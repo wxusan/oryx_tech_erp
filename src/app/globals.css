@@ -94,8 +94,8 @@
   --chart-4: #52525b;
   --chart-5: #27272a;
 
-  /* Radius: sharp — 2px */
-  --radius: 0.125rem;
+  /* Radius: calm SaaS surfaces, capped at 8px */
+  --radius: 0.5rem;
 
   /* Sidebar */
   --sidebar: #ffffff;
