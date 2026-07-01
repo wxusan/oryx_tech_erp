@@ -81,6 +81,8 @@ function actionLabel(action: string, targetType: string) {
   if (action === 'CREATE_NASIYA') return "Nasiya yaratildi"
   if (action === 'PAYMENT') return "To'lov qo'shildi"
   if (action === 'SELL') return 'Sotuv qilindi'
+  if (action === 'RETURN') return 'Qaytarildi'
+  if (action === 'RESTOCK') return 'Omborga qaytarildi'
   if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
   if (action === 'DELETE') return "O'chirildi"
   return action

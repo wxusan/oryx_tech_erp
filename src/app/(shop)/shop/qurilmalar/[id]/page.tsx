@@ -74,6 +74,26 @@ const statusLabels: Record<string, string> = {
   DELETED: "O'chirilgan",
 }
 
+interface DeviceLog {
+  id: string
+  action: string
+  note: string | null
+  targetId: string
+  targetType: string
+  createdAt: string
+}
+
+function deviceActionLabel(action: string) {
+  if (action === 'CREATE') return "Qurilma qo'shildi"
+  if (action === 'SELL') return 'Naqd sotildi'
+  if (action === 'CREATE_NASIYA') return 'Nasiyaga berildi'
+  if (action === 'RETURN') return 'Qaytarildi'
+  if (action === 'RESTOCK') return 'Omborga qaytarildi'
+  if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
+  if (action === 'DELETE') return "O'chirildi"
+  return action
+}
+
 function fmt(n: number) {
   return Number(n).toLocaleString('ru-RU') + " so'm"
 }
@@ -103,6 +123,7 @@ export default function QurilmaDetailPage() {
   const [device, setDevice] = useState<Device | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [logs, setLogs] = useState<DeviceLog[]>([])
 
   const [deleteModalOpen, setDeleteModalOpen] = useState(false)
   const [deleteNote, setDeleteNote] = useState('')
@@ -118,6 +139,10 @@ export default function QurilmaDetailPage() {
   const [returnNote, setReturnNote] = useState('')
   const [returnError, setReturnError] = useState('')
   const [returning, setReturning] = useState(false)
+  const [restockModalOpen, setRestockModalOpen] = useState(false)
+  const [restockNote, setRestockNote] = useState('')
+  const [restockError, setRestockError] = useState('')
+  const [restocking, setRestocking] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -129,6 +154,25 @@ export default function QurilmaDetailPage() {
       })
       .catch(() => setError('Xatolik yuz berdi'))
       .finally(() => setLoading(false))
+  }, [id])
+
+  // Device lifecycle history (created -> sold -> returned -> restocked ...).
+  useEffect(() => {
+    if (!id) return
+    let cancelled = false
+    fetch(`/api/logs?search=${encodeURIComponent(id)}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled || !json.success) return
+        const all: DeviceLog[] = json.data?.logs ?? []
+        setLogs(all.filter((l) => l.targetId === id && l.targetType === 'Device'))
+      })
+      .catch(() => {
+        if (!cancelled) setLogs([])
+      })
+    return () => {
+      cancelled = true
+    }
   }, [id])
 
   async function handleDelete() {
@@ -207,6 +251,27 @@ export default function QurilmaDetailPage() {
     }
   }
 
+  async function handleRestockDevice() {
+    if (restockNote.trim().length < 5 || restocking) return
+    setRestocking(true)
+    setRestockError('')
+    try {
+      const res = await fetch(`/api/devices/${id}/restock`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: restockNote }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.error || 'Omborga qaytarishda xatolik')
+      // Reload so status becomes IN_STOCK and the sell / nasiya actions reappear.
+      window.location.reload()
+    } catch (err) {
+      setRestockError(err instanceof Error ? err.message : 'Omborga qaytarishda xatolik')
+    } finally {
+      setRestocking(false)
+    }
+  }
+
   if (loading) {
     return <div className="p-6 text-sm text-zinc-400">Yuklanmoqda...</div>
   }
@@ -274,6 +339,14 @@ export default function QurilmaDetailPage() {
                 </Button>
               </Link>
             </>
+          )}
+          {device.status === 'RETURNED' && (
+            <Button
+              onClick={() => setRestockModalOpen(true)}
+              className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded"
+            >
+              Sotuvga qo&apos;yish
+            </Button>
           )}
           {!['SOLD_CASH', 'SOLD_NASIYA'].includes(device.status) && (
             <Button
@@ -451,6 +524,30 @@ export default function QurilmaDetailPage() {
         </div>
       )}
 
+      {/* Action / lifecycle logs */}
+      <div className="border border-zinc-200 rounded overflow-hidden">
+        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">
+          Amallar tarixi
+        </div>
+        {logs.length ? (
+          <ul className="divide-y divide-zinc-100">
+            {logs.map((l) => (
+              <li key={l.id} className="px-4 py-3 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-sm text-zinc-900">{deviceActionLabel(l.action)}</div>
+                  {l.note && <div className="text-xs text-zinc-500 mt-0.5">{l.note}</div>}
+                </div>
+                <div className="text-xs text-zinc-400 whitespace-nowrap flex-shrink-0">
+                  {new Date(l.createdAt).toLocaleString('uz-UZ')}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="px-4 py-6 text-sm text-zinc-500">Amallar tarixi yo&apos;q</div>
+        )}
+      </div>
+
       {/* Delete Dialog */}
       <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>
         <DialogContent className="max-w-md rounded">
@@ -594,6 +691,52 @@ export default function QurilmaDetailPage() {
               className="bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-40"
             >
               {returning ? 'Saqlanmoqda...' : 'Qaytarishni tasdiqlash'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={restockModalOpen} onOpenChange={setRestockModalOpen}>
+        <DialogContent className="max-w-md rounded">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900">Sotuvga qo&apos;yish</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-zinc-600">
+              Bu amal qaytarilgan qurilmani omborga qaytaradi va uni yana sotuvga tayyor holatga o&apos;tkazadi.
+            </p>
+            {restockError && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+                {restockError}
+              </div>
+            )}
+            <div>
+              <label htmlFor="restock-note" className="text-xs font-medium text-zinc-700 block mb-1.5">
+                Sabab <span className="text-red-500">*</span>
+              </label>
+              <Textarea
+                id="restock-note"
+                value={restockNote}
+                onChange={(e) => setRestockNote(e.target.value)}
+                placeholder="Masalan: qurilma tekshirildi, soz holatda, qayta sotuvga qo'yildi"
+                className="text-sm border-zinc-200 rounded min-h-[80px]"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => { setRestockModalOpen(false); setRestockNote(''); setRestockError('') }}
+              className="border-zinc-200 text-zinc-700 rounded"
+            >
+              Bekor qilish
+            </Button>
+            <Button
+              disabled={restockNote.trim().length < 5 || restocking}
+              onClick={handleRestockDevice}
+              className="bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
+            >
+              {restocking ? 'Saqlanmoqda...' : "Sotuvga qo'yish"}
             </Button>
           </DialogFooter>
         </DialogContent>
