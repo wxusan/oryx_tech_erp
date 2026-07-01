@@ -12,7 +12,6 @@ import {
 } from '@/components/ui/table'
 
 type ActorType = 'SUPER_ADMIN' | 'SHOP_ADMIN'
-type TabFilter = 'barchasi' | ActorType
 
 interface LogEntry {
   id: string
@@ -47,11 +46,6 @@ interface DisplayLog {
   note: string
 }
 
-const tabs: { key: TabFilter; label: string }[] = [
-  { key: 'barchasi', label: 'Barchasi' },
-  { key: 'SUPER_ADMIN', label: 'Super admin' },
-  { key: 'SHOP_ADMIN', label: "Do'kon" },
-]
 const PER_PAGE = 10
 
 function formatDateTime(value: string) {
@@ -125,7 +119,6 @@ export default function ShopLogsPage() {
   const [loadedKey, setLoadedKey] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [totalLogs, setTotalLogs] = useState(0)
-  const [activeTab, setActiveTab] = useState<TabFilter>('barchasi')
   const [search, setSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
@@ -133,7 +126,6 @@ export default function ShopLogsPage() {
   const requestKey = useMemo(() => {
     const params = new URLSearchParams()
 
-    if (activeTab !== 'barchasi') params.set('actorType', activeTab)
     if (search.trim()) params.set('search', search.trim())
     if (dateFrom) params.set('from', dateFrom)
     if (dateTo) params.set('to', dateTo)
@@ -141,7 +133,7 @@ export default function ShopLogsPage() {
     params.set('take', String(PER_PAGE))
 
     return params.toString()
-  }, [activeTab, search, dateFrom, dateTo, page])
+  }, [search, dateFrom, dateTo, page])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -198,24 +190,6 @@ export default function ShopLogsPage() {
       )}
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-0 overflow-hidden rounded border border-zinc-200">
-          {tabs.map(({ key, label }) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => { setActiveTab(key); setPage(1) }}
-              className={[
-                'border-r border-zinc-200 px-3 py-1.5 text-xs font-medium transition-colors last:border-r-0',
-                activeTab === key
-                  ? 'bg-zinc-900 text-white'
-                  : 'bg-white text-zinc-500 hover:bg-zinc-50 hover:text-zinc-800',
-              ].join(' ')}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
         <Input
           value={search}
           onChange={(e) => { setSearch(e.target.value); setPage(1) }}

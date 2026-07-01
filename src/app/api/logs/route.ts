@@ -22,7 +22,12 @@ export async function GET(req: NextRequest) {
 
     const requestedShopId = searchParams.get('shopId') ?? undefined
     const shopId = session.user.role === 'SHOP_ADMIN' ? session.user.shopId : requestedShopId
-    const actorType = searchParams.get('actorType') ?? undefined
+    // Shop admins only ever see their own shop-admin activity. Super-admin
+    // (platform) actions are never exposed to them, even if actorType is
+    // hand-crafted in the query string.
+    const actorType = session.user.role === 'SHOP_ADMIN'
+      ? 'SHOP_ADMIN'
+      : (searchParams.get('actorType') ?? undefined)
     const from = searchParams.get('from') ?? undefined
     const to = searchParams.get('to') ?? undefined
     const search = searchParams.get('search')?.trim()
