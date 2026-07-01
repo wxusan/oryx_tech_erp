@@ -3,7 +3,6 @@
 import { useState, useEffect } from 'react'
 import {
   AlertTriangle,
-  Banknote,
   CalendarClock,
   ClipboardList,
   Package,
@@ -58,9 +57,18 @@ function fmt(n: number) {
   return `${Number(n).toLocaleString('ru-RU')} so'm`
 }
 
-function fmtSigned(n: number) {
-  const sign = n > 0 ? '+' : ''
-  return `${sign}${fmt(n)}`
+function activityLabel(action: string) {
+  if (action === 'CREATE_NASIYA') return 'Nasiya yaratildi'
+  if (action === 'CREATE') return "Yangi qo'shildi"
+  if (action === 'PAYMENT') return "To'lov qabul qilindi"
+  if (action === 'SELL') return 'Sotuv qilindi'
+  if (action === 'RETURN') return 'Qaytarildi'
+  if (action === 'RESTOCK') return 'Omborga qaytarildi'
+  if (action === 'UPDATE_REMINDER') return "Eslatma o'zgartirildi"
+  if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
+  if (action === 'DELETE') return "O'chirildi"
+  if (action === 'IMPORT') return 'Import qilindi'
+  return action
 }
 
 function outstanding(payment: UpcomingPayment) {
@@ -97,7 +105,6 @@ export default function DashboardPage() {
   const collectionRate = stats && collectionBase > 0
     ? Math.round((stats.cashCollectedThisMonth / collectionBase) * 100)
     : 0
-  const profitTone = stats && stats.realProfitThisMonth >= 0 ? 'text-emerald-700' : 'text-red-700'
 
   return (
     <div className="p-6 space-y-6 max-w-7xl">
@@ -164,19 +171,6 @@ export default function DashboardPage() {
                     {fmt(stats?.accrualGrossProfitThisMonth ?? 0)}
                   </div>
                   <p className="mt-2 text-xs text-zinc-500">Bu oy sotilgan qurilmalar bo'yicha</p>
-                </CardContent>
-              </Card>
-
-              <Card className="rounded-lg">
-                <CardHeader>
-                  <CardDescription>Naqd asosdagi foyda</CardDescription>
-                  <CardAction><Banknote className="size-4 text-zinc-400" /></CardAction>
-                </CardHeader>
-                <CardContent>
-                  <div className={`text-2xl font-bold ${profitTone}`}>
-                    {fmtSigned(stats?.realProfitThisMonth ?? 0)}
-                  </div>
-                  <p className="mt-2 text-xs text-zinc-500">Tushum minus sotilgan mahsulot tannarxi</p>
                 </CardContent>
               </Card>
 
@@ -289,7 +283,7 @@ export default function DashboardPage() {
                 {stats?.recentActivity && stats.recentActivity.length > 0 ? (
                   stats.recentActivity.map((a, i) => (
                     <div key={i} className="flex items-center justify-between py-2 border-b border-zinc-100 last:border-0">
-                      <div className="text-sm text-zinc-700">{a.action}</div>
+                      <div className="text-sm text-zinc-700">{activityLabel(a.action)}</div>
                       <div className="text-xs text-zinc-400 ml-4 whitespace-nowrap">
                         {new Date(a.createdAt).toLocaleDateString('uz-UZ')}
                       </div>

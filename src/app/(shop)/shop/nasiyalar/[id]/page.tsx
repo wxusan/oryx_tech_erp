@@ -102,6 +102,16 @@ function fmt(n: number) {
   return Number(n).toLocaleString('ru-RU')
 }
 
+function nasiyaLogLabel(action: string) {
+  if (action === 'CREATE_NASIYA') return 'Nasiya yaratildi'
+  if (action === 'PAYMENT') return "To'lov qabul qilindi"
+  if (action === 'UPDATE_REMINDER') return "Eslatma o'zgartirildi"
+  if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
+  if (action === 'DELETE') return "O'chirildi"
+  if (action === 'RETURN') return 'Qaytarildi'
+  return action
+}
+
 function scheduleBalance(row: NasiyaSchedule) {
   return Math.max(0, Number(row.expectedAmount) - Number(row.paidAmount))
 }
@@ -489,7 +499,7 @@ export default function NasiyaDetailPage() {
             {logs.map((l) => (
               <li key={l.id} className="px-4 py-3 flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="text-sm text-zinc-900">{l.action}</div>
+                  <div className="text-sm text-zinc-900">{nasiyaLogLabel(l.action)}</div>
                   {l.note && <div className="text-xs text-zinc-500 mt-0.5">{l.note}</div>}
                 </div>
                 <div className="text-xs text-zinc-400 whitespace-nowrap flex-shrink-0">

@@ -150,7 +150,6 @@ export default function ShopDetailPage() {
   const [adminPassword, setAdminPassword] = useState('')
   const [adminLoading, setAdminLoading] = useState(false)
   const [adminError, setAdminError] = useState<string | null>(null)
-  const [adminActionError, setAdminActionError] = useState<string | null>(null)
 
   // Reset admin password
   const [passwordAdmin, setPasswordAdmin] = useState<ShopAdmin | null>(null)
@@ -158,6 +157,12 @@ export default function ShopDetailPage() {
   const [passwordResetNote, setPasswordResetNote] = useState('')
   const [passwordResetLoading, setPasswordResetLoading] = useState(false)
   const [passwordResetError, setPasswordResetError] = useState<string | null>(null)
+
+  // Delete admin
+  const [deleteAdminTarget, setDeleteAdminTarget] = useState<ShopAdmin | null>(null)
+  const [deleteAdminNote, setDeleteAdminNote] = useState('')
+  const [deleteAdminLoading, setDeleteAdminLoading] = useState(false)
+  const [deleteAdminError, setDeleteAdminError] = useState<string | null>(null)
 
   const paymentValid = payAmount.trim() !== '' && payMonths !== '' && payMethod !== ''
   const adminValid =
@@ -398,24 +403,34 @@ export default function ShopDetailPage() {
     }
   }
 
-  const handleDeleteAdmin = async (adminId: string) => {
-    const note = window.prompt("Admin o'chirish sababini kiriting (kamida 5 belgi):")
-    if (!note || note.trim().length < 5) return
-    setAdminActionError(null)
+  const openDeleteAdmin = (admin: ShopAdmin) => {
+    setDeleteAdminTarget(admin)
+    setDeleteAdminNote('')
+    setDeleteAdminError(null)
+  }
+
+  const confirmDeleteAdmin = async () => {
+    if (!deleteAdminTarget || deleteAdminNote.trim().length < 5 || deleteAdminLoading) return
+    setDeleteAdminLoading(true)
+    setDeleteAdminError(null)
     try {
       const res = await fetch(`/api/shops/${id}/admins`, {
         method: 'DELETE',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ adminId, note }),
+        body: JSON.stringify({ adminId: deleteAdminTarget.id, note: deleteAdminNote.trim() }),
       })
       const json = await res.json()
       if (json.success) {
+        setDeleteAdminTarget(null)
+        setDeleteAdminNote('')
         fetchShop()
       } else {
-        setAdminActionError(json.error ?? "O'chirishda xatolik")
+        setDeleteAdminError(json.error ?? "O'chirishda xatolik")
       }
     } catch {
-      setAdminActionError('Xatolik yuz berdi')
+      setDeleteAdminError('Xatolik yuz berdi')
+    } finally {
+      setDeleteAdminLoading(false)
     }
   }
 
@@ -575,11 +590,6 @@ export default function ShopDetailPage() {
             + Admin qo&apos;shish
           </button>
         </div>
-        {adminActionError && (
-          <div className="mx-5 mt-4 px-3 py-2 border border-red-200 bg-red-50 text-xs text-red-600">
-            {adminActionError}
-          </div>
-        )}
         <Table>
           <TableHeader>
             <TableRow className="border-zinc-200 bg-zinc-50">
@@ -633,7 +643,7 @@ export default function ShopDetailPage() {
                         Parol
                       </button>
                       <button
-                        onClick={() => handleDeleteAdmin(admin.id)}
+                        onClick={() => openDeleteAdmin(admin)}
                         className="text-xs text-red-500 hover:text-red-700 border border-red-200 px-2 py-1 hover:bg-red-50 transition-colors"
                       >
                         O&apos;chirish
@@ -1082,6 +1092,48 @@ export default function ShopDetailPage() {
               className="h-8 px-4 text-sm bg-zinc-900 text-white hover:bg-zinc-700 disabled:opacity-40 disabled:pointer-events-none transition-colors"
             >
               {passwordResetLoading ? 'Saqlanmoqda...' : 'Parolni yangilash'}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!deleteAdminTarget} onOpenChange={(v) => { if (!v) { setDeleteAdminTarget(null); setDeleteAdminNote(''); setDeleteAdminError(null) } }}>
+        <DialogContent className="max-w-md rounded-none">
+          <DialogHeader>
+            <DialogTitle className="text-base font-semibold text-zinc-900">
+              Adminni o&apos;chirish
+            </DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-zinc-500 mt-1">
+            <strong className="text-zinc-800">{deleteAdminTarget?.name}</strong> adminini o&apos;chirmoqchimisiz? Buni bekor qilib bo&apos;lmaydi.
+          </p>
+          {deleteAdminError && (
+            <p className="text-xs text-red-500 mt-1">{deleteAdminError}</p>
+          )}
+          <div className="mt-3">
+            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+              Sabab <span className="text-red-500">*</span>
+            </label>
+            <Textarea
+              placeholder="O'chirish sababini kiriting (kamida 5 belgi)..."
+              value={deleteAdminNote}
+              onChange={(e) => setDeleteAdminNote(e.target.value)}
+              className="min-h-[72px] rounded-none border-zinc-200 text-sm"
+            />
+          </div>
+          <DialogFooter className="mt-4 gap-2">
+            <button
+              onClick={() => { setDeleteAdminTarget(null); setDeleteAdminNote(''); setDeleteAdminError(null) }}
+              className="h-8 px-4 text-sm border border-zinc-200 text-zinc-600 hover:bg-zinc-50 transition-colors"
+            >
+              Bekor qilish
+            </button>
+            <button
+              disabled={deleteAdminNote.trim().length < 5 || deleteAdminLoading}
+              onClick={confirmDeleteAdmin}
+              className="h-8 px-4 text-sm bg-red-600 text-white hover:bg-red-700 disabled:opacity-40 disabled:pointer-events-none transition-colors"
+            >
+              {deleteAdminLoading ? "O'chirilmoqda..." : "O'chirish"}
             </button>
           </DialogFooter>
         </DialogContent>

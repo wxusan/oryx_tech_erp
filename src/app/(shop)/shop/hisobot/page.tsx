@@ -3,7 +3,6 @@
 import { useEffect, useState } from 'react'
 import {
   AlertTriangle,
-  Banknote,
   Boxes,
   CalendarClock,
   CircleDollarSign,
@@ -47,10 +46,6 @@ function fmtCompact(value: number) {
   return String(value)
 }
 
-function fmtSigned(value: number) {
-  return `${value > 0 ? '+' : ''}${fmt(value)}`
-}
-
 function uzMonthLabel(date: Date) {
   const months = [
     'Yanvar',
@@ -89,10 +84,8 @@ export default function ShopReportPage() {
   const overdue = stats?.overdueMoney ?? 0
   const inventory = stats?.inventoryPurchaseCost ?? 0
   const grossProfit = stats?.accrualGrossProfitThisMonth ?? stats?.realProfitThisMonth ?? 0
-  const cashProfit = stats?.realProfitThisMonth ?? 0
   const collectionBase = collected + expected
   const collectionRate = collectionBase > 0 ? Math.round((collected / collectionBase) * 100) : 0
-  const profitRate = collected > 0 ? Math.round((cashProfit / collected) * 100) : 0
 
   const cashFlowData = [
     { name: 'Tushum', amount: collected, fill: 'var(--color-collected)' },
@@ -103,7 +96,6 @@ export default function ShopReportPage() {
   const businessData = [
     { name: 'Ombor', amount: inventory, fill: 'var(--color-inventory)' },
     { name: 'Yalpi foyda', amount: grossProfit, fill: 'var(--color-gross)' },
-    { name: 'Naqd foyda', amount: cashProfit, fill: 'var(--color-profit)' },
   ]
 
   const chartConfig = {
@@ -112,7 +104,6 @@ export default function ShopReportPage() {
     overdue: { label: 'Kechikkan', color: '#dc2626' },
     inventory: { label: 'Ombor', color: '#64748b' },
     gross: { label: 'Yalpi foyda', color: '#16a34a' },
-    profit: { label: 'Naqd foyda', color: cashProfit >= 0 ? '#059669' : '#dc2626' },
   } satisfies ChartConfig
 
   return (
@@ -132,16 +123,10 @@ export default function ShopReportPage() {
             Tushum, qarzdorlik, ombor tannarxi va foyda ko'rsatkichlari
           </p>
         </div>
-        <div className="grid grid-cols-2 gap-2 rounded-lg border border-zinc-200 bg-white p-2 text-xs text-zinc-500 sm:flex">
+        <div className="grid grid-cols-1 gap-2 rounded-lg border border-zinc-200 bg-white p-2 text-xs text-zinc-500 sm:flex">
           <div className="rounded-md bg-zinc-50 px-3 py-2">
             <div>Yig'ish darajasi</div>
             <div className="mt-0.5 text-sm font-semibold text-zinc-900">{collectionRate}%</div>
-          </div>
-          <div className="rounded-md bg-zinc-50 px-3 py-2">
-            <div>Foyda marjasi</div>
-            <div className={cashProfit >= 0 ? 'mt-0.5 text-sm font-semibold text-emerald-700' : 'mt-0.5 text-sm font-semibold text-red-700'}>
-              {profitRate}%
-            </div>
           </div>
         </div>
       </div>
@@ -243,7 +228,7 @@ export default function ShopReportPage() {
             <Card className="rounded-lg xl:col-span-2">
               <CardHeader>
                 <CardTitle>Foyda va kapital</CardTitle>
-                <CardDescription>Ombor qiymati, yalpi va naqd asosdagi foyda</CardDescription>
+                <CardDescription>Ombor qiymati va yalpi foyda</CardDescription>
               </CardHeader>
               <CardContent>
                 <ChartContainer config={chartConfig} className="h-[280px] w-full">
@@ -283,19 +268,6 @@ export default function ShopReportPage() {
               <CardContent>
                 <div className="text-2xl font-bold text-zinc-900">{fmt(grossProfit)}</div>
                 <p className="mt-3 text-xs text-zinc-500">Sotilgan/nasiya qilingan qurilmalar bo'yicha</p>
-              </CardContent>
-            </Card>
-
-            <Card className="rounded-lg">
-              <CardHeader>
-                <CardDescription>Naqd asosdagi foyda</CardDescription>
-                <CardAction><Banknote className={cashProfit >= 0 ? 'size-4 text-emerald-600' : 'size-4 text-red-600'} /></CardAction>
-              </CardHeader>
-              <CardContent>
-                <div className={cashProfit >= 0 ? 'text-2xl font-bold text-emerald-700' : 'text-2xl font-bold text-red-700'}>
-                  {fmtSigned(cashProfit)}
-                </div>
-                <p className="mt-3 text-xs text-zinc-500">Tushgan pul minus sotilgan qurilmalar tannarxi</p>
               </CardContent>
             </Card>
 
