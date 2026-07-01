@@ -7,11 +7,16 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import bcrypt from 'bcrypt'
+import { randomBytes } from 'crypto'
 import { createShopSchema } from '@/lib/validations'
 import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
 import type { ZodError } from 'zod'
+
+function telegramLinkCode() {
+  return randomBytes(4).toString('hex').toUpperCase()
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/shops
@@ -105,10 +110,11 @@ export async function POST(req: NextRequest) {
             shopId: newShop.id,
             name: admin.name,
             phone: admin.phone,
-            login: admin.login,
-            telegramId: admin.telegramId,
-            passwordHash,
-          },
+	            login: admin.login,
+	            telegramId: admin.telegramId,
+	            telegramLinkCode: telegramLinkCode(),
+	            passwordHash,
+	          },
         })
       }
 

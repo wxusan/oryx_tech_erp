@@ -29,6 +29,8 @@ interface ShopAdmin {
   name: string
   phone: string
   telegramId: string | null
+  telegramVerifiedAt: string | null
+  telegramLinkCode: string | null
   login: string
   isActive: boolean
 }
@@ -602,7 +604,15 @@ export default function ShopDetailPage() {
                   <TableCell className="pl-5 text-sm font-medium text-zinc-900">{admin.name}</TableCell>
                   <TableCell className="text-sm text-zinc-500 font-mono">{admin.login}</TableCell>
                   <TableCell className="text-sm text-zinc-500 font-mono">{admin.phone}</TableCell>
-                  <TableCell className="text-sm text-zinc-500">{admin.telegramId ?? '—'}</TableCell>
+                  <TableCell className="text-sm text-zinc-500">
+                    {admin.telegramVerifiedAt ? (
+                      <span className="text-emerald-700">Ulangan</span>
+                    ) : admin.telegramLinkCode ? (
+                      <span className="font-mono text-zinc-700">/link {admin.telegramLinkCode}</span>
+                    ) : (
+                      '—'
+                    )}
+                  </TableCell>
                   <TableCell>
                     {admin.isActive ? (
                       <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-900 text-white">

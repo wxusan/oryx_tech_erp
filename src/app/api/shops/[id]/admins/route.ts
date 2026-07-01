@@ -8,12 +8,17 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import bcrypt from 'bcrypt'
+import { randomBytes } from 'crypto'
 import { ok, created, badRequest, conflict, notFound, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { z, ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
+
+function telegramLinkCode() {
+  return randomBytes(4).toString('hex').toUpperCase()
+}
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -94,10 +99,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           shopId: id,
           name: parsed.data.name,
           phone: parsed.data.phone,
-          login: parsed.data.login,
-          telegramId: parsed.data.telegramId,
-          passwordHash,
-        },
+	          login: parsed.data.login,
+	          telegramId: parsed.data.telegramId,
+	          telegramLinkCode: telegramLinkCode(),
+	          passwordHash,
+	        },
       })
 
       await tx.log.create({
@@ -153,10 +159,14 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     const passwordHash = await bcrypt.hash(password, 12)
     const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      await tx.shopAdmin.update({
-        where: { id: adminId },
-        data: { passwordHash },
-      })
+	      await tx.shopAdmin.update({
+	        where: { id: adminId },
+	        data: {
+	          passwordHash,
+	          passwordChangedAt: new Date(),
+	          sessionVersion: { increment: 1 },
+	        },
+	      })
 
       await tx.log.create({
         data: {
@@ -215,10 +225,11 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
       await tx.shopAdmin.update({
         where: { id: adminId },
         data: {
-          isActive: false,
-          deletedAt: new Date(),
-          deletedBy: session.user.id,
-        },
+	          isActive: false,
+	          deletedAt: new Date(),
+	          deletedBy: session.user.id,
+	          sessionVersion: { increment: 1 },
+	        },
       })
 
       await tx.log.create({

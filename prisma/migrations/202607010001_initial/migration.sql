@@ -31,6 +31,7 @@ CREATE TABLE "SuperAdmin" (
     "name" TEXT NOT NULL,
     "email" TEXT NOT NULL,
     "passwordHash" TEXT NOT NULL,
+    "sessionVersion" INTEGER NOT NULL DEFAULT 1,
     "role" "SuperAdminRole" NOT NULL DEFAULT 'SUPER_ADMIN',
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
@@ -86,7 +87,11 @@ CREATE TABLE "ShopAdmin" (
     "phone" TEXT NOT NULL,
     "login" TEXT NOT NULL,
     "telegramId" TEXT,
+    "telegramVerifiedAt" TIMESTAMP(3),
+    "telegramLinkCode" TEXT,
     "passwordHash" TEXT NOT NULL,
+    "passwordChangedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "sessionVersion" INTEGER NOT NULL DEFAULT 1,
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deletedAt" TIMESTAMP(3),
@@ -313,7 +318,13 @@ CREATE INDEX "ShopPayment_shopId_idx" ON "ShopPayment"("shopId");
 CREATE INDEX "ShopPayment_paidAt_idx" ON "ShopPayment"("paidAt");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "ShopAdmin_telegramLinkCode_key" ON "ShopAdmin"("telegramLinkCode");
+
+-- CreateIndex
 CREATE INDEX "ShopAdmin_shopId_idx" ON "ShopAdmin"("shopId");
+
+-- CreateIndex
+CREATE INDEX "ShopAdmin_shopId_phone_idx" ON "ShopAdmin"("shopId", "phone");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "ShopAdmin_shopId_login_key" ON "ShopAdmin"("shopId", "login");

@@ -18,6 +18,7 @@
 
 import { type NextRequest } from 'next/server'
 import { getBot } from '@/lib/telegram'
+import { prisma } from '@/lib/prisma'
 
 // ---------------------------------------------------------------------------
 // Register bot command handlers (runs once at module load)
@@ -39,6 +40,35 @@ function webhookBot() {
     )
 
     console.log(`[TelegramWebhook] /start from telegramId=${telegramId}`)
+  })
+
+  bot.command('link', async (ctx) => {
+    const telegramId = ctx.from?.id?.toString()
+    const code = ctx.match?.trim().toUpperCase()
+    if (!telegramId || !code) {
+      await ctx.reply("Ulash uchun: /link KOD")
+      return
+    }
+
+    const updated = await prisma.shopAdmin.updateMany({
+      where: {
+        telegramLinkCode: code,
+        deletedAt: null,
+        isActive: true,
+      },
+      data: {
+        telegramId,
+        telegramVerifiedAt: new Date(),
+        telegramLinkCode: null,
+      },
+    })
+
+    if (updated.count !== 1) {
+      await ctx.reply("Kod topilmadi yoki allaqachon ishlatilgan.")
+      return
+    }
+
+    await ctx.reply("Telegram akkauntingiz Oryx ERP bilan ulandi.")
   })
 
   bot.on('message', async (ctx) => {

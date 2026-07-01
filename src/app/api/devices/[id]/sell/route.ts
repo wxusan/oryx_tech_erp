@@ -56,9 +56,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
       if (reserved.count !== 1) throw { status: 409, message: "Qurilma allaqachon sotilgan" }
 
-      const customer = await tx.customer.create({
-        data: { shopId, name: customerName, phone: customerPhone },
+      const existingCustomer = await tx.customer.findFirst({
+        where: { shopId, phone: customerPhone, deletedAt: null },
       })
+      const customer = existingCustomer
+        ? await tx.customer.update({
+            where: { id: existingCustomer.id },
+            data: { name: customerName },
+          })
+        : await tx.customer.create({
+            data: { shopId, name: customerName, phone: customerPhone },
+          })
 
       const paid = paidFully ? salePrice : amountPaid ?? 0
       const remaining = salePrice - paid
@@ -96,7 +104,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }
 
       const shopAdmins = await tx.shopAdmin.findMany({
-        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' } },
+        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
       })
       for (const admin of shopAdmins) {
         await tx.notification.create({

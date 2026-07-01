@@ -2,11 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3 } from 'lucide-react'
+import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users } from 'lucide-react'
 
 const navLinks = [
   { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard },
   { href: '/shop/qurilmalar', label: 'Qurilmalar', icon: Smartphone },
+  { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users },
   { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard },
   { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus },
   { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3 },

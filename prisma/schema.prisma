@@ -73,14 +73,15 @@ enum PaymentMethod {
 // ---------------------------------------------------------------------------
 
 model SuperAdmin {
-  id           String         @id @default(cuid())
-  name         String
-  email        String         @unique
-  passwordHash String
-  role         SuperAdminRole @default(SUPER_ADMIN)
-  createdAt    DateTime       @default(now())
-  updatedAt    DateTime       @updatedAt
-  deletedAt    DateTime?
+  id             String         @id @default(cuid())
+  name           String
+  email          String         @unique
+  passwordHash   String
+  sessionVersion Int            @default(1)
+  role           SuperAdminRole @default(SUPER_ADMIN)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  deletedAt      DateTime?
 
   // Relations
   shopsCreated Shop[]        @relation("ShopCreatedBy")
@@ -156,24 +157,29 @@ model ShopPayment {
 // ---------------------------------------------------------------------------
 
 model ShopAdmin {
-  id           String    @id @default(cuid())
-  shopId       String
-  name         String
-  phone        String
-  login        String
-  telegramId   String?
-  passwordHash String
-  isActive     Boolean   @default(true)
-  createdAt    DateTime  @default(now())
-  deletedAt    DateTime?
-  deletedBy    String?
-  deleteNote   String?
+  id                 String    @id @default(cuid())
+  shopId             String
+  name               String
+  phone              String
+  login              String
+  telegramId         String?
+  telegramVerifiedAt DateTime?
+  telegramLinkCode   String?   @unique
+  passwordHash       String
+  passwordChangedAt  DateTime  @default(now())
+  sessionVersion     Int       @default(1)
+  isActive           Boolean   @default(true)
+  createdAt          DateTime  @default(now())
+  deletedAt          DateTime?
+  deletedBy          String?
+  deleteNote         String?
 
   // Relations
   shop Shop @relation(fields: [shopId], references: [id])
 
   @@unique([shopId, login])
   @@index([shopId])
+  @@index([shopId, phone])
 }
 
 // ---------------------------------------------------------------------------

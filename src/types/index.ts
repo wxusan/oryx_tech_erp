@@ -144,4 +144,5 @@ export interface AuthUser {
   name: string
   role: UserRole
   shopId: string | null
+  sessionVersion: number
 }

@@ -192,9 +192,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       })
 
-      // Notify all active shop admins with a telegramId
+      // Notify all active shop admins with a verified telegramId
       const shopAdmins = await tx.shopAdmin.findMany({
-        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' } },
+        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
       })
       for (const admin of shopAdmins) {
         await tx.notification.create({

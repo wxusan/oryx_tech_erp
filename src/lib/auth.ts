@@ -70,6 +70,7 @@ declare module 'next-auth' {
       name: string
       role: UserRole
       shopId: string | null
+      sessionVersion: number
     }
   }
 
@@ -78,6 +79,7 @@ declare module 'next-auth' {
     name: string
     role: UserRole
     shopId: string | null
+    sessionVersion: number
   }
 }
 
@@ -87,6 +89,7 @@ declare module '@auth/core/jwt' {
     role: UserRole
     shopId: string | null
     name: string
+    sessionVersion: number
   }
 }
 
@@ -97,19 +100,19 @@ declare module '@auth/core/jwt' {
 async function verifySuperAdminPassword(
   email: string,
   password: string,
-): Promise<{ id: string; name: string } | null> {
+): Promise<{ id: string; name: string; sessionVersion: number } | null> {
   const admin = await prisma.superAdmin.findFirst({ where: { email, deletedAt: null } })
   if (!admin) return null
   const valid = await bcrypt.compare(password, admin.passwordHash)
   if (!valid) return null
-  return { id: admin.id, name: admin.name }
+  return { id: admin.id, name: admin.name, sessionVersion: admin.sessionVersion }
 }
 
 async function verifyShopAdminPassword(
   login: string,
   password: string,
   shopId: string,
-): Promise<{ id: string; name: string } | null> {
+): Promise<{ id: string; name: string; sessionVersion: number } | null> {
   const admin = await prisma.shopAdmin.findFirst({
     where: {
       shopId,
@@ -126,7 +129,7 @@ async function verifyShopAdminPassword(
   if (!admin) return null
   const valid = await bcrypt.compare(password, admin.passwordHash)
   if (!valid) return null
-  return { id: admin.id, name: admin.name }
+  return { id: admin.id, name: admin.name, sessionVersion: admin.sessionVersion }
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +170,7 @@ export const authConfig: NextAuthConfig = {
           name: admin.name,
           role: 'SUPER_ADMIN' as UserRole,
           shopId: null,
+          sessionVersion: admin.sessionVersion,
         }
       },
     }),
@@ -208,6 +212,7 @@ export const authConfig: NextAuthConfig = {
           name: admin.name,
           role: 'SHOP_ADMIN' as UserRole,
           shopId,
+          sessionVersion: admin.sessionVersion,
         }
       },
     }),
@@ -225,6 +230,7 @@ export const authConfig: NextAuthConfig = {
         token.role = user.role
         token.shopId = user.shopId
         token.name = user.name
+        token.sessionVersion = user.sessionVersion
       }
       return token
     },
@@ -238,6 +244,7 @@ export const authConfig: NextAuthConfig = {
         emailVerified: null,
         role: token.role,
         shopId: token.shopId,
+        sessionVersion: token.sessionVersion,
       }
       return session
     },

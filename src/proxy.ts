@@ -12,7 +12,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import type { ProxyConfig } from 'next/server'
-import { auth } from '@/lib/auth'
+import { getToken } from 'next-auth/jwt'
 
 export async function proxy(req: NextRequest) {
   const { pathname } = req.nextUrl
@@ -25,17 +25,19 @@ export async function proxy(req: NextRequest) {
     return NextResponse.next()
   }
 
-  // auth() in proxy returns the session from the JWT cookie.
-  const session = await auth()
+  const token = await getToken({
+    req,
+    secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+  })
 
-  if (!session?.user) {
+  if (!token) {
     const loginUrl = req.nextUrl.clone()
     loginUrl.pathname = '/login'
     loginUrl.searchParams.set('callbackUrl', pathname)
     return NextResponse.redirect(loginUrl)
   }
 
-  const role = session.user.role
+  const role = token.role
 
   if (isAdminRoute && role !== 'SUPER_ADMIN') {
     const loginUrl = req.nextUrl.clone()

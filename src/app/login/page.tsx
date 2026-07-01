@@ -103,10 +103,11 @@ function LoginForm() {
           {tab === 'admin' ? (
             <form onSubmit={handleAdminLogin} className="space-y-4">
               <div>
-                <Label className="text-xs font-medium text-zinc-700 mb-1.5 block">
+                <Label htmlFor="admin-email" className="text-xs font-medium text-zinc-700 mb-1.5 block">
                   Email
                 </Label>
                 <Input
+                  id="admin-email"
                   type="email"
                   placeholder="admin@example.com"
                   value={adminForm.email}
@@ -116,10 +117,11 @@ function LoginForm() {
                 />
               </div>
               <div>
-                <Label className="text-xs font-medium text-zinc-700 mb-1.5 block">
+                <Label htmlFor="admin-password" className="text-xs font-medium text-zinc-700 mb-1.5 block">
                   Parol
                 </Label>
                 <Input
+                  id="admin-password"
                   type="password"
                   placeholder="••••••••"
                   value={adminForm.password}
@@ -139,10 +141,11 @@ function LoginForm() {
           ) : (
             <form onSubmit={handleShopLogin} className="space-y-4">
               <div>
-                <Label className="text-xs font-medium text-zinc-700 mb-1.5 block">
+                <Label htmlFor="shop-id" className="text-xs font-medium text-zinc-700 mb-1.5 block">
                   Do&apos;kon ID
                 </Label>
                 <Input
+                  id="shop-id"
                   type="text"
                   placeholder="shop_xxx"
                   value={shopForm.shopId}
@@ -152,10 +155,11 @@ function LoginForm() {
                 />
               </div>
               <div>
-                <Label className="text-xs font-medium text-zinc-700 mb-1.5 block">
+                <Label htmlFor="shop-login" className="text-xs font-medium text-zinc-700 mb-1.5 block">
                   Login
                 </Label>
                 <Input
+                  id="shop-login"
                   type="text"
                   placeholder="login"
                   value={shopForm.login}
@@ -165,10 +169,11 @@ function LoginForm() {
                 />
               </div>
               <div>
-                <Label className="text-xs font-medium text-zinc-700 mb-1.5 block">
+                <Label htmlFor="shop-password" className="text-xs font-medium text-zinc-700 mb-1.5 block">
                   Parol
                 </Label>
                 <Input
+                  id="shop-password"
                   type="password"
                   placeholder="••••••••"
                   value={shopForm.password}

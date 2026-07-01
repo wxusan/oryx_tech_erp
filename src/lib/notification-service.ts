@@ -209,7 +209,7 @@ export async function processPendingNotifications(): Promise<{
 
 /**
  * Queue the same message for every active ShopAdmin of a shop who has a
- * telegramId configured.  Silently skips admins without a telegramId.
+ * verified telegramId configured. Silently skips unverified admins.
  */
 export async function notifyShopAdmins(
   shopId: string,
@@ -222,9 +222,10 @@ export async function notifyShopAdmins(
     const admins: Array<{ telegramId: string | null }> = await prisma.shopAdmin.findMany({
       where: {
         shopId,
-        isActive:   true,
+        isActive: true,
         telegramId: { not: null },
-        deletedAt:  null,
+        telegramVerifiedAt: { not: null },
+        deletedAt: null,
       },
       select: { telegramId: true },
     })
@@ -235,7 +236,7 @@ export async function notifyShopAdmins(
 
     if (targets.length === 0) {
       console.log(
-        `[NotificationService] No admins with telegramId for shop=${shopId}`,
+        `[NotificationService] No verified Telegram admins for shop=${shopId}`,
       )
       return
     }

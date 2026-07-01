@@ -87,7 +87,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           device: true,
           shop: {
             include: {
-              admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' } } },
+              admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
             },
           },
         },
@@ -140,7 +140,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           device: true,
           shop: {
             include: {
-              admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' } } },
+              admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
             },
           },
         },
@@ -194,7 +194,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       device: true,
       shop: {
         include: {
-          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' } } },
+          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
         },
       },
     },
@@ -234,7 +234,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       device: true,
       shop: {
         include: {
-          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' } } },
+          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
         },
       },
     },

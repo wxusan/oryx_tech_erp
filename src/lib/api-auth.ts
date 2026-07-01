@@ -34,10 +34,10 @@ export async function requireApiSession(): Promise<GuardResult> {
           subscriptionDue: { gte: subscriptionCutoff() },
         },
       },
-      select: { shopId: true },
+      select: { shopId: true, sessionVersion: true },
     })
 
-    if (!activeAdmin) {
+    if (!activeAdmin || activeAdmin.sessionVersion !== session.user.sessionVersion) {
       return { ok: false, response: forbidden("Do'kon faol emas yoki ruxsat bekor qilingan") }
     }
   }
@@ -45,10 +45,10 @@ export async function requireApiSession(): Promise<GuardResult> {
   if (session.user.role === 'SUPER_ADMIN') {
     const activeSuperAdmin = await prisma.superAdmin.findFirst({
       where: { id: session.user.id, deletedAt: null },
-      select: { id: true },
+      select: { id: true, sessionVersion: true },
     })
 
-    if (!activeSuperAdmin) {
+    if (!activeSuperAdmin || activeSuperAdmin.sessionVersion !== session.user.sessionVersion) {
       return { ok: false, response: forbidden("Super admin ruxsati bekor qilingan") }
     }
   }
