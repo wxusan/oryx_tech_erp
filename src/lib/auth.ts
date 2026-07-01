@@ -2,7 +2,7 @@
  * NextAuth v5 (next-auth@beta) configuration for Oryx Tech ERP.
  *
  * Two credential flows:
- *   1. superadmin  — email + password
+ *   1. superadmin  — login + password
  *   2. shopAdmin   — login + password
  *
  * Session strategy: JWT (required for credentials providers in NextAuth v5).
@@ -98,10 +98,10 @@ declare module '@auth/core/jwt' {
 // ---------------------------------------------------------------------------
 
 async function verifySuperAdminPassword(
-  email: string,
+  login: string,
   password: string,
 ): Promise<{ id: string; name: string; sessionVersion: number } | null> {
-  const admin = await prisma.superAdmin.findFirst({ where: { email, deletedAt: null } })
+  const admin = await prisma.superAdmin.findFirst({ where: { email: login, deletedAt: null } })
   if (!admin) return null
   const valid = await bcrypt.compare(password, admin.passwordHash)
   if (!valid) return null
@@ -142,7 +142,7 @@ export const authConfig: NextAuthConfig = {
       id: 'superadmin',
       name: 'Super Admin',
       credentials: {
-        email: { label: 'Email', type: 'email' },
+        email: { label: 'Login', type: 'text' },
         password: { label: 'Parol', type: 'password' },
       },
       async authorize(credentials) {
@@ -153,10 +153,11 @@ export const authConfig: NextAuthConfig = {
           return null
         }
 
-        const throttleKey = `super:${email.toLowerCase()}`
+        const login = email.trim().toLowerCase()
+        const throttleKey = `super:${login}`
         if (isLocked(throttleKey)) return null
 
-        const admin = await verifySuperAdminPassword(email, password)
+        const admin = await verifySuperAdminPassword(login, password)
         if (!admin) {
           recordFailure(throttleKey)
           return null

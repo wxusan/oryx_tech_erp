@@ -21,7 +21,7 @@ function LoginForm() {
     errorParam === 'unauthorized' ? "Ruxsat yo'q. Iltimos, to'g'ri hisobdan kiring." : null
   )
 
-  const [adminForm, setAdminForm] = useState({ email: '', password: '' })
+  const [adminForm, setAdminForm] = useState({ login: '', password: '' })
   const [shopForm, setShopForm] = useState({ login: '', password: '' })
 
   async function handleAdminLogin(e: React.FormEvent) {
@@ -29,13 +29,13 @@ function LoginForm() {
     setLoading(true)
     setError(null)
     const res = await signIn('superadmin', {
-      email: adminForm.email,
+      email: adminForm.login,
       password: adminForm.password,
       redirect: false,
     })
     setLoading(false)
     if (res?.error) {
-      setError("Email yoki parol noto'g'ri.")
+      setError("Login yoki parol noto'g'ri.")
     } else {
       router.push(adminCallbackUrl)
     }
@@ -103,15 +103,15 @@ function LoginForm() {
           {tab === 'admin' ? (
             <form onSubmit={handleAdminLogin} className="space-y-4">
               <div>
-                <Label htmlFor="admin-email" className="text-xs font-medium text-zinc-700 mb-1.5 block">
-                  Email
+                <Label htmlFor="admin-login" className="text-xs font-medium text-zinc-700 mb-1.5 block">
+                  Login
                 </Label>
                 <Input
-                  id="admin-email"
-                  type="email"
-                  placeholder="admin@example.com"
-                  value={adminForm.email}
-                  onChange={(e) => setAdminForm({ ...adminForm, email: e.target.value })}
+                  id="admin-login"
+                  type="text"
+                  placeholder="oryx_abdulloh"
+                  value={adminForm.login}
+                  onChange={(e) => setAdminForm({ ...adminForm, login: e.target.value })}
                   required
                   className="h-9 text-sm border-zinc-200 rounded-none focus-visible:ring-zinc-900"
                 />

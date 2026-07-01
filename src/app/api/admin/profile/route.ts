@@ -2,9 +2,9 @@ import { NextRequest } from 'next/server'
 import bcrypt from 'bcrypt'
 import { z, ZodError } from 'zod'
 import { Prisma } from '@/generated/prisma/client'
+import { badRequest, notFound, ok, serverError } from '@/lib/api-helpers'
+import { requireSuperAdmin } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
-import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-helpers'
-import { requireApiSession } from '@/lib/api-auth'
 
 const changePasswordSchema = z.object({
   currentPassword: z.string({ error: 'Joriy parol kiritilishi shart' }).min(1, 'Joriy parol kiritilishi shart'),
@@ -17,60 +17,39 @@ function profileSelect() {
   return {
     id: true,
     name: true,
-    phone: true,
-    login: true,
-    telegramId: true,
-    telegramVerifiedAt: true,
-    telegramLinkCode: true,
-    passwordChangedAt: true,
-    shop: {
-      select: {
-        id: true,
-        name: true,
-        shopNumber: true,
-      },
-    },
-  } satisfies Prisma.ShopAdminSelect
+    email: true,
+    role: true,
+    createdAt: true,
+    updatedAt: true,
+  } satisfies Prisma.SuperAdminSelect
 }
 
 export async function GET() {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireSuperAdmin()
     if (!guarded.ok) return guarded.response
-    const { session } = guarded
 
-    if (session.user.role !== 'SHOP_ADMIN' || !session.user.shopId) {
-      return forbidden("Faqat do'kon adminlari uchun")
-    }
-
-    const admin = await prisma.shopAdmin.findFirst({
+    const admin = await prisma.superAdmin.findFirst({
       where: {
-        id: session.user.id,
-        shopId: session.user.shopId,
-        isActive: true,
+        id: guarded.session.user.id,
         deletedAt: null,
       },
       select: profileSelect(),
     })
 
-    if (!admin) return notFound("Admin topilmadi")
+    if (!admin) return notFound('Super admin topilmadi')
 
     return ok(admin)
   } catch (err) {
-    console.error('[GET /api/shop-admin/profile]', err)
+    console.error('[GET /api/admin/profile]', err)
     return serverError()
   }
 }
 
 export async function PATCH(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireSuperAdmin()
     if (!guarded.ok) return guarded.response
-    const { session } = guarded
-
-    if (session.user.role !== 'SHOP_ADMIN' || !session.user.shopId) {
-      return forbidden("Faqat do'kon adminlari uchun")
-    }
 
     const body: unknown = await req.json()
     const parsed = changePasswordSchema.safeParse(body)
@@ -80,23 +59,20 @@ export async function PATCH(req: NextRequest) {
       return badRequest(firstError)
     }
 
-    const admin = await prisma.shopAdmin.findFirst({
+    const admin = await prisma.superAdmin.findFirst({
       where: {
-        id: session.user.id,
-        shopId: session.user.shopId,
-        isActive: true,
+        id: guarded.session.user.id,
         deletedAt: null,
       },
       select: {
         id: true,
-        shopId: true,
-        login: true,
         name: true,
+        email: true,
         passwordHash: true,
       },
     })
 
-    if (!admin) return notFound("Admin topilmadi")
+    if (!admin) return notFound('Super admin topilmadi')
 
     const currentPasswordMatches = await bcrypt.compare(parsed.data.currentPassword, admin.passwordHash)
     if (!currentPasswordMatches) {
@@ -111,24 +87,23 @@ export async function PATCH(req: NextRequest) {
     const passwordHash = await bcrypt.hash(parsed.data.newPassword, 12)
 
     await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      await tx.shopAdmin.update({
+      await tx.superAdmin.update({
         where: { id: admin.id },
         data: {
           passwordHash,
-          passwordChangedAt: new Date(),
           sessionVersion: { increment: 1 },
         },
       })
 
       await tx.log.create({
         data: {
-          shopId: admin.shopId,
+          shopId: null,
           actorId: admin.id,
-          actorType: 'SHOP_ADMIN',
+          actorType: 'SUPER_ADMIN',
           action: 'CHANGE_PASSWORD',
-          targetType: 'ShopAdmin',
+          targetType: 'SuperAdmin',
           targetId: admin.id,
-          oldValue: { login: admin.login, name: admin.name },
+          oldValue: { login: admin.email, name: admin.name },
           newValue: { passwordChanged: true },
         },
       })
@@ -136,7 +111,7 @@ export async function PATCH(req: NextRequest) {
 
     return ok({ passwordChanged: true }, 'Parol yangilandi. Qayta kiring.')
   } catch (err) {
-    console.error('[PATCH /api/shop-admin/profile]', err)
+    console.error('[PATCH /api/admin/profile]', err)
     return serverError()
   }
 }

@@ -1,8 +1,8 @@
 'use client'
 
-import { type FormEvent, useEffect, useMemo, useState } from 'react'
+import { type FormEvent, useEffect, useState } from 'react'
 import { signOut } from 'next-auth/react'
-import { CheckCircle2, Copy, KeyRound, Link2, Loader2, ShieldCheck, UserRound } from 'lucide-react'
+import { CheckCircle2, KeyRound, Loader2, ServerCog, ShieldCheck, UserRound } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -17,20 +17,18 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import type { ApiResponse } from '@/types'
 
-interface ShopAdminProfile {
+interface EnvCheck {
+  label: string
+  ok: boolean
+}
+
+interface SuperAdminProfile {
   id: string
   name: string
-  phone: string
-  login: string
-  telegramId: string | null
-  telegramVerifiedAt: string | null
-  telegramLinkCode: string | null
-  passwordChangedAt: string
-  shop: {
-    id: string
-    name: string
-    shopNumber: string
-  }
+  email: string
+  role: string
+  createdAt: string
+  updatedAt: string
 }
 
 interface PasswordForm {
@@ -65,11 +63,10 @@ function formatDate(value: string | null | undefined) {
   })
 }
 
-export default function ShopSettingsPage() {
-  const [profile, setProfile] = useState<ShopAdminProfile | null>(null)
+export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
+  const [profile, setProfile] = useState<SuperAdminProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
   const [passwordForm, setPasswordForm] = useState<PasswordForm>(emptyPasswordForm)
   const [passwordError, setPasswordError] = useState('')
   const [passwordSuccess, setPasswordSuccess] = useState('')
@@ -78,10 +75,10 @@ export default function ShopSettingsPage() {
   useEffect(() => {
     let mounted = true
 
-    fetch('/api/shop-admin/profile')
+    fetch('/api/admin/profile')
       .then(async (response) => {
         if (!response.ok) throw new Error(await readApiError(response))
-        const json: ApiResponse<ShopAdminProfile> = await response.json()
+        const json: ApiResponse<SuperAdminProfile> = await response.json()
         if (mounted) setProfile(json.data ?? null)
       })
       .catch((err: Error) => {
@@ -96,26 +93,11 @@ export default function ShopSettingsPage() {
     }
   }, [])
 
-  const telegramStatus = useMemo(() => {
-    if (!profile) return { label: '-', tone: 'secondary' as const }
-    if (profile.telegramVerifiedAt) return { label: 'Ulangan', tone: 'default' as const }
-    if (profile.telegramLinkCode) return { label: 'Ulanmagan', tone: 'outline' as const }
-    return { label: "Kod yo'q", tone: 'secondary' as const }
-  }, [profile])
-
-  const linkCommand = profile?.telegramLinkCode ? `/link ${profile.telegramLinkCode}` : ''
   const canSubmitPassword =
     passwordForm.currentPassword.length > 0 &&
     passwordForm.newPassword.length >= 8 &&
     passwordForm.confirmPassword.length >= 8 &&
     !passwordLoading
-
-  async function copyLinkCommand() {
-    if (!linkCommand) return
-    await navigator.clipboard.writeText(linkCommand)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1400)
-  }
 
   async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -129,7 +111,7 @@ export default function ShopSettingsPage() {
 
     setPasswordLoading(true)
     try {
-      const response = await fetch('/api/shop-admin/profile', {
+      const response = await fetch('/api/admin/profile', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -143,7 +125,7 @@ export default function ShopSettingsPage() {
       setPasswordForm(emptyPasswordForm)
       setPasswordSuccess("Parol yangilandi. Qayta kirish oynasiga yo'naltirilasiz.")
       window.setTimeout(() => {
-        void signOut({ callbackUrl: '/login?callbackUrl=/shop/settings' })
+        void signOut({ callbackUrl: '/login?callbackUrl=/admin/settings' })
       }, 900)
     } catch (err) {
       setPasswordError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
@@ -153,17 +135,15 @@ export default function ShopSettingsPage() {
   }
 
   return (
-    <div className="max-w-5xl space-y-6 p-6">
+    <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Sozlamalar</h1>
-          <p className="mt-0.5 text-sm text-zinc-500">Profil, Telegram ulanishi va parol xavfsizligi</p>
+          <p className="mt-0.5 text-sm text-zinc-500">Super admin profili, xavfsizlik va tizim holati</p>
         </div>
-        {profile && (
-          <Badge variant="outline" className="h-6 w-fit rounded-md border-zinc-200 text-zinc-600">
-            {profile.shop.name}
-          </Badge>
-        )}
+        <Badge variant="secondary" className="h-6 w-fit rounded-md">
+          Platforma nazorati
+        </Badge>
       </div>
 
       {error && (
@@ -177,76 +157,57 @@ export default function ShopSettingsPage() {
           <Loader2 className="size-4 animate-spin" />
           Yuklanmoqda...
         </div>
-      ) : profile ? (
+      ) : (
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           <Card className="rounded-lg">
             <CardHeader className="border-b border-zinc-100">
               <CardTitle>Profil</CardTitle>
-              <CardDescription>Hisob va do'kon ma'lumotlari</CardDescription>
+              <CardDescription>Super admin hisob ma'lumotlari</CardDescription>
               <CardAction>
                 <UserRound className="size-5 text-zinc-400" />
               </CardAction>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Info label="Ism" value={profile.name} />
-                <Info label="Telefon" value={profile.phone} />
-                <Info label="Login" value={profile.login} mono />
-                <Info label="Do'kon raqami" value={profile.shop.shopNumber} />
-              </div>
-              <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-                <div className="text-xs font-medium text-zinc-500">Parol oxirgi yangilangan</div>
-                <div className="mt-1 text-sm font-semibold text-zinc-900">
-                  {formatDate(profile.passwordChangedAt)}
-                </div>
-              </div>
+              {profile ? (
+                <>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Info label="Ism" value={profile.name} />
+                    <Info label="Login" value={profile.email} mono />
+                    <Info label="Rol" value={profile.role} />
+                    <Info label="Yaratilgan" value={formatDate(profile.createdAt)} />
+                  </div>
+                  <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                    <div className="text-xs font-medium text-zinc-500">Oxirgi yangilanish</div>
+                    <div className="mt-1 text-sm font-semibold text-zinc-900">{formatDate(profile.updatedAt)}</div>
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm text-zinc-500">Profil topilmadi.</div>
+              )}
             </CardContent>
           </Card>
 
           <Card className="rounded-lg">
             <CardHeader className="border-b border-zinc-100">
-              <CardTitle>Telegram</CardTitle>
-              <CardDescription>Bot orqali xabar olish holati</CardDescription>
+              <CardTitle>Tizim holati</CardTitle>
+              <CardDescription>Vercel env vars va servis ulanishlari</CardDescription>
               <CardAction>
-                <Badge variant={telegramStatus.tone} className="rounded-md">
-                  {telegramStatus.label}
-                </Badge>
+                <ServerCog className="size-5 text-zinc-400" />
               </CardAction>
             </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Info label="Telegram ID" value={profile.telegramId || '-'} mono />
-                <Info label="Ulangan vaqt" value={formatDate(profile.telegramVerifiedAt)} />
+            <CardContent>
+              <div className="divide-y divide-zinc-100">
+                {checks.map((check) => (
+                  <div key={check.label} className="flex items-center justify-between py-2.5">
+                    <span className="text-sm text-zinc-700">{check.label}</span>
+                    <span
+                      className={check.ok ? 'text-xs font-medium text-emerald-700' : 'text-xs font-medium text-red-700'}
+                    >
+                      {check.ok ? 'Sozlangan' : 'Kerak'}
+                    </span>
+                  </div>
+                ))}
               </div>
-
-              {profile.telegramVerifiedAt ? (
-                <div className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
-                  <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
-                  Telegram hisobingiz tasdiqlangan. Bildirishnomalar shu hisobga yuboriladi.
-                </div>
-              ) : linkCommand ? (
-                <div className="space-y-3 rounded-md border border-zinc-200 bg-zinc-50 p-3">
-                  <div className="text-xs font-medium text-zinc-500">Ulash kodi</div>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <code className="min-h-9 flex-1 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-900">
-                      {linkCommand}
-                    </code>
-                    <Button type="button" variant="outline" className="h-9 rounded-md" onClick={copyLinkCommand}>
-                      <Copy className="size-4" />
-                      {copied ? 'Nusxalandi' : 'Nusxa olish'}
-                    </Button>
-                  </div>
-                  <div className="flex items-start gap-2 text-sm text-zinc-600">
-                    <Link2 className="mt-0.5 size-4 shrink-0 text-zinc-400" />
-                    Telegram botga kiring va xabar sifatida <span className="font-mono font-semibold">{linkCommand}</span>{' '}
-                    yuboring.
-                  </div>
-                </div>
-              ) : (
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                  Telegram ulash kodi topilmadi. Super admin bilan bog'laning.
-                </div>
-              )}
             </CardContent>
           </Card>
 
@@ -266,25 +227,26 @@ export default function ShopSettingsPage() {
                   </div>
                 )}
                 {passwordSuccess && (
-                  <div className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                  <div className="flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                    <CheckCircle2 className="size-4" />
                     {passwordSuccess}
                   </div>
                 )}
 
                 <PasswordField
-                  id="current-password"
+                  id="admin-current-password"
                   label="Joriy parol"
                   value={passwordForm.currentPassword}
                   onChange={(value) => setPasswordForm((form) => ({ ...form, currentPassword: value }))}
                 />
                 <PasswordField
-                  id="new-password"
+                  id="admin-new-password"
                   label="Yangi parol"
                   value={passwordForm.newPassword}
                   onChange={(value) => setPasswordForm((form) => ({ ...form, newPassword: value }))}
                 />
                 <PasswordField
-                  id="confirm-password"
+                  id="admin-confirm-password"
                   label="Yangi parolni tasdiqlash"
                   value={passwordForm.confirmPassword}
                   onChange={(value) => setPasswordForm((form) => ({ ...form, confirmPassword: value }))}
@@ -302,7 +264,7 @@ export default function ShopSettingsPage() {
             </CardContent>
           </Card>
         </div>
-      ) : null}
+      )}
     </div>
   )
 }
