@@ -26,9 +26,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div className="flex items-center justify-between gap-2">
             <div>
               <div className="font-bold text-zinc-900 text-sm leading-tight tracking-tight">Oryx ERP</div>
-              <div className="text-xs text-zinc-500 mt-0.5">Admin panel</div>
+              <div className="text-xs text-zinc-500 mt-0.5">Boshqaruv paneli</div>
             </div>
-            <Badge variant="secondary" className="rounded-md">SaaS</Badge>
+            <Badge variant="secondary" className="rounded-md">Platforma</Badge>
           </div>
         </div>
 
@@ -60,8 +60,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {/* Footer */}
         <div className="px-5 py-4 border-t border-zinc-200">
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-            <div className="text-xs font-medium text-zinc-900">Platform nazorati</div>
-            <div className="mt-1 text-xs text-zinc-500">Shoplar, obuna, loglar</div>
+            <div className="text-xs font-medium text-zinc-900">Platforma nazorati</div>
+            <div className="mt-1 text-xs text-zinc-500">Do'konlar, obuna, loglar</div>
           </div>
         </div>
       </aside>
@@ -70,7 +70,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
         {/* Top bar */}
         <header className="h-14 shrink-0 flex items-center justify-end gap-3 px-6 border-b border-zinc-200 bg-white/90 backdrop-blur">
-          <span className="text-xs text-zinc-500 font-medium">Super Admin</span>
+          <span className="text-xs text-zinc-500 font-medium">Bosh admin</span>
           <div
             className="w-8 h-8 rounded-full bg-zinc-900 text-white text-[11px] font-bold flex items-center justify-center select-none shadow-sm"
           >

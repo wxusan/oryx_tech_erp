@@ -49,7 +49,7 @@ export async function requireApiSession(): Promise<GuardResult> {
     })
 
     if (!activeSuperAdmin || activeSuperAdmin.sessionVersion !== session.user.sessionVersion) {
-      return { ok: false, response: forbidden("Super admin ruxsati bekor qilingan") }
+      return { ok: false, response: forbidden("Bosh admin ruxsati bekor qilingan") }
     }
   }
 

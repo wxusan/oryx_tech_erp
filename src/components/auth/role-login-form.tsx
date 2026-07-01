@@ -51,7 +51,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
         <div className="border-b border-zinc-100 px-8 pb-6 pt-8">
           <div className="text-lg font-bold tracking-tight text-zinc-900">Oryx ERP</div>
           <div className="mt-0.5 text-xs text-zinc-400">
-            {isAdmin ? 'Super admin kirishi' : "Do'kon admin kirishi"}
+            {isAdmin ? 'Bosh admin kirishi' : "Do'kon admini kirishi"}
           </div>
         </div>
 
@@ -104,7 +104,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
         </div>
 
         <div className="px-8 pb-6 text-center text-xs text-zinc-400">
-          {isAdmin ? "Do'konlar uchun alohida kirish manzili bor." : 'Super adminlar uchun alohida kirish manzili bor.'}
+          {isAdmin ? "Do'konlar uchun alohida kirish manzili bor." : 'Bosh adminlar uchun alohida kirish manzili bor.'}
         </div>
       </div>
     </div>

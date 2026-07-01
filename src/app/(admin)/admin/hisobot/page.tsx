@@ -99,7 +99,7 @@ export default function AdminReportsPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Hisobot</h1>
-          <p className="mt-0.5 text-sm text-zinc-500">Super admin uchun obuna tushumi va do'konlar holati</p>
+          <p className="mt-0.5 text-sm text-zinc-500">Bosh admin uchun obuna tushumi va do'konlar holati</p>
         </div>
         <Link href="/admin/payments" className="text-sm font-medium text-zinc-500 hover:text-zinc-900">
           To'lovlar tarixi
@@ -153,7 +153,7 @@ export default function AdminReportsPage() {
       <Card className="rounded-lg">
         <CardHeader className="border-b border-zinc-100">
           <CardTitle>To'lov muddati bo'yicha do'konlar</CardTitle>
-          <CardDescription>Eng yaqin subscription due date tepada turadi</CardDescription>
+          <CardDescription>Obuna muddati eng yaqin do'konlar tepada turadi</CardDescription>
           <CardAction>
             <CalendarClock className="size-5 text-zinc-400" />
           </CardAction>

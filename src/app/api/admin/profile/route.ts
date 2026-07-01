@@ -49,7 +49,7 @@ export async function GET() {
       select: profileSelect(),
     })
 
-    if (!admin) return notFound('Super admin topilmadi')
+    if (!admin) return notFound('Bosh admin topilmadi')
 
     return ok(admin)
   } catch (err) {
@@ -86,7 +86,7 @@ export async function PATCH(req: NextRequest) {
         },
       })
 
-      if (!admin) return notFound('Super admin topilmadi')
+      if (!admin) return notFound('Bosh admin topilmadi')
       if (telegramId && (await isTelegramIdTaken(telegramId, { type: 'SUPER_ADMIN', id: admin.id }))) {
         return conflict(`Bu Telegram ID allaqachon tizimda bor: ${telegramId}`)
       }
@@ -142,7 +142,7 @@ export async function PATCH(req: NextRequest) {
       },
     })
 
-    if (!admin) return notFound('Super admin topilmadi')
+    if (!admin) return notFound('Bosh admin topilmadi')
 
     const currentPasswordMatches = await bcrypt.compare(parsed.data.currentPassword, admin.passwordHash)
     if (!currentPasswordMatches) {

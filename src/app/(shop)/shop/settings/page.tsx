@@ -318,7 +318,7 @@ export default function ShopSettingsPage() {
                 </div>
               ) : (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                  Telegram ulash kodi topilmadi. Super admin bilan bog'laning.
+                  Telegram ulash kodi topilmadi. Bosh admin bilan bog'laning.
                 </div>
               )}
             </CardContent>

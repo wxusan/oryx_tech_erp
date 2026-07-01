@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { actionLabel, actorLabel, formatLogValue, targetLabel } from '@/lib/log-format'
 
 type ActorType = 'SUPER_ADMIN' | 'SHOP_ADMIN'
 type TabFilter = 'barchasi' | ActorType
@@ -59,7 +60,7 @@ interface DisplayLog {
 
 const tabs: { key: TabFilter; label: string }[] = [
   { key: 'barchasi', label: 'Barchasi' },
-  { key: 'SUPER_ADMIN', label: 'Super admin' },
+  { key: 'SUPER_ADMIN', label: 'Bosh admin' },
   { key: 'SHOP_ADMIN', label: "Do'kon" },
 ]
 
@@ -72,34 +73,6 @@ function formatDateTime(value: string) {
     minute: '2-digit',
     second: '2-digit',
   })
-}
-
-function actionLabel(action: string, targetType: string) {
-  if (action === 'CREATE' && targetType === 'Shop') return "Do'kon yaratildi"
-  if (action === 'CREATE' && targetType === 'ShopAdmin') return "Admin qo'shildi"
-  if (action === 'CREATE' && targetType === 'Device') return "Qurilma qo'shildi"
-  if (action === 'CREATE_NASIYA') return "Nasiya yaratildi"
-  if (action === 'PAYMENT') return "To'lov qo'shildi"
-  if (action === 'SELL') return 'Sotuv qilindi'
-  if (action === 'RETURN') return 'Qaytarildi'
-  if (action === 'RESTOCK') return 'Omborga qaytarildi'
-  if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
-  if (action === 'DELETE') return "O'chirildi"
-  return action
-}
-
-function valueText(value: unknown) {
-  if (!value || typeof value !== 'object') return ''
-  const data = value as Record<string, unknown>
-  const parts = [
-    typeof data.name === 'string' ? data.name : undefined,
-    typeof data.ownerName === 'string' ? data.ownerName : undefined,
-    typeof data.shopNumber === 'string' ? `#${data.shopNumber}` : undefined,
-    typeof data.amount === 'number' ? `${data.amount.toLocaleString('ru-RU')} so'm` : undefined,
-    typeof data.months === 'number' ? `${data.months} oy` : undefined,
-    typeof data.paymentMethod === 'string' ? data.paymentMethod : undefined,
-  ]
-  return parts.filter(Boolean).join(' - ')
 }
 
 export default function LogsPage() {
@@ -150,12 +123,12 @@ export default function LogsPage() {
         setLogs(json.data.logs.map((log) => ({
           id: log.id,
           datetime: formatDateTime(log.createdAt),
-          actor: log.actorType === 'SUPER_ADMIN' ? 'Super Admin' : "Do'kon admini",
+          actor: actorLabel(log.actorType),
           actorType: log.actorType,
           shop: log.shop?.name ?? '—',
           action: actionLabel(log.action, log.targetType),
-          target: log.shop?.name ?? `${log.targetType}: ${log.targetId.slice(0, 8)}`,
-          note: log.note || valueText(log.newValue),
+          target: log.shop?.name ?? targetLabel(log.targetType, log.targetId, log.newValue),
+          note: log.note || formatLogValue(log.newValue),
         })))
       })
       .catch(() => {
@@ -271,7 +244,7 @@ export default function LogsPage() {
                           ? 'bg-zinc-900 text-white'
                           : 'bg-zinc-100 text-zinc-500',
                       ].join(' ')}>
-                        {log.actorType === 'SUPER_ADMIN' ? 'Super admin' : "Do'kon"}
+                        {log.actorType === 'SUPER_ADMIN' ? 'Bosh admin' : "Do'kon"}
                       </span>
                     </div>
                   </TableCell>

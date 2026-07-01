@@ -125,7 +125,7 @@ export default function DashboardPage() {
         <Card className="rounded-lg lg:col-span-5">
           <CardHeader className="border-b border-zinc-100">
             <CardTitle>Bu oy obuna tushumi</CardTitle>
-            <CardDescription>Super-admin uchun shop subscription daromadi</CardDescription>
+            <CardDescription>Bosh admin uchun do'kon obunalaridan tushum</CardDescription>
             <CardAction><CreditCard className="size-5 text-zinc-400" /></CardAction>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -157,7 +157,7 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-zinc-900">{stats?.activeShops ?? 0}</div>
-              <p className="mt-2 text-xs text-zinc-500">Sotuv va nasiya yuritayotgan shoplar</p>
+              <p className="mt-2 text-xs text-zinc-500">Sotuv va nasiya yuritayotgan do'konlar</p>
             </CardContent>
           </Card>
 
@@ -179,7 +179,7 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-red-700">{stats?.overdue ?? 0}</div>
-              <p className="mt-2 text-xs text-red-700/70">Darhol tekshirish kerak bo'lgan shoplar</p>
+              <p className="mt-2 text-xs text-red-700/70">Darhol tekshirish kerak bo'lgan do'konlar</p>
             </CardContent>
           </Card>
 
@@ -192,7 +192,7 @@ export default function DashboardPage() {
               <div className="text-2xl font-bold text-zinc-900">
                 {stats ? formatMoney(stats.expectedRevenue) : 'Yuklanmoqda...'}
               </div>
-              <p className="mt-2 text-xs text-zinc-500">Faol shoplar soni bo'yicha taxmin</p>
+              <p className="mt-2 text-xs text-zinc-500">Faol do'konlar soni bo'yicha taxmin</p>
             </CardContent>
           </Card>
         </div>

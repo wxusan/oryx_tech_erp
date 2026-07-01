@@ -180,7 +180,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Sozlamalar</h1>
-          <p className="mt-0.5 text-sm text-zinc-500">Super admin profili, xavfsizlik va tizim holati</p>
+          <p className="mt-0.5 text-sm text-zinc-500">Bosh admin profili, xavfsizlik va tizim holati</p>
         </div>
         <Badge variant="secondary" className="h-6 w-fit rounded-md">
           Platforma nazorati
@@ -203,7 +203,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
           <Card className="rounded-lg">
             <CardHeader className="border-b border-zinc-100">
               <CardTitle>Profil</CardTitle>
-              <CardDescription>Super admin hisob ma'lumotlari</CardDescription>
+              <CardDescription>Bosh admin hisob ma'lumotlari</CardDescription>
               <CardAction>
                 <UserRound className="size-5 text-zinc-400" />
               </CardAction>

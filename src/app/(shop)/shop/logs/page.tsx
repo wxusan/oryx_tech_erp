@@ -10,6 +10,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { actionLabel, actorLabel, formatLogValue, targetLabel } from '@/lib/log-format'
 
 type ActorType = 'SUPER_ADMIN' | 'SHOP_ADMIN'
 
@@ -59,61 +60,6 @@ function formatDateTime(value: string) {
   })
 }
 
-function actionLabel(action: string, targetType: string) {
-  if (action === 'CREATE' && targetType === 'Device') return "Qurilma qo'shildi"
-  if (action === 'CREATE' && targetType === 'Customer') return "Mijoz qo'shildi"
-  if (action === 'CREATE_NASIYA') return 'Nasiya yaratildi'
-  if (action === 'PAYMENT') return "To'lov qo'shildi"
-  if (action === 'SELL') return 'Sotuv qilindi'
-  if (action === 'RETURN') return 'Qaytarildi'
-  if (action === 'RESTOCK') return 'Omborga qaytarildi'
-  if (action === 'IMPORT') return 'Import qilindi'
-  if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
-  if (action === 'DELETE') return "O'chirildi"
-  if (action === 'PAY_SUBSCRIPTION') return "Obuna to'lovi"
-  return action
-}
-
-function targetLabel(targetType: string, targetId: string, value: unknown) {
-  const data = value && typeof value === 'object' ? value as Record<string, unknown> : {}
-  const typeLabels: Record<string, string> = {
-    Device: 'Qurilma',
-    Customer: 'Mijoz',
-    Nasiya: 'Nasiya',
-    NasiyaSchedule: "Nasiya to'lovi",
-    Sale: 'Sotuv',
-    Shop: "Do'kon",
-    ShopAdmin: "Do'kon admini",
-  }
-  const label = typeLabels[targetType] ?? targetType
-  const name =
-    typeof data.model === 'string' ? data.model :
-    typeof data.customerName === 'string' ? data.customerName :
-    typeof data.name === 'string' ? data.name :
-    typeof data.imei === 'string' ? data.imei :
-    undefined
-
-  return name ? `${label}: ${name}` : `${label}: ${targetId.slice(0, 8)}`
-}
-
-function valueText(value: unknown) {
-  if (!value || typeof value !== 'object') return ''
-  const data = value as Record<string, unknown>
-  const parts = [
-    typeof data.model === 'string' ? data.model : undefined,
-    typeof data.imei === 'string' ? data.imei : undefined,
-    typeof data.customerName === 'string' ? data.customerName : undefined,
-    typeof data.name === 'string' ? data.name : undefined,
-    typeof data.amount === 'number' ? `${data.amount.toLocaleString('ru-RU')} so'm` : undefined,
-    typeof data.totalAmount === 'number' ? `${data.totalAmount.toLocaleString('ru-RU')} so'm` : undefined,
-    typeof data.purchasePrice === 'number' ? `${data.purchasePrice.toLocaleString('ru-RU')} so'm` : undefined,
-    typeof data.months === 'number' ? `${data.months} oy` : undefined,
-    typeof data.paymentMethod === 'string' ? data.paymentMethod : undefined,
-  ]
-
-  return parts.filter(Boolean).join(' - ')
-}
-
 export default function ShopLogsPage() {
   const [logs, setLogs] = useState<DisplayLog[]>([])
   const [loadedKey, setLoadedKey] = useState('')
@@ -154,11 +100,11 @@ export default function ShopLogsPage() {
         setLogs(json.data.logs.map((log) => ({
           id: log.id,
           datetime: formatDateTime(log.createdAt),
-          actor: log.actorType === 'SUPER_ADMIN' ? 'Super Admin' : "Do'kon admini",
+          actor: actorLabel(log.actorType),
           actorType: log.actorType,
           action: actionLabel(log.action, log.targetType),
           target: targetLabel(log.targetType, log.targetId, log.newValue),
-          note: log.note || valueText(log.newValue),
+          note: log.note || formatLogValue(log.newValue),
         })))
         setLoadedKey(requestKey)
       })
@@ -253,7 +199,7 @@ export default function ShopLogsPage() {
                           ? 'bg-zinc-900 text-white'
                           : 'bg-zinc-100 text-zinc-500',
                       ].join(' ')}>
-                        {log.actorType === 'SUPER_ADMIN' ? 'Super admin' : "Do'kon"}
+                        {log.actorType === 'SUPER_ADMIN' ? 'Bosh admin' : "Do'kon"}
                       </span>
                     </div>
                   </TableCell>

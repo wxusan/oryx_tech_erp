@@ -14,7 +14,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Oryx ERP",
-  description: "Malika do'konlari uchun SaaS ERP paneli",
+  description: "Malika do'konlari uchun bulutli ERP paneli",
 };
 
 export default function RootLayout({

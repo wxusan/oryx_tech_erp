@@ -140,7 +140,7 @@ export const authConfig: NextAuthConfig = {
     // --- Super Admin flow ---
     Credentials({
       id: 'superadmin',
-      name: 'Super Admin',
+      name: 'Bosh admin',
       credentials: {
         email: { label: 'Login', type: 'text' },
         password: { label: 'Parol', type: 'password' },
@@ -177,7 +177,7 @@ export const authConfig: NextAuthConfig = {
     // --- Shop Admin flow ---
     Credentials({
       id: 'shopadmin',
-      name: 'Shop Admin',
+      name: "Do'kon admini",
       credentials: {
         login: { label: 'Login', type: 'text' },
         password: { label: 'Parol', type: 'password' },
