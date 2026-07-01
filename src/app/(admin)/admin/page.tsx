@@ -28,6 +28,7 @@ interface AdminStats {
   expectedRevenue: number
   activeShops: number
   dueSoon: number
+  overdue: number
 }
 
 function formatMoney(n: number) {
@@ -89,6 +90,7 @@ export default function DashboardPage() {
     { label: "Bu oy tushum", value: stats ? formatMoney(stats.thisMonthRevenue) : 'Yuklanmoqda...' },
     { label: "Kutilayotgan to'lovlar", value: stats ? formatMoney(stats.expectedRevenue) : 'Yuklanmoqda...' },
     { label: "Faol do'konlar", value: stats ? String(stats.activeShops) : 'Yuklanmoqda...' },
+    { label: "Muddati o'tgan", value: stats ? String(stats.overdue) : 'Yuklanmoqda...' },
     { label: "Muddati yaqin", value: stats ? String(stats.dueSoon) : 'Yuklanmoqda...' },
   ]
 
@@ -103,7 +105,7 @@ export default function DashboardPage() {
       )}
 
       {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
         {statCards.map(({ label, value }) => (
           <div
             key={label}

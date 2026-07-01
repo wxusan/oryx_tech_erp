@@ -8,6 +8,8 @@ interface ShopStats {
   overdueMoney: number
   inventoryPurchaseCost: number
   realProfitThisMonth: number
+  accrualGrossProfitThisMonth: number
+  cashCollectedThisMonth: number
 }
 
 function fmt(value: number) {
@@ -30,17 +32,21 @@ export default function ShopReportPage() {
 
   const rows = stats
     ? [
-        ['Bu oy kelgan pul', fmt(stats.cashReceivedThisMonth)],
+        ['Bu oy yig\'ilgan pul', fmt(stats.cashCollectedThisMonth ?? stats.cashReceivedThisMonth)],
         ['Bu oy kutilayotgan pul', fmt(stats.expectedThisMonth)],
         ["Muddati o'tgan qarz", fmt(stats.overdueMoney)],
-        ['Ombor tannarxi', fmt(stats.inventoryPurchaseCost)],
-        ['Sof foyda', fmt(stats.realProfitThisMonth)],
+        ['Ombordagi tannarx', fmt(stats.inventoryPurchaseCost)],
+        ['Hisoblangan yalpi foyda', fmt(stats.accrualGrossProfitThisMonth ?? stats.realProfitThisMonth)],
       ]
     : []
+  const monthLabel = new Date().toLocaleDateString('uz-UZ', { month: 'long', year: 'numeric' })
 
   return (
     <div className="p-6 space-y-4">
-      <h1 className="text-xl font-bold text-zinc-900">Hisobot</h1>
+      <div>
+        <h1 className="text-xl font-bold text-zinc-900">Hisobot</h1>
+        <p className="text-sm text-zinc-500 mt-0.5">{monthLabel}</p>
+      </div>
       {error && <div className="text-sm text-red-600 border border-red-200 bg-red-50 rounded px-4 py-3">{error}</div>}
       <div className="border border-zinc-200 rounded overflow-hidden max-w-2xl">
         {stats ? (

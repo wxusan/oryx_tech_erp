@@ -14,7 +14,6 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
 import { calculateRemaining } from '@/lib/nasiya-utils'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
-import { processPendingNotifications } from '@/lib/notification-service'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -43,6 +42,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       note,
       deferredToNext,
     } = parsed.data
+    const idempotencyKey = req.headers.get('idempotency-key')?.trim()
+    if (amount > 0 && !idempotencyKey) {
+      return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
+    }
 
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
@@ -56,61 +59,111 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
       if (!nasiya) throw { status: 404, message: "Nasiya topilmadi" }
 
-      // Verify the schedule entry belongs to this nasiya
-      const schedule = await tx.nasiyaSchedule.findFirst({
+      if (amount > 0 && idempotencyKey) {
+        const existingPayment = await tx.nasiyaPayment.findUnique({
+          where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+        })
+        if (existingPayment) {
+          return {
+            nasiyaId,
+            nasiyaScheduleId: existingPayment.nasiyaScheduleId,
+            amount: Number(existingPayment.amount),
+            remaining: Number(nasiya.remainingAmount),
+            duplicate: true,
+          }
+        }
+      }
+
+      const selectedSchedule = await tx.nasiyaSchedule.findFirst({
         where: { id: nasiyaScheduleId, nasiyaId, shopId },
       })
-      if (!schedule) throw { status: 404, message: "To'lov jadvali topilmadi" }
+      if (!selectedSchedule) throw { status: 404, message: "To'lov jadvali topilmadi" }
 
-      const newPaidAmount = Number(schedule.paidAmount) + amount
-      if (newPaidAmount > Number(schedule.expectedAmount)) {
-        throw { status: 409, message: "To'lov rejalashtirilgan summadan oshib ketdi" }
-      }
-      const isFullyPaid = newPaidAmount >= Number(schedule.expectedAmount)
-      const isPartial = !isFullyPaid && newPaidAmount > 0
-      const effectiveDueDate = delayedUntil ?? schedule.delayedUntil ?? schedule.dueDate
-      const isPastDue = effectiveDueDate < new Date()
-      const nextStatus = deferredToNext
-        ? 'DEFERRED'
-        : isFullyPaid
-          ? 'PAID'
-          : isPastDue
-            ? 'OVERDUE'
-            : isPartial
-            ? 'PARTIAL'
-            : 'PENDING'
+      const allocationRows = [...nasiya.schedules]
+        .filter((schedule) => {
+          if (schedule.status === 'PAID') return false
+          return Number(schedule.paidAmount) < Number(schedule.expectedAmount)
+        })
+        .sort((left, right) => {
+          const leftDue = left.delayedUntil ?? left.dueDate
+          const rightDue = right.delayedUntil ?? right.dueDate
+          return leftDue.getTime() - rightDue.getTime() || left.monthNumber - right.monthNumber
+        })
 
-      const updatedSchedule = await tx.nasiyaSchedule.updateMany({
-        where: {
-          id: nasiyaScheduleId,
-          nasiyaId,
-          shopId,
-          paidAmount: schedule.paidAmount,
-        },
-        data: {
-          paidAmount: newPaidAmount,
-          status: nextStatus,
-          paidAt: isFullyPaid ? date : null,
-          paymentMethod,
-          delayedUntil,
-          deferredToNext: deferredToNext ?? false,
-          note,
-        },
-      })
-      if (updatedSchedule.count !== 1) {
-        throw { status: 409, message: "To'lov bir vaqtda yangilangan, qayta urinib ko'ring" }
-      }
+      const allocations: { scheduleId: string; amount: number; paidAfter: number }[] = []
 
-      if (amount > 0) {
+      if (deferredToNext) {
+        const updatedSchedule = await tx.nasiyaSchedule.updateMany({
+          where: {
+            id: nasiyaScheduleId,
+            nasiyaId,
+            shopId,
+            paidAmount: selectedSchedule.paidAmount,
+          },
+          data: {
+            status: 'DEFERRED',
+            delayedUntil,
+            deferredToNext: true,
+            note,
+          },
+        })
+        if (updatedSchedule.count !== 1) {
+          throw { status: 409, message: "To'lov bir vaqtda yangilangan, qayta urinib ko'ring" }
+        }
+      } else {
+        const totalOutstanding = allocationRows.reduce(
+          (sum, schedule) => sum + Math.max(0, Number(schedule.expectedAmount) - Number(schedule.paidAmount)),
+          0,
+        )
+        if (amount > totalOutstanding) {
+          throw { status: 409, message: "To'lov qolgan nasiya summasidan oshib ketdi" }
+        }
+
+        let remainingPayment = amount
+        for (const schedule of allocationRows) {
+          if (remainingPayment <= 0) break
+          const outstanding = Math.max(0, Number(schedule.expectedAmount) - Number(schedule.paidAmount))
+          const applied = Math.min(remainingPayment, outstanding)
+          const newPaidAmount = Number(schedule.paidAmount) + applied
+          const isFullyPaid = newPaidAmount >= Number(schedule.expectedAmount)
+          const isPartial = !isFullyPaid && newPaidAmount > 0
+          const effectiveDueDate = schedule.delayedUntil ?? schedule.dueDate
+          const isPastDue = effectiveDueDate < new Date()
+          const nextStatus = isFullyPaid ? 'PAID' : isPastDue ? 'OVERDUE' : isPartial ? 'PARTIAL' : 'PENDING'
+
+          const updatedSchedule = await tx.nasiyaSchedule.updateMany({
+            where: {
+              id: schedule.id,
+              nasiyaId,
+              shopId,
+              paidAmount: schedule.paidAmount,
+            },
+            data: {
+              paidAmount: newPaidAmount,
+              status: nextStatus,
+              paidAt: isFullyPaid ? date : null,
+              paymentMethod,
+              note,
+            },
+          })
+          if (updatedSchedule.count !== 1) {
+            throw { status: 409, message: "To'lov bir vaqtda yangilangan, qayta urinib ko'ring" }
+          }
+
+          allocations.push({ scheduleId: schedule.id, amount: applied, paidAfter: newPaidAmount })
+          remainingPayment -= applied
+        }
+
         await tx.nasiyaPayment.create({
           data: {
             nasiyaId,
-            nasiyaScheduleId,
+            nasiyaScheduleId: allocations.length === 1 ? allocations[0].scheduleId : null,
             shopId,
             amount,
             paymentMethod,
             paidAt: date,
             note,
+            idempotencyKey,
             createdBy: session.user.id,
           },
         })
@@ -165,16 +218,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           action: 'PAYMENT',
           targetType: 'NasiyaSchedule',
           targetId: nasiyaScheduleId,
-          newValue: { amount, paymentMethod, deferredToNext },
+          newValue: { amount, paymentMethod, deferredToNext, allocations },
         },
       })
 
-      return { nasiyaId, nasiyaScheduleId, amount, remaining }
+      return { nasiyaId, nasiyaScheduleId, amount, remaining, allocations, duplicate: false }
     })
 
-    await processPendingNotifications()
-
-    return ok(result, "To'lov muvaffaqiyatli qabul qilindi")
+    return ok(result, result.duplicate ? "To'lov allaqachon qabul qilingan" : "To'lov muvaffaqiyatli qabul qilindi")
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }

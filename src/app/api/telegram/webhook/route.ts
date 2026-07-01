@@ -17,39 +17,40 @@
  */
 
 import { type NextRequest } from 'next/server'
-import { bot } from '@/lib/telegram'
+import { getBot } from '@/lib/telegram'
 
 // ---------------------------------------------------------------------------
 // Register bot command handlers (runs once at module load)
 // ---------------------------------------------------------------------------
 
-bot.command('start', async (ctx) => {
-  const telegramId = ctx.from?.id?.toString() ?? 'unknown'
+let registeredBot: ReturnType<typeof getBot> | null = null
 
-  // [PRISMA] Optionally persist / update the admin's telegramId here:
-  // await prisma.shopAdmin.updateMany({
-  //   where: { telegramId },
-  //   data:  { telegramId },   // already set — or use a verification flow
-  // })
+function webhookBot() {
+  if (registeredBot) return registeredBot
 
-  await ctx.reply(
-    "Salom\\! Siz *Oryx ERP* botiga ulandingiz\\. " +
-    "Sizga tegishli do'kon operatsiyalari haqida xabar berib turaman\\.",
-    { parse_mode: 'MarkdownV2' },
-  )
+  const bot = getBot()
 
-  console.log(`[TelegramWebhook] /start from telegramId=${telegramId}`)
-})
+  bot.command('start', async (ctx) => {
+    const telegramId = ctx.from?.id?.toString() ?? 'unknown'
 
-// Catch-all for unknown commands
-bot.on('message', async (ctx) => {
-  // Only reply to text messages that look like an unrecognised command
-  const text = ctx.message.text ?? ''
-  if (text.startsWith('/')) {
-    await ctx.reply('Bu buyruq mavjud emas.')
-  }
-  // Non-command messages are silently ignored
-})
+    await ctx.reply(
+      "Salom! Siz Oryx ERP botiga ulandingiz. " +
+      "Sizga tegishli do'kon operatsiyalari haqida xabar berib turaman.",
+    )
+
+    console.log(`[TelegramWebhook] /start from telegramId=${telegramId}`)
+  })
+
+  bot.on('message', async (ctx) => {
+    const text = ctx.message.text ?? ''
+    if (text.startsWith('/')) {
+      await ctx.reply('Bu buyruq mavjud emas.')
+    }
+  })
+
+  registeredBot = bot
+  return bot
+}
 
 // ---------------------------------------------------------------------------
 // POST handler
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   try {
     // bot.handleUpdate accepts the raw Telegram Update object.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await bot.handleUpdate(update as any)
+    await webhookBot().handleUpdate(update as any)
   } catch (error) {
     console.error('[TelegramWebhook] handleUpdate error:', error)
     // Always return 200 to Telegram so it does not retry indefinitely.

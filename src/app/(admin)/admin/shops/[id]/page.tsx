@@ -52,6 +52,9 @@ interface ShopDetail {
   note: string | null
   subscriptionDue: string
   status: ShopStatus
+  deletedAt: string | null
+  deletedBy: string | null
+  deleteNote: string | null
   admins: ShopAdmin[]
   payments: ShopPayment[]
 }
@@ -135,6 +138,7 @@ export default function ShopDetailPage() {
   const [payNote, setPayNote] = useState('')
   const [payLoading, setPayLoading] = useState(false)
   const [payError, setPayError] = useState<string | null>(null)
+  const [previewNow] = useState(() => Date.now())
 
   // Add admin form
   const [adminName, setAdminName] = useState('')
@@ -168,6 +172,15 @@ export default function ShopDetailPage() {
     editOwnerName.trim().length >= 2 &&
     editOwnerPhone.trim().length >= 9 &&
     editShopNumber.trim().length >= 1
+  const isDeleted = shop?.status === 'DELETED' || !!shop?.deletedAt
+  const paymentPreview = shop && payMonths
+    ? (() => {
+        const base = new Date(Math.max(previewNow, new Date(shop.subscriptionDue).getTime()))
+        const due = new Date(base)
+        due.setMonth(due.getMonth() + Number(payMonths))
+        return { base, due }
+      })()
+    : null
 
   const fetchShop = useCallback(() => {
     fetch(`/api/shops/${id}`)
@@ -226,6 +239,7 @@ export default function ShopDetailPage() {
 
   // Map UI method labels to API enum values
   function methodToEnum(m: string) {
+    if (['CASH', 'CARD', 'TRANSFER', 'OTHER'].includes(m)) return m
     if (m === 'Naqd') return 'CASH'
     if (m === 'Karta') return 'CARD'
     if (m === 'Bank') return 'TRANSFER'
@@ -481,23 +495,27 @@ export default function ShopDetailPage() {
           <StatusBadge status={shop.status} />
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 px-3 text-xs rounded-none border-zinc-200 text-zinc-700 hover:bg-zinc-50"
-            onClick={openEditShop}
-          >
-            Tahrirlash
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 px-3 text-xs rounded-none border-zinc-200 text-zinc-700 hover:bg-zinc-50"
-            onClick={() => setPaymentModalOpen(true)}
-          >
-            To&apos;lov qo&apos;shish
-          </Button>
-          {shop.status !== 'DELETED' && (
+          {!isDeleted && (
+            <>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-3 text-xs rounded-none border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+                onClick={openEditShop}
+              >
+                Tahrirlash
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-3 text-xs rounded-none border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+                onClick={() => setPaymentModalOpen(true)}
+              >
+                To&apos;lov qo&apos;shish
+              </Button>
+            </>
+          )}
+          {!isDeleted && (
             <Button
               size="sm"
               variant="outline"
@@ -507,16 +525,25 @@ export default function ShopDetailPage() {
               {shop.status === 'ACTIVE' ? "To'xtatish" : "Faollashtirish"}
             </Button>
           )}
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-8 px-3 text-xs rounded-none border-red-200 text-red-600 hover:bg-red-50"
-            onClick={() => setDeleteModalOpen(true)}
-          >
-            O&apos;chirish
-          </Button>
+          {!isDeleted && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 px-3 text-xs rounded-none border-red-200 text-red-600 hover:bg-red-50"
+              onClick={() => setDeleteModalOpen(true)}
+            >
+              O&apos;chirish
+            </Button>
+          )}
         </div>
       </div>
+
+      {isDeleted && (
+        <div className="mb-5 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          Bu do&apos;kon o&apos;chirilgan. Ma&apos;lumotlar audit uchun faqat ko&apos;rish rejimida ochildi.
+          {shop.deleteNote && <span className="block mt-1">Sabab: {shop.deleteNote}</span>}
+        </div>
+      )}
 
       {/* Info card */}
       <div className="bg-white border border-zinc-200 p-5 mb-5">
@@ -863,11 +890,21 @@ export default function ShopDetailPage() {
                 className="w-full h-8 text-sm border border-zinc-200 bg-white px-2 focus:outline-none focus:ring-1 focus:ring-zinc-400"
               >
                 <option value="">Tanlang...</option>
-                <option value="Naqd">Naqd</option>
-                <option value="Karta">Karta</option>
-                <option value="Bank">Bank</option>
+                <option value="CASH">Naqd</option>
+                <option value="CARD">Karta</option>
+                <option value="TRANSFER">Bank</option>
+                <option value="OTHER">Boshqa</option>
               </select>
             </div>
+            {paymentPreview && (
+              <div className="border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
+                <div>Joriy muddat: {new Date(shop.subscriptionDue).toLocaleDateString('uz-UZ')}</div>
+                <div>Hisoblanadigan sana: {paymentPreview.base.toLocaleDateString('uz-UZ')}</div>
+                <div className="font-medium text-zinc-900">
+                  Yangi muddat: {paymentPreview.due.toLocaleDateString('uz-UZ')}
+                </div>
+              </div>
+            )}
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
               <Input

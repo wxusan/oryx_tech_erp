@@ -176,6 +176,25 @@ CREATE TABLE "Sale" (
 );
 
 -- CreateTable
+CREATE TABLE "SalePayment" (
+    "id" TEXT NOT NULL,
+    "saleId" TEXT NOT NULL,
+    "shopId" TEXT NOT NULL,
+    "amount" DECIMAL(12,2) NOT NULL,
+    "paymentMethod" "PaymentMethod" NOT NULL,
+    "paidAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "note" TEXT,
+    "idempotencyKey" TEXT,
+    "createdBy" TEXT NOT NULL,
+    "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "deletedAt" TIMESTAMP(3),
+    "deletedBy" TEXT,
+    "deleteNote" TEXT,
+
+    CONSTRAINT "SalePayment_pkey" PRIMARY KEY ("id")
+);
+
+-- CreateTable
 CREATE TABLE "Nasiya" (
     "id" TEXT NOT NULL,
     "shopId" TEXT NOT NULL,
@@ -231,6 +250,7 @@ CREATE TABLE "NasiyaPayment" (
     "paymentMethod" "PaymentMethod",
     "paidAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "note" TEXT,
+    "idempotencyKey" TEXT,
     "createdBy" TEXT NOT NULL,
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "deletedAt" TIMESTAMP(3),
@@ -290,6 +310,9 @@ CREATE INDEX "Shop_status_idx" ON "Shop"("status");
 CREATE INDEX "ShopPayment_shopId_idx" ON "ShopPayment"("shopId");
 
 -- CreateIndex
+CREATE INDEX "ShopPayment_paidAt_idx" ON "ShopPayment"("paidAt");
+
+-- CreateIndex
 CREATE INDEX "ShopAdmin_shopId_idx" ON "ShopAdmin"("shopId");
 
 -- CreateIndex
@@ -318,6 +341,21 @@ CREATE INDEX "Sale_customerId_idx" ON "Sale"("customerId");
 
 -- CreateIndex
 CREATE INDEX "Sale_deviceId_idx" ON "Sale"("deviceId");
+
+-- CreateIndex
+CREATE INDEX "Sale_shopId_paidFully_dueDate_idx" ON "Sale"("shopId", "paidFully", "dueDate");
+
+-- CreateIndex
+CREATE INDEX "SalePayment_saleId_idx" ON "SalePayment"("saleId");
+
+-- CreateIndex
+CREATE INDEX "SalePayment_shopId_idx" ON "SalePayment"("shopId");
+
+-- CreateIndex
+CREATE INDEX "SalePayment_paidAt_idx" ON "SalePayment"("paidAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "SalePayment_shopId_idempotencyKey_key" ON "SalePayment"("shopId", "idempotencyKey");
 
 -- CreateIndex
 CREATE INDEX "Nasiya_shopId_idx" ON "Nasiya"("shopId");
@@ -356,6 +394,9 @@ CREATE INDEX "NasiyaPayment_shopId_idx" ON "NasiyaPayment"("shopId");
 CREATE INDEX "NasiyaPayment_paidAt_idx" ON "NasiyaPayment"("paidAt");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "NasiyaPayment_shopId_idempotencyKey_key" ON "NasiyaPayment"("shopId", "idempotencyKey");
+
+-- CreateIndex
 CREATE UNIQUE INDEX "Notification_dedupeKey_key" ON "Notification"("dedupeKey");
 
 -- CreateIndex
@@ -371,6 +412,9 @@ CREATE INDEX "Notification_scheduledAt_idx" ON "Notification"("scheduledAt");
 CREATE INDEX "Notification_nextAttemptAt_idx" ON "Notification"("nextAttemptAt");
 
 -- CreateIndex
+CREATE INDEX "Notification_status_scheduledAt_nextAttemptAt_idx" ON "Notification"("status", "scheduledAt", "nextAttemptAt");
+
+-- CreateIndex
 CREATE INDEX "Log_shopId_idx" ON "Log"("shopId");
 
 -- CreateIndex
@@ -378,6 +422,12 @@ CREATE INDEX "Log_actorId_idx" ON "Log"("actorId");
 
 -- CreateIndex
 CREATE INDEX "Log_targetType_targetId_idx" ON "Log"("targetType", "targetId");
+
+-- CreateIndex
+CREATE INDEX "Log_createdAt_idx" ON "Log"("createdAt");
+
+-- CreateIndex
+CREATE INDEX "Log_shopId_createdAt_idx" ON "Log"("shopId", "createdAt");
 
 -- AddForeignKey
 ALTER TABLE "Shop" ADD CONSTRAINT "Shop_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "SuperAdmin"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
@@ -411,6 +461,9 @@ ALTER TABLE "Sale" ADD CONSTRAINT "Sale_deviceId_fkey" FOREIGN KEY ("deviceId") 
 
 -- AddForeignKey
 ALTER TABLE "Sale" ADD CONSTRAINT "Sale_customerId_fkey" FOREIGN KEY ("customerId") REFERENCES "Customer"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
+
+-- AddForeignKey
+ALTER TABLE "SalePayment" ADD CONSTRAINT "SalePayment_saleId_fkey" FOREIGN KEY ("saleId") REFERENCES "Sale"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
 
 -- AddForeignKey
 ALTER TABLE "Nasiya" ADD CONSTRAINT "Nasiya_shopId_fkey" FOREIGN KEY ("shopId") REFERENCES "Shop"("id") ON DELETE RESTRICT ON UPDATE CASCADE;

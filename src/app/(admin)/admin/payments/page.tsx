@@ -27,6 +27,7 @@ interface ShopPayment {
   paymentMethod: string
   paidAt: string
   recordedById?: string
+  recordedBy?: { name: string; email: string } | null
 }
 
 interface ShopWithPayments {
@@ -86,7 +87,11 @@ export default function PaymentsPage() {
               months: payment.months,
               method: methodFromEnum(payment.paymentMethod),
               date: payment.paidAt,
-              addedBy: payment.recordedById ? payment.recordedById.slice(0, 8) : '—',
+              addedBy: payment.recordedBy
+                ? `${payment.recordedBy.name} (${payment.recordedBy.email})`
+                : payment.recordedById
+                  ? payment.recordedById.slice(0, 8)
+                  : '—',
             }))
           )
           .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
@@ -194,7 +199,7 @@ export default function PaymentsPage() {
                   <TableCell className="text-sm text-zinc-500">
                     {p.date ? new Date(p.date).toLocaleDateString('ru-RU') : '—'}
                   </TableCell>
-                  <TableCell className="pr-5 text-xs text-zinc-400">{p.addedBy}</TableCell>
+                  <TableCell className="pr-5 text-xs text-zinc-600">{p.addedBy}</TableCell>
                 </TableRow>
               ))
             )}

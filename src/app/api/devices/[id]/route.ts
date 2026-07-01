@@ -11,7 +11,7 @@ import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession } from '@/lib/api-auth'
-import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
+import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -48,12 +48,14 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       where: {
         id: deviceId,
         deletedAt: null,
+        shop: { status: 'ACTIVE', deletedAt: null },
         ...(session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}),
       },
       include: {
         supplier: true,
         sales: {
             include: {
+              payments: { where: { deletedAt: null }, orderBy: { paidAt: 'desc' } },
               customer: {
                 select: { id: true, shopId: true, name: true, phone: true, note: true, createdAt: true },
               },
@@ -104,11 +106,23 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       where: {
         id: deviceId,
         deletedAt: null,
+        shop: { status: 'ACTIVE', deletedAt: null },
         ...(session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}),
       },
     })
 
     if (!existing) return notFound("Qurilma topilmadi")
+    if (['SOLD_CASH', 'SOLD_NASIYA'].includes(existing.status)) {
+      return conflict("Sotilgan qurilmani o'chirish uchun avval qaytarish yoki bekor qilish jarayonidan foydalaning")
+    }
+
+    const financialRecords = await prisma.$transaction([
+      prisma.sale.count({ where: { deviceId, deletedAt: null } }),
+      prisma.nasiya.count({ where: { deviceId, deletedAt: null, status: { not: 'CANCELLED' } } }),
+    ])
+    if (financialRecords[0] > 0 || financialRecords[1] > 0) {
+      return conflict("Bu qurilmaga bog'langan sotuv yoki nasiya bor, bevosita o'chirib bo'lmaydi")
+    }
 
     const device = await prisma.$transaction(async (tx) => {
       const updatedDevice = await tx.device.update({
@@ -173,6 +187,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
       where: {
         id: deviceId,
         deletedAt: null,
+        shop: { status: 'ACTIVE', deletedAt: null },
         ...(session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}),
       },
     })

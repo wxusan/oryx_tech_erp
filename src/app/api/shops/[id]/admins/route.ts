@@ -75,10 +75,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!shop) return notFound("Do'kon topilmadi")
 
     const existingLogin = await prisma.shopAdmin.findFirst({
-      where: { shopId: id, login: parsed.data.login, deletedAt: null },
-      select: { id: true },
+      where: { shopId: id, login: parsed.data.login },
+      select: { id: true, deletedAt: true },
     })
-    if (existingLogin) return conflict('Bu login allaqachon mavjud')
+    if (existingLogin) {
+      return conflict(
+        existingLogin.deletedAt
+          ? "Bu login oldin ishlatilgan. Iltimos, boshqa login tanlang"
+          : 'Bu login allaqachon mavjud',
+      )
+    }
 
     const passwordHash = await bcrypt.hash(parsed.data.password, 12)
 

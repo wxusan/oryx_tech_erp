@@ -26,10 +26,14 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     const { id } = await ctx.params
 
     const shop = await prisma.shop.findFirst({
-      where: { id, deletedAt: null },
+      where: { id },
       include: {
         admins: { where: { deletedAt: null }, select: shopAdminPublicSelect },
-        payments: { where: { deletedAt: null }, orderBy: { paidAt: 'desc' } },
+        payments: {
+          where: { deletedAt: null },
+          orderBy: { paidAt: 'desc' },
+          include: { recordedBy: { select: { name: true, email: true } } },
+        },
         _count: { select: { devices: true, nasiya: true, sales: true } },
       },
     })

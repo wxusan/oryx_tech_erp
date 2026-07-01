@@ -19,7 +19,7 @@ export async function GET() {
     const monthEnd = endOfMonth(now)
     const dueSoonCutoff = addDays(now, 7)
 
-    const [thisMonthResult, activeShops, dueSoon, shops] = await Promise.all([
+    const [thisMonthResult, activeShops, dueSoon, overdue, shops] = await Promise.all([
       // This month's total revenue
       prisma.shopPayment.aggregate({
         _sum: { amount: true },
@@ -37,6 +37,14 @@ export async function GET() {
           status: 'ACTIVE',
           deletedAt: null,
           subscriptionDue: { gte: now, lte: dueSoonCutoff },
+        },
+      }),
+
+      prisma.shop.count({
+        where: {
+          status: 'ACTIVE',
+          deletedAt: null,
+          subscriptionDue: { lt: now },
         },
       }),
 
@@ -61,6 +69,7 @@ export async function GET() {
       expectedRevenue,
       activeShops,
       dueSoon,
+      overdue,
       shops,
     })
   } catch (err) {

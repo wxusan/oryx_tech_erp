@@ -16,12 +16,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname()
 
   return (
-    <div className="flex h-screen bg-white overflow-hidden">
+    <div className="flex min-h-screen flex-col bg-white md:h-screen md:flex-row md:overflow-hidden">
       {/* Sidebar */}
-      <aside
-        style={{ width: 240, minWidth: 240 }}
-        className="flex flex-col border-r border-zinc-200 bg-white shrink-0"
-      >
+      <aside className="flex w-full shrink-0 flex-col border-b border-zinc-200 bg-white md:w-60 md:border-b-0 md:border-r">
         {/* Logo */}
         <div className="px-5 py-5 border-b border-zinc-200">
           <div className="font-bold text-zinc-900 text-sm leading-tight tracking-tight">Oryx ERP</div>
@@ -29,7 +26,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
+        <nav className="flex gap-1 overflow-x-auto px-3 py-3 md:block md:flex-1 md:space-y-0.5 md:overflow-y-auto">
           {navItems.map((item) => {
             const Icon = item.icon
             const isActive =
@@ -40,7 +37,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 key={item.href}
                 href={item.href}
                 className={[
-                  'flex items-center gap-2.5 px-3 py-2 text-sm transition-colors',
+                  'flex shrink-0 items-center gap-2.5 px-3 py-2 text-sm transition-colors',
                   isActive
                     ? 'bg-zinc-900 text-white'
                     : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900',
@@ -60,7 +57,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       </aside>
 
       {/* Right side */}
-      <div className="flex flex-col flex-1 min-w-0 overflow-hidden">
+      <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
         {/* Top bar */}
         <header className="h-12 shrink-0 flex items-center justify-end gap-3 px-6 border-b border-zinc-200 bg-white">
           <span className="text-xs text-zinc-500 font-medium">Super Admin</span>
@@ -72,7 +69,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </header>
 
         {/* Main content */}
-        <main className="flex-1 overflow-y-auto bg-white p-8">
+        <main className="flex-1 overflow-y-auto bg-white p-4 md:p-8">
           {children}
         </main>
       </div>

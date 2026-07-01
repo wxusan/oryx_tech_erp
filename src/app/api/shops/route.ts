@@ -33,6 +33,9 @@ export async function GET(req: NextRequest) {
         payments: {
           where: { deletedAt: null },
           orderBy: { paidAt: 'desc' },
+          include: {
+            recordedBy: { select: { name: true, email: true } },
+          },
         },
         _count: {
           select: { devices: true, nasiya: true },

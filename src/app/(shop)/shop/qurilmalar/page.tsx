@@ -88,7 +88,7 @@ export default function QurilmalarPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Qurilmalar</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">Omboringizdag barcha qurilmalar</p>
+          <p className="text-sm text-zinc-500 mt-0.5">Omboringizdagi barcha qurilmalar</p>
         </div>
         <Link href="/shop/qurilmalar/new">
           <Button className="bg-zinc-900 hover:bg-zinc-800 text-white h-9 px-4 text-sm rounded">
@@ -132,11 +132,11 @@ export default function QurilmalarPage() {
         <div className="text-sm text-zinc-400 py-8 text-center">Yuklanmoqda...</div>
       ) : (
         /* Table */
-        <div className="border border-zinc-200 rounded overflow-hidden">
-          <table className="w-full text-sm">
+        <div className="border border-zinc-200 rounded overflow-x-auto">
+          <table className="min-w-[920px] w-full text-sm">
             <thead className="bg-zinc-50 border-b border-zinc-200">
               <tr>
-                {['Model', 'Rang', 'Xotira', 'Batareya', 'Narx', 'IMEI', 'Status', 'Sana', ''].map((h) => (
+                {['Model', 'Rang', 'Xotira', 'Batareya', 'Kelish narxi', 'IMEI', 'Status', 'Sana', ''].map((h) => (
                   <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide">
                     {h}
                   </th>

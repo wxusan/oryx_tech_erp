@@ -7,8 +7,10 @@
 
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, serverError } from '@/lib/api-helpers'
+
+const nasiyaStatuses = ['ACTIVE', 'COMPLETED', 'OVERDUE', 'CANCELLED'] as const
 
 export async function GET(req: NextRequest) {
   try {
@@ -18,23 +20,22 @@ export async function GET(req: NextRequest) {
 
     const { searchParams } = req.nextUrl
 
-    const shopId =
-      session.user.role === 'SUPER_ADMIN'
-        ? (searchParams.get('shopId') ?? undefined)
-        : (session.user.shopId ?? undefined)
+    const resolved = await resolveActiveShopId(session, searchParams.get('shopId'))
+    if (!resolved.ok) return resolved.response
+    const { shopId } = resolved
 
-    if (!shopId) {
-      return badRequest('shopId talab qilinadi')
+    const statusParam = searchParams.get('status') ?? undefined
+    if (statusParam && !nasiyaStatuses.includes(statusParam as (typeof nasiyaStatuses)[number])) {
+      return badRequest("Nasiya statusi noto'g'ri")
     }
-
-    const status = searchParams.get('status') ?? undefined
+    const status = statusParam as (typeof nasiyaStatuses)[number] | undefined
     const search = searchParams.get('search')?.trim()
 
     const nasiyalar = await prisma.nasiya.findMany({
       where: {
         shopId,
         deletedAt: null,
-        ...(status ? { status: status as 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED' } : {}),
+        ...(status ? { status } : {}),
         ...(search
           ? {
               OR: [

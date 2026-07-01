@@ -14,6 +14,8 @@ import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helper
 import { notifyShopAdmins } from '@/lib/notification-service'
 import type { ZodError } from 'zod'
 
+const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_NASIYA', 'RESERVED', 'RETURNED', 'DELETED'] as const
+
 // ---------------------------------------------------------------------------
 // GET /api/devices
 // ---------------------------------------------------------------------------
@@ -31,14 +33,18 @@ export async function GET(req: NextRequest) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
-    const status = searchParams.get('status') ?? undefined
+    const statusParam = searchParams.get('status') ?? undefined
+    if (statusParam && !deviceStatuses.includes(statusParam as (typeof deviceStatuses)[number])) {
+      return badRequest("Qurilma statusi noto'g'ri")
+    }
+    const status = statusParam as (typeof deviceStatuses)[number] | undefined
     const search = searchParams.get('search') ?? undefined // IMEI / model / color
 
     const devices = await prisma.device.findMany({
       where: {
         shopId,
         deletedAt: null,
-        ...(status ? { status: status as 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED' } : {}),
+        ...(status ? { status } : {}),
         ...(search
           ? {
               OR: [

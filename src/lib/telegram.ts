@@ -4,7 +4,17 @@ import { Bot } from 'grammy'
 // Bot instance — shared across the application
 // ---------------------------------------------------------------------------
 
-export const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN!)
+let cachedBot: Bot | null = null
+
+export function getBot(): Bot {
+  const token = process.env.TELEGRAM_BOT_TOKEN
+  if (!token) {
+    throw new Error('TELEGRAM_BOT_TOKEN is required')
+  }
+
+  cachedBot ??= new Bot(token)
+  return cachedBot
+}
 
 // ---------------------------------------------------------------------------
 // Core send helper
@@ -19,7 +29,7 @@ export async function sendTelegramMessage(
   text: string,
 ): Promise<boolean> {
   try {
-    await bot.api.sendMessage(telegramId, text)
+    await getBot().api.sendMessage(telegramId, text)
     return true
   } catch (error) {
     console.error(`[Telegram] sendMessage failed (id=${telegramId}):`, error)

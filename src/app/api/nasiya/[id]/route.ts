@@ -24,6 +24,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       where: {
         id: nasiyaId,
         deletedAt: null,
+        shop: { status: 'ACTIVE', deletedAt: null },
         ...(session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}),
       },
       include: {
@@ -40,6 +41,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         device: true,
         shop: true,
         schedules: { orderBy: { monthNumber: 'asc' } },
+        payments: { where: { deletedAt: null }, orderBy: { paidAt: 'desc' } },
       },
     })
 

@@ -11,7 +11,6 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { createSaleSchema } from '@/lib/validations'
 import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
-import { processPendingNotifications } from '@/lib/notification-service'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -61,7 +60,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         data: { shopId, name: customerName, phone: customerPhone },
       })
 
-      const paid = amountPaid ?? salePrice
+      const paid = paidFully ? salePrice : amountPaid ?? 0
       const remaining = salePrice - paid
 
       const sale = await tx.sale.create({
@@ -71,7 +70,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           customerId: customer.id,
           salePrice,
           paymentMethod: parsed.data.paymentMethod,
-          paidFully,
+          paidFully: remaining <= 0,
           amountPaid: paid,
           remainingAmount: remaining,
           dueDate,
@@ -80,6 +79,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           createdBy: session.user.id,
         },
       })
+
+      if (paid > 0) {
+        await tx.salePayment.create({
+          data: {
+            saleId: sale.id,
+            shopId,
+            amount: paid,
+            paymentMethod,
+            paidAt: new Date(),
+            note: remaining > 0 ? "Boshlang'ich to'lov" : "To'liq to'lov",
+            idempotencyKey: `sale-initial:${sale.id}`,
+            createdBy: session.user.id,
+          },
+        })
+      }
 
       const shopAdmins = await tx.shopAdmin.findMany({
         where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' } },
@@ -106,14 +120,20 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           action: 'SELL',
           targetType: 'Device',
           targetId: deviceId,
-          newValue: { salePrice, customerName, paymentMethod },
+          newValue: {
+            salePrice,
+            customerName,
+            paymentMethod,
+            amountPaid: paid,
+            remainingAmount: remaining,
+            dueDate,
+            paidFully: remaining <= 0,
+          },
         },
       })
 
       return sale
     })
-
-    await processPendingNotifications()
 
     return created(result, "Qurilma muvaffaqiyatli sotildi")
   } catch (err: unknown) {

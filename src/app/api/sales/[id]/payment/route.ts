@@ -1,0 +1,127 @@
+import { NextRequest } from 'next/server'
+import { prisma } from '@/lib/prisma'
+import { Prisma } from '@/generated/prisma/client'
+import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { addSalePaymentSchema } from '@/lib/validations'
+import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import type { ZodError } from 'zod'
+
+type RouteContext = { params: Promise<{ id: string }> }
+
+export async function POST(req: NextRequest, ctx: RouteContext) {
+  try {
+    const guarded = await requireApiSession()
+    if (!guarded.ok) return guarded.response
+    const { session } = guarded
+
+    const { id: saleId } = await ctx.params
+    const body: unknown = await req.json()
+    const parsed = addSalePaymentSchema.safeParse(body)
+
+    if (!parsed.success) {
+      const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
+      return badRequest(firstError)
+    }
+
+    const idempotencyKey =
+      req.headers.get('idempotency-key')?.trim() ||
+      parsed.data.idempotencyKey?.trim()
+    if (!idempotencyKey) {
+      return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
+    }
+
+    const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
+    if (!resolved.ok) return resolved.response
+    const { shopId } = resolved
+
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const existingPayment = await tx.salePayment.findUnique({
+        where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+      })
+      if (existingPayment) {
+        return { payment: existingPayment, duplicate: true }
+      }
+
+      const sale = await tx.sale.findFirst({
+        where: { id: saleId, shopId, deletedAt: null },
+      })
+      if (!sale) throw { status: 404, message: 'Sotuv topilmadi' }
+
+      const oldRemaining = Number(sale.remainingAmount)
+      if (oldRemaining <= 0 || sale.paidFully) {
+        throw { status: 409, message: "Bu sotuv bo'yicha qarz yopilgan" }
+      }
+
+      const amount = parsed.data.amount
+      if (amount > oldRemaining) {
+        throw { status: 409, message: "To'lov qolgan qarzdan oshib ketdi" }
+      }
+
+      const paidAt = parsed.data.paidAt ?? new Date()
+      const nextRemaining = oldRemaining - amount
+      const nextAmountPaid = Number(sale.amountPaid) + amount
+      const payment = await tx.salePayment.create({
+        data: {
+          saleId,
+          shopId,
+          amount,
+          paymentMethod: parsed.data.paymentMethod,
+          paidAt,
+          note: parsed.data.note,
+          idempotencyKey,
+          createdBy: session.user.id,
+        },
+      })
+
+      const updatedSale = await tx.sale.update({
+        where: { id: saleId },
+        data: {
+          amountPaid: nextAmountPaid,
+          remainingAmount: nextRemaining,
+          paidFully: nextRemaining <= 0,
+          dueDate: nextRemaining <= 0 ? null : parsed.data.nextDueDate ?? sale.dueDate,
+          reminderEnabled: nextRemaining <= 0 ? false : sale.reminderEnabled,
+        },
+      })
+
+      await tx.log.create({
+        data: {
+          shopId,
+          actorId: session.user.id,
+          actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
+          action: 'PAYMENT',
+          targetType: 'Sale',
+          targetId: saleId,
+          oldValue: {
+            amountPaid: sale.amountPaid,
+            remainingAmount: sale.remainingAmount,
+            paidFully: sale.paidFully,
+            dueDate: sale.dueDate,
+          },
+          newValue: {
+            paymentId: payment.id,
+            amount,
+            paymentMethod: parsed.data.paymentMethod,
+            amountPaid: updatedSale.amountPaid,
+            remainingAmount: updatedSale.remainingAmount,
+            paidFully: updatedSale.paidFully,
+            dueDate: updatedSale.dueDate,
+          },
+          note: parsed.data.note,
+        },
+      })
+
+      return { payment, sale: updatedSale, duplicate: false }
+    })
+
+    return ok(result, result.duplicate ? "To'lov allaqachon qabul qilingan" : "To'lov qabul qilindi")
+  } catch (err: unknown) {
+    if (typeof err === 'object' && err !== null && 'status' in err) {
+      const e = err as { status: number; message: string }
+      if (e.status === 404) return notFound(e.message)
+      if (e.status === 409) return conflict(e.message)
+    }
+    console.error('[POST /api/sales/[id]/payment]', err)
+    return serverError()
+  }
+}

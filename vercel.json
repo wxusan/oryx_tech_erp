@@ -1,0 +1,9 @@
+{
+  "buildCommand": "npm run migrate:deploy && npm run build",
+  "crons": [
+    {
+      "path": "/api/cron/reminders",
+      "schedule": "0 3 * * *"
+    }
+  ]
+}

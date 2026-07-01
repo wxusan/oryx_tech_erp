@@ -13,7 +13,6 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { createNasiyaSchema } from '@/lib/validations'
 import { generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
-import { processPendingNotifications } from '@/lib/notification-service'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -147,8 +146,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       return nasiya
     })
-
-    await processPendingNotifications()
 
     return created(result, "Nasiya muvaffaqiyatli yaratildi")
   } catch (err: unknown) {

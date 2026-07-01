@@ -24,6 +24,30 @@ import { prisma } from '@/lib/prisma'
 import { hasValidInternalSecret, internalSecret } from '@/lib/api-auth'
 import { processPendingNotifications } from '@/lib/notification-service'
 
+export const maxDuration = 60
+
+function tashkentDayRange(now = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tashkent',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now)
+  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? ''
+  const year = Number(part('year'))
+  const month = Number(part('month'))
+  const day = Number(part('day'))
+  const start = new Date(Date.UTC(year, month - 1, day, -5, 0, 0, 0))
+  const end = new Date(start)
+  end.setUTCDate(end.getUTCDate() + 1)
+
+  return {
+    start,
+    end,
+    dayKey: `${part('year')}-${part('month')}-${part('day')}`,
+  }
+}
+
 // ---------------------------------------------------------------------------
 // GET handler
 // ---------------------------------------------------------------------------
@@ -37,12 +61,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     return new Response('Unauthorized', { status: 401 })
   }
 
-  // Today's date range
-  const today = new Date()
-  today.setHours(0, 0, 0, 0)
-  const tomorrow = new Date(today)
-  tomorrow.setDate(tomorrow.getDate() + 1)
-  const dayKey = today.toISOString().slice(0, 10)
+  const { start: today, end: tomorrow, dayKey } = tashkentDayRange()
 
   // -------------------------------------------------------------------------
   // 1. Today's reminders — dueDate = today, status PENDING or PARTIAL
@@ -51,7 +70,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   const dueToday = await prisma.nasiyaSchedule.findMany({
     where: {
       OR: [
-        { dueDate: { gte: today, lt: tomorrow } },
+        { delayedUntil: null, dueDate: { gte: today, lt: tomorrow } },
         { delayedUntil: { gte: today, lt: tomorrow } },
       ],
       status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
@@ -105,7 +124,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   const overdue = await prisma.nasiyaSchedule.findMany({
     where: {
       OR: [
-        { dueDate: { lt: today } },
+        { delayedUntil: null, dueDate: { lt: today } },
         { delayedUntil: { lt: today } },
       ],
       status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
@@ -139,7 +158,8 @@ export async function GET(request: NextRequest): Promise<Response> {
       data: { status: 'OVERDUE' },
     })
 
-    const daysLate = Math.floor((today.getTime() - schedule.dueDate.getTime()) / 86400000)
+    const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
+    const daysLate = Math.floor((today.getTime() - effectiveDue.getTime()) / 86400000)
     const msg = `🔴 Muddati o'tgan to'lov\n👤 ${schedule.nasiya.customer.name}\n📞 ${schedule.nasiya.customer.phone}\n📱 ${schedule.nasiya.device.model}\n💵 ${Number(schedule.expectedAmount).toLocaleString()} so'm\n⏳ ${daysLate} kun kechikmoqda`
     for (const admin of schedule.nasiya.shop.admins) {
       const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`

@@ -29,58 +29,84 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       return badRequest(firstError)
     }
 
-    const shop = await prisma.shop.findFirst({
-      where: { id, deletedAt: null, status: { not: 'DELETED' } },
-    })
-    if (!shop) return notFound("Do'kon topilmadi")
+    const runPaymentTransaction = () =>
+      prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        const shop = await tx.shop.findFirst({
+          where: { id, deletedAt: null, status: { not: 'DELETED' } },
+        })
+        if (!shop) throw { status: 404, message: "Do'kon topilmadi" }
 
-    const base = max([new Date(), shop.subscriptionDue])
-    const newDue = addMonths(base, parsed.data.months)
+        const base = max([new Date(), shop.subscriptionDue])
+        const newDue = addMonths(base, parsed.data.months)
 
-    const updatedShop = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      await tx.shopPayment.create({
-        data: {
-          shopId: id,
-          amount: parsed.data.amount,
-          months: parsed.data.months,
-          paymentMethod: parsed.data.paymentMethod,
-          note: parsed.data.note,
-          recordedById: session.user.id,
-        },
-      })
-
-      const updated = await tx.shop.update({
-        where: { id },
-        data: { subscriptionDue: newDue },
-        include: {
-          admins: { where: { deletedAt: null, isActive: true }, select: shopAdminPublicSelect },
-          payments: { where: { deletedAt: null }, orderBy: { paidAt: 'desc' }, take: 5 },
-        },
-      })
-
-      await tx.log.create({
-        data: {
-          shopId: id,
-          actorId: session.user.id,
-          actorType: 'SUPER_ADMIN',
-          action: 'PAYMENT',
-          targetType: 'Shop',
-          targetId: id,
-          newValue: {
+        await tx.shopPayment.create({
+          data: {
+            shopId: id,
             amount: parsed.data.amount,
             months: parsed.data.months,
             paymentMethod: parsed.data.paymentMethod,
-            newSubscriptionDue: newDue,
+            note: parsed.data.note,
+            recordedById: session.user.id,
           },
-          note: parsed.data.note,
-        },
-      })
+        })
 
-      return updated
-    })
+        const updated = await tx.shop.update({
+          where: { id },
+          data: { subscriptionDue: newDue },
+          include: {
+            admins: { where: { deletedAt: null, isActive: true }, select: shopAdminPublicSelect },
+            payments: {
+              where: { deletedAt: null },
+              orderBy: { paidAt: 'desc' },
+              take: 5,
+              include: { recordedBy: { select: { name: true, email: true } } },
+            },
+          },
+        })
+
+        await tx.log.create({
+          data: {
+            shopId: id,
+            actorId: session.user.id,
+            actorType: 'SUPER_ADMIN',
+            action: 'PAYMENT',
+            targetType: 'Shop',
+            targetId: id,
+            oldValue: { subscriptionDue: shop.subscriptionDue },
+            newValue: {
+              amount: parsed.data.amount,
+              months: parsed.data.months,
+              paymentMethod: parsed.data.paymentMethod,
+              newSubscriptionDue: newDue,
+            },
+            note: parsed.data.note,
+          },
+        })
+
+        return updated
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+
+    let updatedShop
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        updatedShop = await runPaymentTransaction()
+        break
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034' && attempt < 2) {
+          continue
+        }
+        throw err
+      }
+    }
+
+    if (!updatedShop) return serverError()
 
     return ok(updatedShop, "To'lov muvaffaqiyatli qo'shildi")
-  } catch (err) {
+  } catch (err: unknown) {
+    if (typeof err === 'object' && err !== null && 'status' in err) {
+      const e = err as { status: number; message: string }
+      if (e.status === 404) return notFound(e.message)
+    }
     console.error('[POST /api/shops/[id]/payment]', err)
     return serverError()
   }

@@ -139,6 +139,20 @@ export const createSaleSchema = z
     },
   )
   .refine(
+    (data) => data.paidFully || (data.amountPaid ?? 0) < data.salePrice,
+    {
+      message: "Qisman savdoda to'langan summa sotuv narxidan kam bo'lishi kerak",
+      path: ['amountPaid'],
+    },
+  )
+  .refine(
+    (data) => !data.paidFully || data.amountPaid === undefined || data.amountPaid === data.salePrice,
+    {
+      message: "To'liq savdoda to'langan summa sotuv narxiga teng bo'lishi kerak",
+      path: ['amountPaid'],
+    },
+  )
+  .refine(
     (data) => data.paidFully || data.dueDate !== undefined,
     {
       message: "Qolgan to'lov sanasi kiritilishi shart",
@@ -147,6 +161,19 @@ export const createSaleSchema = z
   )
 
 export type CreateSaleInput = z.infer<typeof createSaleSchema>
+
+export const addSalePaymentSchema = z.object({
+  amount: z
+    .number({ error: "To'lov summasi kiritilishi shart" })
+    .positive("To'lov summasi musbat bo'lishi kerak"),
+  paymentMethod: paymentMethodSchema,
+  paidAt: z.coerce.date().optional(),
+  nextDueDate: z.coerce.date().optional(),
+  note: z.string().optional(),
+  idempotencyKey: z.string().min(8).max(120).optional(),
+})
+
+export type AddSalePaymentInput = z.infer<typeof addSalePaymentSchema>
 
 // ---------------------------------------------------------------------------
 // createNasiyaSchema

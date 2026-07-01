@@ -31,6 +31,7 @@ export async function GET(req: NextRequest) {
     const [
       totalDevices,
       cashSalesThisMonth,
+      saleReceivedAgg,
       nasiyaSoldThisMonth,
       nasiyaReceivedAgg,
       activeNasiyalar,
@@ -53,6 +54,15 @@ export async function GET(req: NextRequest) {
           createdAt: { gte: monthStart, lte: monthEnd },
         },
         include: { device: true },
+      }),
+
+      prisma.salePayment.aggregate({
+        _sum: { amount: true },
+        where: {
+          shopId,
+          deletedAt: null,
+          paidAt: { gte: monthStart, lte: monthEnd },
+        },
       }),
 
       // Nasiya plans created this month with device cost for cash-basis profit visibility.
@@ -99,13 +109,13 @@ export async function GET(req: NextRequest) {
         },
       }),
 
-      // Inventory purchase cost currently held or sold this month snapshot
+      // Inventory purchase cost currently held in stock.
       prisma.device.aggregate({
         _sum: { purchasePrice: true },
         where: {
           shopId,
           deletedAt: null,
-          createdAt: { lte: monthEnd },
+          status: { in: ['IN_STOCK', 'RESERVED'] },
         },
       }),
 
@@ -144,10 +154,7 @@ export async function GET(req: NextRequest) {
       }),
     ])
 
-    const cashReceived = cashSalesThisMonth.reduce(
-      (sum, sale) => sum + Number(sale.amountPaid),
-      0,
-    )
+    const cashReceived = Number(saleReceivedAgg._sum.amount ?? 0)
     const soldDeviceCost = cashSalesThisMonth.reduce(
       (sum, sale) => sum + Number(sale.device.purchasePrice),
       0,
@@ -158,6 +165,10 @@ export async function GET(req: NextRequest) {
     )
     const nasiyaReceived = Number(nasiyaReceivedAgg._sum.amount ?? 0)
     const cashReceivedThisMonth = cashReceived + nasiyaReceived
+    const accrualRevenueThisMonth =
+      cashSalesThisMonth.reduce((sum, sale) => sum + Number(sale.salePrice), 0) +
+      nasiyaSoldThisMonth.reduce((sum, nasiya) => sum + Number(nasiya.totalAmount), 0)
+    const accrualGrossProfitThisMonth = accrualRevenueThisMonth - soldDeviceCost - nasiyaDeviceCost
     const outstanding = (expected: unknown, paid: unknown) => Math.max(0, Number(expected) - Number(paid))
     const effectiveDue = (row: { delayedUntil: Date | null; dueDate: Date }) => row.delayedUntil ?? row.dueDate
     const expectedThisMonth =
@@ -190,6 +201,8 @@ export async function GET(req: NextRequest) {
       overdueMoney,
       inventoryPurchaseCost,
       realProfitThisMonth: cashReceivedThisMonth - soldDeviceCost - nasiyaDeviceCost,
+      accrualGrossProfitThisMonth,
+      cashCollectedThisMonth: cashReceivedThisMonth,
       overdueCount,
       recentActivity,
       upcomingPayments,

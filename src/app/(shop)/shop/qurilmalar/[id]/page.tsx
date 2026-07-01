@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -20,7 +21,12 @@ interface Supplier {
 }
 
 interface Sale {
+  id: string
   salePrice: number
+  amountPaid: number
+  remainingAmount: number
+  dueDate: string | null
+  paidFully: boolean
   customer?: { name: string; phone: string }
   paymentMethod: string
   createdAt: string
@@ -45,13 +51,13 @@ interface Nasiya {
 interface Device {
   id: string
   model: string
-  color: string
-  storage: string
-  batteryHealth: number
+  color: string | null
+  storage: string | null
+  batteryHealth: number | null
   purchasePrice: number
   imei: string
   supplier: Supplier | null
-  status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'DELETED'
+  status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
   createdAt: string
   sales?: Sale[]
   nasiya?: Nasiya[]
@@ -61,6 +67,8 @@ const statusLabels: Record<string, string> = {
   IN_STOCK: 'Omborda',
   SOLD_CASH: 'Naqd sotildi',
   SOLD_NASIYA: 'Nasiyada',
+  RESERVED: 'Band qilingan',
+  RETURNED: 'Qaytarilgan',
   DELETED: "O'chirilgan",
 }
 
@@ -81,6 +89,12 @@ export default function QurilmaDetailPage() {
   const [deleteNote, setDeleteNote] = useState('')
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
+  const [salePaymentOpen, setSalePaymentOpen] = useState(false)
+  const [salePayAmount, setSalePayAmount] = useState('')
+  const [salePayMethod, setSalePayMethod] = useState('')
+  const [salePayNote, setSalePayNote] = useState('')
+  const [salePayError, setSalePayError] = useState('')
+  const [salePayLoading, setSalePayLoading] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -117,6 +131,39 @@ export default function QurilmaDetailPage() {
     }
   }
 
+  async function handleSalePayment() {
+    if (!latestSale || !salePayAmount || !salePayMethod || salePayLoading) return
+    setSalePayLoading(true)
+    setSalePayError('')
+    try {
+      const res = await fetch(`/api/sales/${latestSale.id}/payment`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': crypto.randomUUID(),
+        },
+        body: JSON.stringify({
+          amount: Number(salePayAmount),
+          paymentMethod: salePayMethod,
+          note: salePayNote.trim() || undefined,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "To'lovni saqlashda xatolik")
+      }
+      setSalePaymentOpen(false)
+      setSalePayAmount('')
+      setSalePayMethod('')
+      setSalePayNote('')
+      window.location.reload()
+    } catch (err) {
+      setSalePayError(err instanceof Error ? err.message : "To'lovni saqlashda xatolik")
+    } finally {
+      setSalePayLoading(false)
+    }
+  }
+
   if (loading) {
     return <div className="p-6 text-sm text-zinc-400">Yuklanmoqda...</div>
   }
@@ -133,10 +180,10 @@ export default function QurilmaDetailPage() {
 
   const infoRows = [
     { label: 'Model', value: device.model },
-    { label: 'Rang', value: device.color },
-    { label: 'Xotira', value: device.storage },
-    { label: 'Batareya', value: `${device.batteryHealth}%` },
-    { label: 'Narx', value: fmt(device.purchasePrice) },
+    { label: 'Rang', value: device.color ?? '—' },
+    { label: 'Xotira', value: device.storage ?? '—' },
+    { label: 'Batareya', value: device.batteryHealth != null ? `${device.batteryHealth}%` : '—' },
+    { label: 'Kelish narxi', value: fmt(device.purchasePrice) },
     { label: 'IMEI', value: device.imei },
     { label: 'Yetkazib beruvchi', value: device.supplier?.name ?? '—' },
     { label: 'Tel raqam', value: device.supplier?.phone ?? '—' },
@@ -146,6 +193,7 @@ export default function QurilmaDetailPage() {
 
   const showSaleActions = device.status === 'IN_STOCK'
   const latestSale = device.sales?.[0]
+  const saleHasDebt = latestSale ? Number(latestSale.remainingAmount) > 0 && !latestSale.paidFully : false
   const latestNasiya = device.nasiya?.[0]
   const nasiyaPct = latestNasiya
     ? Math.round(
@@ -184,13 +232,16 @@ export default function QurilmaDetailPage() {
               </Link>
             </>
           )}
-          <Button
-            variant="outline"
-            onClick={() => setDeleteModalOpen(true)}
-            className="h-9 w-9 p-0 border-zinc-200 text-red-500 hover:bg-red-50 hover:border-red-200 rounded"
-          >
-            <Trash2 size={15} />
-          </Button>
+          {!['SOLD_CASH', 'SOLD_NASIYA'].includes(device.status) && (
+            <Button
+              variant="outline"
+              aria-label="Qurilmani o'chirish"
+              onClick={() => setDeleteModalOpen(true)}
+              className="h-9 w-9 p-0 border-zinc-200 text-red-500 hover:bg-red-50 hover:border-red-200 rounded"
+            >
+              <Trash2 size={15} />
+            </Button>
+          )}
         </div>
       </div>
 
@@ -232,6 +283,22 @@ export default function QurilmaDetailPage() {
               <span className="text-zinc-900 font-medium">{fmt(latestSale.salePrice)}</span>
             </div>
             <div className="flex gap-4 text-sm">
+              <span className="text-zinc-500 w-32">To'langan</span>
+              <span className="text-zinc-900 font-medium">{fmt(latestSale.amountPaid)}</span>
+            </div>
+            <div className="flex gap-4 text-sm">
+              <span className="text-zinc-500 w-32">Qolgan</span>
+              <span className={saleHasDebt ? 'text-red-700 font-medium' : 'text-zinc-900 font-medium'}>
+                {fmt(latestSale.remainingAmount)}
+              </span>
+            </div>
+            {latestSale.dueDate && (
+              <div className="flex gap-4 text-sm">
+                <span className="text-zinc-500 w-32">Muddat</span>
+                <span className="text-zinc-900 font-medium">{new Date(latestSale.dueDate).toLocaleDateString('uz-UZ')}</span>
+              </div>
+            )}
+            <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">To'lov usuli</span>
               <span className="text-zinc-900 font-medium">{latestSale.paymentMethod}</span>
             </div>
@@ -241,6 +308,17 @@ export default function QurilmaDetailPage() {
                 {new Date(latestSale.createdAt).toLocaleDateString('uz-UZ')}
               </span>
             </div>
+            {saleHasDebt && (
+              <Button
+                onClick={() => {
+                  setSalePayAmount(String(latestSale.remainingAmount))
+                  setSalePaymentOpen(true)
+                }}
+                className="mt-2 h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded"
+              >
+                Qolgan to'lovni qabul qilish
+              </Button>
+            )}
           </div>
         </div>
       )}
@@ -332,6 +410,64 @@ export default function QurilmaDetailPage() {
               className="bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-40"
             >
               {deleting ? 'O\'chirilmoqda...' : 'O\'chirish'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={salePaymentOpen} onOpenChange={setSalePaymentOpen}>
+        <DialogContent className="max-w-md rounded">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900">Qolgan to'lovni qabul qilish</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {salePayError && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+                {salePayError}
+              </div>
+            )}
+            <div>
+              <label className="text-xs font-medium text-zinc-700 block mb-1.5">Miqdor</label>
+              <Input
+                type="number"
+                value={salePayAmount}
+                onChange={(e) => setSalePayAmount(e.target.value)}
+                className="h-9 text-sm border-zinc-200 rounded"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-zinc-700 block mb-1.5">To'lov usuli</label>
+              <select
+                value={salePayMethod}
+                onChange={(e) => setSalePayMethod(e.target.value)}
+                className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded"
+              >
+                <option value="">Tanlang...</option>
+                <option value="CASH">Naqd</option>
+                <option value="CARD">Karta</option>
+                <option value="TRANSFER">Bank</option>
+                <option value="OTHER">Boshqa</option>
+              </select>
+            </div>
+            <div>
+              <label className="text-xs font-medium text-zinc-700 block mb-1.5">Izoh</label>
+              <Textarea
+                value={salePayNote}
+                onChange={(e) => setSalePayNote(e.target.value)}
+                className="text-sm border-zinc-200 rounded min-h-[70px]"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setSalePaymentOpen(false)} className="border-zinc-200 text-zinc-700 rounded">
+              Bekor qilish
+            </Button>
+            <Button
+              disabled={!salePayAmount || !salePayMethod || salePayLoading}
+              onClick={handleSalePayment}
+              className="bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
+            >
+              {salePayLoading ? 'Saqlanmoqda...' : 'Saqlash'}
             </Button>
           </DialogFooter>
         </DialogContent>

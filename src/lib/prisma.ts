@@ -13,14 +13,21 @@ declare global {
   var prisma: PrismaClient | undefined
 }
 
-const connectionString = process.env.DATABASE_URL ?? process.env.DIRECT_URL
+const connectionString =
+  process.env.NODE_ENV === 'production'
+    ? process.env.DATABASE_URL
+    : process.env.DATABASE_URL ?? process.env.DIRECT_URL
 
 if (!connectionString) {
-  throw new Error('DATABASE_URL or DIRECT_URL is required for Prisma')
+  throw new Error(
+    process.env.NODE_ENV === 'production'
+      ? 'DATABASE_URL is required for Prisma in production'
+      : 'DATABASE_URL or DIRECT_URL is required for Prisma',
+  )
 }
 
 export const prisma: PrismaClient =
-  global.prisma ?? new PrismaClient({ adapter: new PrismaPg({ connectionString }) })
+  global.prisma ?? new PrismaClient({ adapter: new PrismaPg({ connectionString, max: 1 }) })
 
 if (process.env.NODE_ENV !== 'production') {
   global.prisma = prisma

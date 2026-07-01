@@ -107,7 +107,7 @@ function DataTable<TData extends Record<string, unknown>>({
   return (
     <div
       data-slot="data-table"
-      className={cn("w-full overflow-hidden border border-zinc-200", className)}
+      className={cn("w-full overflow-x-auto border border-zinc-200", className)}
     >
       <Table>
         <TableHeader>
@@ -117,11 +117,8 @@ function DataTable<TData extends Record<string, unknown>>({
                 key={col.key}
                 className={cn(
                   "h-9 px-3 text-xs font-medium uppercase tracking-wide text-zinc-500",
-                  col.sortable &&
-                    "cursor-pointer select-none hover:text-zinc-700",
                   col.headerClassName
                 )}
-                onClick={col.sortable ? () => handleSort(col.key) : undefined}
                 aria-sort={
                   sort?.key === col.key
                     ? sort.direction === "asc"
@@ -132,15 +129,21 @@ function DataTable<TData extends Record<string, unknown>>({
                       : undefined
                 }
               >
-                <span className="inline-flex items-center">
-                  {col.label}
-                  {col.sortable && (
+                {col.sortable ? (
+                  <button
+                    type="button"
+                    onClick={() => handleSort(col.key)}
+                    className="inline-flex items-center rounded-sm hover:text-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-400"
+                  >
+                    {col.label}
                     <SortIcon
                       active={sort?.key === col.key}
                       direction={sort?.key === col.key ? sort.direction : undefined}
                     />
-                  )}
-                </span>
+                  </button>
+                ) : (
+                  <span className="inline-flex items-center">{col.label}</span>
+                )}
               </TableHead>
             ))}
           </TableRow>
