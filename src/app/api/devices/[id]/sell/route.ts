@@ -11,6 +11,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { createSaleSchema } from '@/lib/validations'
 import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { processPendingNotifications } from '@/lib/notification-service'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -142,6 +143,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       return sale
     })
+
+    // Flush freshly-queued notifications immediately (best-effort, post-commit).
+    await processPendingNotifications().catch((e) => console.error('[notify] flush failed', e))
 
     return created(result, "Qurilma muvaffaqiyatli sotildi")
   } catch (err: unknown) {

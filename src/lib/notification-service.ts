@@ -16,6 +16,11 @@ import { sendTelegramMessage } from './telegram'
 
 const MAX_NOTIFICATION_ATTEMPTS = 5
 
+// How long a row may sit in PROCESSING before it is considered stale and
+// reclaimed. Guards against rows stuck forever if the process crashes between
+// claim and final update.
+const STALE_PROCESSING_MS = 5 * 60 * 1000
+
 function nextAttemptDelayMs(attemptCount: number): number {
   return Math.min(60 * 60 * 1000, 2 ** Math.max(0, attemptCount - 1) * 60 * 1000)
 }
@@ -113,13 +118,27 @@ export async function processPendingNotifications(): Promise<{
   let failed = 0
 
   try {
+    const now = new Date()
+    const staleBefore = new Date(now.getTime() - STALE_PROCESSING_MS)
+
     const pending = await prisma.notification.findMany({
       where: {
-        status:      { in: ['PENDING', 'FAILED'] },
-        scheduledAt: { lte: new Date() },
         OR: [
-          { nextAttemptAt: null },
-          { nextAttemptAt: { lte: new Date() } },
+          // Normal due PENDING/FAILED rows (retry semantics preserved).
+          {
+            status:      { in: ['PENDING', 'FAILED'] },
+            scheduledAt: { lte: now },
+            OR: [
+              { nextAttemptAt: null },
+              { nextAttemptAt: { lte: now } },
+            ],
+          },
+          // Reclaim rows stuck in PROCESSING (e.g. after a crash between
+          // claim and final update) once they are older than the threshold.
+          {
+            status:        'PROCESSING',
+            lastAttemptAt: { lte: staleBefore },
+          },
         ],
       },
       orderBy: { scheduledAt: 'asc' },
@@ -131,7 +150,7 @@ export async function processPendingNotifications(): Promise<{
         const claim = await prisma.notification.updateMany({
           where: {
             id: notification.id,
-            status: { in: ['PENDING', 'FAILED'] },
+            status: { in: ['PENDING', 'FAILED', 'PROCESSING'] },
           },
           data: {
             status: 'PROCESSING',

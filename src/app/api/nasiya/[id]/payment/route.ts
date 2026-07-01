@@ -14,6 +14,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
 import { calculateRemaining } from '@/lib/nasiya-utils'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { processPendingNotifications } from '@/lib/notification-service'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -224,6 +225,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       return { nasiyaId, nasiyaScheduleId, amount, remaining, allocations, duplicate: false }
     })
+
+    // Flush freshly-queued notifications immediately (best-effort, post-commit).
+    await processPendingNotifications().catch((e) => console.error('[notify] flush failed', e))
 
     return ok(result, result.duplicate ? "To'lov allaqachon qabul qilingan" : "To'lov muvaffaqiyatli qabul qilindi")
   } catch (err: unknown) {

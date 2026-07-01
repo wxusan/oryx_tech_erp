@@ -126,6 +126,13 @@ export default function PaymentsPage() {
       {/* Header */}
       <div className="flex items-start justify-between mb-6">
         <h1 className="text-xl font-semibold text-zinc-900">Do&apos;kon to&apos;lovlari</h1>
+        {/*
+          Export intentionally disabled: this super-admin page lists shop SUBSCRIPTION
+          payments (from /api/shops -> shop.payments). The /api/export/[entity] route only
+          supports shop-scoped entities (devices, customers, sales, nasiya, logs) and has no
+          shop-subscription-payments entity, so wiring a link here would 400. Enable once the
+          backend adds a matching export entity.
+        */}
         <button
           disabled
           className="h-8 px-4 text-xs border border-zinc-200 text-zinc-400 cursor-not-allowed"

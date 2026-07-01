@@ -49,14 +49,25 @@ interface NasiyaPayment {
   nasiyaScheduleId: string | null
 }
 
+interface NasiyaLog {
+  id: string
+  action: string
+  note: string | null
+  targetType: string
+  targetId: string
+  createdAt: string
+}
+
 interface Nasiya {
   id: string
+  shopId: string
   totalAmount: number
   downPayment: number
   remainingAmount: number
   status: string
+  reminderEnabled: boolean
   device: { model: string }
-  customer: { name: string; phone: string }
+  customer: { name: string; phone: string; passportPhotoUrl?: string | null }
   schedules: NasiyaSchedule[]
   payments: NasiyaPayment[]
 }
@@ -120,6 +131,10 @@ export default function NasiyaDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const [passportUrl, setPassportUrl] = useState<string | null>(null)
+  const [reminderSubmitting, setReminderSubmitting] = useState(false)
+  const [logs, setLogs] = useState<NasiyaLog[]>([])
+
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [payAmount, setPayAmount] = useState('')
   const [payMethod, setPayMethod] = useState('')
@@ -153,6 +168,70 @@ export default function NasiyaDetailPage() {
   useEffect(() => {
     fetchNasiya()
   }, [fetchNasiya])
+
+  // Fetch a signed URL for the customer's passport photo (stored as a storage key).
+  const passportKey = nasiya?.customer?.passportPhotoUrl ?? null
+  useEffect(() => {
+    // When there's no passport key the render guards on `passportKey && passportUrl`,
+    // so no state reset is needed here (avoids a synchronous setState in the effect).
+    if (!passportKey) return
+    let cancelled = false
+    fetch(`/api/uploads/passport?key=${encodeURIComponent(passportKey)}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (!cancelled && json.success && json.data?.url) setPassportUrl(json.data.url)
+      })
+      .catch(() => {
+        if (!cancelled) setPassportUrl(null)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [passportKey])
+
+  // Fetch recent action logs for this nasiya (reminder toggles, payments, etc.).
+  const nasiyaShopId = nasiya?.shopId
+  const nasiyaId = nasiya?.id
+  useEffect(() => {
+    if (!nasiyaId) return
+    const scheduleIds = new Set(nasiya?.schedules?.map((s) => s.id) ?? [])
+    const url = nasiyaShopId ? `/api/logs?shopId=${encodeURIComponent(nasiyaShopId)}` : '/api/logs'
+    let cancelled = false
+    fetch(url)
+      .then((r) => r.json())
+      .then((json) => {
+        if (cancelled || !json.success) return
+        const all: NasiyaLog[] = json.data?.logs ?? []
+        setLogs(
+          all.filter((l) => l.targetId === nasiyaId || scheduleIds.has(l.targetId)),
+        )
+      })
+      .catch(() => {
+        if (!cancelled) setLogs([])
+      })
+    return () => {
+      cancelled = true
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nasiyaId, nasiyaShopId])
+
+  async function handleToggleReminder() {
+    if (!nasiya || reminderSubmitting) return
+    setReminderSubmitting(true)
+    try {
+      const res = await fetch(`/api/nasiya/${nasiya.id}/reminder`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reminderEnabled: !nasiya.reminderEnabled }),
+      })
+      const json = await res.json()
+      if (json.success) fetchNasiya()
+    } catch {
+      // silent — state is re-derived from server on next fetch
+    } finally {
+      setReminderSubmitting(false)
+    }
+  }
 
   const pendingSchedules = nasiya?.schedules
     ?.filter((s) => ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(s.status))
@@ -249,9 +328,10 @@ export default function NasiyaDetailPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
         {[
           { label: 'Jami summa', value: `${fmt(nasiya.totalAmount)} so'm` },
+          { label: "Boshlang'ich to'lov", value: `${fmt(nasiya.downPayment)} so'm` },
           { label: "To'langan", value: `${fmt(paidAmount)} so'm` },
           { label: 'Qolgan', value: `${fmt(nasiya.remainingAmount)} so'm` },
           { label: 'Oylik', value: `${fmt(monthlyPayment)} so'm` },
@@ -283,6 +363,53 @@ export default function NasiyaDetailPage() {
           </div>
         </CardContent>
       </Card>
+
+      {/* Reminder toggle */}
+      <div className="border border-zinc-200 rounded p-4 flex items-center justify-between gap-4">
+        <div>
+          <div className="text-sm font-semibold text-zinc-900">To'lov eslatmasi</div>
+          <div className="text-xs text-zinc-500 mt-0.5">
+            {nasiya.reminderEnabled ? 'Eslatma yoqilgan' : "Eslatma o'chirilgan"}
+          </div>
+        </div>
+        <Button
+          onClick={handleToggleReminder}
+          disabled={reminderSubmitting}
+          variant={nasiya.reminderEnabled ? 'outline' : 'default'}
+          className={
+            nasiya.reminderEnabled
+              ? 'h-9 px-4 text-sm border-zinc-200 text-zinc-700 rounded disabled:opacity-40'
+              : 'h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40'
+          }
+        >
+          {reminderSubmitting
+            ? 'Saqlanmoqda...'
+            : nasiya.reminderEnabled
+              ? "Eslatmani o'chirish"
+              : 'Eslatmani yoqish'}
+        </Button>
+      </div>
+
+      {/* Passport photo */}
+      <div className="border border-zinc-200 rounded overflow-hidden">
+        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">
+          Pasport rasmi
+        </div>
+        <div className="p-4">
+          {passportKey && passportUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={passportUrl}
+              alt="Pasport rasmi"
+              className="max-h-80 w-auto rounded border border-zinc-200"
+            />
+          ) : passportKey && !passportUrl ? (
+            <div className="text-sm text-zinc-400">Yuklanmoqda...</div>
+          ) : (
+            <div className="text-sm text-zinc-400">Pasport rasmi yuklanmagan</div>
+          )}
+        </div>
+      </div>
 
       {/* Payment schedule */}
       <div className="border border-zinc-200 rounded overflow-hidden">
@@ -349,6 +476,30 @@ export default function NasiyaDetailPage() {
           </div>
         ) : (
           <div className="px-4 py-6 text-sm text-zinc-500">To'lov tarixi hali yo'q</div>
+        )}
+      </div>
+
+      {/* Action logs */}
+      <div className="border border-zinc-200 rounded overflow-hidden">
+        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">
+          Amallar tarixi
+        </div>
+        {logs.length ? (
+          <ul className="divide-y divide-zinc-100">
+            {logs.map((l) => (
+              <li key={l.id} className="px-4 py-3 flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <div className="text-sm text-zinc-900">{l.action}</div>
+                  {l.note && <div className="text-xs text-zinc-500 mt-0.5">{l.note}</div>}
+                </div>
+                <div className="text-xs text-zinc-400 whitespace-nowrap flex-shrink-0">
+                  {new Date(l.createdAt).toLocaleString('uz-UZ')}
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="px-4 py-6 text-sm text-zinc-500">Amallar tarixi yo'q</div>
         )}
       </div>
 

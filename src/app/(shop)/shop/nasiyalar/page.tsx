@@ -56,9 +56,11 @@ function fmt(n: number) {
   return Number(n).toLocaleString('ru-RU')
 }
 
+const UNPAID_STATUSES = ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED']
+
 function getNextPayment(schedules: NasiyaSchedule[]): NasiyaSchedule | null {
   const pending = schedules
-    .filter((s) => s.status === 'PENDING' || s.status === 'PARTIAL')
+    .filter((s) => UNPAID_STATUSES.includes(s.status))
     .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
   return pending[0] ?? null
 }
@@ -91,11 +93,19 @@ export default function NasiyalarPage() {
           <h1 className="text-xl font-bold text-zinc-900">Nasiyalar</h1>
           <p className="text-sm text-zinc-500 mt-0.5">Barcha nasiya shartnomalar</p>
         </div>
-        <Link href="/shop/nasiyalar/new">
-          <button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors">
-            + Yangi nasiya
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => { window.location.href = '/api/export/nasiya?format=xlsx' }}
+            className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors"
+          >
+            Excel yuklab olish
           </button>
-        </Link>
+          <Link href="/shop/nasiyalar/new">
+            <button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors">
+              + Yangi nasiya
+            </button>
+          </Link>
+        </div>
       </div>
 
       {/* Filter tabs */}

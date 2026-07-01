@@ -32,6 +32,24 @@ function buildUrl(
 }
 
 // ---------------------------------------------------------------------------
+// Export URLs
+// ---------------------------------------------------------------------------
+
+/** Entities supported by GET /api/export/[entity] (see route.ts). */
+export type ExportEntity = 'devices' | 'customers' | 'sales' | 'nasiya' | 'logs'
+export type ExportFormat = 'csv' | 'xlsx'
+
+/**
+ * Build the download URL for the shop-scoped Excel/CSV export endpoint.
+ * The route authenticates via session cookie and scopes to the active shop
+ * server-side, so a plain `window.location.href = exportUrl('devices')`
+ * triggers the download with no extra params needed.
+ */
+export function exportUrl(entity: ExportEntity, format: ExportFormat = 'xlsx'): string {
+  return buildUrl(`/api/export/${entity}`, { format })
+}
+
+// ---------------------------------------------------------------------------
 // Generic helpers
 // ---------------------------------------------------------------------------
 

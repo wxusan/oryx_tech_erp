@@ -48,10 +48,21 @@ export function calculateRemaining(total: number, paid: number): number {
 }
 
 /**
+ * Statuses that still have an outstanding balance (i.e. not fully paid).
+ * A row in any of these states still counts towards "next payment" and can be overdue.
+ */
+const UNPAID_STATUSES: NasiyaScheduleStatus[] = [
+  NasiyaScheduleStatus.PENDING,
+  NasiyaScheduleStatus.PARTIAL,
+  NasiyaScheduleStatus.OVERDUE,
+  NasiyaScheduleStatus.DEFERRED,
+]
+
+/**
  * Check whether a nasiya plan has any overdue unpaid schedules.
- * A schedule is overdue if:
- *   - Its status is PENDING or PARTIAL
- *   - Its dueDate is in the past
+ * A schedule counts as overdue if:
+ *   - Its status is already OVERDUE (flipped by cron), or
+ *   - It is otherwise unpaid (PENDING / PARTIAL / DEFERRED) and its dueDate is in the past
  *
  * @param schedules - All NasiyaSchedule rows for the nasiya plan
  * @returns true if at least one schedule is overdue
@@ -60,27 +71,23 @@ export function isOverdue(schedules: NasiyaSchedule[]): boolean {
   const now = new Date()
   return schedules.some(
     (s) =>
-      (s.status === NasiyaScheduleStatus.PENDING ||
-        s.status === NasiyaScheduleStatus.PARTIAL) &&
-      s.dueDate < now,
+      UNPAID_STATUSES.includes(s.status) &&
+      (s.status === NasiyaScheduleStatus.OVERDUE || s.dueDate < now),
   )
 }
 
 /**
- * Get the next upcoming unpaid or partial schedule for a nasiya plan.
- * Returns the earliest PENDING or PARTIAL schedule by dueDate,
- * regardless of whether it is overdue.
+ * Get the next unpaid schedule for a nasiya plan.
+ * Returns the earliest unpaid schedule by dueDate — including rows that have
+ * already been flipped to OVERDUE or DEFERRED by cron — so overdue nasiyas
+ * still surface a next-payment date.
  *
  * @param schedules - All NasiyaSchedule rows for the nasiya plan
  * @returns The next NasiyaSchedule due, or null if all are paid/cancelled
  */
 export function getNextPayment(schedules: NasiyaSchedule[]): NasiyaSchedule | null {
   const pending = schedules
-    .filter(
-      (s) =>
-        s.status === NasiyaScheduleStatus.PENDING ||
-        s.status === NasiyaScheduleStatus.PARTIAL,
-    )
+    .filter((s) => UNPAID_STATUSES.includes(s.status))
     .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
 
   return pending[0] ?? null

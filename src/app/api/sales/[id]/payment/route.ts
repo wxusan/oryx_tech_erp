@@ -4,6 +4,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addSalePaymentSchema } from '@/lib/validations'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { processPendingNotifications } from '@/lib/notification-service'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -58,6 +59,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       const sale = await tx.sale.findFirst({
         where: { id: saleId, shopId, deletedAt: null },
+        include: { device: true, customer: true },
       })
       if (!sale) throw { status: 404, message: 'Sotuv topilmadi' }
 
@@ -126,8 +128,29 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       })
 
+      // Notify all active shop admins with a verified telegramId.
+      const shopAdmins = await tx.shopAdmin.findMany({
+        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
+      })
+      for (const admin of shopAdmins) {
+        await tx.notification.create({
+          data: {
+            shopId,
+            type: 'PAYMENT_RECEIVED',
+            message: `💰 To'lov qabul qilindi\n📱 ${sale.device.model}\n👤 ${sale.customer.name}\n💵 Qabul qilingan: ${amount.toLocaleString()} so'm\n🧾 Qolgan qarz: ${nextRemaining.toLocaleString()} so'm`,
+            telegramId: admin.telegramId!,
+            scheduledAt: new Date(),
+            relatedId: saleId,
+            relatedType: 'Sale',
+          },
+        })
+      }
+
       return { payment, sale: updatedSale, duplicate: false }
     })
+
+    // Flush freshly-queued notifications immediately (best-effort, post-commit).
+    await processPendingNotifications().catch((e) => console.error('[notify] flush failed', e))
 
     return ok(result, result.duplicate ? "To'lov allaqachon qabul qilingan" : "To'lov qabul qilindi")
   } catch (err: unknown) {

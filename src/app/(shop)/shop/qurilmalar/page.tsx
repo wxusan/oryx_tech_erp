@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { exportUrl } from '@/lib/api-client'
 
 type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED'
 type DisplayStatus = 'Omborda' | 'Naqd sotildi' | 'Nasiyada' | 'Band qilingan' | 'Qaytarilgan'
@@ -90,11 +91,22 @@ export default function QurilmalarPage() {
           <h1 className="text-xl font-bold text-zinc-900">Qurilmalar</h1>
           <p className="text-sm text-zinc-500 mt-0.5">Omboringizdagi barcha qurilmalar</p>
         </div>
-        <Link href="/shop/qurilmalar/new">
-          <Button className="bg-zinc-900 hover:bg-zinc-800 text-white h-9 px-4 text-sm rounded">
-            + Yangi qurilma
-          </Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          {/* Shop-scoped devices export (session cookie auth) — entity confirmed supported by /api/export/[entity] */}
+          <button
+            onClick={() => {
+              window.location.href = exportUrl('devices', 'xlsx')
+            }}
+            className="h-9 px-4 text-sm border border-zinc-200 rounded text-zinc-700 hover:bg-zinc-100 transition-colors"
+          >
+            Excel yuklab olish
+          </button>
+          <Link href="/shop/qurilmalar/new">
+            <Button className="bg-zinc-900 hover:bg-zinc-800 text-white h-9 px-4 text-sm rounded">
+              + Yangi qurilma
+            </Button>
+          </Link>
+        </div>
       </div>
 
       {/* Filter tabs */}

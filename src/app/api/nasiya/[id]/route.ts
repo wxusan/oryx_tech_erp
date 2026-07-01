@@ -36,6 +36,10 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             phone: true,
             note: true,
             createdAt: true,
+            // Included so the nasiya profile page can render the passport photo.
+            // Access is already shop-scoped (this nasiya is fetched only for its
+            // owning shop) and the signed URL is separately per-shop authorized.
+            passportPhotoUrl: true,
           },
         },
         device: true,

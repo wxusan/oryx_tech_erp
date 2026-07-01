@@ -163,6 +163,11 @@ export async function POST(req: NextRequest) {
 
     return created(device, "Qurilma muvaffaqiyatli qo'shildi")
   } catch (err) {
+    // Handle the race where two concurrent adds both pass the IMEI pre-check
+    // and one violates the @@unique([shopId, imei]) constraint (Prisma P2002).
+    if (err && typeof err === 'object' && 'code' in err && (err as { code?: string }).code === 'P2002') {
+      return conflict("Bu IMEI raqami allaqachon mavjud")
+    }
     console.error('[POST /api/devices]', err)
     return serverError()
   }

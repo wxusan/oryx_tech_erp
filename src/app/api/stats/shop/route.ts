@@ -96,6 +96,7 @@ export async function GET(req: NextRequest) {
         where: {
           shopId,
           status: { in: ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'] },
+          nasiya: { is: { deletedAt: null, status: { not: 'CANCELLED' } } },
         },
       }),
 
@@ -131,6 +132,7 @@ export async function GET(req: NextRequest) {
         where: {
           shopId,
           status: { in: ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'] },
+          nasiya: { is: { deletedAt: null, status: { not: 'CANCELLED' } } },
         },
         orderBy: { dueDate: 'asc' },
         take: 5,
@@ -200,7 +202,7 @@ export async function GET(req: NextRequest) {
       expectedThisMonth,
       overdueMoney,
       inventoryPurchaseCost,
-      realProfitThisMonth: cashReceivedThisMonth - soldDeviceCost - nasiyaDeviceCost,
+      realProfitThisMonth: accrualGrossProfitThisMonth,
       accrualGrossProfitThisMonth,
       cashCollectedThisMonth: cashReceivedThisMonth,
       overdueCount,
