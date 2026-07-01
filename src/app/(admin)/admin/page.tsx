@@ -2,6 +2,17 @@
 
 import { useState, useEffect } from 'react'
 import Link from 'next/link'
+import { AlertTriangle, Building2, CalendarClock, CreditCard, TrendingUp } from 'lucide-react'
+import {
+  Card,
+  CardAction,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
 import {
   Table,
   TableBody,
@@ -86,17 +97,23 @@ export default function DashboardPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  const statCards = [
-    { label: "Bu oy tushum", value: stats ? formatMoney(stats.thisMonthRevenue) : 'Yuklanmoqda...' },
-    { label: "Kutilayotgan to'lovlar", value: stats ? formatMoney(stats.expectedRevenue) : 'Yuklanmoqda...' },
-    { label: "Faol do'konlar", value: stats ? String(stats.activeShops) : 'Yuklanmoqda...' },
-    { label: "Muddati o'tgan", value: stats ? String(stats.overdue) : 'Yuklanmoqda...' },
-    { label: "Muddati yaqin", value: stats ? String(stats.dueSoon) : 'Yuklanmoqda...' },
-  ]
+  const collectionRate = stats && stats.expectedRevenue > 0
+    ? Math.min(100, Math.round((stats.thisMonthRevenue / stats.expectedRevenue) * 100))
+    : 0
 
   return (
     <div className="max-w-6xl mx-auto">
-      <h1 className="text-xl font-semibold text-zinc-900 mb-6">Boshqaruv paneli</h1>
+      <div className="mb-6 flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-zinc-900">Boshqaruv paneli</h1>
+          <p className="mt-1 text-sm text-zinc-500">
+            Obuna tushumi, to'lov muddati va do'konlar holati
+          </p>
+        </div>
+        <Badge variant="outline" className="h-6 w-fit rounded-md border-zinc-200 text-zinc-600">
+          {new Date().toLocaleDateString('uz-UZ', { month: 'long', year: 'numeric' })}
+        </Badge>
+      </div>
 
       {error && (
         <div className="mb-4 p-3 border border-red-200 bg-red-50 text-sm text-red-600">
@@ -104,17 +121,81 @@ export default function DashboardPage() {
         </div>
       )}
 
-      {/* Stat cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
-        {statCards.map(({ label, value }) => (
-          <div
-            key={label}
-            className="bg-white border border-zinc-200 p-4"
-          >
-            <div className="text-xs text-zinc-500 mb-2">{label}</div>
-            <div className="text-2xl font-bold text-zinc-900">{value}</div>
-          </div>
-        ))}
+      <div className="mb-8 grid grid-cols-1 gap-4 lg:grid-cols-12">
+        <Card className="rounded-lg lg:col-span-5">
+          <CardHeader className="border-b border-zinc-100">
+            <CardTitle>Bu oy obuna tushumi</CardTitle>
+            <CardDescription>Super-admin uchun shop subscription daromadi</CardDescription>
+            <CardAction><CreditCard className="size-5 text-zinc-400" /></CardAction>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            <div>
+              <div className="text-xs font-medium uppercase text-zinc-500">Tushgan summa</div>
+              <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-900">
+                {stats ? formatMoney(stats.thisMonthRevenue) : 'Yuklanmoqda...'}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between text-xs text-zinc-500">
+                <span>Rejaga nisbatan</span>
+                <span className="font-semibold text-zinc-800">{collectionRate}%</span>
+              </div>
+              <Progress value={collectionRate} />
+              <div className="flex items-center justify-between text-xs text-zinc-500">
+                <span>Kutilayotgan: {stats ? formatMoney(stats.expectedRevenue) : '...'}</span>
+                <span>{stats?.activeShops ?? 0} faol do'kon</span>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:col-span-7">
+          <Card className="rounded-lg">
+            <CardHeader>
+              <CardDescription>Faol do'konlar</CardDescription>
+              <CardAction><Building2 className="size-4 text-zinc-400" /></CardAction>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-zinc-900">{stats?.activeShops ?? 0}</div>
+              <p className="mt-2 text-xs text-zinc-500">Sotuv va nasiya yuritayotgan shoplar</p>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg">
+            <CardHeader>
+              <CardDescription>7 kun ichida to'lov</CardDescription>
+              <CardAction><CalendarClock className="size-4 text-zinc-400" /></CardAction>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-zinc-900">{stats?.dueSoon ?? 0}</div>
+              <p className="mt-2 text-xs text-zinc-500">Obuna muddati yaqinlashgan do'konlar</p>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg border-red-200 bg-red-50/40">
+            <CardHeader>
+              <CardDescription className="text-red-700">Muddati o'tgan</CardDescription>
+              <CardAction><AlertTriangle className="size-4 text-red-500" /></CardAction>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-red-700">{stats?.overdue ?? 0}</div>
+              <p className="mt-2 text-xs text-red-700/70">Darhol tekshirish kerak bo'lgan shoplar</p>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg">
+            <CardHeader>
+              <CardDescription>Rejadagi tushum</CardDescription>
+              <CardAction><TrendingUp className="size-4 text-zinc-400" /></CardAction>
+            </CardHeader>
+            <CardContent>
+              <div className="text-2xl font-bold text-zinc-900">
+                {stats ? formatMoney(stats.expectedRevenue) : 'Yuklanmoqda...'}
+              </div>
+              <p className="mt-2 text-xs text-zinc-500">Faol shoplar soni bo'yicha taxmin</p>
+            </CardContent>
+          </Card>
+        </div>
       </div>
 
       {/* Shops table */}

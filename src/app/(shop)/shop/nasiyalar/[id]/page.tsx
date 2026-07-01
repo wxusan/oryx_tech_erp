@@ -7,6 +7,15 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from '@/components/ui/card'
+import { Badge } from '@/components/ui/badge'
+import { Progress } from '@/components/ui/progress'
+import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -80,6 +89,16 @@ function RowBadge({ status }: { status: RowStatus }) {
 
 function fmt(n: number) {
   return Number(n).toLocaleString('ru-RU')
+}
+
+function scheduleBalance(row: NasiyaSchedule) {
+  return Math.max(0, Number(row.expectedAmount) - Number(row.paidAmount))
+}
+
+function scheduleLabel(row: NasiyaSchedule) {
+  const due = new Date(row.dueDate).toLocaleDateString('uz-UZ')
+  const balance = scheduleBalance(row)
+  return `${row.monthNumber}-oy | ${due} | qolgan ${fmt(balance)} so'm`
 }
 
 export default function NasiyaDetailPage() {
@@ -195,6 +214,8 @@ export default function NasiyaDetailPage() {
       : 0
 
   const sortedSchedules = [...(nasiya.schedules ?? [])].sort((a, b) => a.monthNumber - b.monthNumber)
+  const selectedSchedule = pendingSchedules.find((s) => s.id === selectedScheduleId)
+  const selectedScheduleOutstanding = selectedSchedule ? scheduleBalance(selectedSchedule) : 0
 
   return (
     <div className="p-6 space-y-5 max-w-4xl">
@@ -217,37 +238,40 @@ export default function NasiyaDetailPage() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         {[
           { label: 'Jami summa', value: `${fmt(nasiya.totalAmount)} so'm` },
           { label: "To'langan", value: `${fmt(paidAmount)} so'm` },
           { label: 'Qolgan', value: `${fmt(nasiya.remainingAmount)} so'm` },
           { label: 'Oylik', value: `${fmt(monthlyPayment)} so'm` },
         ].map((c) => (
-          <div key={c.label} className="border border-zinc-200 rounded p-3">
-            <div className="text-xs text-zinc-500 mb-1">{c.label}</div>
-            <div className="text-base font-bold text-zinc-900">{c.value}</div>
-          </div>
+          <Card key={c.label} className="rounded-lg" size="sm">
+            <CardContent>
+              <div className="text-xs text-zinc-500 mb-1">{c.label}</div>
+              <div className="text-base font-bold text-zinc-900">{c.value}</div>
+            </CardContent>
+          </Card>
         ))}
       </div>
 
       {/* Progress */}
-      <div className="border border-zinc-200 rounded p-4">
-        <div className="flex justify-between text-sm mb-2">
-          <span className="text-zinc-600 font-medium">Umumiy progress</span>
-          <span className="font-bold text-zinc-900">{pct}%</span>
-        </div>
-        <div className="w-full bg-zinc-100 h-2.5 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-zinc-900 rounded-full transition-all"
-            style={{ width: `${pct}%` }}
-          />
-        </div>
-        <div className="flex justify-between text-xs text-zinc-400 mt-1.5">
-          <span>{fmt(paidAmount)} so'm</span>
-          <span>{fmt(nasiya.totalAmount)} so'm</span>
-        </div>
-      </div>
+      <Card className="rounded-lg">
+        <CardHeader>
+          <CardTitle>Umumiy progress</CardTitle>
+          <CardDescription>Nasiya bo'yicha jami to'langan summa</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex justify-between text-sm mb-2">
+            <span className="text-zinc-600 font-medium">{fmt(paidAmount)} so'm to'landi</span>
+            <span className="font-bold text-zinc-900">{pct}%</span>
+          </div>
+          <Progress value={pct} className="h-2.5 rounded-full" />
+          <div className="flex justify-between text-xs text-zinc-400 mt-1.5">
+            <span>0 so'm</span>
+            <span>{fmt(nasiya.totalAmount)} so'm</span>
+          </div>
+        </CardContent>
+      </Card>
 
       {/* Payment schedule */}
       <div className="border border-zinc-200 rounded overflow-hidden">
@@ -319,7 +343,7 @@ export default function NasiyaDetailPage() {
 
       {/* Payment Dialog */}
       <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
-        <DialogContent className="max-w-md rounded">
+        <DialogContent className="max-w-lg rounded-lg">
           <DialogHeader>
             <DialogTitle className="text-zinc-900">To'lov qabul qilish</DialogTitle>
           </DialogHeader>
@@ -333,20 +357,32 @@ export default function NasiyaDetailPage() {
             {pendingSchedules.length > 0 && (
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  To'lov oyi <span className="text-red-500">*</span>
+                  Qaysi oy to'lovi? <span className="text-red-500">*</span>
                 </label>
                 <Select value={selectedScheduleId} onValueChange={(v) => v && setSelectedScheduleId(v)}>
-                  <SelectTrigger className="h-9 text-sm border-zinc-200 rounded">
-                    <SelectValue placeholder="Oyni tanlang" />
+                  <SelectTrigger className="h-10 w-full text-sm border-zinc-200 rounded-lg">
+                    <SelectValue placeholder="Oyni tanlang">
+                      {() => selectedSchedule ? scheduleLabel(selectedSchedule) : 'Oyni tanlang'}
+                    </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {pendingSchedules.map((s) => (
                       <SelectItem key={s.id} value={s.id}>
-                        {s.monthNumber}-oy · {new Date(s.dueDate).toLocaleDateString('uz-UZ')} · {fmt(s.expectedAmount)} so'm
+                        {scheduleLabel(s)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
+                {selectedSchedule && (
+                  <div className="mt-2 flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="rounded-md border-zinc-200 text-zinc-600">
+                      {scheduleStatusLabels[selectedSchedule.status]}
+                    </Badge>
+                    <span className="text-xs text-zinc-500">
+                      Shu oy uchun qolgan summa: {fmt(selectedScheduleOutstanding)} so'm
+                    </span>
+                  </div>
+                )}
               </div>
             )}
 
@@ -358,17 +394,22 @@ export default function NasiyaDetailPage() {
                 type="number"
                 value={payAmount}
                 onChange={(e) => setPayAmount(e.target.value)}
-                placeholder="1 000 000"
+                placeholder={selectedScheduleOutstanding ? String(selectedScheduleOutstanding) : '1000000'}
                 disabled={carryOver}
-                className="h-9 text-sm border-zinc-200 rounded"
+                className="h-10 text-sm border-zinc-200 rounded-lg"
               />
+              {!carryOver && selectedScheduleOutstanding > 0 && (
+                <p className="mt-1.5 text-xs text-zinc-500">
+                  Tavsiya: {fmt(selectedScheduleOutstanding)} so'm
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                 To'lov usuli {!carryOver && <span className="text-red-500">*</span>}
               </label>
               <Select value={payMethod} onValueChange={(v) => v && setPayMethod(v)}>
-                <SelectTrigger className="h-9 text-sm border-zinc-200 rounded" disabled={carryOver}>
+                <SelectTrigger className="h-10 text-sm border-zinc-200 rounded-lg" disabled={carryOver}>
                   <SelectValue placeholder="Usulni tanlang" />
                 </SelectTrigger>
                 <SelectContent>
@@ -381,13 +422,13 @@ export default function NasiyaDetailPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                {carryOver ? 'Kechiktirilgan sana' : 'Sana'} <span className="text-red-500">*</span>
+                {carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"} <span className="text-red-500">*</span>
               </label>
               <Input
                 type="date"
                 value={payDate}
                 onChange={(e) => setPayDate(e.target.value)}
-                className="h-9 text-sm border-zinc-200 rounded"
+                className="h-10 text-sm border-zinc-200 rounded-lg"
               />
             </div>
             <div className="flex items-center gap-2">
@@ -399,7 +440,7 @@ export default function NasiyaDetailPage() {
                 className="w-4 h-4 rounded border-zinc-300"
               />
               <label htmlFor="carry-over" className="text-sm text-zinc-700 cursor-pointer">
-                To'lov muddatini uzaytirish
+                Mijoz bu oy to'lamadi, muddatni uzaytirish
               </label>
             </div>
             <div>
@@ -409,8 +450,8 @@ export default function NasiyaDetailPage() {
               <Textarea
                 value={payNote}
                 onChange={(e) => setPayNote(e.target.value)}
-                placeholder="Ixtiyoriy izoh..."
-                className="text-sm border-zinc-200 rounded min-h-[70px]"
+                placeholder={carryOver ? 'Masalan: mijoz 10 kunga kechiktirishni soradi' : 'Ixtiyoriy izoh...'}
+                className="text-sm border-zinc-200 rounded-lg min-h-[80px]"
               />
             </div>
           </div>
