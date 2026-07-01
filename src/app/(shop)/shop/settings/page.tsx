@@ -2,7 +2,7 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { signOut } from 'next-auth/react'
-import { CheckCircle2, Copy, KeyRound, Link2, Loader2, ShieldCheck, UserRound } from 'lucide-react'
+import { CheckCircle2, Copy, KeyRound, Link2, Loader2, Send, ShieldCheck, UserRound } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -74,6 +74,10 @@ export default function ShopSettingsPage() {
   const [passwordError, setPasswordError] = useState('')
   const [passwordSuccess, setPasswordSuccess] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
+  const [telegramId, setTelegramId] = useState('')
+  const [telegramError, setTelegramError] = useState('')
+  const [telegramSuccess, setTelegramSuccess] = useState('')
+  const [telegramLoading, setTelegramLoading] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -82,7 +86,10 @@ export default function ShopSettingsPage() {
       .then(async (response) => {
         if (!response.ok) throw new Error(await readApiError(response))
         const json: ApiResponse<ShopAdminProfile> = await response.json()
-        if (mounted) setProfile(json.data ?? null)
+        if (mounted) {
+          setProfile(json.data ?? null)
+          setTelegramId(json.data?.telegramId ?? '')
+        }
       })
       .catch((err: Error) => {
         if (mounted) setError(err.message || 'Xatolik yuz berdi')
@@ -143,12 +150,44 @@ export default function ShopSettingsPage() {
       setPasswordForm(emptyPasswordForm)
       setPasswordSuccess("Parol yangilandi. Qayta kirish oynasiga yo'naltirilasiz.")
       window.setTimeout(() => {
-        void signOut({ callbackUrl: '/login?callbackUrl=/shop/settings' })
+        void signOut({ callbackUrl: '/shop/login?callbackUrl=/shop/settings' })
       }, 900)
     } catch (err) {
       setPasswordError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
     } finally {
       setPasswordLoading(false)
+    }
+  }
+
+  async function handleTelegramSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setTelegramError('')
+    setTelegramSuccess('')
+
+    const value = telegramId.trim()
+    if (value && !/^\d{5,20}$/.test(value)) {
+      setTelegramError("Telegram ID faqat raqamlardan iborat bo'lishi kerak")
+      return
+    }
+
+    setTelegramLoading(true)
+    try {
+      const response = await fetch('/api/shop-admin/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telegramId: value }),
+      })
+
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      const json: ApiResponse<ShopAdminProfile> = await response.json()
+      setProfile(json.data ?? null)
+      setTelegramId(json.data?.telegramId ?? '')
+      setTelegramSuccess(json.message ?? 'Telegram ID yangilandi.')
+    } catch (err) {
+      setTelegramError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
+    } finally {
+      setTelegramLoading(false)
     }
   }
 
@@ -206,7 +245,7 @@ export default function ShopSettingsPage() {
           <Card className="rounded-lg">
             <CardHeader className="border-b border-zinc-100">
               <CardTitle>Telegram</CardTitle>
-              <CardDescription>Bot orqali xabar olish holati</CardDescription>
+              <CardDescription>Bot orqali xabar olish uchun Telegram ID</CardDescription>
               <CardAction>
                 <Badge variant={telegramStatus.tone} className="rounded-md">
                   {telegramStatus.label}
@@ -219,10 +258,45 @@ export default function ShopSettingsPage() {
                 <Info label="Ulangan vaqt" value={formatDate(profile.telegramVerifiedAt)} />
               </div>
 
+              <form onSubmit={handleTelegramSubmit} className="space-y-3 rounded-md border border-zinc-200 bg-zinc-50 p-3">
+                {telegramError && (
+                  <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                    {telegramError}
+                  </div>
+                )}
+                {telegramSuccess && (
+                  <div className="flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                    <CheckCircle2 className="size-4" />
+                    {telegramSuccess}
+                  </div>
+                )}
+                <div>
+                  <Label htmlFor="shop-telegram-id" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                    Telegram ID
+                  </Label>
+                  <Input
+                    id="shop-telegram-id"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="123456789"
+                    value={telegramId}
+                    onChange={(event) => setTelegramId(event.target.value)}
+                    className="h-9 rounded-md border-zinc-200 bg-white text-sm focus-visible:ring-zinc-900"
+                  />
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Username emas, faqat raqamli Telegram ID kiriting.
+                  </p>
+                </div>
+                <Button type="submit" disabled={telegramLoading} className="h-9 rounded-md bg-zinc-900 text-white hover:bg-zinc-800">
+                  {telegramLoading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                  Telegram ID saqlash
+                </Button>
+              </form>
+
               {profile.telegramVerifiedAt ? (
                 <div className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
                   <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
-                  Telegram hisobingiz tasdiqlangan. Bildirishnomalar shu hisobga yuboriladi.
+                  Telegram ID tasdiqlangan. Bildirishnomalar shu ID ga yuboriladi.
                 </div>
               ) : linkCommand ? (
                 <div className="space-y-3 rounded-md border border-zinc-200 bg-zinc-50 p-3">

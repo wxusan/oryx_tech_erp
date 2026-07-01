@@ -73,19 +73,23 @@ enum PaymentMethod {
 // ---------------------------------------------------------------------------
 
 model SuperAdmin {
-  id             String         @id @default(cuid())
-  name           String
-  email          String         @unique
-  passwordHash   String
-  sessionVersion Int            @default(1)
-  role           SuperAdminRole @default(SUPER_ADMIN)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
-  deletedAt      DateTime?
+  id                 String         @id @default(cuid())
+  name               String
+  email              String         @unique
+  telegramId         String?
+  telegramVerifiedAt DateTime?
+  passwordHash       String
+  sessionVersion     Int            @default(1)
+  role               SuperAdminRole @default(SUPER_ADMIN)
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+  deletedAt          DateTime?
 
   // Relations
   shopsCreated Shop[]        @relation("ShopCreatedBy")
   shopPayments ShopPayment[]
+
+  @@index([telegramId])
 }
 
 // ---------------------------------------------------------------------------
@@ -180,6 +184,7 @@ model ShopAdmin {
   @@unique([login])
   @@index([shopId])
   @@index([shopId, phone])
+  @@index([telegramId])
 }
 
 // ---------------------------------------------------------------------------

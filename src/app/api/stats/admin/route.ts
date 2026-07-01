@@ -19,16 +19,31 @@ export async function GET() {
     const monthEnd = endOfMonth(now)
     const dueSoonCutoff = addDays(now, 7)
 
-    const [thisMonthResult, activeShops, dueSoon, overdue, shops] = await Promise.all([
+    const [thisMonthResult, totalRevenueResult, totalShops, activeShops, suspendedShops, dueSoon, overdue, shops] =
+      await Promise.all([
       // This month's total revenue
       prisma.shopPayment.aggregate({
         _sum: { amount: true },
         where: { deletedAt: null, paidAt: { gte: monthStart, lte: monthEnd } },
       }),
 
+      prisma.shopPayment.aggregate({
+        _sum: { amount: true },
+        _count: { id: true },
+        where: { deletedAt: null },
+      }),
+
+      prisma.shop.count({
+        where: { deletedAt: null },
+      }),
+
       // Active shops count
       prisma.shop.count({
         where: { status: 'ACTIVE', deletedAt: null },
+      }),
+
+      prisma.shop.count({
+        where: { status: 'SUSPENDED', deletedAt: null },
       }),
 
       // Shops with subscription due within 7 days
@@ -66,6 +81,8 @@ export async function GET() {
     ])
 
     const thisMonthRevenue = Number(thisMonthResult._sum.amount ?? 0)
+    const totalRevenue = Number(totalRevenueResult._sum.amount ?? 0)
+    const totalPayments = totalRevenueResult._count.id
     const expectedRevenue = shops.reduce((sum, shop) => {
       if (shop.status !== 'ACTIVE') return sum
       const latestPayment = shop.payments[0]
@@ -75,8 +92,12 @@ export async function GET() {
 
     return ok({
       thisMonthRevenue,
+      totalRevenue,
+      totalPayments,
       expectedRevenue,
+      totalShops,
       activeShops,
+      suspendedShops,
       dueSoon,
       overdue,
       shops,

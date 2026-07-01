@@ -12,6 +12,7 @@ import { createShopSchema } from '@/lib/validations'
 import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
+import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 import type { ZodError } from 'zod'
 
 function telegramLinkCode() {
@@ -100,6 +101,23 @@ export async function POST(req: NextRequest) {
       return conflict(`Bu login allaqachon mavjud: ${existingLogin.login}`)
     }
 
+    const normalizedAdmins = admins.map((admin) => ({
+      ...admin,
+      telegramId: normalizeTelegramId(admin.telegramId),
+    }))
+    const telegramIds = normalizedAdmins
+      .map((admin) => admin.telegramId)
+      .filter((telegramId): telegramId is string => telegramId !== null)
+    const duplicateTelegramId = telegramIds.find((telegramId, index) => telegramIds.indexOf(telegramId) !== index)
+    if (duplicateTelegramId) {
+      return conflict(`Telegram ID takrorlangan: ${duplicateTelegramId}`)
+    }
+    for (const telegramId of telegramIds) {
+      if (await isTelegramIdTaken(telegramId)) {
+        return conflict(`Bu Telegram ID allaqachon tizimda bor: ${telegramId}`)
+      }
+    }
+
     const shop = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const newShop = await tx.shop.create({
         data: {
@@ -114,7 +132,7 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      for (const admin of admins) {
+      for (const admin of normalizedAdmins) {
         const passwordHash = await bcrypt.hash(admin.password, 12)
         await tx.shopAdmin.create({
           data: {
@@ -122,10 +140,11 @@ export async function POST(req: NextRequest) {
             name: admin.name,
             phone: admin.phone,
             login: admin.login,
-	            telegramId: admin.telegramId,
-	            telegramLinkCode: telegramLinkCode(),
-	            passwordHash,
-	          },
+            telegramId: admin.telegramId,
+            telegramVerifiedAt: admin.telegramId ? new Date() : null,
+            telegramLinkCode: admin.telegramId ? null : telegramLinkCode(),
+            passwordHash,
+          },
         })
       }
 

@@ -3,14 +3,24 @@ import bcrypt from 'bcrypt'
 import { z, ZodError } from 'zod'
 import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
-import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-helpers'
+import { badRequest, conflict, forbidden, notFound, ok, serverError } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
+import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 
 const changePasswordSchema = z.object({
   currentPassword: z.string({ error: 'Joriy parol kiritilishi shart' }).min(1, 'Joriy parol kiritilishi shart'),
   newPassword: z
     .string({ error: 'Yangi parol kiritilishi shart' })
     .min(8, "Yangi parol kamida 8 ta belgidan iborat bo'lishi kerak"),
+})
+
+const updateTelegramSchema = z.object({
+  telegramId: z
+    .string()
+    .trim()
+    .regex(/^\d{5,20}$/, "Telegram ID faqat raqamlardan iborat bo'lishi kerak")
+    .optional()
+    .or(z.literal('')),
 })
 
 function profileSelect() {
@@ -73,6 +83,68 @@ export async function PATCH(req: NextRequest) {
     }
 
     const body: unknown = await req.json()
+    if (typeof body === 'object' && body !== null && 'telegramId' in body) {
+      const parsed = updateTelegramSchema.safeParse(body)
+
+      if (!parsed.success) {
+        const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
+        return badRequest(firstError)
+      }
+
+      const telegramId = normalizeTelegramId(parsed.data.telegramId)
+      const admin = await prisma.shopAdmin.findFirst({
+        where: {
+          id: session.user.id,
+          shopId: session.user.shopId,
+          isActive: true,
+          deletedAt: null,
+        },
+        select: {
+          id: true,
+          shopId: true,
+          login: true,
+          name: true,
+          telegramId: true,
+        },
+      })
+
+      if (!admin) return notFound("Admin topilmadi")
+      if (telegramId && (await isTelegramIdTaken(telegramId, { type: 'SHOP_ADMIN', id: admin.id }))) {
+        return conflict(`Bu Telegram ID allaqachon tizimda bor: ${telegramId}`)
+      }
+
+      const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await tx.shopAdmin.update({
+          where: { id: admin.id },
+          data: {
+            telegramId,
+            telegramVerifiedAt: telegramId ? new Date() : null,
+            telegramLinkCode: telegramId ? null : undefined,
+          },
+        })
+
+        await tx.log.create({
+          data: {
+            shopId: admin.shopId,
+            actorId: admin.id,
+            actorType: 'SHOP_ADMIN',
+            action: 'UPDATE_TELEGRAM_ID',
+            targetType: 'ShopAdmin',
+            targetId: admin.id,
+            oldValue: { telegramId: admin.telegramId, login: admin.login, name: admin.name },
+            newValue: { telegramId },
+          },
+        })
+
+        return tx.shopAdmin.findUniqueOrThrow({
+          where: { id: admin.id },
+          select: profileSelect(),
+        })
+      })
+
+      return ok(updated, telegramId ? 'Telegram ID yangilandi.' : "Telegram ID o'chirildi.")
+    }
+
     const parsed = changePasswordSchema.safeParse(body)
 
     if (!parsed.success) {

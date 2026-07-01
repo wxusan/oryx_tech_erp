@@ -2,7 +2,7 @@
 
 import { type FormEvent, useEffect, useState } from 'react'
 import { signOut } from 'next-auth/react'
-import { CheckCircle2, KeyRound, Loader2, ServerCog, ShieldCheck, UserRound } from 'lucide-react'
+import { CheckCircle2, KeyRound, Loader2, Send, ServerCog, ShieldCheck, UserRound } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,6 +26,8 @@ interface SuperAdminProfile {
   id: string
   name: string
   email: string
+  telegramId: string | null
+  telegramVerifiedAt: string | null
   role: string
   createdAt: string
   updatedAt: string
@@ -71,6 +73,10 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
   const [passwordError, setPasswordError] = useState('')
   const [passwordSuccess, setPasswordSuccess] = useState('')
   const [passwordLoading, setPasswordLoading] = useState(false)
+  const [telegramId, setTelegramId] = useState('')
+  const [telegramError, setTelegramError] = useState('')
+  const [telegramSuccess, setTelegramSuccess] = useState('')
+  const [telegramLoading, setTelegramLoading] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -79,7 +85,10 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       .then(async (response) => {
         if (!response.ok) throw new Error(await readApiError(response))
         const json: ApiResponse<SuperAdminProfile> = await response.json()
-        if (mounted) setProfile(json.data ?? null)
+        if (mounted) {
+          setProfile(json.data ?? null)
+          setTelegramId(json.data?.telegramId ?? '')
+        }
       })
       .catch((err: Error) => {
         if (mounted) setError(err.message || 'Xatolik yuz berdi')
@@ -125,12 +134,44 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       setPasswordForm(emptyPasswordForm)
       setPasswordSuccess("Parol yangilandi. Qayta kirish oynasiga yo'naltirilasiz.")
       window.setTimeout(() => {
-        void signOut({ callbackUrl: '/login?callbackUrl=/admin/settings' })
+        void signOut({ callbackUrl: '/admin/login?callbackUrl=/admin/settings' })
       }, 900)
     } catch (err) {
       setPasswordError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
     } finally {
       setPasswordLoading(false)
+    }
+  }
+
+  async function handleTelegramSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setTelegramError('')
+    setTelegramSuccess('')
+
+    const value = telegramId.trim()
+    if (value && !/^\d{5,20}$/.test(value)) {
+      setTelegramError('Telegram ID faqat raqamlardan iborat bo\'lishi kerak')
+      return
+    }
+
+    setTelegramLoading(true)
+    try {
+      const response = await fetch('/api/admin/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ telegramId: value }),
+      })
+
+      if (!response.ok) throw new Error(await readApiError(response))
+
+      const json: ApiResponse<SuperAdminProfile> = await response.json()
+      setProfile(json.data ?? null)
+      setTelegramId(json.data?.telegramId ?? '')
+      setTelegramSuccess(json.message ?? 'Telegram ID yangilandi.')
+    } catch (err) {
+      setTelegramError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
+    } finally {
+      setTelegramLoading(false)
     }
   }
 
@@ -174,7 +215,9 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
                     <Info label="Ism" value={profile.name} />
                     <Info label="Login" value={profile.email} mono />
                     <Info label="Rol" value={profile.role} />
+                    <Info label="Telegram ID" value={profile.telegramId || '-'} mono />
                     <Info label="Yaratilgan" value={formatDate(profile.createdAt)} />
+                    <Info label="Telegram ulangan" value={formatDate(profile.telegramVerifiedAt)} />
                   </div>
                   <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
                     <div className="text-xs font-medium text-zinc-500">Oxirgi yangilanish</div>
@@ -208,6 +251,58 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
                   </div>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg lg:col-span-2">
+            <CardHeader className="border-b border-zinc-100">
+              <CardTitle>Telegram ID</CardTitle>
+              <CardDescription>Bot sizni ID orqali taniydi. Username kiritmang.</CardDescription>
+              <CardAction>
+                <Send className="size-5 text-zinc-400" />
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleTelegramSubmit} className="max-w-xl space-y-4">
+                {telegramError && (
+                  <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                    {telegramError}
+                  </div>
+                )}
+                {telegramSuccess && (
+                  <div className="flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                    <CheckCircle2 className="size-4" />
+                    {telegramSuccess}
+                  </div>
+                )}
+
+                <div>
+                  <Label htmlFor="admin-telegram-id" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                    Telegram ID
+                  </Label>
+                  <Input
+                    id="admin-telegram-id"
+                    inputMode="numeric"
+                    pattern="[0-9]*"
+                    placeholder="123456789"
+                    value={telegramId}
+                    onChange={(event) => setTelegramId(event.target.value)}
+                    className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                  />
+                  <p className="mt-1 text-xs text-zinc-500">
+                    Botga /start yuborsangiz, aynan shu ID bo'yicha ruxsat tekshiriladi.
+                  </p>
+                </div>
+
+                <Button
+                  type="submit"
+                  disabled={telegramLoading}
+                  className="h-9 rounded-md bg-zinc-900 text-white hover:bg-zinc-800"
+                >
+                  {telegramLoading ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />}
+                  Telegram ID saqlash
+                </Button>
+              </form>
             </CardContent>
           </Card>
 

@@ -12,6 +12,7 @@ import { randomBytes } from 'crypto'
 import { ok, created, badRequest, conflict, notFound, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
+import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 import { z, ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -31,7 +32,12 @@ const addAdminSchema = z.object({
   phone: z
     .string({ error: "Telefon raqam kiritilishi shart" })
     .min(9, "Telefon raqam kamida 9 ta raqam bo'lishi kerak"),
-  telegramId: z.string().optional(),
+  telegramId: z
+    .string()
+    .trim()
+    .regex(/^\d{5,20}$/, "Telegram ID faqat raqamlardan iborat bo'lishi kerak")
+    .optional()
+    .or(z.literal('')),
   login: z
     .string({ error: "Login kiritilishi shart" })
     .min(3, "Login kamida 3 ta belgidan iborat bo'lishi kerak"),
@@ -91,6 +97,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       )
     }
 
+    const telegramId = normalizeTelegramId(parsed.data.telegramId)
+    if (telegramId && (await isTelegramIdTaken(telegramId))) {
+      return conflict(`Bu Telegram ID allaqachon tizimda bor: ${telegramId}`)
+    }
+
     const passwordHash = await bcrypt.hash(parsed.data.password, 12)
 
     const admin = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -100,10 +111,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           name: parsed.data.name,
           phone: parsed.data.phone,
           login: parsed.data.login,
-	          telegramId: parsed.data.telegramId,
-	          telegramLinkCode: telegramLinkCode(),
-	          passwordHash,
-	        },
+          telegramId,
+          telegramVerifiedAt: telegramId ? new Date() : null,
+          telegramLinkCode: telegramId ? null : telegramLinkCode(),
+          passwordHash,
+        },
       })
 
       await tx.log.create({

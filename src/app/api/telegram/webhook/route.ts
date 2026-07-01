@@ -19,6 +19,7 @@
 import { type NextRequest } from 'next/server'
 import { getBot } from '@/lib/telegram'
 import { prisma } from '@/lib/prisma'
+import { findTelegramOwner, isTelegramIdTaken } from '@/lib/telegram-id'
 
 // ---------------------------------------------------------------------------
 // Register bot command handlers (runs once at module load)
@@ -32,12 +33,28 @@ function webhookBot() {
   const bot = getBot()
 
   bot.command('start', async (ctx) => {
-    const telegramId = ctx.from?.id?.toString() ?? 'unknown'
+    const telegramId = ctx.from?.id?.toString()
 
-    await ctx.reply(
-      "Salom! Siz Oryx ERP botiga ulandingiz. " +
-      "Sizga tegishli do'kon operatsiyalari haqida xabar berib turaman.",
-    )
+    if (!telegramId) {
+      await ctx.reply("Telegram ID aniqlanmadi. Iltimos, botni shaxsiy akkauntingizdan oching.")
+      return
+    }
+
+    const owner = await findTelegramOwner(telegramId)
+    if (!owner) {
+      await ctx.reply("Kechirasiz, bu Telegram ID Oryx ERP tizimida ro'yxatdan o'tmagan.")
+      console.log(`[TelegramWebhook] /start denied telegramId=${telegramId}`)
+      return
+    }
+
+    if (owner.type === 'SUPER_ADMIN') {
+      await ctx.reply(`Salom, ${owner.user.name}! Siz Oryx ERP super admini sifatida ulandingiz.`)
+    } else {
+      await ctx.reply(
+        `Salom, ${owner.user.name}! Siz ${owner.user.shop.name} do'koni admini sifatida ulandingiz. ` +
+          "Shu do'konga tegishli xabarlar shu yerga keladi.",
+      )
+    }
 
     console.log(`[TelegramWebhook] /start from telegramId=${telegramId}`)
   })
@@ -50,9 +67,29 @@ function webhookBot() {
       return
     }
 
+    const adminToLink = await prisma.shopAdmin.findFirst({
+      where: {
+        telegramLinkCode: code,
+        deletedAt: null,
+        isActive: true,
+      },
+      select: { id: true },
+    })
+
+    if (!adminToLink) {
+      await ctx.reply("Kod topilmadi yoki allaqachon ishlatilgan.")
+      return
+    }
+
+    if (await isTelegramIdTaken(telegramId, { type: 'SHOP_ADMIN', id: adminToLink.id })) {
+      await ctx.reply("Bu Telegram ID boshqa hisobga ulangan.")
+      return
+    }
+
     const updated = await prisma.shopAdmin.updateMany({
       where: {
         telegramLinkCode: code,
+        id: adminToLink.id,
         deletedAt: null,
         isActive: true,
       },

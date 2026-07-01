@@ -2,13 +2,14 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Store, CreditCard, ScrollText, Settings } from 'lucide-react'
+import { BarChart3, LayoutDashboard, Store, CreditCard, ScrollText, Settings } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 
 const navItems = [
   { label: "Boshqaruv", href: "/admin", icon: LayoutDashboard },
   { label: "Do'konlar", href: "/admin/shops", icon: Store },
   { label: "To'lovlar", href: "/admin/payments", icon: CreditCard },
+  { label: "Hisobot", href: "/admin/hisobot", icon: BarChart3 },
   { label: "Loglar", href: "/admin/logs", icon: ScrollText },
   { label: "Sozlamalar", href: "/admin/settings", icon: Settings },
 ]

@@ -18,6 +18,13 @@ const passwordSchema = z
   .string({ error: "Parol kiritilishi shart" })
   .min(6, "Parol kamida 6 ta belgidan iborat bo'lishi kerak")
 
+const telegramIdInputSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{5,20}$/, "Telegram ID faqat raqamlardan iborat bo'lishi kerak")
+  .optional()
+  .or(z.literal(''))
+
 const paymentMethodSchema = z.enum(['CASH', 'TRANSFER', 'CARD', 'OTHER'], {
   error: "To'lov usuli noto'g'ri",
 })
@@ -38,7 +45,7 @@ const privateFileKeySchema = z
 const shopAdminInputSchema = z.object({
   name: z.string({ error: "Admin ismi kiritilishi shart" }).min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
   phone: phoneSchema,
-  telegramId: z.string().optional(),
+  telegramId: telegramIdInputSchema,
   login: z
     .string({ error: "Login kiritilishi shart" })
     .min(3, "Login kamida 3 ta belgidan iborat bo'lishi kerak")
