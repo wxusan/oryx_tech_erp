@@ -1,0 +1,446 @@
+// Oryx Tech ERP — Prisma Schema
+// SaaS platform for Malika Bazar tech shops
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+enum SuperAdminRole {
+  SUPER_ADMIN
+}
+
+enum ShopStatus {
+  ACTIVE
+  SUSPENDED
+  DELETED
+}
+
+enum DeviceStatus {
+  IN_STOCK
+  SOLD_CASH
+  SOLD_NASIYA
+  RESERVED
+  RETURNED
+  DELETED
+}
+
+enum NasiyaStatus {
+  ACTIVE
+  COMPLETED
+  OVERDUE
+  CANCELLED
+}
+
+enum NasiyaScheduleStatus {
+  PENDING
+  PAID
+  PARTIAL
+  OVERDUE
+  DEFERRED
+}
+
+enum NotificationStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum ActorType {
+  SUPER_ADMIN
+  SHOP_ADMIN
+}
+
+enum PaymentMethod {
+  CASH
+  TRANSFER
+  CARD
+  OTHER
+}
+
+// ---------------------------------------------------------------------------
+// SuperAdmin
+// ---------------------------------------------------------------------------
+
+model SuperAdmin {
+  id           String         @id @default(cuid())
+  name         String
+  email        String         @unique
+  passwordHash String
+  role         SuperAdminRole @default(SUPER_ADMIN)
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  deletedAt    DateTime?
+
+  // Relations
+  shopsCreated Shop[]        @relation("ShopCreatedBy")
+  shopPayments ShopPayment[]
+}
+
+// ---------------------------------------------------------------------------
+// Shop
+// ---------------------------------------------------------------------------
+
+model Shop {
+  id              String     @id @default(cuid())
+  name            String
+  ownerName       String
+  ownerPhone      String
+  shopNumber      String
+  address         String
+  note            String?
+  status          ShopStatus @default(ACTIVE)
+  subscriptionDue DateTime
+  telegramGroupId String?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  deletedAt       DateTime?
+  deletedBy       String?
+  deleteNote      String?
+
+  // FK
+  createdById String
+  createdBy   SuperAdmin @relation("ShopCreatedBy", fields: [createdById], references: [id])
+
+  // Relations
+  payments      ShopPayment[]
+  admins        ShopAdmin[]
+  devices       Device[]
+  suppliers     Supplier[]
+  sales         Sale[]
+  customers     Customer[]
+  nasiya        Nasiya[]
+  notifications Notification[]
+  logs          Log[]
+
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// ShopPayment
+// ---------------------------------------------------------------------------
+
+model ShopPayment {
+  id            String        @id @default(cuid())
+  shopId        String
+  amount        Decimal       @db.Decimal(12, 2)
+  months        Int
+  paymentMethod PaymentMethod
+  note          String?
+  paidAt        DateTime      @default(now())
+  deletedAt     DateTime?
+  deletedBy     String?
+  deleteNote    String?
+
+  // FK
+  recordedById String
+  recordedBy   SuperAdmin @relation(fields: [recordedById], references: [id])
+  shop         Shop       @relation(fields: [shopId], references: [id])
+
+  @@index([shopId])
+}
+
+// ---------------------------------------------------------------------------
+// ShopAdmin
+// ---------------------------------------------------------------------------
+
+model ShopAdmin {
+  id           String    @id @default(cuid())
+  shopId       String
+  name         String
+  phone        String
+  login        String
+  telegramId   String?
+  passwordHash String
+  isActive     Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  deletedAt    DateTime?
+  deletedBy    String?
+  deleteNote   String?
+
+  // Relations
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@unique([shopId, login])
+  @@index([shopId])
+}
+
+// ---------------------------------------------------------------------------
+// Supplier
+// ---------------------------------------------------------------------------
+
+model Supplier {
+  id         String    @id @default(cuid())
+  shopId     String
+  name       String
+  phone      String
+  note       String?
+  createdAt  DateTime  @default(now())
+  deletedAt  DateTime?
+  deletedBy  String?
+  deleteNote String?
+
+  // Relations
+  shop    Shop     @relation(fields: [shopId], references: [id])
+  devices Device[]
+
+  @@index([shopId])
+}
+
+// ---------------------------------------------------------------------------
+// Device
+// ---------------------------------------------------------------------------
+
+model Device {
+  id            String       @id @default(cuid())
+  shopId        String
+  model         String
+  color         String?
+  storage       String?
+  batteryHealth Int?
+  purchasePrice Decimal      @db.Decimal(12, 2)
+  imei          String
+  supplierId    String?
+  supplierPhone String?
+  imageUrls     String[]
+  status        DeviceStatus @default(IN_STOCK)
+  addedBy       String
+  note          String?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+  deletedAt     DateTime?
+  deletedBy     String?
+  deleteNote    String?
+
+  // Relations
+  shop     Shop      @relation(fields: [shopId], references: [id])
+  supplier Supplier? @relation(fields: [supplierId], references: [id])
+  sales    Sale[]
+  nasiya   Nasiya[]
+
+  @@unique([shopId, imei])
+  @@index([shopId])
+  @@index([status])
+}
+
+// ---------------------------------------------------------------------------
+// Customer
+// ---------------------------------------------------------------------------
+
+model Customer {
+  id               String    @id @default(cuid())
+  shopId           String
+  name             String
+  phone            String
+  passportPhotoUrl String?
+  note             String?
+  createdAt        DateTime  @default(now())
+  deletedAt        DateTime?
+  deletedBy        String?
+  deleteNote       String?
+
+  // Relations
+  shop   Shop     @relation(fields: [shopId], references: [id])
+  sales  Sale[]
+  nasiya Nasiya[]
+
+  @@index([shopId])
+}
+
+// ---------------------------------------------------------------------------
+// Sale
+// ---------------------------------------------------------------------------
+
+model Sale {
+  id              String        @id @default(cuid())
+  shopId          String
+  deviceId        String
+  customerId      String
+  salePrice       Decimal       @db.Decimal(12, 2)
+  paymentMethod   PaymentMethod
+  paidFully       Boolean       @default(true)
+  amountPaid      Decimal       @db.Decimal(12, 2)
+  remainingAmount Decimal       @default(0) @db.Decimal(12, 2)
+  dueDate         DateTime?
+  reminderEnabled Boolean       @default(false)
+  note            String?
+  createdAt       DateTime      @default(now())
+  createdBy       String
+  deletedAt       DateTime?
+  deletedBy       String?
+  deleteNote      String?
+
+  // Relations
+  shop     Shop     @relation(fields: [shopId], references: [id])
+  device   Device   @relation(fields: [deviceId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([shopId])
+  @@index([customerId])
+  @@index([deviceId])
+}
+
+// ---------------------------------------------------------------------------
+// Nasiya (Instalment plan)
+// ---------------------------------------------------------------------------
+
+model Nasiya {
+  id              String       @id @default(cuid())
+  shopId          String
+  deviceId        String
+  customerId      String
+  totalAmount     Decimal      @db.Decimal(12, 2)
+  downPayment     Decimal      @db.Decimal(12, 2)
+  remainingAmount Decimal      @db.Decimal(12, 2)
+  months          Int
+  monthlyPayment  Decimal      @db.Decimal(12, 2)
+  startDate       DateTime
+  status          NasiyaStatus @default(ACTIVE)
+  reminderEnabled Boolean      @default(true)
+  appleIdNote     String?
+  note            String?
+  createdAt       DateTime     @default(now())
+  createdBy       String
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
+  deletedBy       String?
+  deleteNote      String?
+
+  // Relations
+  shop      Shop             @relation(fields: [shopId], references: [id])
+  device    Device           @relation(fields: [deviceId], references: [id])
+  customer  Customer         @relation(fields: [customerId], references: [id])
+  schedules NasiyaSchedule[]
+  payments  NasiyaPayment[]
+
+  @@index([shopId])
+  @@index([status])
+  @@index([deviceId])
+  @@index([customerId])
+}
+
+// ---------------------------------------------------------------------------
+// NasiyaSchedule
+// ---------------------------------------------------------------------------
+
+model NasiyaSchedule {
+  id             String               @id @default(cuid())
+  nasiyaId       String
+  shopId         String
+  monthNumber    Int
+  dueDate        DateTime
+  expectedAmount Decimal              @db.Decimal(12, 2)
+  paidAmount     Decimal              @default(0) @db.Decimal(12, 2)
+  status         NasiyaScheduleStatus @default(PENDING)
+  paidAt         DateTime?
+  paymentMethod  PaymentMethod?
+  delayedUntil   DateTime?
+  deferredToNext Boolean              @default(false)
+  note           String?
+  createdAt      DateTime             @default(now())
+
+  // Relations
+  nasiya   Nasiya          @relation(fields: [nasiyaId], references: [id], onDelete: Cascade)
+  payments NasiyaPayment[]
+
+  @@index([nasiyaId])
+  @@index([shopId])
+  @@index([status])
+  @@index([shopId, status, dueDate])
+}
+
+// ---------------------------------------------------------------------------
+// NasiyaPayment
+// ---------------------------------------------------------------------------
+
+model NasiyaPayment {
+  id               String         @id @default(cuid())
+  nasiyaId         String
+  nasiyaScheduleId String?
+  shopId           String
+  amount           Decimal        @db.Decimal(12, 2)
+  paymentMethod    PaymentMethod?
+  paidAt           DateTime       @default(now())
+  note             String?
+  createdBy        String
+  createdAt        DateTime       @default(now())
+  deletedAt        DateTime?
+  deletedBy        String?
+  deleteNote       String?
+
+  // Relations
+  nasiya   Nasiya          @relation(fields: [nasiyaId], references: [id])
+  schedule NasiyaSchedule? @relation(fields: [nasiyaScheduleId], references: [id])
+
+  @@index([nasiyaId])
+  @@index([nasiyaScheduleId])
+  @@index([shopId])
+  @@index([paidAt])
+}
+
+// ---------------------------------------------------------------------------
+// Notification
+// ---------------------------------------------------------------------------
+
+model Notification {
+  id            String             @id @default(cuid())
+  shopId        String
+  dedupeKey     String?            @unique
+  type          String
+  message       String
+  telegramId    String
+  status        NotificationStatus @default(PENDING)
+  scheduledAt   DateTime
+  sentAt        DateTime?
+  attemptCount  Int                @default(0)
+  lastAttemptAt DateTime?
+  nextAttemptAt DateTime?
+  lastError     String?
+  relatedId     String?
+  relatedType   String?
+  createdAt     DateTime           @default(now())
+
+  // Relations
+  shop Shop @relation(fields: [shopId], references: [id])
+
+  @@index([shopId])
+  @@index([status])
+  @@index([scheduledAt])
+  @@index([nextAttemptAt])
+}
+
+// ---------------------------------------------------------------------------
+// Log
+// ---------------------------------------------------------------------------
+
+model Log {
+  id         String    @id @default(cuid())
+  shopId     String?
+  actorId    String
+  actorType  ActorType
+  action     String
+  targetType String
+  targetId   String
+  oldValue   Json?
+  newValue   Json?
+  note       String?
+  ipAddress  String?
+  createdAt  DateTime  @default(now())
+
+  // Relations (shopId nullable — null means super admin action)
+  shop Shop? @relation(fields: [shopId], references: [id])
+
+  @@index([shopId])
+  @@index([actorId])
+  @@index([targetType, targetId])
+}
