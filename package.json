@@ -13,7 +13,8 @@
     "typecheck": "tsc --noEmit --pretty false",
     "db:push": "prisma db push",
     "migrate:deploy": "prisma migrate deploy",
-    "seed:super-admin": "node scripts/seed-super-admin.mjs"
+    "seed:super-admin": "node scripts/seed-super-admin.mjs",
+    "seed:demo": "node scripts/seed-demo.mjs"
   },
   "engines": {
     "node": ">=20.19"

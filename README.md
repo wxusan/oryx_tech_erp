@@ -27,6 +27,22 @@ Shop admins can export CSV data from `/api/export/devices`, `/api/export/custome
 
 Validated customer imports are available through `POST /api/import/customers` with `{ "customers": [{ "name": "...", "phone": "..." }] }`.
 
+## Demo Data
+
+Use demo data only for a preview or demo database. It creates realistic Malika Bazar shops, customers, suppliers, inventory, sales, nasiya plans, payments, notifications, and logs.
+
+```bash
+SEED_DEMO_CONFIRM=yes npm run seed:demo
+```
+
+To replace previously seeded demo shops:
+
+```bash
+SEED_DEMO_CONFIRM=yes SEED_DEMO_RESET=yes npm run seed:demo
+```
+
+All generated demo shop admins use `Demo12345!` unless `SEED_DEMO_PASSWORD` is set.
+
 ## Vercel Deployment
 
 Set the variables from `.env.example` in Vercel. Production must include `DATABASE_URL`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and `CRON_SECRET`.
