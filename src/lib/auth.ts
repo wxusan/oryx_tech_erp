@@ -18,6 +18,47 @@ import bcrypt from 'bcrypt'
 import { prisma } from '@/lib/prisma'
 import type { UserRole } from '@/types'
 
+const AUTH_WINDOW_MS = 15 * 60 * 1000
+const AUTH_LOCK_MS = 10 * 60 * 1000
+const AUTH_MAX_FAILURES = 5
+const SUBSCRIPTION_GRACE_MS = 3 * 24 * 60 * 60 * 1000
+
+type AuthAttempt = { count: number; firstFailedAt: number; lockedUntil?: number }
+
+declare global {
+  var authAttempts: Map<string, AuthAttempt> | undefined
+}
+
+const authAttempts = global.authAttempts ?? new Map<string, AuthAttempt>()
+global.authAttempts = authAttempts
+
+function isLocked(key: string) {
+  const attempt = authAttempts.get(key)
+  return Boolean(attempt?.lockedUntil && attempt.lockedUntil > Date.now())
+}
+
+function recordFailure(key: string) {
+  const now = Date.now()
+  const current = authAttempts.get(key)
+  const attempt =
+    current && now - current.firstFailedAt < AUTH_WINDOW_MS
+      ? { ...current, count: current.count + 1 }
+      : { count: 1, firstFailedAt: now }
+
+  if (attempt.count >= AUTH_MAX_FAILURES) {
+    attempt.lockedUntil = now + AUTH_LOCK_MS
+  }
+  authAttempts.set(key, attempt)
+}
+
+function clearFailures(key: string) {
+  authAttempts.delete(key)
+}
+
+function subscriptionCutoff() {
+  return new Date(Date.now() - SUBSCRIPTION_GRACE_MS)
+}
+
 // ---------------------------------------------------------------------------
 // Module augmentation — extend NextAuth default types
 // ---------------------------------------------------------------------------
@@ -78,6 +119,7 @@ async function verifyShopAdminPassword(
       shop: {
         status: 'ACTIVE',
         deletedAt: null,
+        subscriptionDue: { gte: subscriptionCutoff() },
       },
     },
   })
@@ -110,8 +152,15 @@ export const authConfig: NextAuthConfig = {
           return null
         }
 
+        const throttleKey = `super:${email.toLowerCase()}`
+        if (isLocked(throttleKey)) return null
+
         const admin = await verifySuperAdminPassword(email, password)
-        if (!admin) return null
+        if (!admin) {
+          recordFailure(throttleKey)
+          return null
+        }
+        clearFailures(throttleKey)
 
         return {
           id: admin.id,
@@ -144,8 +193,15 @@ export const authConfig: NextAuthConfig = {
           return null
         }
 
+        const throttleKey = `shop:${shopId}:${login.toLowerCase()}`
+        if (isLocked(throttleKey)) return null
+
         const admin = await verifyShopAdminPassword(login, password, shopId)
-        if (!admin) return null
+        if (!admin) {
+          recordFailure(throttleKey)
+          return null
+        }
+        clearFailures(throttleKey)
 
         return {
           id: admin.id,

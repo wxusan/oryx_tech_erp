@@ -30,6 +30,10 @@ export async function GET(req: NextRequest) {
     }
     const status = statusParam as (typeof nasiyaStatuses)[number] | undefined
     const search = searchParams.get('search')?.trim()
+    const requestedTake = Number(searchParams.get('take') ?? 200)
+    const requestedSkip = Number(searchParams.get('skip') ?? 0)
+    const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 500)) : 200
+    const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
 
     const nasiyalar = await prisma.nasiya.findMany({
       where: {
@@ -62,6 +66,8 @@ export async function GET(req: NextRequest) {
         schedules: { orderBy: { monthNumber: 'asc' } },
         _count: { select: { schedules: true } },
       },
+      take,
+      skip,
     })
 
     const sorted = nasiyalar.sort((a, b) => {

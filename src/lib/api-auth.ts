@@ -7,6 +7,12 @@ type GuardResult =
   | { ok: true; session: Session; shopId?: string }
   | { ok: false; response: ReturnType<typeof unauthorized> }
 
+const SUBSCRIPTION_GRACE_MS = 3 * 24 * 60 * 60 * 1000
+
+function subscriptionCutoff() {
+  return new Date(Date.now() - SUBSCRIPTION_GRACE_MS)
+}
+
 export async function requireApiSession(): Promise<GuardResult> {
   const session = await auth()
   if (!session?.user) return { ok: false, response: unauthorized() }
@@ -25,6 +31,7 @@ export async function requireApiSession(): Promise<GuardResult> {
         shop: {
           status: 'ACTIVE',
           deletedAt: null,
+          subscriptionDue: { gte: subscriptionCutoff() },
         },
       },
       select: { shopId: true },
@@ -67,10 +74,15 @@ export async function resolveActiveShopId(
   if (!shopId) return { ok: false, response: badRequest('shopId talab qilinadi') }
 
   const shop = await prisma.shop.findFirst({
-    where: { id: shopId, status: 'ACTIVE', deletedAt: null },
+    where: {
+      id: shopId,
+      status: 'ACTIVE',
+      deletedAt: null,
+      subscriptionDue: { gte: subscriptionCutoff() },
+    },
     select: { id: true },
   })
-  if (!shop) return { ok: false, response: forbidden("Do'kon faol emas yoki topilmadi") }
+  if (!shop) return { ok: false, response: forbidden("Do'kon faol emas, muddati tugagan yoki topilmadi") }
 
   return { ok: true, shopId }
 }

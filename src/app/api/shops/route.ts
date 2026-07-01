@@ -22,6 +22,10 @@ export async function GET(req: NextRequest) {
     const guarded = await requireSuperAdmin()
     if (!guarded.ok) return guarded.response
     const includeDeleted = req.nextUrl.searchParams.get('includeDeleted') === 'true'
+    const requestedTake = Number(req.nextUrl.searchParams.get('take') ?? 200)
+    const requestedSkip = Number(req.nextUrl.searchParams.get('skip') ?? 0)
+    const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 500)) : 200
+    const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
 
     const shops = await prisma.shop.findMany({
       where: includeDeleted ? {} : { deletedAt: null },
@@ -33,6 +37,7 @@ export async function GET(req: NextRequest) {
         payments: {
           where: { deletedAt: null },
           orderBy: { paidAt: 'desc' },
+          take: 12,
           include: {
             recordedBy: { select: { name: true, email: true } },
           },
@@ -42,6 +47,8 @@ export async function GET(req: NextRequest) {
         },
       },
       orderBy: { subscriptionDue: 'asc' },
+      take,
+      skip,
     })
 
     return ok(shops, "Do'konlar ro'yxati")
