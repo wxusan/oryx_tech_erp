@@ -95,6 +95,10 @@ export default function QurilmaDetailPage() {
   const [salePayNote, setSalePayNote] = useState('')
   const [salePayError, setSalePayError] = useState('')
   const [salePayLoading, setSalePayLoading] = useState(false)
+  const [returnModalOpen, setReturnModalOpen] = useState(false)
+  const [returnNote, setReturnNote] = useState('')
+  const [returnError, setReturnError] = useState('')
+  const [returning, setReturning] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -161,6 +165,26 @@ export default function QurilmaDetailPage() {
       setSalePayError(err instanceof Error ? err.message : "To'lovni saqlashda xatolik")
     } finally {
       setSalePayLoading(false)
+    }
+  }
+
+  async function handleReturnDevice() {
+    if (!returnNote.trim() || returning) return
+    setReturning(true)
+    setReturnError('')
+    try {
+      const res = await fetch(`/api/devices/${id}/return`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: returnNote }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.error || 'Qaytarishda xatolik')
+      router.push('/shop/qurilmalar')
+    } catch (err) {
+      setReturnError(err instanceof Error ? err.message : 'Qaytarishda xatolik')
+    } finally {
+      setReturning(false)
     }
   }
 
@@ -240,6 +264,15 @@ export default function QurilmaDetailPage() {
               className="h-9 w-9 p-0 border-zinc-200 text-red-500 hover:bg-red-50 hover:border-red-200 rounded"
             >
               <Trash2 size={15} />
+            </Button>
+          )}
+          {['SOLD_CASH', 'SOLD_NASIYA'].includes(device.status) && (
+            <Button
+              variant="outline"
+              onClick={() => setReturnModalOpen(true)}
+              className="h-9 px-4 text-sm border-red-200 text-red-600 hover:bg-red-50 rounded"
+            >
+              Qaytarish
             </Button>
           )}
         </div>
@@ -468,6 +501,47 @@ export default function QurilmaDetailPage() {
               className="bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
             >
               {salePayLoading ? 'Saqlanmoqda...' : 'Saqlash'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={returnModalOpen} onOpenChange={setReturnModalOpen}>
+        <DialogContent className="max-w-md rounded">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900">Qurilmani qaytarish</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <p className="text-sm text-zinc-600">
+              Bu amal bog'langan sotuv yoki nasiyani bekor qiladi va qurilmani qaytarilgan holatiga o'tkazadi.
+            </p>
+            {returnError && (
+              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+                {returnError}
+              </div>
+            )}
+            <div>
+              <label htmlFor="return-note" className="text-xs font-medium text-zinc-700 block mb-1.5">
+                Sabab
+              </label>
+              <Textarea
+                id="return-note"
+                value={returnNote}
+                onChange={(e) => setReturnNote(e.target.value)}
+                className="text-sm border-zinc-200 rounded min-h-[80px]"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setReturnModalOpen(false)} className="border-zinc-200 text-zinc-700 rounded">
+              Bekor qilish
+            </Button>
+            <Button
+              disabled={returnNote.trim().length < 5 || returning}
+              onClick={handleReturnDevice}
+              className="bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-40"
+            >
+              {returning ? 'Saqlanmoqda...' : 'Qaytarishni tasdiqlash'}
             </Button>
           </DialogFooter>
         </DialogContent>

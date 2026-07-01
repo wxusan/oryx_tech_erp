@@ -21,6 +21,12 @@ npm run lint
 npm run build
 ```
 
+## Data Operations
+
+Shop admins can export CSV data from `/api/export/devices`, `/api/export/customers`, `/api/export/sales`, `/api/export/nasiya`, and `/api/export/logs`.
+
+Validated customer imports are available through `POST /api/import/customers` with `{ "customers": [{ "name": "...", "phone": "..." }] }`.
+
 ## Vercel Deployment
 
 Set the variables from `.env.example` in Vercel. Production must include `DATABASE_URL`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and `CRON_SECRET`.
