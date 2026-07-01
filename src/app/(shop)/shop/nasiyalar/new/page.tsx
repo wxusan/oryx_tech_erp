@@ -152,7 +152,7 @@ export default function NewNasiyaPage() {
     }))
   }, [startDate, months, monthlyPayment])
 
-  const step2Valid = customerName.trim() && customerPhone.trim()
+  const step2Valid = customerName.trim() && customerPhone.trim() && passportFile
   const step3Valid =
     !!selectedDevice &&
     totalPrice.trim() &&
@@ -163,29 +163,25 @@ export default function NewNasiyaPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!step3Valid || !selectedDevice || submitting) return
+    if (!step3Valid || !selectedDevice || !passportFile || submitting) return
 
     setSubmitting(true)
     setSubmitError('')
     try {
-      let passportPhotoUrl: string | undefined
+      const formData = new FormData()
+      formData.append('file', passportFile)
 
-      if (passportFile) {
-        const formData = new FormData()
-        formData.append('file', passportFile)
+      const uploadRes = await fetch('/api/uploads/passport', {
+        method: 'POST',
+        body: formData,
+      })
+      const uploadJson = await uploadRes.json()
 
-        const uploadRes = await fetch('/api/uploads/passport', {
-          method: 'POST',
-          body: formData,
-        })
-        const uploadJson = await uploadRes.json()
-
-        if (!uploadRes.ok || !uploadJson.success) {
-          throw new Error(uploadJson.error || 'Pasport rasmini yuklashda xatolik')
-        }
-
-        passportPhotoUrl = uploadJson.data.key
+      if (!uploadRes.ok || !uploadJson.success) {
+        throw new Error(uploadJson.error || 'Pasport rasmini yuklashda xatolik')
       }
+
+      const passportPhotoUrl = uploadJson.data.key
 
       const res = await fetch(`/api/devices/${selectedDevice.id}/nasiya`, {
         method: 'POST',
@@ -346,7 +342,7 @@ export default function NewNasiyaPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Pasport rasmi
+                  Pasport rasmi <span className="text-red-500">*</span>
                 </label>
                 <label className="flex items-center justify-center w-full h-24 border-2 border-dashed border-zinc-200 rounded cursor-pointer hover:border-zinc-400 hover:bg-zinc-50 transition-colors">
                   <input

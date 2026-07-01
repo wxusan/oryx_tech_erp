@@ -187,7 +187,7 @@ export const createNasiyaSchema = z
       .string({ error: "Xaridor ismi kiritilishi shart" })
       .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
     customerPhone: phoneSchema,
-    passportPhotoUrl: privateFileKeySchema.optional(),
+    passportPhotoUrl: privateFileKeySchema,
     totalAmount: z
       .number({ error: "Umumiy summa kiritilishi shart" })
       .positive("Summa musbat son bo'lishi kerak"),
@@ -212,7 +212,7 @@ export const createNasiyaSchema = z
     path: ['downPayment'],
   })
   .refine(
-    (data) => Math.abs(data.monthlyPayment * data.months - (data.totalAmount - data.downPayment)) <= 1,
+    (data) => Math.abs(data.monthlyPayment - Math.round((data.totalAmount - data.downPayment) / data.months)) <= 1,
     {
       message: "Oylik to'lovlar qolgan summa bilan mos emas",
       path: ['monthlyPayment'],
@@ -250,6 +250,14 @@ export const addNasiyaPaymentSchema = z
   .refine((data) => !data.deferredToNext || (data.note?.trim().length ?? 0) >= 5, {
     message: "Kechiktirish sababi kamida 5 ta belgidan iborat bo'lishi kerak",
     path: ['note'],
+  })
+  .refine((data) => !data.deferredToNext || data.delayedUntil !== undefined, {
+    message: "Yangi to'lov sanasi kiritilishi shart",
+    path: ['delayedUntil'],
+  })
+  .refine((data) => !data.deferredToNext || data.amount === 0, {
+    message: "Muddat uzaytirilganda to'lov summasi 0 bo'lishi kerak",
+    path: ['amount'],
   })
 
 export type AddNasiyaPaymentInput = z.infer<typeof addNasiyaPaymentSchema>

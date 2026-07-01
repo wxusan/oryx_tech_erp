@@ -120,6 +120,7 @@ export default function ShopDetailPage() {
   const [deleteError, setDeleteError] = useState<string | null>(null)
 
   // Suspend/activate
+  const [suspendReason, setSuspendReason] = useState('')
   const [suspendLoading, setSuspendLoading] = useState(false)
   const [suspendError, setSuspendError] = useState<string | null>(null)
 
@@ -293,6 +294,10 @@ export default function ShopDetailPage() {
 
   const handleSuspendToggle = async () => {
     if (!shop) return
+    if (suspendReason.trim().length < 5) {
+      setSuspendError("Sabab kamida 5 ta belgidan iborat bo'lishi kerak")
+      return
+    }
     setSuspendLoading(true)
     setSuspendError(null)
     const newStatus = shop.status === 'ACTIVE' ? 'SUSPENDED' : 'ACTIVE'
@@ -300,11 +305,12 @@ export default function ShopDetailPage() {
       const res = await fetch(`/api/shops/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: newStatus }),
+        body: JSON.stringify({ status: newStatus, reason: suspendReason.trim() }),
       })
       const json = await res.json()
       if (json.success) {
         setSuspendModalOpen(false)
+        setSuspendReason('')
         setSuspendError(null)
         fetchShop()
       } else {
@@ -741,7 +747,7 @@ export default function ShopDetailPage() {
       </Dialog>
 
       {/* ── SUSPEND / ACTIVATE DIALOG ── */}
-      <Dialog open={suspendModalOpen} onOpenChange={(v) => { setSuspendModalOpen(v); if (!v) setSuspendError(null) }}>
+      <Dialog open={suspendModalOpen} onOpenChange={(v) => { setSuspendModalOpen(v); if (!v) { setSuspendError(null); setSuspendReason('') } }}>
         <DialogContent className="max-w-md rounded-none">
           <DialogHeader>
             <DialogTitle className="text-base font-semibold text-zinc-900">
@@ -756,6 +762,21 @@ export default function ShopDetailPage() {
           {suspendError && (
             <p className="text-xs text-red-500 mt-2">{suspendError}</p>
           )}
+          <div className="mt-3">
+            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+              Sabab <span className="text-red-500">*</span>
+            </label>
+            <Textarea
+              value={suspendReason}
+              onChange={(e) => setSuspendReason(e.target.value)}
+              placeholder={
+                shop.status === 'ACTIVE'
+                  ? "Masalan: to'lov muddati o'tgani uchun"
+                  : "Masalan: to'lov qabul qilindi"
+              }
+              className="min-h-[72px] rounded-none border-zinc-200 text-sm"
+            />
+          </div>
           <DialogFooter className="mt-4 gap-2">
             <button
               onClick={() => { setSuspendModalOpen(false); setSuspendError(null) }}
@@ -764,7 +785,7 @@ export default function ShopDetailPage() {
               Bekor qilish
             </button>
             <button
-              disabled={suspendLoading}
+              disabled={suspendReason.trim().length < 5 || suspendLoading}
               onClick={handleSuspendToggle}
               className="h-8 px-4 text-sm bg-zinc-900 text-white hover:bg-zinc-700 disabled:opacity-40 disabled:pointer-events-none transition-colors"
             >

@@ -15,7 +15,7 @@ import { shopAdminPublicSelect } from '@/lib/api-selects'
 import type { ZodError } from 'zod'
 
 function telegramLinkCode() {
-  return randomBytes(4).toString('hex').toUpperCase()
+  return randomBytes(12).toString('hex').toUpperCase()
 }
 
 // ---------------------------------------------------------------------------
@@ -48,7 +48,10 @@ export async function GET(req: NextRequest) {
           },
         },
         _count: {
-          select: { devices: true, nasiya: true },
+          select: {
+            devices: { where: { deletedAt: null } },
+            nasiya: { where: { deletedAt: null, status: { not: 'CANCELLED' } } },
+          },
         },
       },
       orderBy: { subscriptionDue: 'asc' },

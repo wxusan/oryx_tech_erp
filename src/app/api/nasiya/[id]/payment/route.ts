@@ -65,6 +65,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
         })
         if (existingPayment) {
+          if (existingPayment.nasiyaId !== nasiyaId) {
+            throw { status: 409, message: "Idempotency-Key boshqa nasiya to'lovi uchun ishlatilgan" }
+          }
           return {
             nasiyaId,
             nasiyaScheduleId: existingPayment.nasiyaScheduleId,
@@ -80,16 +83,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
       if (!selectedSchedule) throw { status: 404, message: "To'lov jadvali topilmadi" }
 
-      const allocationRows = [...nasiya.schedules]
+      const unpaidSchedules = [...nasiya.schedules]
         .filter((schedule) => {
           if (schedule.status === 'PAID') return false
           return Number(schedule.paidAmount) < Number(schedule.expectedAmount)
         })
-        .sort((left, right) => {
+      const selectedOutstanding = Math.max(
+        0,
+        Number(selectedSchedule.expectedAmount) - Number(selectedSchedule.paidAmount),
+      )
+      const allocationRows = [
+        ...unpaidSchedules.filter((schedule) => schedule.id === selectedSchedule.id),
+        ...unpaidSchedules
+          .filter((schedule) => schedule.id !== selectedSchedule.id)
+          .sort((left, right) => {
           const leftDue = left.delayedUntil ?? left.dueDate
           const rightDue = right.delayedUntil ?? right.dueDate
           return leftDue.getTime() - rightDue.getTime() || left.monthNumber - right.monthNumber
-        })
+        }),
+      ]
 
       const allocations: { scheduleId: string; amount: number; paidAfter: number }[] = []
 
@@ -112,6 +124,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           throw { status: 409, message: "To'lov bir vaqtda yangilangan, qayta urinib ko'ring" }
         }
       } else {
+        if (selectedOutstanding <= 0) {
+          throw { status: 409, message: "Tanlangan oy to'lovi allaqachon yopilgan" }
+        }
         const totalOutstanding = allocationRows.reduce(
           (sum, schedule) => sum + Math.max(0, Number(schedule.expectedAmount) - Number(schedule.paidAmount)),
           0,
@@ -194,21 +209,23 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
 
       // Notify all active shop admins with a verified telegramId
-      const shopAdmins = await tx.shopAdmin.findMany({
-        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
-      })
-      for (const admin of shopAdmins) {
-        await tx.notification.create({
-          data: {
-            shopId,
-            type: 'PAYMENT_RECEIVED',
-            message: `💰 To'lov qabul qilindi\n📱 Nasiya: ${nasiyaId}\n💵 ${amount.toLocaleString()} so'm`,
-            telegramId: admin.telegramId!,
-            scheduledAt: new Date(),
-            relatedId: nasiyaScheduleId,
-            relatedType: 'NasiyaSchedule',
-          },
+      if (amount > 0) {
+        const shopAdmins = await tx.shopAdmin.findMany({
+          where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
         })
+        for (const admin of shopAdmins) {
+          await tx.notification.create({
+            data: {
+              shopId,
+              type: 'PAYMENT_RECEIVED',
+              message: `💰 To'lov qabul qilindi\n📱 Nasiya: ${nasiyaId}\n💵 ${amount.toLocaleString()} so'm`,
+              telegramId: admin.telegramId!,
+              scheduledAt: new Date(),
+              relatedId: allocations.length === 1 ? allocations[0].scheduleId : nasiyaId,
+              relatedType: allocations.length === 1 ? 'NasiyaSchedule' : 'Nasiya',
+            },
+          })
+        }
       }
 
       await tx.log.create({
@@ -233,6 +250,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }
+      if (e.status === 400) return badRequest(e.message)
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
     }

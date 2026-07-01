@@ -72,7 +72,7 @@ export function isOverdue(schedules: NasiyaSchedule[]): boolean {
   return schedules.some(
     (s) =>
       UNPAID_STATUSES.includes(s.status) &&
-      (s.status === NasiyaScheduleStatus.OVERDUE || s.dueDate < now),
+      (s.status === NasiyaScheduleStatus.OVERDUE || (s.delayedUntil ?? s.dueDate) < now),
   )
 }
 
@@ -88,7 +88,11 @@ export function isOverdue(schedules: NasiyaSchedule[]): boolean {
 export function getNextPayment(schedules: NasiyaSchedule[]): NasiyaSchedule | null {
   const pending = schedules
     .filter((s) => UNPAID_STATUSES.includes(s.status))
-    .sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime())
+    .sort((a, b) => {
+      const leftDue = a.delayedUntil ?? a.dueDate
+      const rightDue = b.delayedUntil ?? b.dueDate
+      return leftDue.getTime() - rightDue.getTime()
+    })
 
   return pending[0] ?? null
 }

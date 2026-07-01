@@ -69,28 +69,14 @@ export async function queueNotification(
     })
 
     console.log(
-      `[NotificationService] Queued notification type=${params.type} shop=${params.shopId} telegram=${params.telegramId}`,
+      `[NotificationService] Queued notification id=${notification.id} type=${params.type} shop=${params.shopId} telegram=${params.telegramId}`,
     )
 
     // Attempt immediate delivery for notifications scheduled now or in the past.
+    // Use the queue processor so the PROCESSING claim remains atomic with
+    // every other worker that may be draining notifications at the same time.
     if (scheduledAt <= new Date()) {
-      const sent = await sendTelegramMessage(params.telegramId, params.message)
-      const newStatus = sent ? 'SENT' : 'FAILED'
-
-      await prisma.notification.update({
-        where: { id: notification.id },
-        data: {
-          status: newStatus,
-          sentAt: sent ? new Date() : null,
-          attemptCount: { increment: 1 },
-          lastAttemptAt: new Date(),
-          nextAttemptAt: sent ? null : new Date(Date.now() + nextAttemptDelayMs(1)),
-        },
-      })
-
-      console.log(
-        `[NotificationService] Immediate send result: ${newStatus} for telegram=${params.telegramId}`,
-      )
+      await processPendingNotifications()
     }
   } catch (error) {
     console.error('[NotificationService] queueNotification error:', error)
@@ -150,7 +136,10 @@ export async function processPendingNotifications(): Promise<{
         const claim = await prisma.notification.updateMany({
           where: {
             id: notification.id,
-            status: { in: ['PENDING', 'FAILED', 'PROCESSING'] },
+            OR: [
+              { status: { in: ['PENDING', 'FAILED'] } },
+              { status: 'PROCESSING', lastAttemptAt: { lte: staleBefore } },
+            ],
           },
           data: {
             status: 'PROCESSING',

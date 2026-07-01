@@ -204,17 +204,17 @@ export default function NasiyaDetailPage() {
   const nasiyaId = nasiya?.id
   useEffect(() => {
     if (!nasiyaId) return
-    const scheduleIds = new Set(nasiya?.schedules?.map((s) => s.id) ?? [])
-    const url = nasiyaShopId ? `/api/logs?shopId=${encodeURIComponent(nasiyaShopId)}` : '/api/logs'
+    const targetIds = [nasiyaId, ...(nasiya?.schedules?.map((s) => s.id) ?? [])]
+    const url = new URL('/api/logs', window.location.origin)
+    if (nasiyaShopId) url.searchParams.set('shopId', nasiyaShopId)
+    url.searchParams.set('take', '100')
+    url.searchParams.set('targetId', targetIds.join(','))
     let cancelled = false
-    fetch(url)
+    fetch(url.toString())
       .then((r) => r.json())
       .then((json) => {
         if (cancelled || !json.success) return
-        const all: NasiyaLog[] = json.data?.logs ?? []
-        setLogs(
-          all.filter((l) => l.targetId === nasiyaId || scheduleIds.has(l.targetId)),
-        )
+        setLogs(json.data?.logs ?? [])
       })
       .catch(() => {
         if (!cancelled) setLogs([])

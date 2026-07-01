@@ -54,15 +54,24 @@ export async function GET() {
         include: {
           admins: { where: { deletedAt: null, isActive: true }, select: shopAdminPublicSelect },
           payments: { where: { deletedAt: null }, orderBy: { paidAt: 'desc' }, take: 1 },
-          _count: { select: { devices: true, nasiya: true } },
+          _count: {
+            select: {
+              devices: { where: { deletedAt: null } },
+              nasiya: { where: { deletedAt: null, status: { not: 'CANCELLED' } } },
+            },
+          },
         },
         orderBy: { subscriptionDue: 'asc' },
       }),
     ])
 
     const thisMonthRevenue = Number(thisMonthResult._sum.amount ?? 0)
-    // expectedRevenue: approximate — active shop count × 500 000 (no per-shop price stored)
-    const expectedRevenue = activeShops * 500000
+    const expectedRevenue = shops.reduce((sum, shop) => {
+      if (shop.status !== 'ACTIVE') return sum
+      const latestPayment = shop.payments[0]
+      if (!latestPayment) return sum
+      return sum + Number(latestPayment.amount) / Math.max(1, latestPayment.months)
+    }, 0)
 
     return ok({
       thisMonthRevenue,

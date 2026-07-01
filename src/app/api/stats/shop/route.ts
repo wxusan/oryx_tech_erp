@@ -62,6 +62,7 @@ export async function GET(req: NextRequest) {
           shopId,
           deletedAt: null,
           paidAt: { gte: monthStart, lte: monthEnd },
+          sale: { deletedAt: null },
         },
       }),
 
@@ -82,12 +83,13 @@ export async function GET(req: NextRequest) {
           shopId,
           deletedAt: null,
           paidAt: { gte: monthStart, lte: monthEnd },
+          nasiya: { deletedAt: null, status: { not: 'CANCELLED' } },
         },
       }),
 
       // Active nasiya count
       prisma.nasiya.count({
-        where: { shopId, deletedAt: null, status: 'ACTIVE' },
+        where: { shopId, deletedAt: null, status: { in: ['ACTIVE', 'OVERDUE'] } },
       }),
 
       // Schedules used for expected/overdue calculations. Compute outstanding
@@ -127,7 +129,8 @@ export async function GET(req: NextRequest) {
         take: 5,
       }),
 
-      // Next 5 upcoming pending/partial schedules
+      // Upcoming schedules are sorted by effective due date below because
+      // delayed rows use delayedUntil instead of the original dueDate.
       prisma.nasiyaSchedule.findMany({
         where: {
           shopId,
@@ -135,7 +138,7 @@ export async function GET(req: NextRequest) {
           nasiya: { is: { deletedAt: null, status: { not: 'CANCELLED' } } },
         },
         orderBy: { dueDate: 'asc' },
-        take: 5,
+        take: 50,
         include: {
           nasiya: {
             include: {
@@ -171,6 +174,7 @@ export async function GET(req: NextRequest) {
       cashSalesThisMonth.reduce((sum, sale) => sum + Number(sale.salePrice), 0) +
       nasiyaSoldThisMonth.reduce((sum, nasiya) => sum + Number(nasiya.totalAmount), 0)
     const accrualGrossProfitThisMonth = accrualRevenueThisMonth - soldDeviceCost - nasiyaDeviceCost
+    const cashBasisProfitThisMonth = cashReceivedThisMonth - soldDeviceCost - nasiyaDeviceCost
     const outstanding = (expected: unknown, paid: unknown) => Math.max(0, Number(expected) - Number(paid))
     const effectiveDue = (row: { delayedUntil: Date | null; dueDate: Date }) => row.delayedUntil ?? row.dueDate
     const expectedThisMonth =
@@ -202,12 +206,14 @@ export async function GET(req: NextRequest) {
       expectedThisMonth,
       overdueMoney,
       inventoryPurchaseCost,
-      realProfitThisMonth: accrualGrossProfitThisMonth,
+      realProfitThisMonth: cashBasisProfitThisMonth,
       accrualGrossProfitThisMonth,
       cashCollectedThisMonth: cashReceivedThisMonth,
       overdueCount,
       recentActivity,
-      upcomingPayments,
+      upcomingPayments: upcomingPayments
+        .sort((left, right) => effectiveDue(left).getTime() - effectiveDue(right).getTime())
+        .slice(0, 5),
     })
   } catch (err) {
     console.error('[GET /api/stats/shop]', err)

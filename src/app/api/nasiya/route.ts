@@ -73,15 +73,23 @@ export async function GET(req: NextRequest) {
     const sorted = nasiyalar.sort((a, b) => {
       const nextA = a.schedules
         .filter((s) => ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(s.status))
-        .sort((left, right) => left.dueDate.getTime() - right.dueDate.getTime())[0]
+        .sort((left, right) => {
+          const leftDue = left.delayedUntil ?? left.dueDate
+          const rightDue = right.delayedUntil ?? right.dueDate
+          return leftDue.getTime() - rightDue.getTime()
+        })[0]
       const nextB = b.schedules
         .filter((s) => ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(s.status))
-        .sort((left, right) => left.dueDate.getTime() - right.dueDate.getTime())[0]
+        .sort((left, right) => {
+          const leftDue = left.delayedUntil ?? left.dueDate
+          const rightDue = right.delayedUntil ?? right.dueDate
+          return leftDue.getTime() - rightDue.getTime()
+        })[0]
 
       if (!nextA && !nextB) return b.createdAt.getTime() - a.createdAt.getTime()
       if (!nextA) return 1
       if (!nextB) return -1
-      return nextA.dueDate.getTime() - nextB.dueDate.getTime()
+      return (nextA.delayedUntil ?? nextA.dueDate).getTime() - (nextB.delayedUntil ?? nextB.dueDate).getTime()
     })
 
     return ok(sorted, "Nasiyalar ro'yxati")

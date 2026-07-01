@@ -48,6 +48,10 @@ function tashkentDayRange(now = new Date()) {
   }
 }
 
+function outstandingAmount(expected: unknown, paid: unknown) {
+  return Math.max(0, Number(expected) - Number(paid ?? 0))
+}
+
 // ---------------------------------------------------------------------------
 // GET handler
 // ---------------------------------------------------------------------------
@@ -97,7 +101,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   for (const schedule of dueToday) {
     const { nasiya } = schedule
-    const msg = `⏰ Bugungi to'lov eslatmasi\n👤 ${nasiya.customer.name}\n📞 ${nasiya.customer.phone}\n📱 ${nasiya.device.model}\n💵 ${Number(schedule.expectedAmount).toLocaleString()} so'm`
+    const msg = `⏰ Bugungi to'lov eslatmasi\n👤 ${nasiya.customer.name}\n📞 ${nasiya.customer.phone}\n📱 ${nasiya.device.model}\n💵 ${outstandingAmount(schedule.expectedAmount, schedule.paidAmount).toLocaleString()} so'm`
     for (const admin of nasiya.shop.admins) {
       const dedupeKey = `REMINDER:${dayKey}:${admin.telegramId}:${schedule.id}`
       await prisma.notification.upsert({
@@ -130,6 +134,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
       nasiya: {
         deletedAt: null,
+        reminderEnabled: true,
         shop: { status: 'ACTIVE', deletedAt: null },
       },
     },
@@ -160,7 +165,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 
     const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
     const daysLate = Math.floor((today.getTime() - effectiveDue.getTime()) / 86400000)
-    const msg = `🔴 Muddati o'tgan to'lov\n👤 ${schedule.nasiya.customer.name}\n📞 ${schedule.nasiya.customer.phone}\n📱 ${schedule.nasiya.device.model}\n💵 ${Number(schedule.expectedAmount).toLocaleString()} so'm\n⏳ ${daysLate} kun kechikmoqda`
+    const msg = `🔴 Muddati o'tgan to'lov\n👤 ${schedule.nasiya.customer.name}\n📞 ${schedule.nasiya.customer.phone}\n📱 ${schedule.nasiya.device.model}\n💵 ${outstandingAmount(schedule.expectedAmount, schedule.paidAmount).toLocaleString()} so'm\n⏳ ${daysLate} kun kechikmoqda`
     for (const admin of schedule.nasiya.shop.admins) {
       const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
       await prisma.notification.upsert({

@@ -31,6 +31,12 @@ export async function GET(req: NextRequest) {
     const from = searchParams.get('from') ?? undefined
     const to = searchParams.get('to') ?? undefined
     const search = searchParams.get('search')?.trim()
+    const targetIds = searchParams
+      .getAll('targetId')
+      .flatMap((value) => value.split(','))
+      .map((value) => value.trim())
+      .filter(Boolean)
+    const targetType = searchParams.get('targetType')?.trim()
     const requestedTake = Number(searchParams.get('take') ?? 50)
     const requestedSkip = Number(searchParams.get('skip') ?? 0)
     const take = Number.isFinite(requestedTake)
@@ -43,6 +49,8 @@ export async function GET(req: NextRequest) {
     const where: Prisma.LogWhereInput = {
       ...(shopId && shopId !== 'all' ? { shopId } : {}),
       ...(actorType && actorType !== 'barchasi' ? { actorType: actorType as 'SUPER_ADMIN' | 'SHOP_ADMIN' } : {}),
+      ...(targetType ? { targetType } : {}),
+      ...(targetIds.length > 0 ? { targetId: { in: targetIds } } : {}),
       ...(from || to
         ? {
             createdAt: {

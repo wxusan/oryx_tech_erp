@@ -42,7 +42,12 @@ export async function GET(req: NextRequest) {
         phone: true,
         note: true,
         createdAt: true,
-        _count: { select: { sales: true, nasiya: true } },
+        _count: {
+          select: {
+            sales: { where: { deletedAt: null } },
+            nasiya: { where: { deletedAt: null, status: { not: 'CANCELLED' } } },
+          },
+        },
       },
     })
 

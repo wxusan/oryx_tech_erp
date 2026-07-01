@@ -9,6 +9,7 @@ type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan' | 'Bekor qilingan
 interface NasiyaSchedule {
   id: string
   dueDate: string
+  delayedUntil: string | null
   status: string
 }
 
@@ -61,8 +62,16 @@ const UNPAID_STATUSES = ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED']
 function getNextPayment(schedules: NasiyaSchedule[]): NasiyaSchedule | null {
   const pending = schedules
     .filter((s) => UNPAID_STATUSES.includes(s.status))
-    .sort((a, b) => new Date(a.dueDate).getTime() - new Date(b.dueDate).getTime())
+    .sort((a, b) => {
+      const leftDue = a.delayedUntil ?? a.dueDate
+      const rightDue = b.delayedUntil ?? b.dueDate
+      return new Date(leftDue).getTime() - new Date(rightDue).getTime()
+    })
   return pending[0] ?? null
+}
+
+function effectiveDueDate(schedule: NasiyaSchedule) {
+  return schedule.delayedUntil ?? schedule.dueDate
 }
 
 export default function NasiyalarPage() {
@@ -157,7 +166,7 @@ export default function NasiyalarPage() {
                       <div className="text-xs text-zinc-500 mb-2">
                         {n.device.model} · {n.customer.phone}
                         {nextPayment && (
-                          <> · Keyingi to'lov: {new Date(nextPayment.dueDate).toLocaleDateString('uz-UZ')}</>
+                          <> · Keyingi to'lov: {new Date(effectiveDueDate(nextPayment)).toLocaleDateString('uz-UZ')}</>
                         )}
                       </div>
 

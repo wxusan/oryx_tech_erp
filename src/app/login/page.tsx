@@ -12,6 +12,7 @@ function LoginForm() {
   const searchParams = useSearchParams()
   const callbackUrl = searchParams.get('callbackUrl') || '/admin'
   const adminCallbackUrl = callbackUrl.startsWith('/admin') ? callbackUrl : '/admin'
+  const shopCallbackUrl = callbackUrl.startsWith('/shop') ? callbackUrl : '/shop/dashboard'
   const errorParam = searchParams.get('error')
 
   const [tab, setTab] = useState<'admin' | 'shop'>('admin')
@@ -53,7 +54,7 @@ function LoginForm() {
     if (res?.error) {
       setError("Login yoki parol noto'g'ri.")
     } else {
-      router.push('/shop/dashboard')
+      router.push(shopCallbackUrl)
     }
   }
 

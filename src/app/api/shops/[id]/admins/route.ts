@@ -17,7 +17,7 @@ import { z, ZodError } from 'zod'
 type RouteContext = { params: Promise<{ id: string }> }
 
 function telegramLinkCode() {
-  return randomBytes(4).toString('hex').toUpperCase()
+  return randomBytes(12).toString('hex').toUpperCase()
 }
 
 // ---------------------------------------------------------------------------

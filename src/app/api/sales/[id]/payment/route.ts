@@ -36,11 +36,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const { shopId } = resolved
 
     const auditNote = parsed.data.reason?.trim() || parsed.data.note?.trim()
-    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const runPaymentTransaction = () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const existingPayment = await tx.salePayment.findUnique({
         where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
       })
       if (existingPayment) {
+        if (existingPayment.saleId !== saleId) {
+          throw { status: 409, message: "Idempotency-Key boshqa sotuv to'lovi uchun ishlatilgan" }
+        }
         return { payment: existingPayment, duplicate: true }
       }
 
@@ -147,7 +150,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }
 
       return { payment, sale: updatedSale, duplicate: false }
-    })
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+
+    let result: Awaited<ReturnType<typeof runPaymentTransaction>> | undefined
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        result = await runPaymentTransaction()
+        break
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034' && attempt < 2) {
+          continue
+        }
+        throw err
+      }
+    }
+    if (!result) return serverError()
 
     // Flush freshly-queued notifications immediately (best-effort, post-commit).
     await processPendingNotifications().catch((e) => console.error('[notify] flush failed', e))

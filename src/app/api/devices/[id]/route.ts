@@ -55,6 +55,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       include: {
         supplier: true,
         sales: {
+            where: { deletedAt: null },
             include: {
               payments: { where: { deletedAt: null }, orderBy: { paidAt: 'desc' } },
               customer: {
@@ -64,6 +65,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
           orderBy: { createdAt: 'desc' },
         },
         nasiya: {
+          where: { deletedAt: null, status: { not: 'CANCELLED' } },
           include: {
             customer: {
               select: { id: true, shopId: true, name: true, phone: true, note: true, createdAt: true },
