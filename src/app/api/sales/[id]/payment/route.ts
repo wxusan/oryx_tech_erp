@@ -34,12 +34,26 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
+    const auditNote = parsed.data.reason?.trim() || parsed.data.note?.trim()
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const existingPayment = await tx.salePayment.findUnique({
         where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
       })
       if (existingPayment) {
         return { payment: existingPayment, duplicate: true }
+      }
+
+      if (!auditNote) {
+        throw {
+          status: 400,
+          message: "To'lov yozish yoki keyingi to'lov sanasini o'zgartirish uchun izoh yoki sabab kiritilishi shart",
+        }
+      }
+      if (auditNote.length < 5) {
+        throw {
+          status: 400,
+          message: "To'lov yoki keyingi to'lov sanasi sababi kamida 5 ta belgidan iborat bo'lishi kerak",
+        }
       }
 
       const sale = await tx.sale.findFirst({
@@ -67,7 +81,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           amount,
           paymentMethod: parsed.data.paymentMethod,
           paidAt,
-          note: parsed.data.note,
+          note: auditNote,
           idempotencyKey,
           createdBy: session.user.id,
         },
@@ -106,8 +120,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             remainingAmount: updatedSale.remainingAmount,
             paidFully: updatedSale.paidFully,
             dueDate: updatedSale.dueDate,
+            auditReason: auditNote,
           },
-          note: parsed.data.note,
+          note: auditNote,
         },
       })
 
@@ -118,6 +133,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }
+      if (e.status === 400) return badRequest(e.message)
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
     }

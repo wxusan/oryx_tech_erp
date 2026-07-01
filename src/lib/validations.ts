@@ -170,6 +170,7 @@ export const addSalePaymentSchema = z.object({
   paidAt: z.coerce.date().optional(),
   nextDueDate: z.coerce.date().optional(),
   note: z.string().optional(),
+  reason: z.string().optional(),
   idempotencyKey: z.string().min(8).max(120).optional(),
 })
 

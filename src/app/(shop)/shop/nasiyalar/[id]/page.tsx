@@ -95,10 +95,21 @@ function scheduleBalance(row: NasiyaSchedule) {
   return Math.max(0, Number(row.expectedAmount) - Number(row.paidAmount))
 }
 
-function scheduleLabel(row: NasiyaSchedule) {
+function formatScheduleMonth(row: NasiyaSchedule) {
+  const dueDate = new Date(row.dueDate)
+  if (Number.isNaN(dueDate.getTime())) return `${row.monthNumber}-oy`
+
+  return dueDate.toLocaleDateString('uz-UZ', {
+    month: 'long',
+    year: 'numeric',
+  })
+}
+
+function scheduleLabel(row: NasiyaSchedule, nasiya: Nasiya) {
   const due = new Date(row.dueDate).toLocaleDateString('uz-UZ')
   const balance = scheduleBalance(row)
-  return `${row.monthNumber}-oy | ${due} | qolgan ${fmt(balance)} so'm`
+  const month = formatScheduleMonth(row)
+  return `${month} (${row.monthNumber}-oy) - ${nasiya.customer.name}, ${nasiya.device.model} - ${due} - qolgan ${fmt(balance)} so'm`
 }
 
 export default function NasiyaDetailPage() {
@@ -360,15 +371,15 @@ export default function NasiyaDetailPage() {
                   Qaysi oy to'lovi? <span className="text-red-500">*</span>
                 </label>
                 <Select value={selectedScheduleId} onValueChange={(v) => v && setSelectedScheduleId(v)}>
-                  <SelectTrigger className="h-10 w-full text-sm border-zinc-200 rounded-lg">
-                    <SelectValue placeholder="Oyni tanlang">
-                      {() => selectedSchedule ? scheduleLabel(selectedSchedule) : 'Oyni tanlang'}
+                  <SelectTrigger className="h-10 w-full text-sm border-zinc-200 rounded-lg [&>span]:truncate">
+                    <SelectValue placeholder="To'lov oyini tanlang">
+                      {selectedSchedule ? scheduleLabel(selectedSchedule, nasiya) : "To'lov oyini tanlang"}
                     </SelectValue>
                   </SelectTrigger>
                   <SelectContent>
                     {pendingSchedules.map((s) => (
                       <SelectItem key={s.id} value={s.id}>
-                        {scheduleLabel(s)}
+                        {scheduleLabel(s, nasiya)}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -450,7 +461,7 @@ export default function NasiyaDetailPage() {
               <Textarea
                 value={payNote}
                 onChange={(e) => setPayNote(e.target.value)}
-                placeholder={carryOver ? 'Masalan: mijoz 10 kunga kechiktirishni soradi' : 'Ixtiyoriy izoh...'}
+                placeholder={carryOver ? "Masalan: mijoz 10 kunga kechiktirishni so'radi" : 'Ixtiyoriy izoh...'}
                 className="text-sm border-zinc-200 rounded-lg min-h-[80px]"
               />
             </div>

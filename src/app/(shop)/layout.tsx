@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users } from 'lucide-react'
+import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, ScrollText, Settings } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 
 const navLinks = [
@@ -12,6 +12,8 @@ const navLinks = [
   { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard },
   { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus },
   { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3 },
+  { href: '/shop/logs', label: 'Loglar', icon: ScrollText },
+  { href: '/shop/settings', label: 'Sozlamalar', icon: Settings },
 ]
 
 export default function ShopLayout({ children }: { children: React.ReactNode }) {

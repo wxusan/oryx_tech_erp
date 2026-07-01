@@ -11,7 +11,7 @@ import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession } from '@/lib/api-auth'
-import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -26,6 +26,7 @@ const updateDeviceSchema = z.object({
   storage: z.string().optional(),
   batteryHealth: z.number().optional(),
   note: z.string().optional(),
+  reason: z.string().optional(),
 })
 
 const deleteDeviceSchema = z.object({
@@ -112,23 +113,36 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     })
 
     if (!existing) return notFound("Qurilma topilmadi")
-    if (['SOLD_CASH', 'SOLD_NASIYA'].includes(existing.status)) {
-      return conflict("Sotilgan qurilmani o'chirish uchun avval qaytarish yoki bekor qilish jarayonidan foydalaning")
-    }
 
-    const financialRecords = await prisma.$transaction([
+    const { reason, ...updateData } = parsed.data
+    const hasDeviceChanges = Object.entries(updateData).some(([key, value]) => {
+      if (value === undefined) return false
+      return existing[key as keyof typeof existing] !== value
+    })
+
+    const [saleCount, nasiyaCount] = await prisma.$transaction([
       prisma.sale.count({ where: { deviceId, deletedAt: null } }),
-      prisma.nasiya.count({ where: { deviceId, deletedAt: null, status: { not: 'CANCELLED' } } }),
+      prisma.nasiya.count({ where: { deviceId, deletedAt: null } }),
     ])
-    if (financialRecords[0] > 0 || financialRecords[1] > 0) {
-      return conflict("Bu qurilmaga bog'langan sotuv yoki nasiya bor, bevosita o'chirib bo'lmaydi")
+    const isFinanciallyLinked =
+      ['SOLD_CASH', 'SOLD_NASIYA'].includes(existing.status) || saleCount > 0 || nasiyaCount > 0
+    const auditNote = reason?.trim() || updateData.note?.trim()
+    if (hasDeviceChanges && isFinanciallyLinked) {
+      if (!auditNote) {
+        return badRequest(
+          "Sotilgan yoki nasiya qurilma ma'lumotlarini o'zgartirish uchun izoh yoki sabab kiritilishi shart",
+        )
+      }
+      if (auditNote.length < 5) {
+        return badRequest("Qurilma ma'lumotlarini o'zgartirish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
+      }
     }
 
     const device = await prisma.$transaction(async (tx) => {
       const updatedDevice = await tx.device.update({
         where: { id: deviceId },
         data: {
-          ...parsed.data,
+          ...updateData,
           updatedAt: new Date(),
         },
       })
@@ -148,7 +162,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
             batteryHealth: existing.batteryHealth,
             note: existing.note,
           },
-          newValue: parsed.data,
+          newValue: {
+            ...updateData,
+            ...(auditNote && isFinanciallyLinked ? { editReason: auditNote } : {}),
+          },
+          note: auditNote && isFinanciallyLinked ? auditNote : undefined,
         },
       })
 
@@ -193,6 +211,21 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
     })
 
     if (!existing) return notFound("Qurilma topilmadi")
+    if (['SOLD_CASH', 'SOLD_NASIYA'].includes(existing.status)) {
+      return badRequest(
+        "Sotilgan yoki nasiya qilingan qurilmani bevosita o'chirib bo'lmaydi. Qaytarish yoki bekor qilish jarayonidan foydalaning.",
+      )
+    }
+
+    const [saleCount, nasiyaCount] = await prisma.$transaction([
+      prisma.sale.count({ where: { deviceId, deletedAt: null } }),
+      prisma.nasiya.count({ where: { deviceId, deletedAt: null } }),
+    ])
+    if (saleCount > 0 || nasiyaCount > 0) {
+      return badRequest(
+        "Bu qurilmaga bog'langan sotuv yoki nasiya mavjud. O'chirish uchun qaytarish yoki bekor qilish jarayonidan foydalaning.",
+      )
+    }
 
     const device = await prisma.$transaction(async (tx) => {
       const deletedDevice = await tx.device.update({

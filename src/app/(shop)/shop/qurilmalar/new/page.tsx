@@ -1,12 +1,16 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import { ArrowLeft } from 'lucide-react'
+import { ArrowLeft, ImagePlus, Loader2, X } from 'lucide-react'
+
+const MAX_IMAGE_SIZE = 5 * 1024 * 1024
+const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 
 interface FormData {
   model: string
@@ -35,11 +39,65 @@ export default function NewDevicePage() {
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [imageFiles, setImageFiles] = useState<File[]>([])
+  const imagePreviews = useMemo(() => imageFiles.map((file) => URL.createObjectURL(file)), [imageFiles])
+
+  useEffect(() => {
+    return () => imagePreviews.forEach((preview) => URL.revokeObjectURL(preview))
+  }, [imagePreviews])
 
   const set = (field: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }))
 
   const isValid = form.model.trim() && form.color.trim() && form.purchasePrice.trim() && form.imei.trim()
+
+  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const files = Array.from(e.target.files ?? [])
+    e.target.value = ''
+    if (files.length === 0) return
+
+    const invalidType = files.find((file) => !ALLOWED_IMAGE_TYPES.has(file.type))
+    if (invalidType) {
+      setError('Faqat JPG, PNG yoki WEBP rasm yuklash mumkin')
+      return
+    }
+
+    const oversized = files.find((file) => file.size > MAX_IMAGE_SIZE)
+    if (oversized) {
+      setError('Har bir rasm hajmi 5 MB dan oshmasligi kerak')
+      return
+    }
+
+    setError('')
+    setImageFiles((prev) => [...prev, ...files])
+  }
+
+  function removeImage(index: number) {
+    setImageFiles((prev) => prev.filter((_, i) => i !== index))
+  }
+
+  async function uploadDeviceImages() {
+    if (imageFiles.length === 0) return []
+
+    return Promise.all(
+      imageFiles.map(async (file) => {
+        const formData = new FormData()
+        formData.append('file', file)
+
+        const res = await fetch('/api/uploads/device', {
+          method: 'POST',
+          body: formData,
+        })
+        const json = await res.json()
+
+        if (!res.ok || !json.success) {
+          throw new Error(json.error || 'Qurilma rasmini yuklashda xatolik')
+        }
+
+        return json.data.url as string
+      }),
+    )
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -47,6 +105,7 @@ export default function NewDevicePage() {
     setLoading(true)
     setError('')
     try {
+      const imageUrls = await uploadDeviceImages()
       const res = await fetch('/api/devices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -60,6 +119,7 @@ export default function NewDevicePage() {
           supplierName: form.supplierName || undefined,
           supplierPhone: form.supplierPhone || undefined,
           note: form.note || undefined,
+          imageUrls,
         }),
       })
       const json = await res.json()
@@ -206,14 +266,61 @@ export default function NewDevicePage() {
           <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
             <span className="text-sm font-semibold text-zinc-900">Qo'shimcha</span>
           </div>
-          <div className="p-4">
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
-            <Textarea
-              value={form.note}
-              onChange={set('note')}
-              placeholder="Qurilma haqida qo'shimcha ma'lumot..."
-              className="text-sm border-zinc-200 rounded min-h-[80px]"
-            />
+          <div className="p-4 space-y-4">
+            <div>
+              <div className="flex items-center justify-between gap-3 mb-2">
+                <label className="block text-xs font-medium text-zinc-700">Rasmlar</label>
+                <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50">
+                  <ImagePlus size={14} />
+                  Rasm tanlash
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    multiple
+                    onChange={handleImageChange}
+                    className="sr-only"
+                  />
+                </label>
+              </div>
+              {imagePreviews.length > 0 ? (
+                <div className="grid grid-cols-3 gap-3">
+                  {imagePreviews.map((preview, index) => (
+                    <div key={`${preview}-${index}`} className="relative aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+                      <Image
+                        src={preview}
+                        alt={`Qurilma rasmi ${index + 1}`}
+                        fill
+                        sizes="160px"
+                        unoptimized
+                        className="object-cover"
+                      />
+                      <button
+                        type="button"
+                        aria-label="Rasmni olib tashlash"
+                        onClick={() => removeImage(index)}
+                        className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded bg-white/90 text-zinc-700 shadow-sm hover:bg-white hover:text-red-600"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="rounded border border-dashed border-zinc-200 bg-zinc-50 px-4 py-5 text-center text-xs text-zinc-500">
+                  JPG, PNG yoki WEBP, 5 MB gacha
+                </div>
+              )}
+            </div>
+
+            <div>
+              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
+              <Textarea
+                value={form.note}
+                onChange={set('note')}
+                placeholder="Qurilma haqida qo'shimcha ma'lumot..."
+                className="text-sm border-zinc-200 rounded min-h-[80px]"
+              />
+            </div>
           </div>
         </div>
 
@@ -222,7 +329,14 @@ export default function NewDevicePage() {
           disabled={!isValid || loading}
           className="w-full h-10 bg-zinc-900 hover:bg-zinc-800 text-white text-sm font-medium rounded disabled:opacity-40"
         >
-          {loading ? 'Saqlanmoqda...' : 'Qurilmani saqlash'}
+          {loading ? (
+            <span className="inline-flex items-center gap-2">
+              <Loader2 size={15} className="animate-spin" />
+              Saqlanmoqda...
+            </span>
+          ) : (
+            'Qurilmani saqlash'
+          )}
         </Button>
       </form>
     </div>

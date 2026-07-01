@@ -58,6 +58,7 @@ const updateShopSchema = z.object({
   shopNumber: z.string().min(1).optional(),
   address: z.string().optional(),
   note: z.string().optional(),
+  reason: z.string().optional(),
   status: z.enum(['ACTIVE', 'SUSPENDED']).optional(),
   telegramGroupId: z.string().optional(),
 })
@@ -80,9 +81,23 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const existing = await prisma.shop.findFirst({ where: { id, deletedAt: null } })
     if (!existing) return notFound("Do'kon topilmadi")
 
+    const { reason, ...updateData } = parsed.data
+    const statusChanged = updateData.status !== undefined && updateData.status !== existing.status
+    const auditNote = reason?.trim() || updateData.note?.trim()
+    let statusChangeReason: string | undefined
+    if (statusChanged) {
+      if (!auditNote) {
+        return badRequest("Do'kon statusini o'zgartirish uchun izoh yoki sabab kiritilishi shart")
+      }
+      if (auditNote.length < 5) {
+        return badRequest("Statusni o'zgartirish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
+      }
+      statusChangeReason = auditNote
+    }
+
     const updated = await prisma.shop.update({
       where: { id },
-      data: parsed.data,
+      data: updateData,
     })
 
     await prisma.log.create({
@@ -94,7 +109,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         targetType: 'Shop',
         targetId: id,
         oldValue: existing as object,
-        newValue: parsed.data as object,
+        newValue: {
+          ...updateData,
+          ...(statusChangeReason ? { statusChangeReason } : {}),
+        },
+        note: statusChangeReason,
       },
     })
 

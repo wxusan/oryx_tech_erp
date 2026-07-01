@@ -1,8 +1,14 @@
 import { NextRequest } from 'next/server'
+import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/node'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
 
 type RouteContext = { params: Promise<{ entity: string }> }
+type ExportCell = string | number | boolean | Date | null | undefined
+type ExportData = { headers: string[]; rows: ExportCell[][] }
+type ExportFormat = 'csv' | 'xlsx'
+
+export const runtime = 'nodejs'
 
 function csvValue(value: unknown) {
   const raw = value instanceof Date ? value.toISOString() : value == null ? '' : String(value)
@@ -13,34 +19,100 @@ function csv(headers: string[], rows: unknown[][]) {
   return [headers, ...rows].map((row) => row.map(csvValue).join(',')).join('\n')
 }
 
+function fileHeaders(entity: string, format: ExportFormat, contentType: string) {
+  return {
+    'Content-Type': contentType,
+    'Content-Disposition': `attachment; filename="${entity}.${format}"`,
+  }
+}
+
 function csvResponse(entity: string, body: string) {
   return new Response(body, {
-    headers: {
-      'Content-Type': 'text/csv; charset=utf-8',
-      'Content-Disposition': `attachment; filename="${entity}.csv"`,
-    },
+    headers: fileHeaders(entity, 'csv', 'text/csv; charset=utf-8'),
   })
 }
 
-export async function GET(req: NextRequest, ctx: RouteContext) {
-  const guarded = await requireApiSession()
-  if (!guarded.ok) return guarded.response
-  const { session } = guarded
-  const { entity } = await ctx.params
+function normalizeFormat(value: string | null): ExportFormat | null {
+  if (!value || value === 'csv') return 'csv'
+  if (value === 'xlsx') return 'xlsx'
+  return null
+}
 
-  const resolved = await resolveActiveShopId(session, req.nextUrl.searchParams.get('shopId'))
-  if (!resolved.ok) return resolved.response
-  const { shopId } = resolved
+function excelValue(value: ExportCell): Cell {
+  return value ?? ''
+}
 
+async function xlsxResponse(entity: string, data: ExportData) {
+  const sheetData: SheetData = [
+    data.headers.map((header) => ({ value: header, fontWeight: 'bold' })),
+    ...data.rows.map((row) => row.map(excelValue)),
+  ]
+  const columns = data.headers.map((header, index) => {
+    const values = data.rows.map((row) => row[index])
+    return {
+      width: Math.min(
+        48,
+        Math.max(
+          12,
+          header.length,
+          ...values.map((value) => {
+            if (value instanceof Date) return value.toISOString().length
+            return value == null ? 0 : String(value).length
+          }),
+        ) + 2,
+      ),
+    }
+  })
+
+  const buffer = await writeXlsxFile(sheetData, {
+    sheet: entity,
+    columns,
+    dateFormat: 'yyyy-mm-dd hh:mm:ss',
+    stickyRowsCount: 1,
+  }).toBuffer()
+
+  return new Response(new Uint8Array(buffer), {
+    headers: fileHeaders(
+      entity,
+      'xlsx',
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    ),
+  })
+}
+
+function exportResponse(entity: string, format: ExportFormat, data: ExportData) {
+  if (format === 'xlsx') return xlsxResponse(entity, data)
+  return csvResponse(entity, csv(data.headers, data.rows))
+}
+
+async function exportData(entity: string, shopId: string): Promise<ExportData | null> {
   if (entity === 'devices') {
     const devices = await prisma.device.findMany({
       where: { shopId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
     })
-    return csvResponse(entity, csv(
-      ['model', 'imei', 'color', 'storage', 'batteryHealth', 'purchasePrice', 'status', 'createdAt'],
-      devices.map((d) => [d.model, d.imei, d.color, d.storage, d.batteryHealth, d.purchasePrice, d.status, d.createdAt]),
-    ))
+    return {
+      headers: [
+        'model',
+        'imei',
+        'color',
+        'storage',
+        'batteryHealth',
+        'purchasePrice',
+        'status',
+        'createdAt',
+      ],
+      rows: devices.map((d) => [
+        d.model,
+        d.imei,
+        d.color,
+        d.storage,
+        d.batteryHealth,
+        d.purchasePrice.toString(),
+        d.status,
+        d.createdAt,
+      ]),
+    }
   }
 
   if (entity === 'customers') {
@@ -48,10 +120,10 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       where: { shopId, deletedAt: null },
       orderBy: { createdAt: 'desc' },
     })
-    return csvResponse(entity, csv(
-      ['name', 'phone', 'note', 'createdAt'],
-      customers.map((c) => [c.name, c.phone, c.note, c.createdAt]),
-    ))
+    return {
+      headers: ['name', 'phone', 'note', 'createdAt'],
+      rows: customers.map((c) => [c.name, c.phone, c.note, c.createdAt]),
+    }
   }
 
   if (entity === 'sales') {
@@ -60,10 +132,30 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       include: { customer: true, device: true },
       orderBy: { createdAt: 'desc' },
     })
-    return csvResponse(entity, csv(
-      ['customer', 'phone', 'device', 'salePrice', 'amountPaid', 'remainingAmount', 'paidFully', 'dueDate', 'createdAt'],
-      sales.map((s) => [s.customer.name, s.customer.phone, s.device.model, s.salePrice, s.amountPaid, s.remainingAmount, s.paidFully, s.dueDate, s.createdAt]),
-    ))
+    return {
+      headers: [
+        'customer',
+        'phone',
+        'device',
+        'salePrice',
+        'amountPaid',
+        'remainingAmount',
+        'paidFully',
+        'dueDate',
+        'createdAt',
+      ],
+      rows: sales.map((s) => [
+        s.customer.name,
+        s.customer.phone,
+        s.device.model,
+        s.salePrice.toString(),
+        s.amountPaid.toString(),
+        s.remainingAmount.toString(),
+        s.paidFully,
+        s.dueDate,
+        s.createdAt,
+      ]),
+    }
   }
 
   if (entity === 'nasiya') {
@@ -72,10 +164,30 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       include: { customer: true, device: true },
       orderBy: { createdAt: 'desc' },
     })
-    return csvResponse(entity, csv(
-      ['customer', 'phone', 'device', 'totalAmount', 'downPayment', 'remainingAmount', 'months', 'status', 'createdAt'],
-      nasiyalar.map((n) => [n.customer.name, n.customer.phone, n.device.model, n.totalAmount, n.downPayment, n.remainingAmount, n.months, n.status, n.createdAt]),
-    ))
+    return {
+      headers: [
+        'customer',
+        'phone',
+        'device',
+        'totalAmount',
+        'downPayment',
+        'remainingAmount',
+        'months',
+        'status',
+        'createdAt',
+      ],
+      rows: nasiyalar.map((n) => [
+        n.customer.name,
+        n.customer.phone,
+        n.device.model,
+        n.totalAmount.toString(),
+        n.downPayment.toString(),
+        n.remainingAmount.toString(),
+        n.months,
+        n.status,
+        n.createdAt,
+      ]),
+    }
   }
 
   if (entity === 'logs') {
@@ -84,11 +196,38 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       orderBy: { createdAt: 'desc' },
       take: 1000,
     })
-    return csvResponse(entity, csv(
-      ['actorId', 'actorType', 'action', 'targetType', 'targetId', 'note', 'createdAt'],
-      logs.map((log) => [log.actorId, log.actorType, log.action, log.targetType, log.targetId, log.note, log.createdAt]),
-    ))
+    return {
+      headers: ['actorId', 'actorType', 'action', 'targetType', 'targetId', 'note', 'createdAt'],
+      rows: logs.map((log) => [
+        log.actorId,
+        log.actorType,
+        log.action,
+        log.targetType,
+        log.targetId,
+        log.note,
+        log.createdAt,
+      ]),
+    }
   }
 
-  return new Response('Unknown export entity', { status: 404 })
+  return null
+}
+
+export async function GET(req: NextRequest, ctx: RouteContext) {
+  const guarded = await requireApiSession()
+  if (!guarded.ok) return guarded.response
+  const { session } = guarded
+  const { entity } = await ctx.params
+
+  const format = normalizeFormat(req.nextUrl.searchParams.get('format'))
+  if (!format) return new Response('Unsupported export format', { status: 400 })
+
+  const resolved = await resolveActiveShopId(session, req.nextUrl.searchParams.get('shopId'))
+  if (!resolved.ok) return resolved.response
+  const { shopId } = resolved
+
+  const data = await exportData(entity, shopId)
+  if (!data) return new Response('Unknown export entity', { status: 404 })
+
+  return exportResponse(entity, format, data)
 }

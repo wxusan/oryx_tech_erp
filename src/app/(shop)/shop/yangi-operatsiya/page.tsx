@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Smartphone, ShoppingCart, CreditCard } from 'lucide-react'
+import { Smartphone, ShoppingCart, CreditCard, HandCoins } from 'lucide-react'
 
 const operations = [
   {
@@ -22,18 +22,24 @@ const operations = [
     title: 'Nasiya sotuv',
     description: "Qurilmani nasiya asosida bering",
   },
+  {
+    href: '/shop/nasiyalar',
+    icon: HandCoins,
+    title: "To'lov qabul qilish",
+    description: "Mijoz nasiyasini tanlab, oylik to'lovni kiriting",
+  },
 ]
 
 export default function YangiOperatsiyaPage() {
   return (
     <div className="p-6 flex flex-col items-center justify-center min-h-[calc(100vh-3rem)]">
-      <div className="w-full max-w-3xl">
+      <div className="w-full max-w-5xl">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-zinc-900">Yangi operatsiya</h1>
           <p className="text-sm text-zinc-500 mt-1.5">Quyidagi amallardan birini tanlang</p>
         </div>
 
-        <div className="grid grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {operations.map(({ href, icon: Icon, title, description }) => (
             <Link key={href} href={href} className="block group">
               <div className="p-8 border border-zinc-200 rounded cursor-pointer hover:bg-zinc-900 hover:text-white transition-colors text-center group">

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -58,6 +59,7 @@ interface Device {
   imei: string
   supplier: Supplier | null
   status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
+  imageUrls: string[]
   createdAt: string
   sales?: Sale[]
   nasiya?: Nasiya[]
@@ -74,6 +76,23 @@ const statusLabels: Record<string, string> = {
 
 function fmt(n: number) {
   return Number(n).toLocaleString('ru-RU') + " so'm"
+}
+
+function getDeviceImageSrc(imageUrl: string) {
+  if (imageUrl.startsWith('shops/')) {
+    return `/api/uploads/device?key=${encodeURIComponent(imageUrl)}`
+  }
+
+  try {
+    const url = new URL(imageUrl)
+    if (url.pathname === '/api/uploads/device') {
+      return `${url.pathname}${url.search}`
+    }
+  } catch {
+    // Non-URL values are returned as-is so broken data remains visible in QA.
+  }
+
+  return imageUrl
 }
 
 export default function QurilmaDetailPage() {
@@ -136,7 +155,7 @@ export default function QurilmaDetailPage() {
   }
 
   async function handleSalePayment() {
-    if (!latestSale || !salePayAmount || !salePayMethod || salePayLoading) return
+    if (!latestSale || !salePayAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading) return
     setSalePayLoading(true)
     setSalePayError('')
     try {
@@ -277,6 +296,36 @@ export default function QurilmaDetailPage() {
           )}
         </div>
       </div>
+
+      {device.imageUrls.length > 0 && (
+        <div className="border border-zinc-200 rounded overflow-hidden">
+          <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
+            <span className="text-sm font-semibold text-zinc-900">Qurilma rasmlari</span>
+          </div>
+          <div className="p-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+              {device.imageUrls.map((imageUrl, index) => (
+                <a
+                  key={`${imageUrl}-${index}`}
+                  href={getDeviceImageSrc(imageUrl)}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="relative block aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50 hover:opacity-90"
+                >
+                  <Image
+                    src={getDeviceImageSrc(imageUrl)}
+                    alt={`${device.model} rasmi ${index + 1}`}
+                    fill
+                    sizes="(max-width: 640px) 50vw, 220px"
+                    unoptimized
+                    className="object-cover"
+                  />
+                </a>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Device info card */}
       <div className="border border-zinc-200 rounded overflow-hidden">
@@ -483,10 +532,13 @@ export default function QurilmaDetailPage() {
               </select>
             </div>
             <div>
-              <label className="text-xs font-medium text-zinc-700 block mb-1.5">Izoh</label>
+              <label className="text-xs font-medium text-zinc-700 block mb-1.5">
+                Izoh <span className="text-red-500">*</span>
+              </label>
               <Textarea
                 value={salePayNote}
                 onChange={(e) => setSalePayNote(e.target.value)}
+                placeholder="Masalan: mijoz qolgan qarzni to'ladi"
                 className="text-sm border-zinc-200 rounded min-h-[70px]"
               />
             </div>
@@ -496,7 +548,7 @@ export default function QurilmaDetailPage() {
               Bekor qilish
             </Button>
             <Button
-              disabled={!salePayAmount || !salePayMethod || salePayLoading}
+              disabled={!salePayAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading}
               onClick={handleSalePayment}
               className="bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
             >

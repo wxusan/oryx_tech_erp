@@ -10,6 +10,7 @@ const updateCustomerSchema = z.object({
   name: z.string().min(2).optional(),
   phone: z.string().min(9).optional(),
   note: z.string().optional(),
+  reason: z.string().optional(),
   shopId: z.string().optional(),
 })
 
@@ -35,13 +36,30 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     })
     if (!existing) return notFound('Mijoz topilmadi')
 
+    const identityChanged =
+      (parsed.data.name !== undefined && parsed.data.name !== existing.name) ||
+      (parsed.data.phone !== undefined && parsed.data.phone !== existing.phone)
+    const auditNote = parsed.data.reason?.trim() || parsed.data.note?.trim()
+    let identityChangeReason: string | undefined
+    if (identityChanged) {
+      if (!auditNote) {
+        return badRequest("Mijoz ismi yoki telefonini o'zgartirish uchun izoh yoki sabab kiritilishi shart")
+      }
+      if (auditNote.length < 5) {
+        return badRequest("Mijoz ma'lumotlarini o'zgartirish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
+      }
+      identityChangeReason = auditNote
+    }
+
+    const customerUpdate = {
+      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+      ...(parsed.data.phone !== undefined ? { phone: parsed.data.phone } : {}),
+      ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
+    }
+
     const customer = await prisma.customer.update({
       where: { id },
-      data: {
-        name: parsed.data.name,
-        phone: parsed.data.phone,
-        note: parsed.data.note,
-      },
+      data: customerUpdate,
       select: {
         id: true,
         shopId: true,
@@ -61,7 +79,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         targetType: 'Customer',
         targetId: id,
         oldValue: { name: existing.name, phone: existing.phone, note: existing.note },
-        newValue: parsed.data,
+        newValue: {
+          ...customerUpdate,
+          ...(identityChangeReason ? { identityChangeReason } : {}),
+        },
+        note: identityChangeReason,
       },
     })
 
