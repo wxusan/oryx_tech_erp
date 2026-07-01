@@ -10,7 +10,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, serverError } from '@/lib/api-helpers'
-import { startOfMonth, endOfMonth } from 'date-fns'
+import { tashkentMonthRange } from '@/lib/timezone'
 
 export async function GET(req: NextRequest) {
   try {
@@ -25,8 +25,7 @@ export async function GET(req: NextRequest) {
     const { shopId } = resolved
 
     const now = new Date()
-    const monthStart = startOfMonth(now)
-    const monthEnd = endOfMonth(now)
+    const { start: monthStart, end: monthEnd } = tashkentMonthRange(now)
 
     const [
       totalDevices,
@@ -38,6 +37,8 @@ export async function GET(req: NextRequest) {
       nasiyaSchedulesForStats,
       unpaidSales,
       inventoryAgg,
+      returnRefundAgg,
+      returnsThisMonth,
       recentActivity,
       upcomingPayments,
     ] = await Promise.all([
@@ -51,7 +52,7 @@ export async function GET(req: NextRequest) {
         where: {
           shopId,
           deletedAt: null,
-          createdAt: { gte: monthStart, lte: monthEnd },
+          createdAt: { gte: monthStart, lt: monthEnd },
         },
         include: { device: true },
       }),
@@ -61,7 +62,7 @@ export async function GET(req: NextRequest) {
         where: {
           shopId,
           deletedAt: null,
-          paidAt: { gte: monthStart, lte: monthEnd },
+          paidAt: { gte: monthStart, lt: monthEnd },
           sale: { deletedAt: null },
         },
       }),
@@ -71,7 +72,7 @@ export async function GET(req: NextRequest) {
         where: {
           shopId,
           deletedAt: null,
-          createdAt: { gte: monthStart, lte: monthEnd },
+          createdAt: { gte: monthStart, lt: monthEnd },
         },
         include: { device: true },
       }),
@@ -82,7 +83,7 @@ export async function GET(req: NextRequest) {
         where: {
           shopId,
           deletedAt: null,
-          paidAt: { gte: monthStart, lte: monthEnd },
+          paidAt: { gte: monthStart, lt: monthEnd },
           nasiya: { deletedAt: null, status: { not: 'CANCELLED' } },
         },
       }),
@@ -122,9 +123,27 @@ export async function GET(req: NextRequest) {
         },
       }),
 
+      prisma.deviceReturn.aggregate({
+        _sum: { refundAmount: true },
+        where: {
+          shopId,
+          createdAt: { gte: monthStart, lt: monthEnd },
+        },
+      }),
+
+      prisma.deviceReturn.count({
+        where: {
+          shopId,
+          createdAt: { gte: monthStart, lt: monthEnd },
+        },
+      }),
+
       // Last 5 log entries for this shop
       prisma.log.findMany({
-        where: { shopId },
+        where: {
+          shopId,
+          ...(session.user.role === 'SHOP_ADMIN' ? { actorType: 'SHOP_ADMIN' as const } : {}),
+        },
         orderBy: { createdAt: 'desc' },
         take: 5,
       }),
@@ -180,11 +199,11 @@ export async function GET(req: NextRequest) {
     const expectedThisMonth =
       nasiyaSchedulesForStats.reduce((sum, schedule) => {
         const due = effectiveDue(schedule)
-        if (due < monthStart || due > monthEnd) return sum
+        if (due < monthStart || due >= monthEnd) return sum
         return sum + outstanding(schedule.expectedAmount, schedule.paidAmount)
       }, 0) +
       unpaidSales.reduce((sum, sale) => {
-        if (!sale.dueDate || sale.dueDate < monthStart || sale.dueDate > monthEnd) return sum
+        if (!sale.dueDate || sale.dueDate < monthStart || sale.dueDate >= monthEnd) return sum
         return sum + Number(sale.remainingAmount)
       }, 0)
     const overdueSchedules = nasiyaSchedulesForStats.filter((schedule) => {
@@ -196,6 +215,7 @@ export async function GET(req: NextRequest) {
       overdueSchedules.reduce((sum, schedule) => sum + outstanding(schedule.expectedAmount, schedule.paidAmount), 0) +
       overdueSales.reduce((sum, sale) => sum + Number(sale.remainingAmount), 0)
     const inventoryPurchaseCost = Number(inventoryAgg._sum.purchasePrice ?? 0)
+    const returnRefundsThisMonth = Number(returnRefundAgg._sum.refundAmount ?? 0)
     const overdueCount = overdueSchedules.length + overdueSales.length
 
     return ok({
@@ -209,6 +229,9 @@ export async function GET(req: NextRequest) {
       realProfitThisMonth: cashBasisProfitThisMonth,
       accrualGrossProfitThisMonth,
       cashCollectedThisMonth: cashReceivedThisMonth,
+      returnRefundsThisMonth,
+      returnsThisMonth,
+      netCashAfterReturnsThisMonth: cashReceivedThisMonth - returnRefundsThisMonth,
       overdueCount,
       recentActivity,
       upcomingPayments: upcomingPayments

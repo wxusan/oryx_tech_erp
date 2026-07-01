@@ -51,8 +51,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const auditNote = note?.trim()
 
-    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const runPaymentTransaction = () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // Verify nasiya exists and belongs to this shop
       const nasiya = await tx.nasiya.findFirst({
         where: { id: nasiyaId, shopId, deletedAt: null, status: { not: 'CANCELLED' } },
@@ -82,6 +83,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         where: { id: nasiyaScheduleId, nasiyaId, shopId },
       })
       if (!selectedSchedule) throw { status: 404, message: "To'lov jadvali topilmadi" }
+      if (deferredToNext) {
+        const currentDue = selectedSchedule.delayedUntil ?? selectedSchedule.dueDate
+        if (!delayedUntil || delayedUntil <= currentDue) {
+          throw { status: 400, message: "Yangi to'lov sanasi hozirgi muddatdan keyin bo'lishi kerak" }
+        }
+      }
 
       const unpaidSchedules = [...nasiya.schedules]
         .filter((schedule) => {
@@ -117,7 +124,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             status: 'DEFERRED',
             delayedUntil,
             deferredToNext: true,
-            note,
+            note: auditNote,
           },
         })
         if (updatedSchedule.count !== 1) {
@@ -159,7 +166,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               status: nextStatus,
               paidAt: isFullyPaid ? date : null,
               paymentMethod,
-              note,
+              note: auditNote,
             },
           })
           if (updatedSchedule.count !== 1) {
@@ -178,7 +185,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             amount,
             paymentMethod,
             paidAt: date,
-            note,
+            note: auditNote,
             idempotencyKey,
             createdBy: session.user.id,
           },
@@ -236,12 +243,27 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           action: 'PAYMENT',
           targetType: 'NasiyaSchedule',
           targetId: nasiyaScheduleId,
-          newValue: { amount, paymentMethod, deferredToNext, allocations },
+          newValue: { amount, paymentMethod, deferredToNext, allocations, auditReason: auditNote },
+          note: auditNote,
         },
       })
 
       return { nasiyaId, nasiyaScheduleId, amount, remaining, allocations, duplicate: false }
-    })
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+
+    let result: Awaited<ReturnType<typeof runPaymentTransaction>> | undefined
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        result = await runPaymentTransaction()
+        break
+      } catch (err) {
+        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034' && attempt < 2) {
+          continue
+        }
+        throw err
+      }
+    }
+    if (!result) return serverError()
 
     // Flush freshly-queued notifications immediately (best-effort, post-commit).
     await processPendingNotifications().catch((e) => console.error('[notify] flush failed', e))
@@ -253,6 +275,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (e.status === 400) return badRequest(e.message)
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
+    }
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return conflict("Idempotency-Key bo'yicha to'lov allaqachon yozilgan")
     }
     console.error('[POST /api/nasiya/[id]/payment]', err)
     return serverError()

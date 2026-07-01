@@ -36,7 +36,7 @@ function buildUrl(
 // ---------------------------------------------------------------------------
 
 /** Entities supported by GET /api/export/[entity] (see route.ts). */
-export type ExportEntity = 'devices' | 'customers' | 'sales' | 'nasiya' | 'logs'
+export type ExportEntity = 'devices' | 'customers' | 'sales' | 'nasiya' | 'returns' | 'logs'
 export type ExportFormat = 'csv' | 'xlsx'
 
 /**

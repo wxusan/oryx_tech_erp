@@ -23,30 +23,9 @@ import { type NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hasValidInternalSecret, internalSecret } from '@/lib/api-auth'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { tashkentDayRange } from '@/lib/timezone'
 
 export const maxDuration = 60
-
-function tashkentDayRange(now = new Date()) {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Tashkent',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(now)
-  const part = (type: string) => parts.find((item) => item.type === type)?.value ?? ''
-  const year = Number(part('year'))
-  const month = Number(part('month'))
-  const day = Number(part('day'))
-  const start = new Date(Date.UTC(year, month - 1, day, -5, 0, 0, 0))
-  const end = new Date(start)
-  end.setUTCDate(end.getUTCDate() + 1)
-
-  return {
-    start,
-    end,
-    dayKey: `${part('year')}-${part('month')}-${part('day')}`,
-  }
-}
 
 function outstandingAmount(expected: unknown, paid: unknown) {
   return Math.max(0, Number(expected) - Number(paid ?? 0))
@@ -154,35 +133,37 @@ export async function GET(request: NextRequest): Promise<Response> {
   })
 
   for (const schedule of overdue) {
-    await prisma.nasiyaSchedule.update({
-      where: { id: schedule.id },
-      data: { status: 'OVERDUE' },
-    })
-    await prisma.nasiya.update({
-      where: { id: schedule.nasiya.id },
-      data: { status: 'OVERDUE' },
-    })
-
     const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
     const daysLate = Math.floor((today.getTime() - effectiveDue.getTime()) / 86400000)
     const msg = `🔴 Muddati o'tgan to'lov\n👤 ${schedule.nasiya.customer.name}\n📞 ${schedule.nasiya.customer.phone}\n📱 ${schedule.nasiya.device.model}\n💵 ${outstandingAmount(schedule.expectedAmount, schedule.paidAmount).toLocaleString()} so'm\n⏳ ${daysLate} kun kechikmoqda`
-    for (const admin of schedule.nasiya.shop.admins) {
-      const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
-      await prisma.notification.upsert({
-        where: { dedupeKey },
-        update: {},
-        create: {
-          dedupeKey,
-          shopId: schedule.nasiya.shopId,
-          type: 'OVERDUE',
-          message: msg,
-          telegramId: admin.telegramId!,
-          scheduledAt: new Date(),
-          relatedId: schedule.id,
-          relatedType: 'NasiyaSchedule',
-        },
+    await prisma.$transaction(async (tx) => {
+      for (const admin of schedule.nasiya.shop.admins) {
+        const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
+        await tx.notification.upsert({
+          where: { dedupeKey },
+          update: {},
+          create: {
+            dedupeKey,
+            shopId: schedule.nasiya.shopId,
+            type: 'OVERDUE',
+            message: msg,
+            telegramId: admin.telegramId!,
+            scheduledAt: new Date(),
+            relatedId: schedule.id,
+            relatedType: 'NasiyaSchedule',
+          },
+        })
+      }
+
+      await tx.nasiyaSchedule.updateMany({
+        where: { id: schedule.id, status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] } },
+        data: { status: 'OVERDUE' },
       })
-    }
+      await tx.nasiya.update({
+        where: { id: schedule.nasiya.id },
+        data: { status: 'OVERDUE' },
+      })
+    })
   }
 
   const salePaymentsDueToday = await prisma.sale.findMany({

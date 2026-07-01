@@ -6,6 +6,7 @@ import {
   Boxes,
   CalendarClock,
   CircleDollarSign,
+  RotateCcw,
   TrendingUp,
 } from 'lucide-react'
 import { Bar, BarChart, CartesianGrid, XAxis, YAxis } from 'recharts'
@@ -34,6 +35,9 @@ interface ShopStats {
   realProfitThisMonth: number
   accrualGrossProfitThisMonth: number
   cashCollectedThisMonth: number
+  returnRefundsThisMonth: number
+  returnsThisMonth: number
+  netCashAfterReturnsThisMonth: number
 }
 
 function fmt(value: number) {
@@ -82,6 +86,7 @@ export default function ShopReportPage() {
   const collected = stats?.cashCollectedThisMonth ?? stats?.cashReceivedThisMonth ?? 0
   const expected = stats?.expectedThisMonth ?? 0
   const overdue = stats?.overdueMoney ?? 0
+  const refunds = stats?.returnRefundsThisMonth ?? 0
   const inventory = stats?.inventoryPurchaseCost ?? 0
   const grossProfit = stats?.accrualGrossProfitThisMonth ?? stats?.realProfitThisMonth ?? 0
   const collectionBase = collected + expected
@@ -89,6 +94,7 @@ export default function ShopReportPage() {
 
   const cashFlowData = [
     { name: 'Tushum', amount: collected, fill: 'var(--color-collected)' },
+    { name: 'Qaytarildi', amount: refunds, fill: 'var(--color-refunds)' },
     { name: 'Kutilmoqda', amount: expected, fill: 'var(--color-expected)' },
     { name: 'Kechikkan', amount: overdue, fill: 'var(--color-overdue)' },
   ]
@@ -100,6 +106,7 @@ export default function ShopReportPage() {
 
   const chartConfig = {
     collected: { label: 'Tushum', color: '#2563eb' },
+    refunds: { label: 'Qaytarildi', color: '#9333ea' },
     expected: { label: 'Kutilmoqda', color: '#0f766e' },
     overdue: { label: 'Kechikkan', color: '#dc2626' },
     inventory: { label: 'Ombor', color: '#64748b' },
@@ -165,6 +172,19 @@ export default function ShopReportPage() {
               <CardContent>
                 <div className="text-2xl font-bold text-zinc-900">{fmt(expected)}</div>
                 <p className="mt-3 text-xs text-zinc-500">Nasiya va qisman sotuvlardan qolgan oy ichidagi summa</p>
+              </CardContent>
+            </Card>
+
+            <Card className="rounded-lg">
+              <CardHeader>
+                <CardDescription>Qaytarilgan pul</CardDescription>
+                <CardAction><RotateCcw className="size-4 text-purple-600" /></CardAction>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-zinc-900">{fmt(refunds)}</div>
+                <p className="mt-3 text-xs text-zinc-500">
+                  Bu oy {stats.returnsThisMonth} ta qaytarish bo'yicha yozilgan summa
+                </p>
               </CardContent>
             </Card>
 

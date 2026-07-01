@@ -7,7 +7,8 @@ import { prisma } from '@/lib/prisma'
 import { ok, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
-import { startOfMonth, endOfMonth, addDays } from 'date-fns'
+import { tashkentMonthRange } from '@/lib/timezone'
+import { addDays } from 'date-fns'
 
 export async function GET() {
   try {
@@ -15,8 +16,7 @@ export async function GET() {
     if (!guarded.ok) return guarded.response
 
     const now = new Date()
-    const monthStart = startOfMonth(now)
-    const monthEnd = endOfMonth(now)
+    const { start: monthStart, end: monthEnd } = tashkentMonthRange(now)
     const dueSoonCutoff = addDays(now, 7)
 
     const [thisMonthResult, totalRevenueResult, totalShops, activeShops, suspendedShops, dueSoon, overdue, shops] =
@@ -24,7 +24,7 @@ export async function GET() {
       // This month's total revenue
       prisma.shopPayment.aggregate({
         _sum: { amount: true },
-        where: { deletedAt: null, paidAt: { gte: monthStart, lte: monthEnd } },
+        where: { deletedAt: null, paidAt: { gte: monthStart, lt: monthEnd } },
       }),
 
       prisma.shopPayment.aggregate({

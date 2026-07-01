@@ -121,6 +121,7 @@ model Shop {
   payments      ShopPayment[]
   admins        ShopAdmin[]
   devices       Device[]
+  deviceReturns DeviceReturn[]
   suppliers     Supplier[]
   sales         Sale[]
   customers     Customer[]
@@ -239,8 +240,9 @@ model Device {
   supplier Supplier? @relation(fields: [supplierId], references: [id])
   sales    Sale[]
   nasiya   Nasiya[]
+  returns  DeviceReturn[]
 
-  @@unique([shopId, imei])
+  @@index([shopId, imei])
   @@index([shopId])
   @@index([status])
 }
@@ -254,6 +256,7 @@ model Customer {
   shopId           String
   name             String
   phone            String
+  normalizedPhone  String?
   passportPhotoUrl String?
   note             String?
   createdAt        DateTime  @default(now())
@@ -267,6 +270,7 @@ model Customer {
   nasiya Nasiya[]
 
   @@index([shopId])
+  @@index([shopId, normalizedPhone])
 }
 
 // ---------------------------------------------------------------------------
@@ -297,6 +301,7 @@ model Sale {
   device   Device        @relation(fields: [deviceId], references: [id])
   customer Customer      @relation(fields: [customerId], references: [id])
   payments SalePayment[]
+  returns  DeviceReturn[]
 
   @@index([shopId])
   @@index([customerId])
@@ -364,6 +369,7 @@ model Nasiya {
   customer  Customer         @relation(fields: [customerId], references: [id])
   schedules NasiyaSchedule[]
   payments  NasiyaPayment[]
+  returns   DeviceReturn[]
 
   @@index([shopId])
   @@index([status])
@@ -430,6 +436,35 @@ model NasiyaPayment {
   @@index([nasiyaScheduleId])
   @@index([shopId])
   @@index([paidAt])
+}
+
+// ---------------------------------------------------------------------------
+// DeviceReturn
+// ---------------------------------------------------------------------------
+
+model DeviceReturn {
+  id            String         @id @default(cuid())
+  shopId        String
+  deviceId      String
+  saleId        String?
+  nasiyaId      String?
+  refundAmount  Decimal        @default(0) @db.Decimal(12, 2)
+  refundMethod  PaymentMethod?
+  note          String
+  createdBy     String
+  createdAt     DateTime       @default(now())
+
+  // Relations
+  shop   Shop    @relation(fields: [shopId], references: [id])
+  device Device  @relation(fields: [deviceId], references: [id])
+  sale   Sale?   @relation(fields: [saleId], references: [id])
+  nasiya Nasiya? @relation(fields: [nasiyaId], references: [id])
+
+  @@index([shopId])
+  @@index([deviceId])
+  @@index([saleId])
+  @@index([nasiyaId])
+  @@index([createdAt])
 }
 
 // ---------------------------------------------------------------------------

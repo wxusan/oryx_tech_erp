@@ -34,6 +34,11 @@ function decimal(value) {
   return value.toFixed(2)
 }
 
+function normalizePhone(phone) {
+  const digits = phone.replace(/\D/g, '')
+  return digits || null
+}
+
 async function insert(table, data) {
   const keys = Object.keys(data)
   const columns = keys.map((key) => `"${key}"`).join(', ')
@@ -103,6 +108,7 @@ async function resetExistingDemoData() {
   await client.query('delete from "Nasiya" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "SalePayment" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Sale" where "shopId" = any($1)', [shopIds])
+  await client.query('delete from "DeviceReturn" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Device" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Customer" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Supplier" where "shopId" = any($1)', [shopIds])
@@ -182,6 +188,7 @@ async function seedShop(superAdminId, index, shop) {
       shopId,
       name: customer.name,
       phone: customer.phone,
+      normalizedPhone: normalizePhone(customer.phone),
       passportPhotoUrl: customer.passportPhotoUrl,
       note: customer.note,
       createdAt: dateFromNow(customer.createdDays),

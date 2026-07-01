@@ -14,6 +14,7 @@ import {
   DialogTitle,
   DialogFooter,
 } from '@/components/ui/dialog'
+import { paymentMethodLabel } from '@/lib/labels'
 import { ArrowLeft, Trash2 } from 'lucide-react'
 
 interface Supplier {
@@ -137,6 +138,8 @@ export default function QurilmaDetailPage() {
   const [salePayLoading, setSalePayLoading] = useState(false)
   const [returnModalOpen, setReturnModalOpen] = useState(false)
   const [returnNote, setReturnNote] = useState('')
+  const [returnRefundAmount, setReturnRefundAmount] = useState('')
+  const [returnRefundMethod, setReturnRefundMethod] = useState('')
   const [returnError, setReturnError] = useState('')
   const [returning, setReturning] = useState(false)
   const [restockModalOpen, setRestockModalOpen] = useState(false)
@@ -232,14 +235,25 @@ export default function QurilmaDetailPage() {
   }
 
   async function handleReturnDevice() {
-    if (!returnNote.trim() || returning) return
+    const refundAmount = Number(returnRefundAmount || 0)
+    if (
+      returnNote.trim().length < 5 ||
+      Number.isNaN(refundAmount) ||
+      refundAmount < 0 ||
+      (refundAmount > 0 && !returnRefundMethod) ||
+      returning
+    ) return
     setReturning(true)
     setReturnError('')
     try {
       const res = await fetch(`/api/devices/${id}/return`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note: returnNote }),
+        body: JSON.stringify({
+          note: returnNote,
+          refundAmount,
+          refundMethod: refundAmount > 0 ? returnRefundMethod : undefined,
+        }),
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Qaytarishda xatolik')
@@ -455,7 +469,7 @@ export default function QurilmaDetailPage() {
             )}
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">To'lov usuli</span>
-              <span className="text-zinc-900 font-medium">{latestSale.paymentMethod}</span>
+              <span className="text-zinc-900 font-medium">{paymentMethodLabel(latestSale.paymentMethod)}</span>
             </div>
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">Sotilgan sana</span>
@@ -680,13 +694,50 @@ export default function QurilmaDetailPage() {
                 className="text-sm border-zinc-200 rounded min-h-[80px]"
               />
             </div>
+            <div>
+              <label htmlFor="return-refund-amount" className="text-xs font-medium text-zinc-700 block mb-1.5">
+                Qaytarilgan summa
+              </label>
+              <Input
+                id="return-refund-amount"
+                type="number"
+                min="0"
+                value={returnRefundAmount}
+                onChange={(e) => setReturnRefundAmount(e.target.value)}
+                placeholder="0"
+                className="h-9 text-sm border-zinc-200 rounded"
+              />
+            </div>
+            <div>
+              <label htmlFor="return-refund-method" className="text-xs font-medium text-zinc-700 block mb-1.5">
+                Qaytarish usuli {Number(returnRefundAmount || 0) > 0 && <span className="text-red-500">*</span>}
+              </label>
+              <select
+                id="return-refund-method"
+                value={returnRefundMethod}
+                onChange={(e) => setReturnRefundMethod(e.target.value)}
+                disabled={Number(returnRefundAmount || 0) <= 0}
+                className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded disabled:bg-zinc-50 disabled:text-zinc-400"
+              >
+                <option value="">Tanlang...</option>
+                <option value="CASH">Naqd</option>
+                <option value="CARD">Karta</option>
+                <option value="TRANSFER">Bank o'tkazmasi</option>
+                <option value="OTHER">Boshqa</option>
+              </select>
+            </div>
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setReturnModalOpen(false)} className="border-zinc-200 text-zinc-700 rounded">
               Bekor qilish
             </Button>
             <Button
-              disabled={returnNote.trim().length < 5 || returning}
+              disabled={
+                returnNote.trim().length < 5 ||
+                Number(returnRefundAmount || 0) < 0 ||
+                (Number(returnRefundAmount || 0) > 0 && !returnRefundMethod) ||
+                returning
+              }
               onClick={handleReturnDevice}
               className="bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-40"
             >

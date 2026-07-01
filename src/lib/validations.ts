@@ -246,6 +246,10 @@ export const addNasiyaPaymentSchema = z
     note: z.string().optional(),
     deferredToNext: z.boolean().optional().default(false),
   })
+  .refine((data) => (data.note?.trim().length ?? 0) >= 5, {
+    message: "To'lov izohi kamida 5 ta belgidan iborat bo'lishi kerak",
+    path: ['note'],
+  })
   .refine((data) => data.deferredToNext || data.amount > 0, {
     message: "To'lov summasi musbat son bo'lishi kerak",
     path: ['amount'],

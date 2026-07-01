@@ -14,6 +14,7 @@ import { createNasiyaSchema } from '@/lib/validations'
 import { generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { normalizePhone } from '@/lib/phone'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (passportPhotoUrl && !passportPhotoUrl.startsWith(`shops/${shopId}/passports/`)) {
       return badRequest("Pasport rasmi boshqa do'konga tegishli")
     }
+    const normalizedPhone = normalizePhone(customerPhone)
 
     const remainingAmount = totalAmount - downPayment
     // Generate exact schedule rows. The last month absorbs rounding remainder.
@@ -65,13 +67,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (reserved.count !== 1) throw { status: 409, message: "Qurilma allaqachon sotilgan" }
 
       const existingCustomer = await tx.customer.findFirst({
-        where: { shopId, phone: customerPhone, deletedAt: null },
+        where: {
+          shopId,
+          deletedAt: null,
+          OR: [
+            ...(normalizedPhone ? [{ normalizedPhone }] : []),
+            { phone: customerPhone },
+          ],
+        },
       })
       const customer = existingCustomer
         ? await tx.customer.update({
             where: { id: existingCustomer.id },
             data: {
               name: customerName,
+              normalizedPhone,
               passportPhotoUrl: passportPhotoUrl ?? existingCustomer.passportPhotoUrl,
             },
           })
@@ -80,6 +90,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               shopId,
               name: customerName,
               phone: customerPhone,
+              normalizedPhone,
               passportPhotoUrl,
             },
           })
@@ -168,6 +179,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const e = err as { status: number; message: string }
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
+    }
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return conflict('Bu telefon raqam bilan faol mijoz allaqachon mavjud')
     }
     console.error('[POST /api/devices/[id]/nasiya]', err)
     return serverError()

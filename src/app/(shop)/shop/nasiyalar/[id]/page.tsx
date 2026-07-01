@@ -29,6 +29,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { paymentMethodLabel } from '@/lib/labels'
 import { ArrowLeft } from 'lucide-react'
 
 interface NasiyaSchedule {
@@ -249,7 +250,7 @@ export default function NasiyaDetailPage() {
 
   const canSubmit = carryOver
     ? payDate.trim() && selectedScheduleId && payNote.trim().length >= 5
-    : payAmount.trim() && payMethod && payDate.trim() && selectedScheduleId
+    : payAmount.trim() && payMethod && payDate.trim() && selectedScheduleId && payNote.trim().length >= 5
 
   async function handlePaymentSubmit() {
     if (!canSubmit || submitting) return
@@ -477,7 +478,7 @@ export default function NasiyaDetailPage() {
                 <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
                   <td className="px-4 py-3 text-zinc-700">{new Date(payment.paidAt).toLocaleDateString('uz-UZ')}</td>
                   <td className="px-4 py-3 font-medium text-zinc-900">{fmt(payment.amount)} so'm</td>
-                  <td className="px-4 py-3 text-zinc-700">{payment.paymentMethod ?? '—'}</td>
+                  <td className="px-4 py-3 text-zinc-700">{paymentMethodLabel(payment.paymentMethod)}</td>
                   <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
                 </tr>
               ))}
@@ -617,12 +618,12 @@ export default function NasiyaDetailPage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Izoh {carryOver && <span className="text-red-500">*</span>}
+                Izoh <span className="text-red-500">*</span>
               </label>
               <Textarea
                 value={payNote}
                 onChange={(e) => setPayNote(e.target.value)}
-                placeholder={carryOver ? "Masalan: mijoz 10 kunga kechiktirishni so'radi" : 'Ixtiyoriy izoh...'}
+                placeholder={carryOver ? "Masalan: mijoz 10 kunga kechiktirishni so'radi" : "Masalan: mijoz oylik to'lovni naqd berdi"}
                 className="text-sm border-zinc-200 rounded-lg min-h-[80px]"
               />
             </div>

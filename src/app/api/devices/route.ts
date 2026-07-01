@@ -109,9 +109,9 @@ export async function POST(req: NextRequest) {
     if (!resolved.ok) return resolved.response
     const resolvedShopId = resolved.shopId
 
-    // Check IMEI uniqueness within shop
-    const existing = await prisma.device.findUnique({
-      where: { shopId_imei: { shopId: resolvedShopId, imei } },
+    // Check active IMEI uniqueness within shop. Soft-deleted rows may be reused.
+    const existing = await prisma.device.findFirst({
+      where: { shopId: resolvedShopId, imei, deletedAt: null },
     })
     if (existing) return conflict("Bu IMEI raqami allaqachon mavjud")
 
@@ -164,7 +164,7 @@ export async function POST(req: NextRequest) {
     return created(device, "Qurilma muvaffaqiyatli qo'shildi")
   } catch (err) {
     // Handle the race where two concurrent adds both pass the IMEI pre-check
-    // and one violates the @@unique([shopId, imei]) constraint (Prisma P2002).
+    // and one violates the active partial unique index (Prisma P2002).
     if (err && typeof err === 'object' && 'code' in err && (err as { code?: string }).code === 'P2002') {
       return conflict("Bu IMEI raqami allaqachon mavjud")
     }

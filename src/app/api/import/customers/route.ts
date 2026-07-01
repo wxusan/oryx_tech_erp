@@ -3,7 +3,8 @@ import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
-import { ok, badRequest, serverError } from '@/lib/api-helpers'
+import { ok, badRequest, conflict, serverError } from '@/lib/api-helpers'
+import { normalizePhone } from '@/lib/phone'
 
 const customerImportSchema = z.object({
   shopId: z.string().optional(),
@@ -36,8 +37,16 @@ export async function POST(req: NextRequest) {
 
       for (const item of parsed.data.customers) {
         const phone = item.phone.trim()
+        const normalizedPhone = normalizePhone(phone)
         const existing = await tx.customer.findFirst({
-          where: { shopId: resolved.shopId, phone, deletedAt: null },
+          where: {
+            shopId: resolved.shopId,
+            deletedAt: null,
+            OR: [
+              ...(normalizedPhone ? [{ normalizedPhone }] : []),
+              { phone },
+            ],
+          },
           select: { id: true },
         })
 
@@ -45,7 +54,7 @@ export async function POST(req: NextRequest) {
           updated += 1
           await tx.customer.update({
             where: { id: existing.id },
-            data: { name: item.name.trim(), note: item.note },
+            data: { name: item.name.trim(), normalizedPhone, note: item.note },
           })
         } else {
           created += 1
@@ -54,6 +63,7 @@ export async function POST(req: NextRequest) {
               shopId: resolved.shopId,
               name: item.name.trim(),
               phone,
+              normalizedPhone,
               note: item.note,
             },
           })
@@ -77,6 +87,9 @@ export async function POST(req: NextRequest) {
 
     return ok(result, 'Mijozlar import qilindi')
   } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return conflict('Import ichida takrorlangan faol telefon raqam bor')
+    }
     console.error('[POST /api/import/customers]', err)
     return serverError()
   }

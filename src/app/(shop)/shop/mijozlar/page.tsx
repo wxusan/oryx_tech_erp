@@ -30,6 +30,7 @@ export default function CustomersPage() {
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
   const [note, setNote] = useState('')
+  const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
 
@@ -70,6 +71,7 @@ export default function CustomersPage() {
     setName(customer.name)
     setPhone(customer.phone)
     setNote(customer.note ?? '')
+    setReason('')
     setSaveError('')
   }
 
@@ -78,14 +80,21 @@ export default function CustomersPage() {
     setSaving(true)
     setSaveError('')
     try {
+      const identityChanged = name !== editing.name || phone !== editing.phone
       const res = await fetch(`/api/customers/${editing.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, phone, note }),
+        body: JSON.stringify({
+          name,
+          phone,
+          note,
+          reason: identityChanged ? reason : undefined,
+        }),
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Saqlashda xatolik')
       setEditing(null)
+      setReason('')
       loadCustomers()
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Saqlashda xatolik')
@@ -175,6 +184,20 @@ export default function CustomersPage() {
               <label htmlFor="customer-phone" className="block text-xs font-medium text-zinc-700 mb-1.5">Telefon</label>
               <Input id="customer-phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
             </div>
+            {editing && (name !== editing.name || phone !== editing.phone) && (
+              <div>
+                <label htmlFor="customer-reason" className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  O'zgartirish sababi <span className="text-red-500">*</span>
+                </label>
+                <Textarea
+                  id="customer-reason"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  placeholder="Masalan: mijoz telefon raqamini yangiladi"
+                  className="text-sm border-zinc-200 rounded min-h-[70px]"
+                />
+              </div>
+            )}
             <div>
               <label htmlFor="customer-note" className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
               <Textarea id="customer-note" value={note} onChange={(e) => setNote(e.target.value)} className="text-sm border-zinc-200 rounded min-h-[80px]" />
@@ -182,7 +205,16 @@ export default function CustomersPage() {
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setEditing(null)} className="border-zinc-200 rounded">Bekor qilish</Button>
-            <Button disabled={saving || name.trim().length < 2 || phone.trim().length < 9} onClick={saveCustomer} className="bg-zinc-900 text-white rounded">
+            <Button
+              disabled={
+                saving ||
+                name.trim().length < 2 ||
+                phone.trim().length < 9 ||
+                (!!editing && (name !== editing.name || phone !== editing.phone) && reason.trim().length < 5)
+              }
+              onClick={saveCustomer}
+              className="bg-zinc-900 text-white rounded"
+            >
               {saving ? 'Saqlanmoqda...' : 'Saqlash'}
             </Button>
           </DialogFooter>

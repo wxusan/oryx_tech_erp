@@ -9,7 +9,12 @@ type RouteContext = { params: Promise<{ id: string }> }
 
 const returnDeviceSchema = z.object({
   note: z.string({ error: 'Sabab kiritilishi shart' }).min(5, 'Sabab kamida 5 ta belgidan iborat bo\'lishi kerak'),
+  refundAmount: z.number().min(0, "Qaytarilgan summa manfiy bo'lmasligi kerak").optional().default(0),
+  refundMethod: z.enum(['CASH', 'TRANSFER', 'CARD', 'OTHER']).optional(),
   shopId: z.string().optional(),
+}).refine((data) => data.refundAmount <= 0 || data.refundMethod !== undefined, {
+  message: "Pul qaytarilgan bo'lsa, qaytarish usuli tanlanishi shart",
+  path: ['refundMethod'],
 })
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
@@ -43,10 +48,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         throw { status: 409, message: 'Faqat sotilgan qurilmani qaytarish mumkin' }
       }
 
-      const returned = await tx.device.update({
-        where: { id: deviceId },
+      const guardedReturn = await tx.device.updateMany({
+        where: { id: deviceId, shopId, deletedAt: null, status: { in: ['SOLD_CASH', 'SOLD_NASIYA'] } },
         data: { status: 'RETURNED', updatedAt: new Date(), note: parsed.data.note },
       })
+      if (guardedReturn.count !== 1) {
+        throw { status: 409, message: 'Qurilma qaytarish amali allaqachon bajarilgan' }
+      }
 
       const sale = device.sales[0]
       if (sale) {
@@ -77,6 +85,19 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         })
       }
 
+      const returnRecord = await tx.deviceReturn.create({
+        data: {
+          shopId,
+          deviceId,
+          saleId: sale?.id,
+          nasiyaId: nasiya?.id,
+          refundAmount: parsed.data.refundAmount,
+          refundMethod: parsed.data.refundAmount > 0 ? parsed.data.refundMethod : undefined,
+          note: parsed.data.note,
+          createdBy: session.user.id,
+        },
+      })
+
       await tx.log.create({
         data: {
           shopId,
@@ -86,18 +107,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           targetType: 'Device',
           targetId: deviceId,
           oldValue: { status: device.status, saleId: sale?.id, nasiyaId: nasiya?.id },
-          newValue: { status: 'RETURNED', note: parsed.data.note },
+          newValue: {
+            status: 'RETURNED',
+            returnId: returnRecord.id,
+            refundAmount: parsed.data.refundAmount,
+            refundMethod: parsed.data.refundMethod,
+            note: parsed.data.note,
+          },
           note: parsed.data.note,
         },
       })
 
-      return returned
-    })
+      return tx.device.findFirst({ where: { id: deviceId, shopId } })
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
     return ok(result, 'Qurilma qaytarildi va bog\'langan sotuv/nasiya bekor qilindi')
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }
+      if (e.status === 400) return badRequest(e.message)
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
     }

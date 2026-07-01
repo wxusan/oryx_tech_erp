@@ -1,8 +1,10 @@
 import { NextRequest } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
+import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
-import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
+import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { normalizePhone } from '@/lib/phone'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -53,7 +55,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     const customerUpdate = {
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
-      ...(parsed.data.phone !== undefined ? { phone: parsed.data.phone } : {}),
+      ...(parsed.data.phone !== undefined
+        ? { phone: parsed.data.phone, normalizedPhone: normalizePhone(parsed.data.phone) }
+        : {}),
       ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
     }
 
@@ -89,6 +93,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     return ok(customer, 'Mijoz yangilandi')
   } catch (err) {
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return conflict('Bu telefon raqam bilan faol mijoz allaqachon mavjud')
+    }
     console.error('[PATCH /api/customers/[id]]', err)
     return serverError()
   }

@@ -12,6 +12,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { createSaleSchema } from '@/lib/validations'
 import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { normalizePhone } from '@/lib/phone'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -42,6 +43,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const normalizedPhone = normalizePhone(customerPhone)
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
@@ -58,15 +60,22 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (reserved.count !== 1) throw { status: 409, message: "Qurilma allaqachon sotilgan" }
 
       const existingCustomer = await tx.customer.findFirst({
-        where: { shopId, phone: customerPhone, deletedAt: null },
+        where: {
+          shopId,
+          deletedAt: null,
+          OR: [
+            ...(normalizedPhone ? [{ normalizedPhone }] : []),
+            { phone: customerPhone },
+          ],
+        },
       })
       const customer = existingCustomer
         ? await tx.customer.update({
             where: { id: existingCustomer.id },
-            data: { name: customerName },
+            data: { name: customerName, normalizedPhone },
           })
         : await tx.customer.create({
-            data: { shopId, name: customerName, phone: customerPhone },
+            data: { shopId, name: customerName, phone: customerPhone, normalizedPhone },
           })
 
       const paid = paidFully ? salePrice : amountPaid ?? 0
@@ -153,6 +162,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const e = err as { status: number; message: string }
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
+    }
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return conflict('Bu telefon raqam bilan faol mijoz allaqachon mavjud')
     }
     console.error('[POST /api/devices/[id]/sell]', err)
     return serverError()

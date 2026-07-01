@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/node'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
+import { deviceStatusLabel, nasiyaStatusLabel, paymentMethodLabel } from '@/lib/labels'
 
 type RouteContext = { params: Promise<{ entity: string }> }
 type ExportCell = string | number | boolean | Date | null | undefined
@@ -85,7 +86,7 @@ function exportResponse(entity: string, format: ExportFormat, data: ExportData) 
   return csvResponse(entity, csv(data.headers, data.rows))
 }
 
-async function exportData(entity: string, shopId: string): Promise<ExportData | null> {
+async function exportData(entity: string, shopId: string, role: string): Promise<ExportData | null> {
   if (entity === 'devices') {
     const devices = await prisma.device.findMany({
       where: { shopId, deletedAt: null },
@@ -109,7 +110,7 @@ async function exportData(entity: string, shopId: string): Promise<ExportData | 
         d.storage,
         d.batteryHealth,
         d.purchasePrice.toString(),
-        d.status,
+        deviceStatusLabel(d.status),
         d.createdAt,
       ]),
     }
@@ -140,6 +141,7 @@ async function exportData(entity: string, shopId: string): Promise<ExportData | 
         'salePrice',
         'amountPaid',
         'remainingAmount',
+        'paymentMethod',
         'paidFully',
         'dueDate',
         'createdAt',
@@ -151,6 +153,7 @@ async function exportData(entity: string, shopId: string): Promise<ExportData | 
         s.salePrice.toString(),
         s.amountPaid.toString(),
         s.remainingAmount.toString(),
+        paymentMethodLabel(s.paymentMethod),
         s.paidFully,
         s.dueDate,
         s.createdAt,
@@ -184,15 +187,50 @@ async function exportData(entity: string, shopId: string): Promise<ExportData | 
         n.downPayment.toString(),
         n.remainingAmount.toString(),
         n.months,
-        n.status,
+        nasiyaStatusLabel(n.status),
         n.createdAt,
+      ]),
+    }
+  }
+
+  if (entity === 'returns') {
+    const returns = await prisma.deviceReturn.findMany({
+      where: { shopId },
+      include: {
+        device: true,
+        sale: { include: { customer: true } },
+        nasiya: { include: { customer: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    })
+    return {
+      headers: [
+        'device',
+        'imei',
+        'customer',
+        'refundAmount',
+        'refundMethod',
+        'note',
+        'createdAt',
+      ],
+      rows: returns.map((item) => [
+        item.device.model,
+        item.device.imei,
+        item.sale?.customer.name ?? item.nasiya?.customer.name ?? '',
+        item.refundAmount.toString(),
+        paymentMethodLabel(item.refundMethod),
+        item.note,
+        item.createdAt,
       ]),
     }
   }
 
   if (entity === 'logs') {
     const logs = await prisma.log.findMany({
-      where: { shopId },
+      where: {
+        shopId,
+        ...(role === 'SHOP_ADMIN' ? { actorType: 'SHOP_ADMIN' as const } : {}),
+      },
       orderBy: { createdAt: 'desc' },
       take: 1000,
     })
@@ -226,7 +264,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
   if (!resolved.ok) return resolved.response
   const { shopId } = resolved
 
-  const data = await exportData(entity, shopId)
+  const data = await exportData(entity, shopId, session.user.role)
   if (!data) return new Response('Unknown export entity', { status: 404 })
 
   return exportResponse(entity, format, data)
