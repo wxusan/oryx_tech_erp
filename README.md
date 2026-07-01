@@ -43,6 +43,13 @@ SEED_DEMO_CONFIRM=yes SEED_DEMO_RESET=yes npm run seed:demo
 
 All generated demo shop admins use `Demo12345!` unless `SEED_DEMO_PASSWORD` is set.
 
+Demo super admin:
+
+```text
+email: demo.admin@oryx.local
+password: Demo12345!
+```
+
 ## Vercel Deployment
 
 Set the variables from `.env.example` in Vercel. Production must include `DATABASE_URL`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and `CRON_SECRET`.

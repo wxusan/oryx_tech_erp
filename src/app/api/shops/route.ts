@@ -89,6 +89,14 @@ export async function POST(req: NextRequest) {
       return conflict(`Admin login takrorlangan: ${duplicateLogin.login}`)
     }
 
+    const existingLogin = await prisma.shopAdmin.findFirst({
+      where: { login: { in: admins.map((admin) => admin.login) } },
+      select: { login: true },
+    })
+    if (existingLogin) {
+      return conflict(`Bu login allaqachon mavjud: ${existingLogin.login}`)
+    }
+
     const shop = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const newShop = await tx.shop.create({
         data: {
@@ -110,7 +118,7 @@ export async function POST(req: NextRequest) {
             shopId: newShop.id,
             name: admin.name,
             phone: admin.phone,
-	            login: admin.login,
+            login: admin.login,
 	            telegramId: admin.telegramId,
 	            telegramLinkCode: telegramLinkCode(),
 	            passwordHash,

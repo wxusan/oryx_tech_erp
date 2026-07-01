@@ -177,7 +177,7 @@ model ShopAdmin {
   // Relations
   shop Shop @relation(fields: [shopId], references: [id])
 
-  @@unique([shopId, login])
+  @@unique([login])
   @@index([shopId])
   @@index([shopId, phone])
 }

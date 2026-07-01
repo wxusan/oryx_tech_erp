@@ -21,7 +21,7 @@ function LoginForm() {
   )
 
   const [adminForm, setAdminForm] = useState({ email: '', password: '' })
-  const [shopForm, setShopForm] = useState({ login: '', password: '', shopId: '' })
+  const [shopForm, setShopForm] = useState({ login: '', password: '' })
 
   async function handleAdminLogin(e: React.FormEvent) {
     e.preventDefault()
@@ -47,12 +47,11 @@ function LoginForm() {
     const res = await signIn('shopadmin', {
       login: shopForm.login,
       password: shopForm.password,
-      shopId: shopForm.shopId,
       redirect: false,
     })
     setLoading(false)
     if (res?.error) {
-      setError("Login, parol yoki do'kon ID noto'g'ri.")
+      setError("Login yoki parol noto'g'ri.")
     } else {
       router.push('/shop/dashboard')
     }
@@ -140,20 +139,6 @@ function LoginForm() {
             </form>
           ) : (
             <form onSubmit={handleShopLogin} className="space-y-4">
-              <div>
-                <Label htmlFor="shop-id" className="text-xs font-medium text-zinc-700 mb-1.5 block">
-                  Do&apos;kon ID
-                </Label>
-                <Input
-                  id="shop-id"
-                  type="text"
-                  placeholder="shop_xxx"
-                  value={shopForm.shopId}
-                  onChange={(e) => setShopForm({ ...shopForm, shopId: e.target.value })}
-                  required
-                  className="h-9 text-sm border-zinc-200 rounded-none focus-visible:ring-zinc-900"
-                />
-              </div>
               <div>
                 <Label htmlFor="shop-login" className="text-xs font-medium text-zinc-700 mb-1.5 block">
                   Login

@@ -44,19 +44,27 @@ async function insert(table, data) {
 }
 
 async function getSuperAdminId() {
-  const existing = await client.query(
-    'select id from "SuperAdmin" where "deletedAt" is null order by "createdAt" asc limit 1',
+  const demoEmail = 'demo.admin@oryx.local'
+  const passwordHash = await bcrypt.hash(password, 12)
+  const existingDemo = await client.query(
+    'select id from "SuperAdmin" where email = $1 and "deletedAt" is null limit 1',
+    [demoEmail],
   )
 
-  if (existing.rowCount) return existing.rows[0].id
+  if (existingDemo.rowCount) {
+    await client.query(
+      'update "SuperAdmin" set name = $1, "passwordHash" = $2, "sessionVersion" = "sessionVersion" + 1, "updatedAt" = now() where id = $3',
+      ['Demo Super Admin', passwordHash, existingDemo.rows[0].id],
+    )
+    return existingDemo.rows[0].id
+  }
 
-  const passwordHash = await bcrypt.hash(password, 12)
   const superAdminId = id('sa')
 
   await insert('SuperAdmin', {
     id: superAdminId,
     name: 'Demo Super Admin',
-    email: 'demo.admin@oryx.local',
+    email: demoEmail,
     passwordHash,
     sessionVersion: 1,
     role: 'SUPER_ADMIN',

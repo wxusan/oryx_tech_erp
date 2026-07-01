@@ -3,7 +3,7 @@
  *
  * Two credential flows:
  *   1. superadmin  — email + password
- *   2. shopAdmin   — login + password + shopId
+ *   2. shopAdmin   — login + password
  *
  * Session strategy: JWT (required for credentials providers in NextAuth v5).
  * Session shape: { id, role, shopId, name }
@@ -111,11 +111,9 @@ async function verifySuperAdminPassword(
 async function verifyShopAdminPassword(
   login: string,
   password: string,
-  shopId: string,
-): Promise<{ id: string; name: string; sessionVersion: number } | null> {
+): Promise<{ id: string; name: string; shopId: string; sessionVersion: number } | null> {
   const admin = await prisma.shopAdmin.findFirst({
     where: {
-      shopId,
       login,
       isActive: true,
       deletedAt: null,
@@ -129,7 +127,7 @@ async function verifyShopAdminPassword(
   if (!admin) return null
   const valid = await bcrypt.compare(password, admin.passwordHash)
   if (!valid) return null
-  return { id: admin.id, name: admin.name, sessionVersion: admin.sessionVersion }
+  return { id: admin.id, name: admin.name, shopId: admin.shopId, sessionVersion: admin.sessionVersion }
 }
 
 // ---------------------------------------------------------------------------
@@ -182,25 +180,19 @@ export const authConfig: NextAuthConfig = {
       credentials: {
         login: { label: 'Login', type: 'text' },
         password: { label: 'Parol', type: 'password' },
-        shopId: { label: 'Shop ID', type: 'text' },
       },
       async authorize(credentials) {
         const login = credentials?.login
         const password = credentials?.password
-        const shopId = credentials?.shopId
 
-        if (
-          typeof login !== 'string' ||
-          typeof password !== 'string' ||
-          typeof shopId !== 'string'
-        ) {
+        if (typeof login !== 'string' || typeof password !== 'string') {
           return null
         }
 
-        const throttleKey = `shop:${shopId}:${login.toLowerCase()}`
+        const throttleKey = `shop:${login.toLowerCase()}`
         if (isLocked(throttleKey)) return null
 
-        const admin = await verifyShopAdminPassword(login, password, shopId)
+        const admin = await verifyShopAdminPassword(login, password)
         if (!admin) {
           recordFailure(throttleKey)
           return null
@@ -211,7 +203,7 @@ export const authConfig: NextAuthConfig = {
           id: admin.id,
           name: admin.name,
           role: 'SHOP_ADMIN' as UserRole,
-          shopId,
+          shopId: admin.shopId,
           sessionVersion: admin.sessionVersion,
         }
       },

@@ -80,7 +80,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!shop) return notFound("Do'kon topilmadi")
 
     const existingLogin = await prisma.shopAdmin.findFirst({
-      where: { shopId: id, login: parsed.data.login },
+      where: { login: parsed.data.login },
       select: { id: true, deletedAt: true },
     })
     if (existingLogin) {
@@ -99,7 +99,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           shopId: id,
           name: parsed.data.name,
           phone: parsed.data.phone,
-	          login: parsed.data.login,
+          login: parsed.data.login,
 	          telegramId: parsed.data.telegramId,
 	          telegramLinkCode: telegramLinkCode(),
 	          passwordHash,
