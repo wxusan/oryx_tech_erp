@@ -101,7 +101,12 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   // -------------------------------------------------------------------------
-  // 2. Overdue — dueDate < today, status PENDING or PARTIAL
+  // 2. Overdue — dueDate < today and still unpaid.
+  //    OVERDUE is included in the selection so chronically-overdue schedules
+  //    keep alerting every day (deduped per day by dayKey), not just once.
+  //    PAID/COMPLETED schedules fall out because their status is no longer in
+  //    this set. Cancelled/returned/reminder-off nasiyas are excluded via the
+  //    nasiya filter below.
   // -------------------------------------------------------------------------
 
   const overdue = await prisma.nasiyaSchedule.findMany({
@@ -110,7 +115,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         { delayedUntil: null, dueDate: { lt: today } },
         { delayedUntil: { lt: today } },
       ],
-      status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
+      status: { in: ['PENDING', 'PARTIAL', 'DEFERRED', 'OVERDUE'] },
       nasiya: {
         deletedAt: null,
         reminderEnabled: true,

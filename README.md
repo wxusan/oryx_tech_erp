@@ -4,14 +4,22 @@ Oryx ERP is a Next.js SaaS dashboard for Malika tech shops: inventory, direct sa
 
 ## Local Development
 
+Use a **fresh Supabase (or local Postgres) database** for QA. See
+[Database & Migrations](#database--migrations) before running anything.
+
 ```bash
 npm install
-cp .env.example .env.local
-npm run db:push
+cp .env.example .env.local            # then fill in the values
+npm run prisma:generate
+npm run prisma:migrate:deploy         # apply migrations (creates all tables + indexes)
+SUPER_ADMIN_PASSWORD='ChangeMe!123' npm run seed:super-admin   # one super admin (idempotent)
 npm run dev
 ```
 
 Open `http://localhost:3000`.
+
+> Never run `prisma db push` on this project — it drops the migration-managed
+> partial unique indexes. See [Database & Migrations](#database--migrations).
 
 ## Verification
 
@@ -50,8 +58,70 @@ email: demo.admin@oryx.local
 password: Demo12345!
 ```
 
+## Database & Migrations
+
+This project is **migration-managed**. Schema changes live in `prisma/migrations/`
+and are applied with `prisma migrate deploy`.
+
+### Rules
+
+- **Use `prisma migrate deploy` only.** Never run `prisma db push` or
+  `prisma migrate dev` against a real (dev/QA/prod) database.
+- **Why:** active-only uniqueness for device IMEI and customer phone is enforced
+  by **raw-SQL partial unique indexes** (`... WHERE "deletedAt" IS NULL`) that
+  Prisma cannot represent in `schema.prisma`. `db push` / `migrate dev` see them
+  as drift and would **drop** them, silently removing dedup protection. These
+  indexes are created in `prisma/migrations/202607020002_integrity_return_ledger`
+  and must always be preserved.
+- If unsure about a database's state, **use a fresh Supabase database for QA.**
+
+### Fresh database (recommended)
+
+```bash
+npm run prisma:migrate:deploy   # applies all migrations to an empty DB
+SUPER_ADMIN_PASSWORD='...' npm run seed:super-admin
+```
+
+### Existing / non-empty database (P3005)
+
+If the target DB already has tables but **no** `_prisma_migrations` history
+(e.g. it was created with `prisma db push` or by hand), `prisma migrate deploy`
+fails with **P3005 "The database schema is not empty."** Baseline it carefully —
+mark already-applied migrations as applied, in order, then deploy the rest:
+
+```bash
+# Only if the DB already matches these migrations. Verify first.
+npx prisma migrate resolve --applied 202607010001_initial
+npx prisma migrate resolve --applied 202607010002_global_shop_admin_login
+npx prisma migrate resolve --applied 202607020001_super_admin_telegram
+npx prisma migrate resolve --applied 202607020002_integrity_return_ledger
+npm run prisma:migrate:deploy   # applies remaining migrations (e.g. cron indexes)
+```
+
+If you cannot confirm the DB matches, prefer a fresh database instead of guessing.
+
 ## Vercel Deployment
 
-Set the variables from `.env.example` in Vercel. Production must include `DATABASE_URL`, `NEXTAUTH_SECRET`, `NEXTAUTH_URL`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and `CRON_SECRET`.
+Set the variables from `.env.example` in Vercel. Production must include
+`DATABASE_URL`, `DIRECT_URL`, `NEXTAUTH_SECRET` (or `AUTH_SECRET`), `NEXTAUTH_URL`,
+`TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and `CRON_SECRET`.
 
-`vercel.json` runs `npm run migrate:deploy && npm run build`, so Prisma migrations are applied before the production build. Use `DIRECT_URL` for migrations when your database provider requires a non-pooled migration connection.
+**Migrations are NOT run during the Vercel build.** `vercel.json` builds only
+(`npm run build`) so that **preview deployments never mutate a shared/production
+database.** Run migrations deliberately as a controlled production step:
+
+```bash
+# From a trusted environment pointed at the PRODUCTION database:
+npm run prisma:migrate:deploy
+```
+
+Use `DIRECT_URL` (non-pooled) for migrations. Scope preview deployments to a
+separate database, or run migrations only against production out-of-band.
+
+### Cron auth
+
+Vercel's built-in cron does **not** send an `Authorization` header, but
+`/api/cron/reminders` requires `Authorization: Bearer <CRON_SECRET>` (it returns
+401/503 otherwise). Either configure Vercel Cron to send the header, or trigger
+the endpoint from an external scheduler (e.g. cron-job.org) that sends the
+bearer token. Without this, reminders/overdue alerts will not run.

@@ -242,6 +242,12 @@ model Device {
   nasiya   Nasiya[]
   returns  DeviceReturn[]
 
+  // ACTIVE-ONLY IMEI UNIQUENESS is enforced by a raw-SQL PARTIAL UNIQUE index
+  // `Device_shopId_imei_active_key ... WHERE "deletedAt" IS NULL` created in
+  // prisma/migrations/202607020002_integrity_return_ledger. Prisma cannot
+  // express partial uniques, so this is only a plain index here. DO NOT run
+  // `prisma db push` or `prisma migrate dev` against a real DB — they would
+  // treat the partial unique as drift and drop it. Use `migrate deploy` only.
   @@index([shopId, imei])
   @@index([shopId])
   @@index([status])
@@ -269,6 +275,13 @@ model Customer {
   sales  Sale[]
   nasiya Nasiya[]
 
+  // ACTIVE-ONLY CUSTOMER PHONE UNIQUENESS (per shop) is enforced by a raw-SQL
+  // PARTIAL UNIQUE index `Customer_shopId_normalizedPhone_active_key ... WHERE
+  // "deletedAt" IS NULL AND "normalizedPhone" IS NOT NULL` created in
+  // prisma/migrations/202607020002_integrity_return_ledger. Prisma cannot
+  // express partial uniques, so this is only a plain index here. DO NOT run
+  // `prisma db push` / `prisma migrate dev` — they would drop it. Use
+  // `migrate deploy` only.
   @@index([shopId])
   @@index([shopId, normalizedPhone])
 }
@@ -307,6 +320,9 @@ model Sale {
   @@index([customerId])
   @@index([deviceId])
   @@index([shopId, paidFully, dueDate])
+  // Cross-shop cron scan (overdue sale reminders): filters by paidFully + due
+  // date with no shopId, so a shopId-leading index cannot serve it.
+  @@index([paidFully, dueDate])
 }
 
 // ---------------------------------------------------------------------------
@@ -405,6 +421,9 @@ model NasiyaSchedule {
   @@index([shopId])
   @@index([status])
   @@index([shopId, status, dueDate])
+  // Cross-shop cron scan (reminders/overdue): filters by status + due date with
+  // no shopId, so a shopId-leading index cannot serve it.
+  @@index([status, dueDate])
 }
 
 // ---------------------------------------------------------------------------
