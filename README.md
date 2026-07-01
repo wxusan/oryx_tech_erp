@@ -12,7 +12,7 @@ npm install
 cp .env.example .env.local            # then fill in the values
 npm run prisma:generate
 npm run prisma:migrate:deploy         # apply migrations (creates all tables + indexes)
-SUPER_ADMIN_PASSWORD='ChangeMe!123' npm run seed:super-admin   # one super admin (idempotent)
+SEED_SUPER_ADMIN_PASSWORD='ChangeMe!123' npm run seed:super-admin   # one super admin (idempotent)
 npm run dev
 ```
 
@@ -79,8 +79,13 @@ and are applied with `prisma migrate deploy`.
 
 ```bash
 npm run prisma:migrate:deploy   # applies all migrations to an empty DB
-SUPER_ADMIN_PASSWORD='...' npm run seed:super-admin
+SEED_SUPER_ADMIN_PASSWORD='...' npm run seed:super-admin
 ```
+
+The super-admin seed is **idempotent** — re-running with the same email does not
+create duplicates. `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_NAME` are
+optional (defaults shown in `.env.example`); `SEED_SUPER_ADMIN_PASSWORD` is
+required and never defaulted.
 
 ### Existing / non-empty database (P3005)
 
@@ -99,6 +104,39 @@ npm run prisma:migrate:deploy   # applies remaining migrations (e.g. cron indexe
 ```
 
 If you cannot confirm the DB matches, prefer a fresh database instead of guessing.
+
+## Local QA Testing
+
+### Trigger the reminder cron manually
+
+`/api/cron/reminders` is protected — it requires the bearer secret and returns
+401/503 otherwise. With the dev server running and `CRON_SECRET` set:
+
+```bash
+curl -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/cron/reminders
+# → { "reminders": n, "overdue": n, "saleReminders": n, "saleOverdue": n }
+```
+
+Overdue nasiya schedules keep alerting on each run (deduped once per Tashkent
+day per admin), so running it on consecutive days re-notifies chronic debtors.
+
+### Test Telegram without a public webhook
+
+Telegram's webhook needs a public HTTPS URL, so it can't reach `localhost`.
+For local QA you can still exercise delivery:
+
+- Set `TELEGRAM_BOT_TOKEN` to a real bot and link an admin (`/link <CODE>` in the
+  bot) so `telegramId` + `telegramVerifiedAt` are populated. Outbound sends
+  (sale/nasiya/payment/reminder) then reach that Telegram account directly —
+  no inbound webhook required.
+- To flush queued notifications on demand:
+  `curl -X POST -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/telegram/send`
+- To exercise the inbound webhook (`/start`, `/link`) locally, expose the dev
+  server with a tunnel (e.g. `ngrok http 3000`) and register the webhook with
+  `setWebhook` + `secret_token=$TELEGRAM_WEBHOOK_SECRET`. Optional for QA.
+
+> Migrations are never run automatically during a Vercel build (see below). Run
+> them deliberately with `npm run prisma:migrate:deploy`.
 
 ## Vercel Deployment
 

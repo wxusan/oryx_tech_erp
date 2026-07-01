@@ -6,16 +6,17 @@ dotenv.config({ path: '.env.local' })
 dotenv.config({ path: '.env' })
 
 const connectionString = process.env.DIRECT_URL || process.env.DATABASE_URL
-const email = process.env.SUPER_ADMIN_EMAIL || 'admin@oryx.local'
-const name = process.env.SUPER_ADMIN_NAME || 'Super Admin'
-const password = process.env.SUPER_ADMIN_PASSWORD
+// SEED_SUPER_ADMIN_* are the canonical names; SUPER_ADMIN_* kept as fallbacks.
+const email = process.env.SEED_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL || 'admin@oryx.local'
+const name = process.env.SEED_SUPER_ADMIN_NAME || process.env.SUPER_ADMIN_NAME || 'Super Admin'
+const password = process.env.SEED_SUPER_ADMIN_PASSWORD || process.env.SUPER_ADMIN_PASSWORD
 
 if (!connectionString) {
   throw new Error('DIRECT_URL or DATABASE_URL is required')
 }
 
 if (!password) {
-  throw new Error('SUPER_ADMIN_PASSWORD is required and must be provided explicitly')
+  throw new Error('SEED_SUPER_ADMIN_PASSWORD is required and must be provided explicitly')
 }
 
 const client = new Client({ connectionString })
