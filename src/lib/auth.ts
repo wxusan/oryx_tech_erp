@@ -21,6 +21,8 @@ import type { UserRole } from '@/types'
 const AUTH_WINDOW_MS = 15 * 60 * 1000
 const AUTH_LOCK_MS = 10 * 60 * 1000
 const AUTH_MAX_FAILURES = 5
+const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
+const SESSION_UPDATE_AGE_SECONDS = 15 * 60
 const SUBSCRIPTION_GRACE_MS = 3 * 24 * 60 * 60 * 1000
 
 type AuthAttempt = { count: number; firstFailedAt: number; lockedUntil?: number }
@@ -213,6 +215,12 @@ export const authConfig: NextAuthConfig = {
 
   session: {
     strategy: 'jwt',
+    maxAge: SESSION_MAX_AGE_SECONDS,
+    updateAge: SESSION_UPDATE_AGE_SECONDS,
+  },
+
+  jwt: {
+    maxAge: SESSION_MAX_AGE_SECONDS,
   },
 
   callbacks: {

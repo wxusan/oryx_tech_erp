@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { BarChart3, LayoutDashboard, Store, CreditCard, ScrollText, Settings } from 'lucide-react'
+import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
 
 const navItems = [
@@ -74,8 +75,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div
             className="w-8 h-8 rounded-full bg-zinc-900 text-white text-[11px] font-bold flex items-center justify-center select-none shadow-sm"
           >
-            SA
+            BA
           </div>
+          <SessionControls callbackUrl="/admin/login" />
         </header>
 
         {/* Main content */}

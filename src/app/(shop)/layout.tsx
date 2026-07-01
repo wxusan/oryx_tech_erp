@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, ScrollText, Settings } from 'lucide-react'
+import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
 
 const navLinks = [
@@ -74,6 +75,7 @@ export default function ShopLayout({ children }: { children: React.ReactNode }) 
             <div className="w-8 h-8 rounded-full bg-zinc-900 text-white text-xs flex items-center justify-center font-medium shadow-sm">
               S
             </div>
+            <SessionControls callbackUrl="/shop/login" />
           </div>
         </header>
 
