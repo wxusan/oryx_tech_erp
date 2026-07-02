@@ -12,7 +12,7 @@ npm install
 cp .env.example .env.local            # then fill in the values
 npm run prisma:generate
 npm run prisma:migrate:deploy         # apply migrations (creates all tables + indexes)
-SEED_SUPER_ADMIN_PASSWORD='ChangeMe!123' npm run seed:super-admin   # one super admin (idempotent)
+SEED_SUPER_ADMIN_PASSWORD='ChangeMe!123' npm run seed:super-admin   # creates/updates super admins
 npm run dev
 ```
 
@@ -54,6 +54,7 @@ All generated demo shop admins use `Demo12345!` unless `SEED_DEMO_PASSWORD` is s
 Demo super admin:
 
 ```text
+login: demo-admin
 email: demo.admin@oryx.local
 password: Demo12345!
 ```
@@ -88,10 +89,13 @@ fine. On a large existing production database, create those indexes with
 `CREATE INDEX CONCURRENTLY` during a planned DB maintenance step instead,
 because Prisma migrations run inside a transaction.
 
-The super-admin seed is **idempotent** — re-running with the same email does not
-create duplicates. `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_NAME` are
-optional (defaults shown in `.env.example`); `SEED_SUPER_ADMIN_PASSWORD` is
-required and never defaulted.
+The super-admin seed is **idempotent** — re-running with the same login/email does
+not create duplicates. By default it creates/updates two equal-permission logins:
+`oryx_abdulloh` and `wxusan`. `SEED_SUPER_ADMIN_LOGIN`,
+`SEED_SUPER_ADMIN_EMAIL`, `SEED_SUPER_ADMIN_NAME`,
+`SEED_SUPER_ADMIN_2_LOGIN`, `SEED_SUPER_ADMIN_2_EMAIL`, and
+`SEED_SUPER_ADMIN_2_NAME` are optional (defaults shown in `.env.example`);
+`SEED_SUPER_ADMIN_PASSWORD` is required and never defaulted.
 
 ### Existing / non-empty database (P3005)
 

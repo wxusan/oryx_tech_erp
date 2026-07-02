@@ -100,10 +100,15 @@ declare module '@auth/core/jwt' {
 // ---------------------------------------------------------------------------
 
 async function verifySuperAdminPassword(
-  login: string,
+  identifier: string,
   password: string,
 ): Promise<{ id: string; name: string; sessionVersion: number } | null> {
-  const admin = await prisma.superAdmin.findFirst({ where: { email: login, deletedAt: null } })
+  const admin = await prisma.superAdmin.findFirst({
+    where: {
+      deletedAt: null,
+      OR: [{ email: identifier }, { login: identifier }],
+    },
+  })
   if (!admin) return null
   const valid = await bcrypt.compare(password, admin.passwordHash)
   if (!valid) return null
@@ -144,18 +149,20 @@ export const authConfig: NextAuthConfig = {
       id: 'superadmin',
       name: 'Bosh admin',
       credentials: {
-        email: { label: 'Login', type: 'text' },
+        login: { label: 'Login yoki email', type: 'text' },
         password: { label: 'Parol', type: 'password' },
       },
       async authorize(credentials) {
-        const email = credentials?.email
+        const identifier = credentials?.login
         const password = credentials?.password
 
-        if (typeof email !== 'string' || typeof password !== 'string') {
+        if (typeof identifier !== 'string' || typeof password !== 'string') {
           return null
         }
 
-        const login = email.trim().toLowerCase()
+        const login = identifier.trim().toLowerCase()
+        if (!login) return null
+
         const throttleKey = `super:${login}`
         if (isLocked(throttleKey)) return null
 
@@ -192,10 +199,13 @@ export const authConfig: NextAuthConfig = {
           return null
         }
 
-        const throttleKey = `shop:${login.toLowerCase()}`
+        const normalizedLogin = login.trim()
+        if (!normalizedLogin) return null
+
+        const throttleKey = `shop:${normalizedLogin.toLowerCase()}`
         if (isLocked(throttleKey)) return null
 
-        const admin = await verifyShopAdminPassword(login, password)
+        const admin = await verifyShopAdminPassword(normalizedLogin, password)
         if (!admin) {
           recordFailure(throttleKey)
           return null

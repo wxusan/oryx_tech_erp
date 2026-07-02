@@ -31,7 +31,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
     setError(null)
 
     const result = await signIn(isAdmin ? 'superadmin' : 'shopadmin', {
-      ...(isAdmin ? { email: form.login } : { login: form.login }),
+      login: form.login,
       password: form.password,
       redirect: false,
     })
@@ -70,7 +70,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
               <Input
                 id={`${mode}-login`}
                 type="text"
-                placeholder={isAdmin ? 'oryx_abdulloh' : 'malika-demo'}
+                placeholder={isAdmin ? 'Login yoki email' : "Do'kon loginini kiriting"}
                 value={form.login}
                 onChange={(event) => setForm({ ...form, login: event.target.value })}
                 required
@@ -85,7 +85,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
               <Input
                 id={`${mode}-password`}
                 type="password"
-                placeholder="••••••••"
+                placeholder="Parolni kiriting"
                 value={form.password}
                 onChange={(event) => setForm({ ...form, password: event.target.value })}
                 required

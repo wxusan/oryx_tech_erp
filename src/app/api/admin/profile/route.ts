@@ -27,6 +27,7 @@ function profileSelect() {
   return {
     id: true,
     name: true,
+    login: true,
     email: true,
     telegramId: true,
     telegramVerifiedAt: true,
@@ -81,6 +82,7 @@ export async function PATCH(req: NextRequest) {
         select: {
           id: true,
           name: true,
+          login: true,
           email: true,
           telegramId: true,
         },
@@ -108,7 +110,7 @@ export async function PATCH(req: NextRequest) {
             action: 'UPDATE_TELEGRAM_ID',
             targetType: 'SuperAdmin',
             targetId: admin.id,
-            oldValue: { telegramId: admin.telegramId, login: admin.email, name: admin.name },
+            oldValue: { telegramId: admin.telegramId, login: admin.login ?? admin.email, name: admin.name },
             newValue: { telegramId },
           },
         })
@@ -137,6 +139,7 @@ export async function PATCH(req: NextRequest) {
       select: {
         id: true,
         name: true,
+        login: true,
         email: true,
         passwordHash: true,
       },
@@ -173,7 +176,7 @@ export async function PATCH(req: NextRequest) {
           action: 'CHANGE_PASSWORD',
           targetType: 'SuperAdmin',
           targetId: admin.id,
-          oldValue: { login: admin.email, name: admin.name },
+          oldValue: { login: admin.login ?? admin.email, name: admin.name },
           newValue: { passwordChanged: true },
         },
       })

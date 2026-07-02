@@ -25,6 +25,7 @@ interface EnvCheck {
 interface SuperAdminProfile {
   id: string
   name: string
+  login: string | null
   email: string
   telegramId: string | null
   telegramVerifiedAt: string | null
@@ -213,7 +214,8 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
                 <>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Info label="Ism" value={profile.name} />
-                    <Info label="Login" value={profile.email} mono />
+                    <Info label="Login" value={profile.login || profile.email} mono />
+                    <Info label="Email" value={profile.email} mono />
                     <Info label="Rol" value={profile.role} />
                     <Info label="Telegram ID" value={profile.telegramId || '-'} mono />
                     <Info label="Yaratilgan" value={formatDate(profile.createdAt)} />
