@@ -22,4 +22,13 @@ describe('integration (needs a Postgres test DB) — TODO', () => {
   it.todo('req 10: inserting a duplicate ACTIVE (shopId,normalizedPhone) is rejected per shop')
   it.todo('req 11: a shop admin session cannot read/modify another shop’s device/nasiya/customer (403/empty)')
   it.todo('req 12: an OVERDUE schedule still emits a reminder on the next cron day, deduped once per day')
+
+  // Telegram integration (needs a DB + a stubbed Telegram API):
+  it.todo('telegram: /start on a manually-entered SuperAdmin id stamps telegramVerifiedAt and welcomes')
+  it.todo('telegram: /start on a manually-entered ShopAdmin id welcomes with the shop name')
+  it.todo('telegram: /start on an unknown id replies with the not-linked message and writes nothing')
+  it.todo('telegram: device return queues exactly one RETURN notification per verified admin of THAT shop only')
+  it.todo('telegram: device restock queues exactly one RESTOCK notification per verified admin of THAT shop only')
+  it.todo('telegram: a double-click return (2nd request 409s on the atomic guard) does not queue a duplicate')
+  it.todo('telegram: a deleted/inactive/unverified admin of the shop receives no return/restock notification')
 })

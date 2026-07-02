@@ -326,3 +326,95 @@ export function formatOverdueNotification(data: {
   ]
   return lines.join('\n')
 }
+
+// ---------------------------------------------------------------------------
+// Plain-text event notifications
+//
+// These are built in the same plain-text (no Markdown) style as the inline
+// messages produced by the sale / cron routes, because sendTelegramMessage()
+// sends without parse_mode — any `*asterisks*` would show up literally.
+// ---------------------------------------------------------------------------
+
+/** Uzbek label for a payment/refund method enum value. */
+export function paymentMethodLabel(method?: string | null): string {
+  switch (method) {
+    case 'CASH':
+      return 'Naqd'
+    case 'TRANSFER':
+      return "O'tkazma"
+    case 'CARD':
+      return 'Karta'
+    case 'OTHER':
+      return 'Boshqa'
+    default:
+      return '-'
+  }
+}
+
+/**
+ * Device returned (Qaytarish). Includes refund details, reason, and actor.
+ *
+ * ↩️ Qurilma qaytarildi
+ * 📱 iPhone 13 Pro
+ * 📋 IMEI: 123456789012345
+ * 💸 Qaytarilgan summa: 8,500,000 so'm
+ * 💳 Usul: Naqd
+ * 📝 Sabab: mijoz bekor qildi
+ * 👤 Admin: Dilshod
+ */
+export function formatDeviceReturnNotification(data: {
+  deviceModel: string
+  imei: string
+  refundAmount: number
+  refundMethod?: string | null
+  note: string
+  actorName?: string
+}): string {
+  const lines: string[] = [
+    '↩️ Qurilma qaytarildi',
+    `📱 ${data.deviceModel}`,
+    `📋 IMEI: ${data.imei}`,
+    `💸 Qaytarilgan summa: ${formatAmount(data.refundAmount)}`,
+  ]
+
+  if (data.refundAmount > 0) {
+    lines.push(`💳 Usul: ${paymentMethodLabel(data.refundMethod)}`)
+  }
+
+  lines.push(`📝 Sabab: ${data.note}`)
+
+  if (data.actorName) {
+    lines.push(`👤 Admin: ${data.actorName}`)
+  }
+
+  return lines.join('\n')
+}
+
+/**
+ * Returned device put back on sale (Sotuvga chiqarish / restock).
+ *
+ * 📦 Qurilma qayta sotuvga chiqarildi
+ * 📱 iPhone 13 Pro
+ * 📋 IMEI: 123456789012345
+ * 📝 Sabab: qayta ko'rikdan o'tdi
+ * 👤 Admin: Dilshod
+ */
+export function formatDeviceRestockNotification(data: {
+  deviceModel: string
+  imei: string
+  note: string
+  actorName?: string
+}): string {
+  const lines: string[] = [
+    '📦 Qurilma qayta sotuvga chiqarildi',
+    `📱 ${data.deviceModel}`,
+    `📋 IMEI: ${data.imei}`,
+    `📝 Sabab: ${data.note}`,
+  ]
+
+  if (data.actorName) {
+    lines.push(`👤 Admin: ${data.actorName}`)
+  }
+
+  return lines.join('\n')
+}

@@ -8,6 +8,13 @@ export default defineConfig({
   test: {
     environment: 'node',
     include: ['tests/**/*.test.ts'],
+    // Dummy DB URLs so modules that import the Prisma client singleton (e.g.
+    // telegram-id.ts) can be loaded by pure unit tests. The pg adapter builds a
+    // lazy Pool, so no real connection is made unless a query actually runs.
+    env: {
+      DATABASE_URL: 'postgresql://dummy:dummy@localhost:5432/dummy',
+      DIRECT_URL: 'postgresql://dummy:dummy@localhost:5432/dummy',
+    },
   },
   resolve: {
     alias: {

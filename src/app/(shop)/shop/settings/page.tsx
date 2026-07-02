@@ -284,7 +284,7 @@ export default function ShopSettingsPage() {
                     className="h-9 rounded-md border-zinc-200 bg-white text-sm focus-visible:ring-zinc-900"
                   />
                   <p className="mt-1 text-xs text-zinc-500">
-                    Username emas, faqat raqamli Telegram ID kiriting.
+                    Username emas, faqat raqamli Telegram ID kiriting, keyin botga /start yuboring.
                   </p>
                 </div>
                 <Button type="submit" disabled={telegramLoading} className="h-9 rounded-md bg-zinc-900 text-white hover:bg-zinc-800">

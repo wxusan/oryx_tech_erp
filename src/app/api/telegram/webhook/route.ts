@@ -19,7 +19,12 @@
 import { type NextRequest } from 'next/server'
 import { getBot } from '@/lib/telegram'
 import { prisma } from '@/lib/prisma'
-import { findTelegramOwner, isTelegramIdTaken } from '@/lib/telegram-id'
+import {
+  buildStartWelcome,
+  findTelegramOwner,
+  isTelegramIdTaken,
+  START_NOT_LINKED_MESSAGE,
+} from '@/lib/telegram-id'
 
 // ---------------------------------------------------------------------------
 // Register bot command handlers (runs once at module load)
@@ -42,21 +47,33 @@ function webhookBot() {
 
     const owner = await findTelegramOwner(telegramId)
     if (!owner) {
-      await ctx.reply("Kechirasiz, bu Telegram ID Oryx ERP tizimida ro'yxatdan o'tmagan.")
-      console.log(`[TelegramWebhook] /start denied telegramId=${telegramId}`)
+      await ctx.reply(START_NOT_LINKED_MESSAGE)
+      console.log(`[TelegramWebhook] /start not linked telegramId=${telegramId}`)
       return
     }
 
-    if (owner.type === 'SUPER_ADMIN') {
-      await ctx.reply(`Salom, ${owner.user.name}! Siz Oryx ERP super admini sifatida ulandingiz.`)
-    } else {
-      await ctx.reply(
-        `Salom, ${owner.user.name}! Siz ${owner.user.shop.name} do'koni admini sifatida ulandingiz. ` +
-          "Shu do'konga tegishli xabarlar shu yerga keladi.",
-      )
+    // Mark the manually-entered ID as verified on first /start (idempotent —
+    // only writes when telegramVerifiedAt is still null). Never blocks the
+    // welcome reply if the stamp fails.
+    try {
+      if (owner.type === 'SUPER_ADMIN') {
+        await prisma.superAdmin.updateMany({
+          where: { id: owner.user.id, telegramVerifiedAt: null },
+          data: { telegramVerifiedAt: new Date() },
+        })
+      } else {
+        await prisma.shopAdmin.updateMany({
+          where: { id: owner.user.id, telegramVerifiedAt: null },
+          data: { telegramVerifiedAt: new Date() },
+        })
+      }
+    } catch (error) {
+      console.error(`[TelegramWebhook] /start verify stamp failed telegramId=${telegramId}:`, error)
     }
 
-    console.log(`[TelegramWebhook] /start from telegramId=${telegramId}`)
+    await ctx.reply(buildStartWelcome(owner))
+
+    console.log(`[TelegramWebhook] /start from telegramId=${telegramId} type=${owner.type}`)
   })
 
   bot.command('link', async (ctx) => {
@@ -105,7 +122,11 @@ function webhookBot() {
       return
     }
 
-    await ctx.reply("Telegram akkauntingiz Oryx ERP bilan ulandi.")
+    // Send the shop-specific welcome (falls back to a generic confirmation if
+    // the freshly-linked admin can't be re-read for any reason).
+    const owner = await findTelegramOwner(telegramId)
+    await ctx.reply(owner ? buildStartWelcome(owner) : 'Telegram akkauntingiz Oryx ERP bilan ulandi.')
+    console.log(`[TelegramWebhook] /link success telegramId=${telegramId}`)
   })
 
   bot.on('message', async (ctx) => {
@@ -116,6 +137,23 @@ function webhookBot() {
   })
 
   registeredBot = bot
+  return bot
+}
+
+/**
+ * Return a command-registered bot that is guaranteed to be initialised.
+ *
+ * grammy's `handleUpdate()` throws "Bot not initialized!" unless `botInfo` is
+ * known — in webhook mode we must call `bot.init()` ourselves (it is
+ * idempotent and only performs one getMe per warm instance). Without this,
+ * EVERY inbound command (/start, /link, fallback) silently throws before its
+ * handler runs, which is why the bot never welcomed linked users.
+ */
+async function ensureWebhookBot() {
+  const bot = webhookBot()
+  if (!bot.isInited()) {
+    await bot.init()
+  }
   return bot
 }
 
@@ -147,9 +185,11 @@ export async function POST(request: NextRequest): Promise<Response> {
 
   // --- Dispatch to Grammy ---
   try {
+    // The bot must be initialised before handleUpdate (see ensureWebhookBot).
+    const bot = await ensureWebhookBot()
     // bot.handleUpdate accepts the raw Telegram Update object.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await webhookBot().handleUpdate(update as any)
+    await bot.handleUpdate(update as any)
   } catch (error) {
     console.error('[TelegramWebhook] handleUpdate error:', error)
     // Always return 200 to Telegram so it does not retry indefinitely.

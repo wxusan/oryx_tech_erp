@@ -1,10 +1,12 @@
-import { NextRequest } from 'next/server'
+import { NextRequest, after } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { invalidateShopReturnMutation } from '@/lib/server/cache-tags'
+import { processPendingNotifications } from '@/lib/notification-service'
+import { formatDeviceReturnNotification } from '@/lib/telegram'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -119,10 +121,45 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       })
 
+      // Notify the shop's verified Telegram admins. Rows are committed with the
+      // transaction (behind the atomic RETURNED guard above, so a double-click
+      // that 409s never reaches here) and flushed after the response.
+      const shopAdmins = await tx.shopAdmin.findMany({
+        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
+        select: { telegramId: true },
+      })
+      if (shopAdmins.length > 0) {
+        const message = formatDeviceReturnNotification({
+          deviceModel: device.model,
+          imei: device.imei,
+          refundAmount: parsed.data.refundAmount,
+          refundMethod: parsed.data.refundMethod,
+          note: parsed.data.note,
+          actorName: session.user.name,
+        })
+        for (const admin of shopAdmins) {
+          await tx.notification.create({
+            data: {
+              shopId,
+              type: 'RETURN',
+              message,
+              telegramId: admin.telegramId!,
+              scheduledAt: new Date(),
+              relatedId: returnRecord.id,
+              relatedType: 'DeviceReturn',
+            },
+          })
+        }
+      }
+
       return tx.device.findFirst({ where: { id: deviceId, shopId } })
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
     invalidateShopReturnMutation(shopId)
+
+    // Flush freshly-queued notifications after the response (non-blocking).
+    // Rows are already committed, so cron is the backstop if this misses.
+    after(() => processPendingNotifications().catch((e) => console.error('[notify] flush failed', e)))
 
     return ok(result, 'Qurilma qaytarildi va bog\'langan sotuv/nasiya bekor qilindi')
   } catch (err: unknown) {
