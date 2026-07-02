@@ -17,6 +17,7 @@ interface Payment {
   months: number
   method: string
   date: string
+  nextPaymentDate: string
   addedBy: string
 }
 
@@ -33,6 +34,7 @@ interface ShopPayment {
 interface ShopWithPayments {
   id: string
   name: string
+  subscriptionDue: string
   payments?: ShopPayment[]
 }
 
@@ -57,6 +59,10 @@ function methodFromEnum(m: string) {
 
 function formatMoney(n: number) {
   return n.toLocaleString('ru-RU') + " so'm"
+}
+
+function formatDate(value: string) {
+  return value ? new Date(value).toLocaleDateString('ru-RU') : '—'
 }
 
 function monthKey(date: Date) {
@@ -87,6 +93,7 @@ export default function PaymentsPage() {
               months: payment.months,
               method: methodFromEnum(payment.paymentMethod),
               date: payment.paidAt,
+              nextPaymentDate: shop.subscriptionDue,
               addedBy: payment.recordedBy
                 ? `${payment.recordedBy.name} (${payment.recordedBy.login})`
                 : payment.recordedById
@@ -156,22 +163,23 @@ export default function PaymentsPage() {
             <TableRow className="border-zinc-200 bg-zinc-50">
               <TableHead className="text-xs text-zinc-500 font-medium pl-5">Do&apos;kon</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">Miqdor</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">Oylar</TableHead>
+              <TableHead className="text-xs text-zinc-500 font-medium">Obuna muddati</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">To&apos;lov usuli</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">Sana</TableHead>
+              <TableHead className="text-xs text-zinc-500 font-medium">To&apos;lov sanasi</TableHead>
+              <TableHead className="text-xs text-zinc-500 font-medium">Keyingi to&apos;lov sanasi</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium pr-5">Kim qo&apos;shgan</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-10 text-sm text-zinc-400">
+                <TableCell colSpan={7} className="text-center py-10 text-sm text-zinc-400">
                   Yuklanmoqda...
                 </TableCell>
               </TableRow>
             ) : payments.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-10 text-sm text-zinc-400">
+                <TableCell colSpan={7} className="text-center py-10 text-sm text-zinc-400">
                   To&apos;lovlar topilmadi
                 </TableCell>
               </TableRow>
@@ -190,7 +198,10 @@ export default function PaymentsPage() {
                     </span>
                   </TableCell>
                   <TableCell className="text-sm text-zinc-500">
-                    {p.date ? new Date(p.date).toLocaleDateString('ru-RU') : '—'}
+                    {formatDate(p.date)}
+                  </TableCell>
+                  <TableCell className="text-sm text-zinc-500">
+                    {formatDate(p.nextPaymentDate)}
                   </TableCell>
                   <TableCell className="pr-5 text-xs text-zinc-600">{p.addedBy}</TableCell>
                 </TableRow>

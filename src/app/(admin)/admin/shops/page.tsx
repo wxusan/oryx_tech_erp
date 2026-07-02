@@ -55,6 +55,16 @@ function StatusBadge({ status }: { status: ShopStatus }) {
   )
 }
 
+function dueDateSortValue(value: string) {
+  if (!value) return Number.POSITIVE_INFINITY
+  const time = new Date(value).getTime()
+  return Number.isFinite(time) ? time : Number.POSITIVE_INFINITY
+}
+
+function formatDate(value: string) {
+  return value ? new Date(value).toLocaleDateString('ru-RU') : '—'
+}
+
 export default function ShopsPage() {
   const [shops, setShops] = useState<Shop[]>([])
   const [loading, setLoading] = useState(true)
@@ -73,17 +83,19 @@ export default function ShopsPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  const filtered = shops.filter((s) => {
-    const matchTab = activeTab === 'barchasi' || s.status === activeTab
-    const q = search.toLowerCase()
-    const matchSearch =
-      !q ||
-      s.name.toLowerCase().includes(q) ||
-      s.ownerName.toLowerCase().includes(q) ||
-      s.ownerPhone.includes(q) ||
-      s.shopNumber.includes(q)
-    return matchTab && matchSearch
-  })
+  const filtered = shops
+    .filter((s) => {
+      const matchTab = activeTab === 'barchasi' || s.status === activeTab
+      const q = search.toLowerCase()
+      const matchSearch =
+        !q ||
+        s.name.toLowerCase().includes(q) ||
+        s.ownerName.toLowerCase().includes(q) ||
+        s.ownerPhone.includes(q) ||
+        s.shopNumber.includes(q)
+      return matchTab && matchSearch
+    })
+    .sort((a, b) => dueDateSortValue(a.subscriptionDue) - dueDateSortValue(b.subscriptionDue))
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -139,7 +151,7 @@ export default function ShopsPage() {
               <TableHead className="text-xs text-zinc-500 font-medium">Tel</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">Do&apos;kon raqami</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">Status</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">To&apos;lov sanasi</TableHead>
+              <TableHead className="text-xs text-zinc-500 font-medium">Keyingi to&apos;lov sanasi</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium pr-5 text-right">Amallar</TableHead>
             </TableRow>
           </TableHeader>
@@ -167,7 +179,7 @@ export default function ShopsPage() {
                     <StatusBadge status={shop.status} />
                   </TableCell>
                   <TableCell className="text-sm text-zinc-500">
-                    {shop.subscriptionDue ? new Date(shop.subscriptionDue).toLocaleDateString('ru-RU') : '—'}
+                    {formatDate(shop.subscriptionDue)}
                   </TableCell>
                   <TableCell className="pr-5 text-right">
                     <Link
