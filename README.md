@@ -55,7 +55,6 @@ Demo super admin:
 
 ```text
 login: demo-admin
-email: demo.admin@oryx.local
 password: Demo12345!
 ```
 

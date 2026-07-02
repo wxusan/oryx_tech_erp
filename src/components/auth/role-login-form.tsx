@@ -70,7 +70,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
               <Input
                 id={`${mode}-login`}
                 type="text"
-                placeholder={isAdmin ? 'Login yoki email' : "Do'kon loginini kiriting"}
+                placeholder={isAdmin ? 'Admin loginini kiriting' : "Do'kon loginini kiriting"}
                 value={form.login}
                 onChange={(event) => setForm({ ...form, login: event.target.value })}
                 required

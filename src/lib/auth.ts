@@ -100,22 +100,15 @@ declare module '@auth/core/jwt' {
 // ---------------------------------------------------------------------------
 
 async function verifySuperAdminPassword(
-  identifier: string,
+  login: string,
   password: string,
 ): Promise<{ id: string; name: string; sessionVersion: number } | null> {
-  const admin =
-    (await prisma.superAdmin.findFirst({
-      where: {
-        login: identifier,
-        deletedAt: null,
-      },
-    })) ??
-    (await prisma.superAdmin.findFirst({
-      where: {
-        email: identifier,
-        deletedAt: null,
-      },
-    }))
+  const admin = await prisma.superAdmin.findFirst({
+    where: {
+      login,
+      deletedAt: null,
+    },
+  })
   if (!admin) return null
   const valid = await bcrypt.compare(password, admin.passwordHash)
   if (!valid) return null
@@ -156,7 +149,7 @@ export const authConfig: NextAuthConfig = {
       id: 'superadmin',
       name: 'Bosh admin',
       credentials: {
-        login: { label: 'Login yoki email', type: 'text' },
+        login: { label: 'Login', type: 'text' },
         password: { label: 'Parol', type: 'password' },
       },
       async authorize(credentials) {
