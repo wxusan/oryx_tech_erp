@@ -103,12 +103,19 @@ async function verifySuperAdminPassword(
   identifier: string,
   password: string,
 ): Promise<{ id: string; name: string; sessionVersion: number } | null> {
-  const admin = await prisma.superAdmin.findFirst({
-    where: {
-      deletedAt: null,
-      OR: [{ email: identifier }, { login: identifier }],
-    },
-  })
+  const admin =
+    (await prisma.superAdmin.findFirst({
+      where: {
+        login: identifier,
+        deletedAt: null,
+      },
+    })) ??
+    (await prisma.superAdmin.findFirst({
+      where: {
+        email: identifier,
+        deletedAt: null,
+      },
+    }))
   if (!admin) return null
   const valid = await bcrypt.compare(password, admin.passwordHash)
   if (!valid) return null
