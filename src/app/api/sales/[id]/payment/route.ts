@@ -5,6 +5,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addSalePaymentSchema } from '@/lib/validations'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -165,6 +166,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }
     }
     if (!result) return serverError()
+
+    if (!result.duplicate) {
+      invalidateShopPaymentMutation(shopId)
+    }
 
     // Flush freshly-queued notifications after the response (non-blocking).
     // The rows are already committed, so cron is the backstop if this misses.

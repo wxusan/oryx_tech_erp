@@ -12,6 +12,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addDeviceSchema } from '@/lib/validations'
 import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
 import { notifyShopAdmins } from '@/lib/notification-service'
+import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import type { ZodError } from 'zod'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_NASIYA', 'RESERVED', 'RETURNED', 'DELETED'] as const
@@ -163,6 +164,8 @@ export async function POST(req: NextRequest) {
 
       return createdDevice
     })
+
+    invalidateShopDeviceMutation(resolvedShopId)
 
     // Deliver notifications after the response is sent (non-blocking) so the
     // add-device request never waits on Telegram HTTP calls.

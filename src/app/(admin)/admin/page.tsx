@@ -250,6 +250,7 @@ export default function DashboardPage() {
                   <TableCell className="pr-5 text-right">
                     <Link
                       href={`/admin/shops/${shop.id}`}
+                      prefetch={false}
                       className="text-xs text-zinc-500 hover:text-zinc-900 border border-zinc-200 px-2.5 py-1 hover:bg-zinc-50 transition-colors"
                     >
                       Ko&apos;rish

@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { invalidateShopCustomerMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -90,6 +91,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         note: identityChangeReason,
       },
     })
+
+    invalidateShopCustomerMutation(resolved.shopId)
 
     return ok(customer, 'Mijoz yangilandi')
   } catch (err) {

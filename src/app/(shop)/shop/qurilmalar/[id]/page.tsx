@@ -536,7 +536,7 @@ export default function QurilmaDetailPage() {
                 />
               </div>
             </div>
-            <Link href={`/shop/nasiyalar/${latestNasiya.id}`}>
+            <Link href={`/shop/nasiyalar/${latestNasiya.id}`} prefetch={false}>
               <Button variant="outline" className="text-sm border-zinc-200 text-zinc-700 rounded mt-2">
                 Nasiyani ko'rish
               </Button>

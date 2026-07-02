@@ -140,7 +140,7 @@ export default function NasiyalarClient({ initialNasiyalar }: { initialNasiyalar
             const isOverdue = n.status === 'OVERDUE'
             const nextPayment = getNextPayment(n.schedules ?? [])
             return (
-              <Link key={n.id} href={`/shop/nasiyalar/${n.id}`} className="block">
+              <Link key={n.id} href={`/shop/nasiyalar/${n.id}`} prefetch={false} className="block">
                 <div
                   className={`border border-zinc-200 rounded p-4 hover:bg-zinc-50 transition-colors ${
                     isOverdue ? 'border-l-2 border-l-red-500 pl-4' : ''

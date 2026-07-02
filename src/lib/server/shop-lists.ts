@@ -1,7 +1,9 @@
 import 'server-only'
 
+import { unstable_cache } from 'next/cache'
 import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
+import { shopCacheTag } from '@/lib/server/cache-tags'
 
 const UNPAID_SCHEDULE_STATUSES = ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED']
 
@@ -55,6 +57,17 @@ export function initialLogsRequestKey() {
 }
 
 export async function getShopDevicesList(shopId: string): Promise<ShopDeviceListItem[]> {
+  return unstable_cache(
+    () => getShopDevicesListFresh(shopId),
+    ['shop-devices:list:v1', shopId],
+    {
+      revalidate: 30,
+      tags: [shopCacheTag.devices(shopId)],
+    },
+  )()
+}
+
+async function getShopDevicesListFresh(shopId: string): Promise<ShopDeviceListItem[]> {
   const devices = await prisma.device.findMany({
     where: { shopId, deletedAt: null },
     orderBy: { createdAt: 'desc' },
@@ -92,6 +105,21 @@ function nextScheduleTime(row: ShopNasiyaListItem) {
 }
 
 export async function getShopNasiyalarList(shopId: string): Promise<ShopNasiyaListItem[]> {
+  return unstable_cache(
+    () => getShopNasiyalarListFresh(shopId),
+    ['shop-nasiyalar:list:v1', shopId],
+    {
+      revalidate: 15,
+      tags: [
+        shopCacheTag.nasiyalar(shopId),
+        shopCacheTag.nasiyaSchedules(shopId),
+        shopCacheTag.customers(shopId),
+      ],
+    },
+  )()
+}
+
+async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaListItem[]> {
   const nasiyalar = await prisma.nasiya.findMany({
     where: { shopId, deletedAt: null },
     take: 500,

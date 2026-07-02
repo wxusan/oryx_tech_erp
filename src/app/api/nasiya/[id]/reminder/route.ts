@@ -10,6 +10,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession } from '@/lib/api-auth'
 import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
+import { invalidateShopReminderMutation } from '@/lib/server/cache-tags'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -63,6 +64,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         newValue: { reminderEnabled },
       },
     })
+
+    invalidateShopReminderMutation(nasiya.shopId)
 
     return ok(updated, reminderEnabled ? 'Eslatma yoqildi' : "Eslatma o'chirildi")
   } catch (err) {

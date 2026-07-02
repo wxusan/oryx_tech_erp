@@ -14,6 +14,7 @@ import { createNasiyaSchema } from '@/lib/validations'
 import { generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import type { ZodError } from 'zod'
 
@@ -169,6 +170,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       return nasiya
     })
+
+    invalidateShopNasiyaMutation(shopId)
 
     // Flush freshly-queued notifications after the response (non-blocking).
     // The rows are already committed, so cron is the backstop if this misses.

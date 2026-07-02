@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession } from '@/lib/api-auth'
 import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
+import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -201,6 +202,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       return updatedDevice
     })
 
+    invalidateShopDeviceMutation(existing.shopId)
+
     return ok(device, "Qurilma muvaffaqiyatli yangilandi")
   } catch (err) {
     console.error('[PATCH /api/devices/[id]]', err)
@@ -283,6 +286,8 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
 
       return deletedDevice
     })
+
+    invalidateShopDeviceMutation(existing.shopId)
 
     return ok(device, "Qurilma muvaffaqiyatli o'chirildi")
   } catch (err) {

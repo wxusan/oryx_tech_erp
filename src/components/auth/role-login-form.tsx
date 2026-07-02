@@ -42,7 +42,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
       return
     }
 
-    router.push(safeCallbackUrl)
+    router.replace(safeCallbackUrl)
   }
 
   return (

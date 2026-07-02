@@ -189,7 +189,7 @@ export default function AdminReportsPage() {
                   return (
                     <TableRow key={shop.id}>
                       <TableCell className="pl-5 font-medium text-zinc-900">
-                        <Link href={`/admin/shops/${shop.id}`} className="hover:underline">
+                        <Link href={`/admin/shops/${shop.id}`} prefetch={false} className="hover:underline">
                           {shop.name} <span className="text-xs text-zinc-400">#{shop.shopNumber}</span>
                         </Link>
                       </TableCell>

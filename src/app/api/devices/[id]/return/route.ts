@@ -4,6 +4,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { invalidateShopReturnMutation } from '@/lib/server/cache-tags'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -120,6 +121,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       return tx.device.findFirst({ where: { id: deviceId, shopId } })
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+
+    invalidateShopReturnMutation(shopId)
 
     return ok(result, 'Qurilma qaytarildi va bog\'langan sotuv/nasiya bekor qilindi')
   } catch (err: unknown) {

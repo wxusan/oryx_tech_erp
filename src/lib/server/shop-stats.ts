@@ -1,10 +1,39 @@
 import 'server-only'
 
+import { unstable_cache } from 'next/cache'
 import type { Session } from 'next-auth'
 import { prisma } from '@/lib/prisma'
+import { shopCacheTag } from '@/lib/server/cache-tags'
 import { tashkentMonthRange } from '@/lib/timezone'
 
+type StatsRole = Session['user']['role']
+
 export async function getShopStats(session: Session, shopId: string) {
+  const role = session.user.role
+
+  return unstable_cache(
+    () => getShopStatsFresh(role, shopId),
+    ['shop-stats:v1', shopId, role],
+    {
+      // Money/overdue figures are high-churn. Keep the TTL short and expire
+      // these tags immediately after sale/payment/return mutations.
+      revalidate: 15,
+      tags: [
+        shopCacheTag.stats(shopId),
+        shopCacheTag.reports(shopId),
+        shopCacheTag.devices(shopId),
+        shopCacheTag.sales(shopId),
+        shopCacheTag.nasiyalar(shopId),
+        shopCacheTag.nasiyaSchedules(shopId),
+        shopCacheTag.returns(shopId),
+        shopCacheTag.logs(shopId),
+        shopCacheTag.customers(shopId),
+      ],
+    },
+  )()
+}
+
+async function getShopStatsFresh(role: StatsRole, shopId: string) {
   const now = new Date()
   const { start: monthStart, end: monthEnd } = tashkentMonthRange(now)
 
@@ -130,7 +159,7 @@ export async function getShopStats(session: Session, shopId: string) {
     prisma.log.findMany({
       where: {
         shopId,
-        ...(session.user.role === 'SHOP_ADMIN' ? { actorType: 'SHOP_ADMIN' as const } : {}),
+        ...(role === 'SHOP_ADMIN' ? { actorType: 'SHOP_ADMIN' as const } : {}),
       },
       orderBy: { createdAt: 'desc' },
       take: 5,

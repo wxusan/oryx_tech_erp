@@ -164,7 +164,7 @@ export default function QurilmalarClient({ initialDevices }: { initialDevices: D
                     {new Date(d.createdAt).toLocaleDateString('uz-UZ')}
                   </td>
                   <td className="px-4 py-3">
-                    <Link href={`/shop/qurilmalar/${d.id}`}>
+                    <Link href={`/shop/qurilmalar/${d.id}`} prefetch={false}>
                       <button className="text-xs px-3 py-1.5 border border-zinc-200 rounded hover:bg-zinc-100 text-zinc-700 transition-colors">
                         Ko'rish
                       </button>
