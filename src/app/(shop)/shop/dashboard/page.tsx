@@ -1,6 +1,4 @@
-'use client'
-
-import { useState, useEffect } from 'react'
+import { redirect } from 'next/navigation'
 import {
   AlertTriangle,
   CalendarClock,
@@ -20,37 +18,18 @@ import {
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import { requireApiSession } from '@/lib/api-auth'
+import { getShopStats } from '@/lib/server/shop-stats'
 
 interface UpcomingPayment {
   nasiya: {
     customer: { name: string }
     device: { model: string }
   }
-  dueDate: string
+  dueDate: string | Date
   expectedAmount: number
   paidAmount: number
   status: string
-}
-
-interface RecentActivity {
-  action: string
-  createdAt: string
-  actorId: string
-}
-
-interface ShopStats {
-  totalDevices: number
-  soldThisMonth: number
-  activeNasiyalar: number
-  expectedThisMonth: number
-  overdueMoney: number
-  inventoryPurchaseCost: number
-  realProfitThisMonth: number
-  accrualGrossProfitThisMonth: number
-  cashCollectedThisMonth: number
-  overdueCount: number
-  upcomingPayments: UpcomingPayment[]
-  recentActivity: RecentActivity[]
 }
 
 function fmt(n: number) {
@@ -83,26 +62,14 @@ function statusLabel(status: string) {
   return 'Kutilmoqda'
 }
 
-export default function DashboardPage() {
-  const [stats, setStats] = useState<ShopStats | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+export default async function DashboardPage() {
+  const guarded = await requireApiSession()
+  if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
 
-  useEffect(() => {
-    fetch('/api/stats/shop')
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.success) setStats(json.data)
-        else setError(json.error || 'Xatolik yuz berdi')
-      })
-      .catch(() => setError('Xatolik yuz berdi'))
-      .finally(() => setLoading(false))
-  }, [])
+  const stats = await getShopStats(guarded.session, guarded.shopId)
 
-  const collectionBase = stats
-    ? stats.cashCollectedThisMonth + stats.expectedThisMonth
-    : 0
-  const collectionRate = stats && collectionBase > 0
+  const collectionBase = stats.cashCollectedThisMonth + stats.expectedThisMonth
+  const collectionRate = collectionBase > 0
     ? Math.round((stats.cashCollectedThisMonth / collectionBase) * 100)
     : 0
 
@@ -120,17 +87,7 @@ export default function DashboardPage() {
         </Badge>
       </div>
 
-      {error && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">
-          {error}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="text-sm text-zinc-400">Yuklanmoqda...</div>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
             <Card className="rounded-lg lg:col-span-5">
               <CardHeader className="border-b border-zinc-100">
                 <CardTitle>Bu oy pul oqimi</CardTitle>
@@ -143,7 +100,7 @@ export default function DashboardPage() {
                 <div>
                   <div className="text-xs font-medium uppercase text-zinc-500">Tushgan pul</div>
                   <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-900">
-                    {fmt(stats?.cashCollectedThisMonth ?? 0)}
+                    {fmt(stats.cashCollectedThisMonth)}
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -153,7 +110,7 @@ export default function DashboardPage() {
                   </div>
                   <Progress value={collectionRate} />
                   <div className="flex items-center justify-between text-xs text-zinc-500">
-                    <span>Kutilmoqda: {fmt(stats?.expectedThisMonth ?? 0)}</span>
+                    <span>Kutilmoqda: {fmt(stats.expectedThisMonth)}</span>
                     <span>Jami oqim: {fmt(collectionBase)}</span>
                   </div>
                 </div>
@@ -168,7 +125,7 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-zinc-900">
-                    {fmt(stats?.accrualGrossProfitThisMonth ?? 0)}
+                    {fmt(stats.accrualGrossProfitThisMonth)}
                   </div>
                   <p className="mt-2 text-xs text-zinc-500">Bu oy sotilgan qurilmalar bo'yicha</p>
                 </CardContent>
@@ -181,7 +138,7 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-zinc-900">
-                    {fmt(stats?.inventoryPurchaseCost ?? 0)}
+                    {fmt(stats.inventoryPurchaseCost)}
                   </div>
                   <p className="mt-2 text-xs text-zinc-500">Sotilmagan va band qilingan qurilmalar</p>
                 </CardContent>
@@ -194,22 +151,22 @@ export default function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-red-700">
-                    {fmt(stats?.overdueMoney ?? 0)}
+                    {fmt(stats.overdueMoney)}
                   </div>
                   <p className="mt-2 text-xs text-red-700/70">
-                    {stats?.overdueCount ?? 0} ta muddatdan o'tgan yozuv
+                    {stats.overdueCount} ta muddatdan o'tgan yozuv
                   </p>
                 </CardContent>
               </Card>
             </div>
-          </div>
+      </div>
 
-          <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Card className="rounded-lg" size="sm">
               <CardContent className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-xs text-zinc-500">Jami qurilmalar</div>
-                  <div className="mt-1 text-xl font-bold text-zinc-900">{stats?.totalDevices ?? 0}</div>
+                  <div className="mt-1 text-xl font-bold text-zinc-900">{stats.totalDevices}</div>
                 </div>
                 <Package className="size-5 text-zinc-400" />
               </CardContent>
@@ -218,7 +175,7 @@ export default function DashboardPage() {
               <CardContent className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-xs text-zinc-500">Bu oy sotildi</div>
-                  <div className="mt-1 text-xl font-bold text-zinc-900">{stats?.soldThisMonth ?? 0}</div>
+                  <div className="mt-1 text-xl font-bold text-zinc-900">{stats.soldThisMonth}</div>
                 </div>
                 <ReceiptText className="size-5 text-zinc-400" />
               </CardContent>
@@ -227,7 +184,7 @@ export default function DashboardPage() {
               <CardContent className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-xs text-zinc-500">Faol nasiyalar</div>
-                  <div className="mt-1 text-xl font-bold text-zinc-900">{stats?.activeNasiyalar ?? 0}</div>
+                  <div className="mt-1 text-xl font-bold text-zinc-900">{stats.activeNasiyalar}</div>
                 </div>
                 <ClipboardList className="size-5 text-zinc-400" />
               </CardContent>
@@ -236,21 +193,21 @@ export default function DashboardPage() {
               <CardContent className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-xs text-zinc-500">Bu oy kutilmoqda</div>
-                  <div className="mt-1 text-xl font-bold text-zinc-900">{fmt(stats?.expectedThisMonth ?? 0)}</div>
+                  <div className="mt-1 text-xl font-bold text-zinc-900">{fmt(stats.expectedThisMonth)}</div>
                 </div>
                 <CalendarClock className="size-5 text-zinc-400" />
               </CardContent>
             </Card>
-          </div>
+      </div>
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <Card className="rounded-lg">
               <CardHeader className="border-b border-zinc-100">
                 <CardTitle>Yaqin to'lov sanalari</CardTitle>
                 <CardDescription>Nasiya bo'yicha eng yaqin va kechikkan oyliklar</CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                {stats?.upcomingPayments && stats.upcomingPayments.length > 0 ? (
+                {stats.upcomingPayments.length > 0 ? (
                   stats.upcomingPayments.map((p, i) => (
                     <div key={i} className="flex items-center justify-between gap-3 py-3 border-b border-zinc-100 last:border-0">
                       <div>
@@ -280,7 +237,7 @@ export default function DashboardPage() {
                 <CardDescription>Do'kon ichidagi oxirgi harakatlar</CardDescription>
               </CardHeader>
               <CardContent className="space-y-2">
-                {stats?.recentActivity && stats.recentActivity.length > 0 ? (
+                {stats.recentActivity.length > 0 ? (
                   stats.recentActivity.map((a, i) => (
                     <div key={i} className="flex items-center justify-between py-2 border-b border-zinc-100 last:border-0">
                       <div className="text-sm text-zinc-700">{activityLabel(a.action)}</div>
@@ -294,9 +251,7 @@ export default function DashboardPage() {
                 )}
               </CardContent>
             </Card>
-          </div>
-        </>
-      )}
+      </div>
     </div>
   )
 }

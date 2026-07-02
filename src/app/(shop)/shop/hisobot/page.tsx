@@ -1,7 +1,4 @@
-'use client'
-
-import { useEffect, useState } from 'react'
-import dynamic from 'next/dynamic'
+import { redirect } from 'next/navigation'
 import {
   AlertTriangle,
   Boxes,
@@ -20,30 +17,9 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import type { ChartConfig } from '@/components/ui/chart'
-
-// Recharts is code-split so it doesn't block first paint of the report cards.
-const HisobotCharts = dynamic(() => import('./hisobot-charts'), {
-  ssr: false,
-  loading: () => (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
-      <div className="h-[344px] rounded-lg border border-zinc-200 bg-zinc-50 xl:col-span-3" />
-      <div className="h-[344px] rounded-lg border border-zinc-200 bg-zinc-50 xl:col-span-2" />
-    </div>
-  ),
-})
-
-interface ShopStats {
-  cashReceivedThisMonth: number
-  expectedThisMonth: number
-  overdueMoney: number
-  inventoryPurchaseCost: number
-  realProfitThisMonth: number
-  accrualGrossProfitThisMonth: number
-  cashCollectedThisMonth: number
-  returnRefundsThisMonth: number
-  returnsThisMonth: number
-  netCashAfterReturnsThisMonth: number
-}
+import { requireApiSession } from '@/lib/api-auth'
+import { getShopStats } from '@/lib/server/shop-stats'
+import HisobotChartsLoader from './hisobot-charts-loader'
 
 function fmt(value: number) {
   return `${Number(value).toLocaleString('ru-RU')} so'm`
@@ -67,27 +43,19 @@ function uzMonthLabel(date: Date) {
   return `${months[date.getMonth()]} ${date.getFullYear()}`
 }
 
-export default function ShopReportPage() {
-  const [stats, setStats] = useState<ShopStats | null>(null)
-  const [error, setError] = useState('')
+export default async function ShopReportPage() {
+  const guarded = await requireApiSession()
+  if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
 
-  useEffect(() => {
-    fetch('/api/stats/shop')
-      .then((res) => res.json())
-      .then((json) => {
-        if (json.success) setStats(json.data)
-        else setError(json.error || 'Hisobot yuklanmadi')
-      })
-      .catch(() => setError('Hisobot yuklanmadi'))
-  }, [])
+  const stats = await getShopStats(guarded.session, guarded.shopId)
 
   const monthLabel = uzMonthLabel(new Date())
-  const collected = stats?.cashCollectedThisMonth ?? stats?.cashReceivedThisMonth ?? 0
-  const expected = stats?.expectedThisMonth ?? 0
-  const overdue = stats?.overdueMoney ?? 0
-  const refunds = stats?.returnRefundsThisMonth ?? 0
-  const inventory = stats?.inventoryPurchaseCost ?? 0
-  const grossProfit = stats?.accrualGrossProfitThisMonth ?? stats?.realProfitThisMonth ?? 0
+  const collected = stats.cashCollectedThisMonth ?? stats.cashReceivedThisMonth
+  const expected = stats.expectedThisMonth
+  const overdue = stats.overdueMoney
+  const refunds = stats.returnRefundsThisMonth
+  const inventory = stats.inventoryPurchaseCost
+  const grossProfit = stats.accrualGrossProfitThisMonth ?? stats.realProfitThisMonth
   const collectionBase = collected + expected
   const collectionRate = collectionBase > 0 ? Math.round((collected / collectionBase) * 100) : 0
 
@@ -137,15 +105,7 @@ export default function ShopReportPage() {
         </div>
       </div>
 
-      {error && <div className="text-sm text-red-600 border border-red-200 bg-red-50 rounded px-4 py-3">{error}</div>}
-
-      {!stats ? (
-        <Card className="rounded-lg">
-          <CardContent className="py-10 text-sm text-zinc-400">Yuklanmoqda...</CardContent>
-        </Card>
-      ) : (
-        <>
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <Card className="rounded-lg">
               <CardHeader>
                 <CardDescription>Bu oy tushgan pul</CardDescription>
@@ -208,15 +168,15 @@ export default function ShopReportPage() {
                 <p className="mt-3 text-xs text-zinc-500">Hali sotilmagan qurilmalarga bog'langan pul</p>
               </CardContent>
             </Card>
-          </div>
+      </div>
 
-          <HisobotCharts
+      <HisobotChartsLoader
             cashFlowData={cashFlowData}
             businessData={businessData}
             chartConfig={chartConfig}
-          />
+      />
 
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card className="rounded-lg">
               <CardHeader>
                 <CardDescription>Hisoblangan yalpi foyda</CardDescription>
@@ -246,9 +206,7 @@ export default function ShopReportPage() {
                 ))}
               </CardContent>
             </Card>
-          </div>
-        </>
-      )}
+      </div>
     </div>
   )
 }
