@@ -172,16 +172,18 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card className="rounded-lg border-red-200 bg-red-50/40">
-            <CardHeader>
-              <CardDescription className="text-red-700">Muddati o'tgan</CardDescription>
-              <CardAction><AlertTriangle className="size-4 text-red-500" /></CardAction>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-red-700">{stats?.overdue ?? 0}</div>
-              <p className="mt-2 text-xs text-red-700/70">Darhol tekshirish kerak bo'lgan do'konlar</p>
-            </CardContent>
-          </Card>
+          <Link href="/admin/shops?payment=overdue" className="block">
+            <Card className="rounded-lg border-red-200 bg-red-50/40 transition-colors hover:border-red-300 hover:bg-red-50">
+              <CardHeader>
+                <CardDescription className="text-red-700">Muddati o'tgan</CardDescription>
+                <CardAction><AlertTriangle className="size-4 text-red-500" /></CardAction>
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-red-700">{stats?.overdue ?? 0}</div>
+                <p className="mt-2 text-xs text-red-700/70">Darhol tekshirish kerak bo'lgan do'konlar</p>
+              </CardContent>
+            </Card>
+          </Link>
 
           <Card className="rounded-lg">
             <CardHeader>

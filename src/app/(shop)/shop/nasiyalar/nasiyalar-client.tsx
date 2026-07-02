@@ -18,6 +18,7 @@ interface Nasiya {
   totalAmount: number
   remainingAmount: number
   status: NasiyaStatus
+  createdAt: string
   /** Live display status derived server-side from schedules (matches dashboard). */
   displayStatus: NasiyaStatus
   isOverdue: boolean
@@ -63,17 +64,31 @@ function fmt(n: number) {
   return Number(n).toLocaleString('ru-RU')
 }
 
-export default function NasiyalarClient({ initialNasiyalar }: { initialNasiyalar: Nasiya[] }) {
+export default function NasiyalarClient({
+  initialNasiyalar,
+  initialFilter = 'Barchasi',
+}: {
+  initialNasiyalar: Nasiya[]
+  initialFilter?: NasiyaStatus | 'Barchasi'
+}) {
   const [nasiyalar] = useState<Nasiya[]>(initialNasiyalar)
   const loading = false
   const error = ''
-  const [activeFilter, setActiveFilter] = useState<NasiyaStatus | 'Barchasi'>('Barchasi')
+  const [activeFilter, setActiveFilter] = useState<NasiyaStatus | 'Barchasi'>(initialFilter)
 
   // Filter on the derived display status so overdue contracts land under
   // "Muddati o'tgan" (and out of "Faol"), matching the dashboard.
-  const filtered = nasiyalar.filter(
-    (n) => activeFilter === 'Barchasi' || n.displayStatus === activeFilter
-  )
+  const filtered = nasiyalar
+    .filter((n) => activeFilter === 'Barchasi' || n.displayStatus === activeFilter)
+    .sort((a, b) => {
+      if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1
+
+      const nextA = a.nextPaymentDate ? new Date(a.nextPaymentDate).getTime() : Number.POSITIVE_INFINITY
+      const nextB = b.nextPaymentDate ? new Date(b.nextPaymentDate).getTime() : Number.POSITIVE_INFINITY
+      if (nextA !== nextB) return nextA - nextB
+
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    })
 
   return (
     <div className="p-6 space-y-4">

@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation'
+import Link from 'next/link'
 import {
   AlertTriangle,
   CalendarClock,
@@ -144,20 +145,22 @@ export default async function DashboardPage() {
                 </CardContent>
               </Card>
 
-              <Card className="rounded-lg border-red-200 bg-red-50/40">
-                <CardHeader>
-                  <CardDescription className="text-red-700">Kechikkan to'lovlar</CardDescription>
-                  <CardAction><AlertTriangle className="size-4 text-red-500" /></CardAction>
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-red-700">
-                    {fmt(stats.overdueMoney)}
-                  </div>
-                  <p className="mt-2 text-xs text-red-700/70">
-                    {stats.overdueCount} ta muddatdan o'tgan yozuv
-                  </p>
-                </CardContent>
-              </Card>
+              <Link href="/shop/nasiyalar?status=OVERDUE" className="block">
+                <Card className="rounded-lg border-red-200 bg-red-50/40 transition-colors hover:border-red-300 hover:bg-red-50">
+                  <CardHeader>
+                    <CardDescription className="text-red-700">Kechikkan to'lovlar</CardDescription>
+                    <CardAction><AlertTriangle className="size-4 text-red-500" /></CardAction>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold text-red-700">
+                      {fmt(stats.overdueMoney)}
+                    </div>
+                    <p className="mt-2 text-xs text-red-700/70">
+                      {stats.overdueCount} ta muddatdan o'tgan yozuv
+                    </p>
+                  </CardContent>
+                </Card>
+              </Link>
             </div>
       </div>
 

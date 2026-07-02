@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useSyncExternalStore } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,6 +15,7 @@ import {
 
 type ShopStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED'
 type FilterTab = 'barchasi' | ShopStatus
+type PaymentView = 'all' | 'overdue'
 
 interface Shop {
   id: string
@@ -65,12 +66,31 @@ function formatDate(value: string) {
   return value ? new Date(value).toLocaleDateString('ru-RU') : '—'
 }
 
+function isOverdueShop(shop: Shop) {
+  return shop.status === 'ACTIVE' && dueDateSortValue(shop.subscriptionDue) < Date.now()
+}
+
+function subscribeToLocation() {
+  return () => {}
+}
+
+function getPaymentViewSnapshot(): PaymentView {
+  if (typeof window === 'undefined') return 'all'
+  const params = new URLSearchParams(window.location.search)
+  return params.get('payment') === 'overdue' ? 'overdue' : 'all'
+}
+
 export default function ShopsPage() {
   const [shops, setShops] = useState<Shop[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState<FilterTab>('barchasi')
+  const paymentView = useSyncExternalStore(
+    subscribeToLocation,
+    getPaymentViewSnapshot,
+    () => 'all',
+  )
 
   useEffect(() => {
     fetch('/api/shops?includeDeleted=true')
@@ -95,7 +115,14 @@ export default function ShopsPage() {
         s.shopNumber.includes(q)
       return matchTab && matchSearch
     })
-    .sort((a, b) => dueDateSortValue(a.subscriptionDue) - dueDateSortValue(b.subscriptionDue))
+    .sort((a, b) => {
+      if (paymentView === 'overdue') {
+        const overdueA = isOverdueShop(a)
+        const overdueB = isOverdueShop(b)
+        if (overdueA !== overdueB) return overdueA ? -1 : 1
+      }
+      return dueDateSortValue(a.subscriptionDue) - dueDateSortValue(b.subscriptionDue)
+    })
 
   return (
     <div className="max-w-6xl mx-auto">
@@ -169,29 +196,32 @@ export default function ShopsPage() {
                 </TableCell>
               </TableRow>
             ) : (
-              filtered.map((shop) => (
-                <TableRow key={shop.id} className="border-zinc-100 hover:bg-zinc-50">
-                  <TableCell className="pl-5 text-sm font-medium text-zinc-900">{shop.name}</TableCell>
-                  <TableCell className="text-sm text-zinc-600">{shop.ownerName}</TableCell>
-                  <TableCell className="text-sm text-zinc-500 font-mono">{shop.ownerPhone}</TableCell>
-                  <TableCell className="text-sm text-zinc-500">{shop.shopNumber}</TableCell>
-                  <TableCell>
-                    <StatusBadge status={shop.status} />
-                  </TableCell>
-                  <TableCell className="text-sm text-zinc-500">
-                    {formatDate(shop.subscriptionDue)}
-                  </TableCell>
-                  <TableCell className="pr-5 text-right">
-                    <Link
-                      href={`/admin/shops/${shop.id}`}
-                      prefetch={false}
-                      className="text-xs text-zinc-500 hover:text-zinc-900 border border-zinc-200 px-2.5 py-1 hover:bg-zinc-50 transition-colors"
-                    >
-                      Ko&apos;rish
-                    </Link>
-                  </TableCell>
-                </TableRow>
-              ))
+              filtered.map((shop) => {
+                const overdue = isOverdueShop(shop)
+                return (
+                  <TableRow key={shop.id} className="border-zinc-100 hover:bg-zinc-50">
+                    <TableCell className="pl-5 text-sm font-medium text-zinc-900">{shop.name}</TableCell>
+                    <TableCell className="text-sm text-zinc-600">{shop.ownerName}</TableCell>
+                    <TableCell className="text-sm text-zinc-500 font-mono">{shop.ownerPhone}</TableCell>
+                    <TableCell className="text-sm text-zinc-500">{shop.shopNumber}</TableCell>
+                    <TableCell>
+                      <StatusBadge status={shop.status} />
+                    </TableCell>
+                    <TableCell className={overdue ? 'text-sm font-medium text-red-700' : 'text-sm text-zinc-500'}>
+                      {formatDate(shop.subscriptionDue)}
+                    </TableCell>
+                    <TableCell className="pr-5 text-right">
+                      <Link
+                        href={`/admin/shops/${shop.id}`}
+                        prefetch={false}
+                        className="text-xs text-zinc-500 hover:text-zinc-900 border border-zinc-200 px-2.5 py-1 hover:bg-zinc-50 transition-colors"
+                      >
+                        Ko&apos;rish
+                      </Link>
+                    </TableCell>
+                  </TableRow>
+                )
+              })
             )}
           </TableBody>
         </Table>
