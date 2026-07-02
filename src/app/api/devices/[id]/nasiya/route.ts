@@ -6,7 +6,7 @@
  * notifications, and logs the action.
  */
 
-import { NextRequest } from 'next/server'
+import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
@@ -170,8 +170,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       return nasiya
     })
 
-    // Flush freshly-queued notifications immediately (best-effort, post-commit).
-    await processPendingNotifications().catch((e) => console.error('[notify] flush failed', e))
+    // Flush freshly-queued notifications after the response (non-blocking).
+    // The rows are already committed, so cron is the backstop if this misses.
+    after(() => processPendingNotifications().catch((e) => console.error('[notify] flush failed', e)))
 
     return created(result, "Nasiya muvaffaqiyatli yaratildi")
   } catch (err: unknown) {

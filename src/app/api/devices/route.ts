@@ -6,7 +6,7 @@
  * Shop admins can only see/add devices for their own shop.
  */
 
-import { NextRequest } from 'next/server'
+import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addDeviceSchema } from '@/lib/validations'
@@ -153,12 +153,16 @@ export async function POST(req: NextRequest) {
       return createdDevice
     })
 
-    await notifyShopAdmins(
-      resolvedShopId,
-      `Yangi qurilma qo'shildi\nModel: ${model}\nIMEI: ${imei}\nKelish narxi: ${Number(purchasePrice).toLocaleString('ru-RU')} so'm`,
-      'DEVICE_CREATED',
-      device.id,
-      'Device',
+    // Deliver notifications after the response is sent (non-blocking) so the
+    // add-device request never waits on Telegram HTTP calls.
+    after(() =>
+      notifyShopAdmins(
+        resolvedShopId,
+        `Yangi qurilma qo'shildi\nModel: ${model}\nIMEI: ${imei}\nKelish narxi: ${Number(purchasePrice).toLocaleString('ru-RU')} so'm`,
+        'DEVICE_CREATED',
+        device.id,
+        'Device',
+      ).catch((e) => console.error('[notify] device create failed', e)),
     )
 
     return created(device, "Qurilma muvaffaqiyatli qo'shildi")

@@ -66,20 +66,28 @@ export default function ShopLogsPage() {
   const [error, setError] = useState<string | null>(null)
   const [totalLogs, setTotalLogs] = useState(0)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [page, setPage] = useState(1)
+
+  // Debounce the free-text search so typing doesn't fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
   const requestKey = useMemo(() => {
     const params = new URLSearchParams()
 
-    if (search.trim()) params.set('search', search.trim())
+    if (debouncedSearch.trim()) params.set('search', debouncedSearch.trim())
     if (dateFrom) params.set('from', dateFrom)
     if (dateTo) params.set('to', dateTo)
     params.set('skip', String((page - 1) * PER_PAGE))
     params.set('take', String(PER_PAGE))
 
     return params.toString()
-  }, [search, dateFrom, dateTo, page])
+  }, [debouncedSearch, dateFrom, dateTo, page])
 
   useEffect(() => {
     const controller = new AbortController()

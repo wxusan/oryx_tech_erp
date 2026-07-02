@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
@@ -147,9 +147,9 @@ export default function QurilmaDetailPage() {
   const [restockError, setRestockError] = useState('')
   const [restocking, setRestocking] = useState(false)
 
-  useEffect(() => {
+  const fetchDevice = useCallback(() => {
     if (!id) return
-    fetch(`/api/devices/${id}`)
+    return fetch(`/api/devices/${id}`)
       .then((r) => r.json())
       .then((json) => {
         if (json.success) setDevice(json.data)
@@ -158,6 +158,10 @@ export default function QurilmaDetailPage() {
       .catch(() => setError('Xatolik yuz berdi'))
       .finally(() => setLoading(false))
   }, [id])
+
+  useEffect(() => {
+    fetchDevice()
+  }, [fetchDevice])
 
   // Device lifecycle history (created -> sold -> returned -> restocked ...).
   useEffect(() => {
@@ -226,7 +230,7 @@ export default function QurilmaDetailPage() {
       setSalePayAmount('')
       setSalePayMethod('')
       setSalePayNote('')
-      window.location.reload()
+      await fetchDevice()
     } catch (err) {
       setSalePayError(err instanceof Error ? err.message : "To'lovni saqlashda xatolik")
     } finally {
@@ -277,8 +281,11 @@ export default function QurilmaDetailPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Omborga qaytarishda xatolik')
-      // Reload so status becomes IN_STOCK and the sell / nasiya actions reappear.
-      window.location.reload()
+      // Local refetch: status becomes IN_STOCK and the sell / nasiya actions
+      // reappear without a full page reload.
+      setRestockModalOpen(false)
+      setRestockNote('')
+      await fetchDevice()
     } catch (err) {
       setRestockError(err instanceof Error ? err.message : 'Omborga qaytarishda xatolik')
     } finally {

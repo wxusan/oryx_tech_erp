@@ -73,6 +73,15 @@ export async function resolveActiveShopId(
   const shopId = session.user.role === 'SHOP_ADMIN' ? session.user.shopId : requestedShopId
   if (!shopId) return { ok: false, response: badRequest('shopId talab qilinadi') }
 
+  // For a shop admin, requireApiSession() has ALREADY validated this exact shop
+  // (ACTIVE, not deleted, subscription in grace) via the shopAdmin.findFirst join
+  // in the same request. Re-querying it here is a redundant round-trip, so we
+  // trust the session-derived shopId. Super admins pass an arbitrary shopId that
+  // was NOT pre-validated, so they still need the DB check below.
+  if (session.user.role === 'SHOP_ADMIN') {
+    return { ok: true, shopId }
+  }
+
   const shop = await prisma.shop.findFirst({
     where: {
       id: shopId,
