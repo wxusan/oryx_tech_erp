@@ -11,6 +11,7 @@ import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { ok, serverError } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
+import { enrichLogsWithActors } from '@/lib/server/log-actors'
 
 export async function GET(req: NextRequest) {
   try {
@@ -94,7 +95,9 @@ export async function GET(req: NextRequest) {
       prisma.log.count({ where }),
     ])
 
-    return ok({ logs, total, skip, take }, "Loglar ro'yxati")
+    const logsWithActors = await enrichLogsWithActors(logs)
+
+    return ok({ logs: logsWithActors, total, skip, take }, "Loglar ro'yxati")
   } catch (err) {
     console.error('[GET /api/logs]', err)
     return serverError()

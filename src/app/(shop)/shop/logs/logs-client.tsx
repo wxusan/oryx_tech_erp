@@ -24,6 +24,8 @@ interface LogEntry {
   targetId: string
   note: string | null
   newValue: unknown
+  actorName?: string | null
+  actorLogin?: string | null
 }
 
 interface ApiResponse<T> {
@@ -64,7 +66,7 @@ function displayLog(log: LogEntry): DisplayLog {
   return {
     id: log.id,
     datetime: formatDateTime(log.createdAt),
-    actor: actorLabel(log.actorType),
+    actor: log.actorName || log.actorLogin || actorLabel(log.actorType),
     actorType: log.actorType,
     action: actionLabel(log.action, log.targetType),
     target: targetLabel(log.targetType, log.targetId, log.newValue),

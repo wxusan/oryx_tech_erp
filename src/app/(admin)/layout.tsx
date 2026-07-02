@@ -2,6 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
+import { useEffect, useState } from 'react'
 import { BarChart3, LayoutDashboard, Store, CreditCard, ScrollText, Settings } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
@@ -15,8 +16,44 @@ const navItems = [
   { label: "Sozlamalar", href: "/admin/settings", icon: Settings },
 ]
 
+type SessionPayload = {
+  user?: {
+    name?: string | null
+    role?: string | null
+  }
+}
+
+function initials(name: string) {
+  const parts = name.trim().split(/\s+/).filter(Boolean)
+  if (!parts.length) return 'SA'
+  return parts
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join('')
+}
+
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
+  const [adminName, setAdminName] = useState('')
+
+  useEffect(() => {
+    let cancelled = false
+
+    fetch('/api/auth/session', { cache: 'no-store' })
+      .then((response) => (response.ok ? response.json() : null))
+      .then((session: SessionPayload | null) => {
+        if (!cancelled && session?.user?.role === 'SUPER_ADMIN') {
+          setAdminName(session.user.name?.trim() || '')
+        }
+      })
+      .catch(() => {})
+
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const displayName = adminName || 'Admin'
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 md:h-screen md:flex-row md:overflow-hidden">
@@ -71,11 +108,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
         {/* Top bar */}
         <header className="h-14 shrink-0 flex items-center justify-end gap-3 px-6 border-b border-zinc-200 bg-white/90 backdrop-blur">
-          <span className="text-xs text-zinc-500 font-medium">Bosh admin</span>
+          <span className="text-xs text-zinc-500 font-medium">{displayName}</span>
           <div
             className="w-8 h-8 rounded-full bg-zinc-900 text-white text-[11px] font-bold flex items-center justify-center select-none shadow-sm"
           >
-            BA
+            {initials(displayName)}
           </div>
           <SessionControls callbackUrl="/admin/login" />
         </header>

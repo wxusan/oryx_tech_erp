@@ -25,6 +25,8 @@ interface LogEntry {
   targetId: string
   note: string | null
   newValue: unknown
+  actorName?: string | null
+  actorLogin?: string | null
   shop?: {
     id: string
     name: string
@@ -123,7 +125,7 @@ export default function LogsPage() {
         setLogs(json.data.logs.map((log) => ({
           id: log.id,
           datetime: formatDateTime(log.createdAt),
-          actor: actorLabel(log.actorType),
+          actor: log.actorName || log.actorLogin || actorLabel(log.actorType),
           actorType: log.actorType,
           shop: log.shop?.name ?? '—',
           action: actionLabel(log.action, log.targetType),

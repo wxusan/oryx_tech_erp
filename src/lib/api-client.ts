@@ -240,6 +240,8 @@ export interface Log {
   shopId: string | null
   actorId: string
   actorType: string
+  actorName?: string | null
+  actorLogin?: string | null
   action: string
   targetType: string
   targetId: string

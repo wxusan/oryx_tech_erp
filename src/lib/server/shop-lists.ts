@@ -4,6 +4,7 @@ import { unstable_cache } from 'next/cache'
 import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { shopCacheTag } from '@/lib/server/cache-tags'
+import { enrichLogsWithActors } from '@/lib/server/log-actors'
 import { deriveNasiyaOverdue, type NasiyaDisplayStatus } from '@/lib/nasiya-utils'
 
 export interface ShopDeviceListItem {
@@ -46,6 +47,8 @@ export interface ShopLogListItem {
   createdAt: string
   actorId: string
   actorType: 'SUPER_ADMIN' | 'SHOP_ADMIN'
+  actorName?: string | null
+  actorLogin?: string | null
   action: string
   targetType: string
   targetId: string
@@ -233,9 +236,11 @@ export async function getShopLogsInitial(shopId: string): Promise<ShopLogsPayloa
     prisma.log.count({ where }),
   ])
 
+  const logsWithActors = await enrichLogsWithActors(logs)
+
   return {
     total,
-    logs: logs.map((log) => ({
+    logs: logsWithActors.map((log) => ({
       ...log,
       createdAt: log.createdAt.toISOString(),
     })),
