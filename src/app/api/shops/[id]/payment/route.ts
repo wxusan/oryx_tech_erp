@@ -59,7 +59,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               where: { deletedAt: null },
               orderBy: { paidAt: 'desc' },
               take: 5,
-              include: { recordedBy: { select: { name: true, email: true } } },
+              include: { recordedBy: { select: { name: true, login: true } } },
             },
           },
         })

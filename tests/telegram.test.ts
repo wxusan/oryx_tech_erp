@@ -33,7 +33,7 @@ describe('buildStartWelcome', () => {
   it('welcomes a super admin generically by name', () => {
     const owner: TelegramOwner = {
       type: 'SUPER_ADMIN',
-      user: { id: 'sa1', name: 'Abdulloh', email: 'a@oryx.local' },
+      user: { id: 'sa1', name: 'Abdulloh', login: 'abdulloh' },
     }
     const msg = buildStartWelcome(owner)
     expect(msg).toContain('Abdulloh')

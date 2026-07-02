@@ -75,8 +75,7 @@ enum PaymentMethod {
 model SuperAdmin {
   id                 String         @id @default(cuid())
   name               String
-  login              String?        @unique
-  email              String         @unique
+  login              String         @unique
   telegramId         String?
   telegramVerifiedAt DateTime?
   passwordHash       String

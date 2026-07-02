@@ -251,7 +251,7 @@ export const authConfig: NextAuthConfig = {
       session.user = {
         id: token.id,
         name: token.name,
-        email: token.email ?? '',
+        email: '',
         emailVerified: null,
         role: token.role,
         shopId: token.shopId,

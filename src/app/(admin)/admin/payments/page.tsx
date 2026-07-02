@@ -27,7 +27,7 @@ interface ShopPayment {
   paymentMethod: string
   paidAt: string
   recordedById?: string
-  recordedBy?: { name: string; email: string } | null
+  recordedBy?: { name: string; login: string } | null
 }
 
 interface ShopWithPayments {
@@ -88,7 +88,7 @@ export default function PaymentsPage() {
               method: methodFromEnum(payment.paymentMethod),
               date: payment.paidAt,
               addedBy: payment.recordedBy
-                ? `${payment.recordedBy.name} (${payment.recordedBy.email})`
+                ? `${payment.recordedBy.name} (${payment.recordedBy.login})`
                 : payment.recordedById
                   ? payment.recordedById.slice(0, 8)
                   : '—',

@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
           orderBy: { paidAt: 'desc' },
           take: 12,
           include: {
-            recordedBy: { select: { name: true, email: true } },
+            recordedBy: { select: { name: true, login: true } },
           },
         },
         _count: {

@@ -32,7 +32,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         payments: {
           where: { deletedAt: null },
           orderBy: { paidAt: 'desc' },
-          include: { recordedBy: { select: { name: true, email: true } } },
+          include: { recordedBy: { select: { name: true, login: true } } },
         },
         _count: {
           select: {

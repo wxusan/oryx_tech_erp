@@ -20,31 +20,23 @@ function normalizeLogin(value) {
   return value.trim().toLowerCase()
 }
 
-function normalizeEmail(value) {
-  return value.trim().toLowerCase()
-}
-
 const admins = [
   {
     login: normalizeLogin(process.env.SEED_SUPER_ADMIN_LOGIN || process.env.SUPER_ADMIN_LOGIN || 'oryx_abdulloh'),
-    email: normalizeEmail(process.env.SEED_SUPER_ADMIN_EMAIL || process.env.SUPER_ADMIN_EMAIL || 'admin@oryx.local'),
     name: process.env.SEED_SUPER_ADMIN_NAME || process.env.SUPER_ADMIN_NAME || 'Abdulloh',
   },
   {
     login: normalizeLogin(process.env.SEED_SUPER_ADMIN_2_LOGIN || 'wxusan'),
-    email: normalizeEmail(process.env.SEED_SUPER_ADMIN_2_EMAIL || 'wxusan@oryx.local'),
     name: process.env.SEED_SUPER_ADMIN_2_NAME || 'Xusan',
   },
 ]
 
 const uniqueAdmins = admins.filter((admin, index) => {
-  if (!admin.login || !admin.email) {
-    throw new Error('Super admin login and email are required')
+  if (!admin.login) {
+    throw new Error('Super admin login is required')
   }
 
-  return (
-    admins.findIndex((candidate) => candidate.login === admin.login || candidate.email === admin.email) === index
-  )
+  return admins.findIndex((candidate) => candidate.login === admin.login) === index
 })
 
 const client = new Client({ connectionString })
@@ -55,9 +47,9 @@ async function upsertSuperAdmin(admin) {
   const existing = await client.query(
     `select id
      from "SuperAdmin"
-     where "deletedAt" is null and (login = $1 or email = $2)
+     where "deletedAt" is null and login = $1
      limit 1`,
-    [admin.login, admin.email],
+    [admin.login],
   )
   const passwordHash = await bcrypt.hash(password, 12)
 
@@ -65,26 +57,25 @@ async function upsertSuperAdmin(admin) {
     await client.query(
       `update "SuperAdmin"
        set login = $1,
-           email = $2,
-           name = $3,
-           "passwordHash" = $4,
+           name = $2,
+           "passwordHash" = $3,
            "sessionVersion" = "sessionVersion" + 1,
            "updatedAt" = now()
-       where id = $5`,
-      [admin.login, admin.email, admin.name, passwordHash, existing.rows[0].id],
+       where id = $4`,
+      [admin.login, admin.name, passwordHash, existing.rows[0].id],
     )
 
-    console.log(`Updated super admin: ${admin.login} (${admin.email})`)
+    console.log(`Updated super admin: ${admin.login}`)
     return
   }
 
   await client.query(
-    `insert into "SuperAdmin" (id, name, login, email, "passwordHash", role, "createdAt", "updatedAt")
-     values (concat('sa_', replace(gen_random_uuid()::text, '-', '')), $1, $2, $3, $4, 'SUPER_ADMIN', now(), now())`,
-    [admin.name, admin.login, admin.email, passwordHash],
+    `insert into "SuperAdmin" (id, name, login, "passwordHash", role, "createdAt", "updatedAt")
+     values (concat('sa_', replace(gen_random_uuid()::text, '-', '')), $1, $2, $3, 'SUPER_ADMIN', now(), now())`,
+    [admin.name, admin.login, passwordHash],
   )
 
-  console.log(`Created super admin: ${admin.login} (${admin.email})`)
+  console.log(`Created super admin: ${admin.login}`)
 }
 
 try {

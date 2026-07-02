@@ -26,12 +26,10 @@ interface SuperAdminProfile {
   id: string
   name: string
   login: string | null
-  email: string
   telegramId: string | null
   telegramVerifiedAt: string | null
   role: string
   createdAt: string
-  updatedAt: string
 }
 
 interface PasswordForm {
@@ -59,8 +57,8 @@ function formatDate(value: string | null | undefined) {
   if (!value) return '-'
   return new Date(value).toLocaleString('uz-UZ', {
     year: 'numeric',
-    month: 'short',
-    day: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
   })
@@ -214,16 +212,11 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
                 <>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Info label="Ism" value={profile.name} />
-                    <Info label="Login" value={profile.login || profile.email} mono />
-                    <Info label="Email" value={profile.email} mono />
+                    <Info label="Login" value={profile.login || '-'} mono />
                     <Info label="Rol" value={profile.role} />
                     <Info label="Telegram ID" value={profile.telegramId || '-'} mono />
                     <Info label="Yaratilgan" value={formatDate(profile.createdAt)} />
                     <Info label="Telegram ulangan" value={formatDate(profile.telegramVerifiedAt)} />
-                  </div>
-                  <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-                    <div className="text-xs font-medium text-zinc-500">Oxirgi yangilanish</div>
-                    <div className="mt-1 text-sm font-semibold text-zinc-900">{formatDate(profile.updatedAt)}</div>
                   </div>
                 </>
               ) : (

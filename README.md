@@ -88,11 +88,10 @@ fine. On a large existing production database, create those indexes with
 `CREATE INDEX CONCURRENTLY` during a planned DB maintenance step instead,
 because Prisma migrations run inside a transaction.
 
-The super-admin seed is **idempotent** — re-running with the same login/email does
-not create duplicates. By default it creates/updates two equal-permission logins:
+The super-admin seed is **idempotent** — re-running with the same login does not
+create duplicates. By default it creates/updates two equal-permission logins:
 `oryx_abdulloh` and `wxusan`. `SEED_SUPER_ADMIN_LOGIN`,
-`SEED_SUPER_ADMIN_EMAIL`, `SEED_SUPER_ADMIN_NAME`,
-`SEED_SUPER_ADMIN_2_LOGIN`, `SEED_SUPER_ADMIN_2_EMAIL`, and
+`SEED_SUPER_ADMIN_NAME`, `SEED_SUPER_ADMIN_2_LOGIN`, and
 `SEED_SUPER_ADMIN_2_NAME` are optional (defaults shown in `.env.example`);
 `SEED_SUPER_ADMIN_PASSWORD` is required and never defaulted.
 

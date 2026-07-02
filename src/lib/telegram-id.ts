@@ -15,7 +15,7 @@ export async function findTelegramOwner(telegramId: string) {
   const [superAdmin, shopAdmin] = await Promise.all([
     prisma.superAdmin.findFirst({
       where: { telegramId, deletedAt: null },
-      select: { id: true, name: true, email: true },
+      select: { id: true, name: true, login: true },
     }),
     prisma.shopAdmin.findFirst({
       where: {
