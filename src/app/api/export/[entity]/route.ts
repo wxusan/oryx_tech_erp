@@ -11,6 +11,18 @@ type ExportFormat = 'csv' | 'xlsx'
 
 export const runtime = 'nodejs'
 
+const EXPORT_ROW_LIMIT = 5000
+const EXPORT_BATCH_SIZE = 500
+
+class ExportTooLargeError extends Error {
+  constructor(
+    readonly entity: string,
+    readonly count: number,
+  ) {
+    super(`Export ${entity} has ${count} rows`)
+  }
+}
+
 function csvValue(value: unknown) {
   const raw = value instanceof Date ? value.toISOString() : value == null ? '' : String(value)
   return `"${raw.replaceAll('"', '""')}"`
@@ -41,6 +53,28 @@ function normalizeFormat(value: string | null): ExportFormat | null {
 
 function excelValue(value: ExportCell): Cell {
   return value ?? ''
+}
+
+async function assertExportSize(entity: string, count: Promise<number>) {
+  const total = await count
+  if (total > EXPORT_ROW_LIMIT) {
+    throw new ExportTooLargeError(entity, total)
+  }
+  return total
+}
+
+async function fetchExportRows<T>(
+  total: number,
+  fetchBatch: (skip: number, take: number) => Promise<T[]>,
+) {
+  const rows: T[] = []
+
+  for (let skip = 0; skip < total; skip += EXPORT_BATCH_SIZE) {
+    const batch = await fetchBatch(skip, Math.min(EXPORT_BATCH_SIZE, total - skip))
+    rows.push(...batch)
+  }
+
+  return rows
 }
 
 async function xlsxResponse(entity: string, data: ExportData) {
@@ -88,10 +122,26 @@ function exportResponse(entity: string, format: ExportFormat, data: ExportData) 
 
 async function exportData(entity: string, shopId: string, role: string): Promise<ExportData | null> {
   if (entity === 'devices') {
-    const devices = await prisma.device.findMany({
-      where: { shopId, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-    })
+    const where = { shopId, deletedAt: null }
+    const total = await assertExportSize(entity, prisma.device.count({ where }))
+    const devices = await fetchExportRows(total, (skip, take) =>
+      prisma.device.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        select: {
+          model: true,
+          imei: true,
+          color: true,
+          storage: true,
+          batteryHealth: true,
+          purchasePrice: true,
+          status: true,
+          createdAt: true,
+        },
+      }),
+    )
     return {
       headers: [
         'model',
@@ -117,10 +167,22 @@ async function exportData(entity: string, shopId: string, role: string): Promise
   }
 
   if (entity === 'customers') {
-    const customers = await prisma.customer.findMany({
-      where: { shopId, deletedAt: null },
-      orderBy: { createdAt: 'desc' },
-    })
+    const where = { shopId, deletedAt: null }
+    const total = await assertExportSize(entity, prisma.customer.count({ where }))
+    const customers = await fetchExportRows(total, (skip, take) =>
+      prisma.customer.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        select: {
+          name: true,
+          phone: true,
+          note: true,
+          createdAt: true,
+        },
+      }),
+    )
     return {
       headers: ['name', 'phone', 'note', 'createdAt'],
       rows: customers.map((c) => [c.name, c.phone, c.note, c.createdAt]),
@@ -128,11 +190,27 @@ async function exportData(entity: string, shopId: string, role: string): Promise
   }
 
   if (entity === 'sales') {
-    const sales = await prisma.sale.findMany({
-      where: { shopId, deletedAt: null },
-      include: { customer: true, device: true },
-      orderBy: { createdAt: 'desc' },
-    })
+    const where = { shopId, deletedAt: null }
+    const total = await assertExportSize(entity, prisma.sale.count({ where }))
+    const sales = await fetchExportRows(total, (skip, take) =>
+      prisma.sale.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        select: {
+          salePrice: true,
+          amountPaid: true,
+          remainingAmount: true,
+          paymentMethod: true,
+          paidFully: true,
+          dueDate: true,
+          createdAt: true,
+          customer: { select: { name: true, phone: true } },
+          device: { select: { model: true } },
+        },
+      }),
+    )
     return {
       headers: [
         'customer',
@@ -162,11 +240,26 @@ async function exportData(entity: string, shopId: string, role: string): Promise
   }
 
   if (entity === 'nasiya') {
-    const nasiyalar = await prisma.nasiya.findMany({
-      where: { shopId, deletedAt: null },
-      include: { customer: true, device: true },
-      orderBy: { createdAt: 'desc' },
-    })
+    const where = { shopId, deletedAt: null }
+    const total = await assertExportSize(entity, prisma.nasiya.count({ where }))
+    const nasiyalar = await fetchExportRows(total, (skip, take) =>
+      prisma.nasiya.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        select: {
+          totalAmount: true,
+          downPayment: true,
+          remainingAmount: true,
+          months: true,
+          status: true,
+          createdAt: true,
+          customer: { select: { name: true, phone: true } },
+          device: { select: { model: true } },
+        },
+      }),
+    )
     return {
       headers: [
         'customer',
@@ -194,15 +287,25 @@ async function exportData(entity: string, shopId: string, role: string): Promise
   }
 
   if (entity === 'returns') {
-    const returns = await prisma.deviceReturn.findMany({
-      where: { shopId },
-      include: {
-        device: true,
-        sale: { include: { customer: true } },
-        nasiya: { include: { customer: true } },
-      },
-      orderBy: { createdAt: 'desc' },
-    })
+    const where = { shopId }
+    const total = await assertExportSize(entity, prisma.deviceReturn.count({ where }))
+    const returns = await fetchExportRows(total, (skip, take) =>
+      prisma.deviceReturn.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        select: {
+          refundAmount: true,
+          refundMethod: true,
+          note: true,
+          createdAt: true,
+          device: { select: { model: true, imei: true } },
+          sale: { select: { customer: { select: { name: true } } } },
+          nasiya: { select: { customer: { select: { name: true } } } },
+        },
+      }),
+    )
     return {
       headers: [
         'device',
@@ -226,14 +329,28 @@ async function exportData(entity: string, shopId: string, role: string): Promise
   }
 
   if (entity === 'logs') {
-    const logs = await prisma.log.findMany({
-      where: {
-        shopId,
-        ...(role === 'SHOP_ADMIN' ? { actorType: 'SHOP_ADMIN' as const } : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take: 1000,
-    })
+    const where = {
+      shopId,
+      ...(role === 'SHOP_ADMIN' ? { actorType: 'SHOP_ADMIN' as const } : {}),
+    }
+    const total = await assertExportSize(entity, prisma.log.count({ where }))
+    const logs = await fetchExportRows(total, (skip, take) =>
+      prisma.log.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        select: {
+          actorId: true,
+          actorType: true,
+          action: true,
+          targetType: true,
+          targetId: true,
+          note: true,
+          createdAt: true,
+        },
+      }),
+    )
     return {
       headers: ['actorId', 'actorType', 'action', 'targetType', 'targetId', 'note', 'createdAt'],
       rows: logs.map((log) => [
@@ -252,20 +369,35 @@ async function exportData(entity: string, shopId: string, role: string): Promise
 }
 
 export async function GET(req: NextRequest, ctx: RouteContext) {
-  const guarded = await requireApiSession()
-  if (!guarded.ok) return guarded.response
-  const { session } = guarded
-  const { entity } = await ctx.params
+  try {
+    const guarded = await requireApiSession()
+    if (!guarded.ok) return guarded.response
+    const { session } = guarded
+    const { entity } = await ctx.params
 
-  const format = normalizeFormat(req.nextUrl.searchParams.get('format'))
-  if (!format) return new Response('Unsupported export format', { status: 400 })
+    const format = normalizeFormat(req.nextUrl.searchParams.get('format'))
+    if (!format) return new Response('Unsupported export format', { status: 400 })
 
-  const resolved = await resolveActiveShopId(session, req.nextUrl.searchParams.get('shopId'))
-  if (!resolved.ok) return resolved.response
-  const { shopId } = resolved
+    const resolved = await resolveActiveShopId(session, req.nextUrl.searchParams.get('shopId'))
+    if (!resolved.ok) return resolved.response
+    const { shopId } = resolved
 
-  const data = await exportData(entity, shopId, session.user.role)
-  if (!data) return new Response('Unknown export entity', { status: 404 })
+    const data = await exportData(entity, shopId, session.user.role)
+    if (!data) return new Response('Unknown export entity', { status: 404 })
 
-  return exportResponse(entity, format, data)
+    return exportResponse(entity, format, data)
+  } catch (err) {
+    if (err instanceof ExportTooLargeError) {
+      return Response.json(
+        {
+          success: false,
+          error: `Eksport hajmi juda katta: ${err.count} ta qator. Iltimos, ma'lumotni ${EXPORT_ROW_LIMIT} qatordan kamroq qiling.`,
+        },
+        { status: 413 },
+      )
+    }
+
+    console.error('[GET /api/export/[entity]]', err)
+    return Response.json({ success: false, error: 'Eksportda xatolik yuz berdi' }, { status: 500 })
+  }
 }

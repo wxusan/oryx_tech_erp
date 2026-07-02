@@ -67,7 +67,18 @@ export async function GET(req: NextRequest) {
       orderBy: { createdAt: 'desc' },
       take,
       skip,
-      include: { supplier: true },
+      select: {
+        id: true,
+        model: true,
+        color: true,
+        storage: true,
+        batteryHealth: true,
+        purchasePrice: true,
+        imei: true,
+        status: true,
+        imageUrls: true,
+        createdAt: true,
+      },
     })
 
     return ok(devices, "Qurilmalar ro'yxati")

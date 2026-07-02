@@ -2,7 +2,7 @@
  * GET /api/nasiya?shopId=...&status=... — list nasiyalar
  *
  * Auth: SHOP_ADMIN (scoped to their own shop) or SUPER_ADMIN (requires shopId param)
- * Returns nasiyalar with customer + device + _count schedules + schedules ordered by monthNumber
+ * Returns nasiyalar with customer + device + the schedule fields needed by the list view.
  */
 
 import { NextRequest } from 'next/server'
@@ -51,20 +51,35 @@ export async function GET(req: NextRequest) {
             }
           : {}),
       },
-      include: {
+      select: {
+        id: true,
+        totalAmount: true,
+        remainingAmount: true,
+        status: true,
+        createdAt: true,
         customer: {
           select: {
             id: true,
-            shopId: true,
             name: true,
             phone: true,
-            note: true,
-            createdAt: true,
           },
         },
-        device: true,
-        schedules: { orderBy: { monthNumber: 'asc' } },
-        _count: { select: { schedules: true } },
+        device: {
+          select: {
+            id: true,
+            model: true,
+            imei: true,
+          },
+        },
+        schedules: {
+          orderBy: { monthNumber: 'asc' },
+          select: {
+            id: true,
+            dueDate: true,
+            delayedUntil: true,
+            status: true,
+          },
+        },
       },
       take,
       skip,

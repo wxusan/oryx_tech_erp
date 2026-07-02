@@ -53,26 +53,52 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         ...(session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}),
       },
       include: {
-        supplier: true,
+        supplier: {
+          select: {
+            name: true,
+            phone: true,
+          },
+        },
         sales: {
             where: { deletedAt: null },
-            include: {
-              payments: { where: { deletedAt: null }, orderBy: { paidAt: 'desc' } },
+            select: {
+              id: true,
+              salePrice: true,
+              amountPaid: true,
+              remainingAmount: true,
+              dueDate: true,
+              paidFully: true,
+              paymentMethod: true,
+              createdAt: true,
               customer: {
-                select: { id: true, shopId: true, name: true, phone: true, note: true, createdAt: true },
+                select: { name: true, phone: true },
               },
             },
           orderBy: { createdAt: 'desc' },
+          take: 1,
         },
         nasiya: {
           where: { deletedAt: null, status: { not: 'CANCELLED' } },
-          include: {
+          select: {
+            id: true,
+            totalAmount: true,
+            remainingAmount: true,
             customer: {
-              select: { id: true, shopId: true, name: true, phone: true, note: true, createdAt: true },
+              select: { name: true, phone: true },
             },
-            schedules: { orderBy: { monthNumber: 'asc' } },
+            schedules: {
+              orderBy: { monthNumber: 'asc' },
+              select: {
+                id: true,
+                monthNumber: true,
+                dueDate: true,
+                expectedAmount: true,
+                status: true,
+              },
+            },
           },
           orderBy: { createdAt: 'desc' },
+          take: 1,
         },
       },
     })

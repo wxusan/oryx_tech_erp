@@ -1,7 +1,7 @@
 /**
  * GET /api/nasiya/[id] — get a single nasiya with full details
  *
- * Returns: customer, device, schedules ordered by monthNumber, shop
+ * Returns: customer, device, schedules and payments needed by the nasiya profile
  * Auth: SHOP_ADMIN (scoped to their own shop) or SUPER_ADMIN
  */
 
@@ -27,25 +27,54 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         shop: { status: 'ACTIVE', deletedAt: null },
         ...(session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}),
       },
-      include: {
+      select: {
+        id: true,
+        shopId: true,
+        totalAmount: true,
+        downPayment: true,
+        remainingAmount: true,
+        status: true,
+        reminderEnabled: true,
         customer: {
           select: {
             id: true,
-            shopId: true,
             name: true,
             phone: true,
-            note: true,
-            createdAt: true,
             // Included so the nasiya profile page can render the passport photo.
             // Access is already shop-scoped (this nasiya is fetched only for its
             // owning shop) and the signed URL is separately per-shop authorized.
             passportPhotoUrl: true,
           },
         },
-        device: true,
-        shop: true,
-        schedules: { orderBy: { monthNumber: 'asc' } },
-        payments: { where: { deletedAt: null }, orderBy: { paidAt: 'desc' } },
+        device: {
+          select: {
+            id: true,
+            model: true,
+          },
+        },
+        schedules: {
+          orderBy: { monthNumber: 'asc' },
+          select: {
+            id: true,
+            monthNumber: true,
+            dueDate: true,
+            expectedAmount: true,
+            paidAmount: true,
+            status: true,
+          },
+        },
+        payments: {
+          where: { deletedAt: null },
+          orderBy: { paidAt: 'desc' },
+          select: {
+            id: true,
+            amount: true,
+            paymentMethod: true,
+            paidAt: true,
+            note: true,
+            nasiyaScheduleId: true,
+          },
+        },
       },
     })
 

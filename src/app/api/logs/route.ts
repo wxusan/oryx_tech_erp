@@ -78,7 +78,16 @@ export async function GET(req: NextRequest) {
         orderBy: { createdAt: 'desc' },
         skip,
         take,
-        include: {
+        select: {
+          id: true,
+          createdAt: true,
+          actorId: true,
+          actorType: true,
+          action: true,
+          targetType: true,
+          targetId: true,
+          note: true,
+          newValue: true,
           shop: { select: { id: true, name: true } },
         },
       }),
