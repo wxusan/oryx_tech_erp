@@ -121,7 +121,7 @@ export default async function DashboardPage() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:col-span-7">
               <Card className="rounded-lg">
                 <CardHeader>
-                  <CardDescription>Yalpi foyda</CardDescription>
+                  <CardDescription>Sotuvdan foyda</CardDescription>
                   <CardAction><TrendingUp className="size-4 text-zinc-400" /></CardAction>
                 </CardHeader>
                 <CardContent>

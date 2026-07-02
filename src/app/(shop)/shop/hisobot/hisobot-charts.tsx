@@ -76,7 +76,7 @@ export default function HisobotCharts({
       <Card className="rounded-lg xl:col-span-2">
         <CardHeader>
           <CardTitle>Foyda va kapital</CardTitle>
-          <CardDescription>Ombor qiymati va yalpi foyda</CardDescription>
+          <CardDescription>Ombor qiymati va sotuvdan foyda</CardDescription>
         </CardHeader>
         <CardContent>
           <ChartContainer config={chartConfig} className="h-[280px] w-full">

@@ -68,7 +68,7 @@ export default async function ShopReportPage() {
 
   const businessData = [
     { name: 'Ombor', amount: inventory, fill: 'var(--color-inventory)' },
-    { name: 'Yalpi foyda', amount: grossProfit, fill: 'var(--color-gross)' },
+    { name: 'Sotuvdan foyda', amount: grossProfit, fill: 'var(--color-gross)' },
   ]
 
   const chartConfig = {
@@ -77,7 +77,7 @@ export default async function ShopReportPage() {
     expected: { label: 'Kutilmoqda', color: '#0f766e' },
     overdue: { label: 'Kechikkan', color: '#dc2626' },
     inventory: { label: 'Ombor', color: '#64748b' },
-    gross: { label: 'Yalpi foyda', color: '#16a34a' },
+    gross: { label: 'Sotuvdan foyda', color: '#16a34a' },
   } satisfies ChartConfig
 
   return (
@@ -179,7 +179,7 @@ export default async function ShopReportPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card className="rounded-lg">
               <CardHeader>
-                <CardDescription>Hisoblangan yalpi foyda</CardDescription>
+                <CardDescription>Hisoblangan sotuv foydasi</CardDescription>
                 <CardAction><TrendingUp className="size-4 text-emerald-600" /></CardAction>
               </CardHeader>
               <CardContent>
