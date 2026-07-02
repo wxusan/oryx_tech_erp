@@ -82,6 +82,12 @@ npm run prisma:migrate:deploy   # applies all migrations to an empty DB
 SEED_SUPER_ADMIN_PASSWORD='...' npm run seed:super-admin
 ```
 
+The search-performance migration enables `pg_trgm` and creates raw-SQL GIN
+indexes for search screens. On a fresh or small QA database, `migrate deploy` is
+fine. On a large existing production database, create those indexes with
+`CREATE INDEX CONCURRENTLY` during a planned DB maintenance step instead,
+because Prisma migrations run inside a transaction.
+
 The super-admin seed is **idempotent** — re-running with the same email does not
 create duplicates. `SEED_SUPER_ADMIN_EMAIL` / `SEED_SUPER_ADMIN_NAME` are
 optional (defaults shown in `.env.example`); `SEED_SUPER_ADMIN_PASSWORD` is
@@ -144,6 +150,23 @@ Set the variables from `.env.example` in Vercel. Production must include
 `DATABASE_URL`, `DIRECT_URL`, `NEXTAUTH_SECRET` (or `AUTH_SECRET`), `NEXTAUTH_URL`,
 `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, and `CRON_SECRET`.
 
+### Database URLs, region, and pool
+
+- `DATABASE_URL`: use the Supabase **transaction pooler** URL for the app
+  runtime, normally port `6543`.
+- `DIRECT_URL`: use the non-pooled direct/session URL for migrations and seeds,
+  normally port `5432`.
+- `DATABASE_POOL_MAX`: per Vercel function instance pg-adapter pool size. Start
+  at `5`; test `1` if you want a conservative baseline. The value is clamped in
+  code from `1` to `20`.
+- Capacity rule of thumb:
+  `max concurrent Vercel instances × DATABASE_POOL_MAX <= Supabase pool size`.
+  If you see connection saturation, lower `DATABASE_POOL_MAX` first.
+- Put Vercel and Supabase in nearby regions when possible. The current Vercel
+  build region shown in logs was Washington, D.C. (`iad1`), while the Supabase
+  host shown earlier was `ap-south-1`; that distance adds latency to every DB
+  round trip. Co-locating them is a deployment setting, not a code change.
+
 **Migrations are NOT run during the Vercel build.** `vercel.json` builds only
 (`npm run build`) so that **preview deployments never mutate a shared/production
 database.** Run migrations deliberately as a controlled production step:
@@ -158,8 +181,10 @@ separate database, or run migrations only against production out-of-band.
 
 ### Cron auth
 
-Vercel's built-in cron does **not** send an `Authorization` header, but
-`/api/cron/reminders` requires `Authorization: Bearer <CRON_SECRET>` (it returns
-401/503 otherwise). Either configure Vercel Cron to send the header, or trigger
-the endpoint from an external scheduler (e.g. cron-job.org) that sends the
-bearer token. Without this, reminders/overdue alerts will not run.
+Vercel Cron sends `Authorization: Bearer <CRON_SECRET>` automatically when the
+`CRON_SECRET` environment variable is configured. `/api/cron/reminders` requires
+that bearer token and returns 401/503 otherwise. External schedulers can also
+trigger the route if they send the same header.
+
+`vercel.json` schedules `/api/cron/reminders` at `0 3 * * *` UTC, which is
+08:00 in Asia/Tashkent.

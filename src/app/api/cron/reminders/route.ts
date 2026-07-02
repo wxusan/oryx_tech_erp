@@ -8,11 +8,12 @@
  *
  * Vercel cron configuration (vercel.json):
  * {
- *   "crons": [{ "path": "/api/cron/reminders", "schedule": "0 8 * * *" }]
+ *   "crons": [{ "path": "/api/cron/reminders", "schedule": "0 3 * * *" }]
  * }
+ * This runs at 08:00 Asia/Tashkent.
  *
- * The route also accepts an Authorization header check so it can be called
- * by external cron services (e.g. cron-job.org) without a Vercel plan:
+ * Vercel Cron sends Authorization: Bearer <CRON_SECRET> automatically when the
+ * env var is configured. The same header can be used by external schedulers:
  *   Authorization: Bearer <CRON_SECRET>
  *
  * Response:

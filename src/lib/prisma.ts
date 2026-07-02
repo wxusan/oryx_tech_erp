@@ -33,9 +33,11 @@ if (!connectionString) {
 // multiplexes to Postgres, so a modest per-instance pool is safe and lets
 // independent queries run concurrently. Tunable via DATABASE_POOL_MAX; set it
 // against your Supabase pooler pool_size (total ≈ instances × max). Set to 1 to
-// restore the old serialized behavior.
+// restore the old serialized behavior. Clamp to a conservative range so a
+// mistyped env var cannot exhaust the Supabase pooler.
 const parsedPoolMax = Number(process.env.DATABASE_POOL_MAX)
-const poolMax = Number.isFinite(parsedPoolMax) && parsedPoolMax > 0 ? parsedPoolMax : 5
+const requestedPoolMax = Number.isFinite(parsedPoolMax) && parsedPoolMax > 0 ? Math.floor(parsedPoolMax) : 5
+const poolMax = Math.min(Math.max(requestedPoolMax, 1), 20)
 
 export const prisma: PrismaClient =
   global.prisma ?? new PrismaClient({ adapter: new PrismaPg({ connectionString, max: poolMax }) })
