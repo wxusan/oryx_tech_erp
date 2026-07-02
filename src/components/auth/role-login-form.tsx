@@ -1,16 +1,16 @@
 'use client'
 
-import { Suspense, useState } from 'react'
+import { Suspense, useEffect, useState } from 'react'
 import { signIn } from 'next-auth/react'
-import { useRouter, useSearchParams } from 'next/navigation'
+import { useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 type LoginMode = 'admin' | 'shop'
+type AuthSession = { user?: { role?: string } }
 
 function LoginFormInner({ mode }: { mode: LoginMode }) {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const fallbackUrl = mode === 'admin' ? '/admin' : '/shop/dashboard'
   const allowedPrefix = mode === 'admin' ? '/admin' : '/shop'
@@ -25,6 +25,42 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
 
   const isAdmin = mode === 'admin'
 
+  useEffect(() => {
+    let cancelled = false
+
+    async function redirectIfSignedIn() {
+      try {
+        const response = await fetch('/api/auth/session', { cache: 'no-store' })
+        if (!response.ok) return
+        const session = (await response.json()) as AuthSession
+        if (cancelled) return
+
+        const expectedRole = isAdmin ? 'SUPER_ADMIN' : 'SHOP_ADMIN'
+        if (session.user?.role === expectedRole) {
+          window.location.replace(safeCallbackUrl)
+        }
+      } catch {
+        // Stay on the login page if the session check cannot complete.
+      }
+    }
+
+    function handlePageShow(event: PageTransitionEvent) {
+      if (!event.persisted) return
+      setForm({ login: '', password: '' })
+      setError(null)
+      setLoading(false)
+      void redirectIfSignedIn()
+    }
+
+    void redirectIfSignedIn()
+    window.addEventListener('pageshow', handlePageShow)
+
+    return () => {
+      cancelled = true
+      window.removeEventListener('pageshow', handlePageShow)
+    }
+  }, [isAdmin, safeCallbackUrl])
+
   async function handleLogin(event: React.FormEvent) {
     event.preventDefault()
     setLoading(true)
@@ -38,11 +74,12 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
 
     setLoading(false)
     if (result?.error) {
+      setForm((current) => ({ ...current, password: '' }))
       setError("Login yoki parol noto'g'ri.")
       return
     }
 
-    router.replace(safeCallbackUrl)
+    window.location.assign(safeCallbackUrl)
   }
 
   return (
@@ -72,7 +109,11 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
                 type="text"
                 placeholder={isAdmin ? 'Admin loginini kiriting' : "Do'kon loginini kiriting"}
                 value={form.login}
-                onChange={(event) => setForm({ ...form, login: event.target.value })}
+                onChange={(event) => {
+                  setForm({ ...form, login: event.target.value })
+                  setError(null)
+                }}
+                autoComplete="username"
                 required
                 className="h-9 rounded-none border-zinc-200 text-sm focus-visible:ring-zinc-900"
               />
@@ -87,7 +128,11 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
                 type="password"
                 placeholder="Parolni kiriting"
                 value={form.password}
-                onChange={(event) => setForm({ ...form, password: event.target.value })}
+                onChange={(event) => {
+                  setForm({ ...form, password: event.target.value })
+                  setError(null)
+                }}
+                autoComplete="current-password"
                 required
                 className="h-9 rounded-none border-zinc-200 text-sm focus-visible:ring-zinc-900"
               />
