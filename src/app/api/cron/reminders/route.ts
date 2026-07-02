@@ -24,6 +24,7 @@ import { type NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hasValidInternalSecret, internalSecret } from '@/lib/api-auth'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { invalidateShopOverdueCron } from '@/lib/server/cache-tags'
 import { tashkentDayRange } from '@/lib/timezone'
 
 export const maxDuration = 60
@@ -170,6 +171,14 @@ export async function GET(request: NextRequest): Promise<Response> {
         data: { status: 'OVERDUE' },
       })
     })
+  }
+
+  // Bust caches for shops whose nasiya schedules / parent status were just
+  // marked OVERDUE so the list, dashboard and reports refresh immediately
+  // instead of serving a stale "Faol" snapshot until the tag TTL expires.
+  const overdueShopIds = new Set(overdue.map((schedule) => schedule.nasiya.shopId))
+  for (const overdueShopId of overdueShopIds) {
+    invalidateShopOverdueCron(overdueShopId)
   }
 
   const salePaymentsDueToday = await prisma.sale.findMany({

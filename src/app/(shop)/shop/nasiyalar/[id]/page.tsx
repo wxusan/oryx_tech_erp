@@ -30,12 +30,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { paymentMethodLabel } from '@/lib/labels'
+import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
 import { ArrowLeft } from 'lucide-react'
 
 interface NasiyaSchedule {
   id: string
   monthNumber: number
   dueDate: string
+  delayedUntil: string | null
   expectedAmount: number
   paidAmount: number
   status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED'
@@ -115,6 +117,15 @@ function nasiyaLogLabel(action: string) {
 
 function scheduleBalance(row: NasiyaSchedule) {
   return Math.max(0, Number(row.expectedAmount) - Number(row.paidAmount))
+}
+
+/**
+ * Effective status shown for a schedule row. An unpaid row past its effective
+ * due date reads as OVERDUE even before cron flips the stored status, so the
+ * detail page agrees with the list and dashboard.
+ */
+function rowDisplayStatus(row: NasiyaSchedule): RowStatus {
+  return scheduleDisplayStatus(row) as RowStatus
 }
 
 function formatScheduleMonth(row: NasiyaSchedule) {
@@ -448,7 +459,7 @@ export default function NasiyaDetailPage() {
                 <td className="px-4 py-3 font-medium text-zinc-900">{fmt(row.expectedAmount)} so'm</td>
                 <td className="px-4 py-3 text-zinc-700">{fmt(row.paidAmount)} so'm</td>
                 <td className="px-4 py-3">
-                  <RowBadge status={row.status as RowStatus} />
+                  <RowBadge status={rowDisplayStatus(row)} />
                 </td>
               </tr>
             ))}
@@ -549,7 +560,7 @@ export default function NasiyaDetailPage() {
                 {selectedSchedule && (
                   <div className="mt-2 flex flex-wrap items-center gap-2">
                     <Badge variant="outline" className="rounded-md border-zinc-200 text-zinc-600">
-                      {scheduleStatusLabels[selectedSchedule.status]}
+                      {scheduleStatusLabels[rowDisplayStatus(selectedSchedule)]}
                     </Badge>
                     <span className="text-xs text-zinc-500">
                       Shu oy uchun qolgan summa: {fmt(selectedScheduleOutstanding)} so'm

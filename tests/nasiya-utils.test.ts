@@ -4,6 +4,10 @@ import {
   calculateRemaining,
   getNextPayment,
   isOverdue,
+  isScheduleOverdue,
+  scheduleDisplayStatus,
+  deriveNasiyaOverdue,
+  type OverdueScheduleInput,
 } from '@/lib/nasiya-utils'
 import { NasiyaScheduleStatus, type NasiyaSchedule } from '@/types'
 
@@ -108,5 +112,176 @@ describe('isOverdue', () => {
   })
   it('is false when all unpaid schedules are in the future', () => {
     expect(isOverdue([schedule({ status: NasiyaScheduleStatus.PENDING, dueDate: new Date('2999-01-01') })])).toBe(false)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Canonical overdue derivation used by the dashboard, list and detail page.
+// A fixed `now` is passed everywhere so the tests are deterministic and the
+// Tashkent-day boundary behaviour is explicit (the predicate is instant-based,
+// matching shop-stats.ts and the payment route).
+// ---------------------------------------------------------------------------
+
+const NOW = new Date('2026-06-15T09:00:00.000Z') // ~14:00 Asia/Tashkent
+
+function sch(overrides: Partial<OverdueScheduleInput>): OverdueScheduleInput {
+  return {
+    status: 'PENDING',
+    dueDate: new Date('2026-05-15T00:00:00.000Z'),
+    delayedUntil: null,
+    expectedAmount: 1_000_000,
+    paidAmount: 0,
+    ...overrides,
+  }
+}
+
+describe('isScheduleOverdue (canonical predicate)', () => {
+  it('is true for an unpaid schedule past its due date with a balance', () => {
+    expect(isScheduleOverdue(sch({ dueDate: new Date('2026-05-15') }), NOW)).toBe(true)
+  })
+
+  it('is false for an unpaid schedule due in the future', () => {
+    expect(isScheduleOverdue(sch({ dueDate: new Date('2026-08-15') }), NOW)).toBe(false)
+  })
+
+  it('is false for a fully-paid schedule even if past due (no outstanding)', () => {
+    expect(
+      isScheduleOverdue(sch({ status: 'PAID', paidAmount: 1_000_000, dueDate: new Date('2026-01-15') }), NOW),
+    ).toBe(false)
+  })
+
+  it('honours an active defer (delayedUntil) — future defer is not overdue', () => {
+    expect(
+      isScheduleOverdue(
+        sch({ status: 'DEFERRED', dueDate: new Date('2026-05-15'), delayedUntil: new Date('2026-09-01') }),
+        NOW,
+      ),
+    ).toBe(false)
+  })
+
+  it('a defer pushed into the past IS overdue again', () => {
+    expect(
+      isScheduleOverdue(
+        sch({ status: 'DEFERRED', dueDate: new Date('2026-05-15'), delayedUntil: new Date('2026-06-01') }),
+        NOW,
+      ),
+    ).toBe(true)
+  })
+
+  it('a partial schedule past due with a remaining balance is overdue (req 3)', () => {
+    expect(
+      isScheduleOverdue(
+        sch({ status: 'PARTIAL', expectedAmount: 1_000_000, paidAmount: 400_000, dueDate: new Date('2026-05-15') }),
+        NOW,
+      ),
+    ).toBe(true)
+  })
+})
+
+describe('scheduleDisplayStatus (detail row badge)', () => {
+  it('reads a past-due PENDING row as OVERDUE even before cron flips it', () => {
+    expect(scheduleDisplayStatus(sch({ status: 'PENDING', dueDate: new Date('2026-05-15') }), NOW)).toBe('OVERDUE')
+  })
+  it('keeps a PAID row as PAID', () => {
+    expect(
+      scheduleDisplayStatus(sch({ status: 'PAID', paidAmount: 1_000_000, dueDate: new Date('2026-01-15') }), NOW),
+    ).toBe('PAID')
+  })
+  it('keeps a future PENDING row as PENDING', () => {
+    expect(scheduleDisplayStatus(sch({ status: 'PENDING', dueDate: new Date('2026-09-15') }), NOW)).toBe('PENDING')
+  })
+})
+
+describe('deriveNasiyaOverdue (contract display status)', () => {
+  it('ACTIVE parent with only future unpaid schedules → ACTIVE (req 1)', () => {
+    const d = deriveNasiyaOverdue({ status: 'ACTIVE', schedules: [sch({ dueDate: new Date('2026-09-15') })] }, NOW)
+    expect(d.displayStatus).toBe('ACTIVE')
+    expect(d.isOverdue).toBe(false)
+    expect(d.overdueCount).toBe(0)
+    expect(d.overdueAmount).toBe(0)
+  })
+
+  it('ACTIVE parent with a past unpaid schedule → OVERDUE (req 2)', () => {
+    const d = deriveNasiyaOverdue(
+      { status: 'ACTIVE', schedules: [sch({ dueDate: new Date('2026-05-15'), expectedAmount: 1_000_000, paidAmount: 0 })] },
+      NOW,
+    )
+    expect(d.displayStatus).toBe('OVERDUE')
+    expect(d.isOverdue).toBe(true)
+    expect(d.overdueCount).toBe(1)
+    expect(d.overdueAmount).toBe(1_000_000)
+  })
+
+  it('sums overdue amount across multiple overdue schedules, ignores future ones', () => {
+    const d = deriveNasiyaOverdue(
+      {
+        status: 'ACTIVE',
+        schedules: [
+          sch({ dueDate: new Date('2026-04-15'), expectedAmount: 1_000_000, paidAmount: 200_000 }), // 800k overdue
+          sch({ status: 'PARTIAL', dueDate: new Date('2026-05-15'), expectedAmount: 1_000_000, paidAmount: 0 }), // 1,000k overdue
+          sch({ dueDate: new Date('2026-09-15'), expectedAmount: 1_000_000, paidAmount: 0 }), // future
+        ],
+      },
+      NOW,
+    )
+    expect(d.overdueCount).toBe(2)
+    expect(d.overdueAmount).toBe(1_800_000)
+  })
+
+  it('paid past schedules are not overdue (req 4)', () => {
+    const d = deriveNasiyaOverdue(
+      { status: 'ACTIVE', schedules: [sch({ status: 'PAID', paidAmount: 1_000_000, dueDate: new Date('2026-01-15') })] },
+      NOW,
+    )
+    expect(d.displayStatus).toBe('ACTIVE')
+    expect(d.isOverdue).toBe(false)
+  })
+
+  it('COMPLETED / CANCELLED parents keep their terminal status (req 5)', () => {
+    const overduePast = [sch({ dueDate: new Date('2026-01-15') })]
+    expect(deriveNasiyaOverdue({ status: 'COMPLETED', schedules: [] }, NOW).displayStatus).toBe('COMPLETED')
+    // Even a stray past-due schedule cannot make a COMPLETED/CANCELLED contract "active overdue".
+    expect(deriveNasiyaOverdue({ status: 'CANCELLED', schedules: overduePast }, NOW).displayStatus).toBe('CANCELLED')
+    expect(deriveNasiyaOverdue({ status: 'CANCELLED', schedules: overduePast }, NOW).isOverdue).toBe(false)
+  })
+
+  it('respects a parent already flipped to OVERDUE by cron', () => {
+    const d = deriveNasiyaOverdue({ status: 'OVERDUE', schedules: [sch({ dueDate: new Date('2026-09-15') })] }, NOW)
+    expect(d.displayStatus).toBe('OVERDUE')
+  })
+
+  it('nextPaymentDate is the earliest unpaid schedule by effective due date', () => {
+    const d = deriveNasiyaOverdue(
+      {
+        status: 'ACTIVE',
+        schedules: [
+          sch({ dueDate: new Date('2026-08-15') }),
+          sch({ dueDate: new Date('2026-05-15') }),
+          sch({ status: 'PAID', paidAmount: 1_000_000, dueDate: new Date('2026-01-15') }),
+        ],
+      },
+      NOW,
+    )
+    expect(d.nextPaymentDate?.toISOString()).toBe(new Date('2026-05-15T00:00:00.000Z').toISOString())
+  })
+})
+
+describe('tab filtering by derived display status (req 6 & 7)', () => {
+  const contracts = [
+    { id: 'future', status: 'ACTIVE', schedules: [sch({ dueDate: new Date('2026-09-15') })] },
+    { id: 'past', status: 'ACTIVE', schedules: [sch({ dueDate: new Date('2026-05-15') })] },
+    { id: 'done', status: 'COMPLETED', schedules: [] },
+  ].map((c) => ({ id: c.id, displayStatus: deriveNasiyaOverdue(c, NOW).displayStatus }))
+
+  const inTab = (tab: string) => contracts.filter((c) => c.displayStatus === tab).map((c) => c.id)
+
+  it("'Muddati o'tgan' (OVERDUE) includes the derived-overdue contract", () => {
+    expect(inTab('OVERDUE')).toContain('past')
+    expect(inTab('OVERDUE')).not.toContain('future')
+  })
+
+  it("'Faol' (ACTIVE) excludes the derived-overdue contract", () => {
+    expect(inTab('ACTIVE')).toContain('future')
+    expect(inTab('ACTIVE')).not.toContain('past')
   })
 })

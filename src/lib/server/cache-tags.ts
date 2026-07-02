@@ -131,6 +131,24 @@ export function invalidateShopReminderMutation(shopId: string) {
   invalidateShopCache(shopId, [shopCacheTag.nasiyalar, shopCacheTag.logs], ['/shop/nasiyalar', '/shop/logs'])
 }
 
+/**
+ * Invalidate the caches affected when the cron marks nasiya schedules / parent
+ * status OVERDUE, so the nasiyalar list, dashboard and reports do not keep
+ * serving stale "Faol"/pre-overdue money after a cron run.
+ */
+export function invalidateShopOverdueCron(shopId: string) {
+  invalidateShopCache(
+    shopId,
+    [
+      shopCacheTag.nasiyalar,
+      shopCacheTag.nasiyaSchedules,
+      shopCacheTag.stats,
+      shopCacheTag.reports,
+    ],
+    ['/shop/nasiyalar', '/shop/dashboard', '/shop/hisobot'],
+  )
+}
+
 export function invalidateShopLogMutation(shopId: string) {
   invalidateShopCache(shopId, [shopCacheTag.logs], ['/shop/logs'])
 }

@@ -18,6 +18,12 @@ interface Nasiya {
   totalAmount: number
   remainingAmount: number
   status: NasiyaStatus
+  /** Live display status derived server-side from schedules (matches dashboard). */
+  displayStatus: NasiyaStatus
+  isOverdue: boolean
+  overdueAmount: number
+  overdueCount: number
+  nextPaymentDate: string | null
   device: { model: string }
   customer: { name: string; phone: string }
   schedules: NasiyaSchedule[]
@@ -57,31 +63,16 @@ function fmt(n: number) {
   return Number(n).toLocaleString('ru-RU')
 }
 
-const UNPAID_STATUSES = ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED']
-
-function getNextPayment(schedules: NasiyaSchedule[]): NasiyaSchedule | null {
-  const pending = schedules
-    .filter((s) => UNPAID_STATUSES.includes(s.status))
-    .sort((a, b) => {
-      const leftDue = a.delayedUntil ?? a.dueDate
-      const rightDue = b.delayedUntil ?? b.dueDate
-      return new Date(leftDue).getTime() - new Date(rightDue).getTime()
-    })
-  return pending[0] ?? null
-}
-
-function effectiveDueDate(schedule: NasiyaSchedule) {
-  return schedule.delayedUntil ?? schedule.dueDate
-}
-
 export default function NasiyalarClient({ initialNasiyalar }: { initialNasiyalar: Nasiya[] }) {
   const [nasiyalar] = useState<Nasiya[]>(initialNasiyalar)
   const loading = false
   const error = ''
   const [activeFilter, setActiveFilter] = useState<NasiyaStatus | 'Barchasi'>('Barchasi')
 
+  // Filter on the derived display status so overdue contracts land under
+  // "Muddati o'tgan" (and out of "Faol"), matching the dashboard.
   const filtered = nasiyalar.filter(
-    (n) => activeFilter === 'Barchasi' || n.status === activeFilter
+    (n) => activeFilter === 'Barchasi' || n.displayStatus === activeFilter
   )
 
   return (
@@ -137,8 +128,7 @@ export default function NasiyalarClient({ initialNasiyalar }: { initialNasiyalar
           {filtered.map((n) => {
             const paidAmount = n.totalAmount - n.remainingAmount
             const pct = n.totalAmount > 0 ? Math.round((paidAmount / n.totalAmount) * 100) : 0
-            const isOverdue = n.status === 'OVERDUE'
-            const nextPayment = getNextPayment(n.schedules ?? [])
+            const isOverdue = n.isOverdue
             return (
               <Link key={n.id} href={`/shop/nasiyalar/${n.id}`} prefetch={false} className="block">
                 <div
@@ -150,12 +140,12 @@ export default function NasiyalarClient({ initialNasiyalar }: { initialNasiyalar
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium text-sm text-zinc-900">{n.customer.name}</span>
-                        <StatusBadge status={n.status} />
+                        <StatusBadge status={n.displayStatus} />
                       </div>
                       <div className="text-xs text-zinc-500 mb-2">
                         {n.device.model} · {n.customer.phone}
-                        {nextPayment && (
-                          <> · Keyingi to'lov: {new Date(effectiveDueDate(nextPayment)).toLocaleDateString('uz-UZ')}</>
+                        {n.nextPaymentDate && (
+                          <> · Keyingi to'lov: {new Date(n.nextPaymentDate).toLocaleDateString('uz-UZ')}</>
                         )}
                       </div>
 

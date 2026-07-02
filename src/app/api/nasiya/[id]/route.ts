@@ -58,6 +58,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             id: true,
             monthNumber: true,
             dueDate: true,
+            delayedUntil: true,
             expectedAmount: true,
             paidAmount: true,
             status: true,

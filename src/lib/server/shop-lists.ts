@@ -4,8 +4,7 @@ import { unstable_cache } from 'next/cache'
 import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { shopCacheTag } from '@/lib/server/cache-tags'
-
-const UNPAID_SCHEDULE_STATUSES = ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED']
+import { deriveNasiyaOverdue, type NasiyaDisplayStatus } from '@/lib/nasiya-utils'
 
 export interface ShopDeviceListItem {
   id: string
@@ -23,7 +22,14 @@ export interface ShopNasiyaListItem {
   id: string
   totalAmount: number
   remainingAmount: number
+  /** Stored parent status (kept for reference / debugging). */
   status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
+  /** Live display status derived from schedules (matches the dashboard). */
+  displayStatus: NasiyaDisplayStatus
+  isOverdue: boolean
+  overdueAmount: number
+  overdueCount: number
+  nextPaymentDate: string | null
   createdAt: string
   device: { id: string; model: string; imei: string }
   customer: { id: string; name: string; phone: string }
@@ -92,18 +98,6 @@ async function getShopDevicesListFresh(shopId: string): Promise<ShopDeviceListIt
   }))
 }
 
-function nextScheduleTime(row: ShopNasiyaListItem) {
-  const next = row.schedules
-    .filter((schedule) => UNPAID_SCHEDULE_STATUSES.includes(schedule.status))
-    .sort((left, right) => {
-      const leftDue = left.delayedUntil ?? left.dueDate
-      const rightDue = right.delayedUntil ?? right.dueDate
-      return new Date(leftDue).getTime() - new Date(rightDue).getTime()
-    })[0]
-
-  return next ? new Date(next.delayedUntil ?? next.dueDate).getTime() : null
-}
-
 export async function getShopNasiyalarList(shopId: string): Promise<ShopNasiyaListItem[]> {
   return unstable_cache(
     () => getShopNasiyalarListFresh(shopId),
@@ -150,27 +144,60 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
           dueDate: true,
           delayedUntil: true,
           status: true,
+          expectedAmount: true,
+          paidAmount: true,
         },
       },
     },
   })
 
-  return nasiyalar
-    .map((nasiya) => ({
-      ...nasiya,
-      totalAmount: Number(nasiya.totalAmount),
-      remainingAmount: Number(nasiya.remainingAmount),
-      createdAt: nasiya.createdAt.toISOString(),
-      schedules: nasiya.schedules.map((schedule) => ({
-        ...schedule,
-        dueDate: schedule.dueDate.toISOString(),
-        delayedUntil: schedule.delayedUntil?.toISOString() ?? null,
-      })),
-    }))
-    .sort((left, right) => {
-      const nextLeft = nextScheduleTime(left)
-      const nextRight = nextScheduleTime(right)
+  // Single `now` for the whole batch so all rows are judged against the same
+  // instant (and it stays stable for the cached snapshot's lifetime).
+  const now = new Date()
 
+  return nasiyalar
+    .map((nasiya) => {
+      const derived = deriveNasiyaOverdue(
+        {
+          status: nasiya.status,
+          schedules: nasiya.schedules.map((s) => ({
+            status: s.status,
+            dueDate: s.dueDate,
+            delayedUntil: s.delayedUntil,
+            expectedAmount: Number(s.expectedAmount),
+            paidAmount: Number(s.paidAmount),
+          })),
+        },
+        now,
+      )
+
+      return {
+        id: nasiya.id,
+        totalAmount: Number(nasiya.totalAmount),
+        remainingAmount: Number(nasiya.remainingAmount),
+        status: nasiya.status,
+        displayStatus: derived.displayStatus,
+        isOverdue: derived.isOverdue,
+        overdueAmount: derived.overdueAmount,
+        overdueCount: derived.overdueCount,
+        nextPaymentDate: derived.nextPaymentDate?.toISOString() ?? null,
+        createdAt: nasiya.createdAt.toISOString(),
+        customer: nasiya.customer,
+        device: nasiya.device,
+        schedules: nasiya.schedules.map((schedule) => ({
+          id: schedule.id,
+          dueDate: schedule.dueDate.toISOString(),
+          delayedUntil: schedule.delayedUntil?.toISOString() ?? null,
+          status: schedule.status,
+        })),
+      }
+    })
+    .sort((left, right) => {
+      // Overdue contracts first, then by earliest upcoming payment, then newest.
+      if (left.isOverdue !== right.isOverdue) return left.isOverdue ? -1 : 1
+
+      const nextLeft = left.nextPaymentDate ? new Date(left.nextPaymentDate).getTime() : null
+      const nextRight = right.nextPaymentDate ? new Date(right.nextPaymentDate).getTime() : null
       if (nextLeft == null && nextRight == null) {
         return new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime()
       }

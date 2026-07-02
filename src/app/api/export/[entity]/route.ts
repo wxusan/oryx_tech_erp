@@ -3,6 +3,7 @@ import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/node'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
 import { deviceStatusLabel, nasiyaStatusLabel, paymentMethodLabel } from '@/lib/labels'
+import { deriveNasiyaOverdue } from '@/lib/nasiya-utils'
 
 type RouteContext = { params: Promise<{ entity: string }> }
 type ExportCell = string | number | boolean | Date | null | undefined
@@ -257,9 +258,21 @@ async function exportData(entity: string, shopId: string, role: string): Promise
           createdAt: true,
           customer: { select: { name: true, phone: true } },
           device: { select: { model: true } },
+          schedules: {
+            select: {
+              status: true,
+              dueDate: true,
+              delayedUntil: true,
+              expectedAmount: true,
+              paidAmount: true,
+            },
+          },
         },
       }),
     )
+    // Export the live display status (schedule-derived) so the sheet agrees
+    // with the list/dashboard instead of the lagging parent status.
+    const exportNow = new Date()
     return {
       headers: [
         'customer',
@@ -280,7 +293,21 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         n.downPayment.toString(),
         n.remainingAmount.toString(),
         n.months,
-        nasiyaStatusLabel(n.status),
+        nasiyaStatusLabel(
+          deriveNasiyaOverdue(
+            {
+              status: n.status,
+              schedules: n.schedules.map((s) => ({
+                status: s.status,
+                dueDate: s.dueDate,
+                delayedUntil: s.delayedUntil,
+                expectedAmount: Number(s.expectedAmount),
+                paidAmount: Number(s.paidAmount),
+              })),
+            },
+            exportNow,
+          ).displayStatus,
+        ),
         n.createdAt,
       ]),
     }
