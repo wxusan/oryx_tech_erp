@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { displayImei } from '@/lib/device-display'
 import { ArrowLeft, Check } from 'lucide-react'
 
 interface Device {
@@ -36,7 +37,7 @@ function deviceMeta(device: Device) {
     device.color,
     device.storage,
     device.batteryHealth != null ? `${device.batteryHealth}%` : null,
-    `IMEI: ${device.imei}`,
+    `IMEI: ${displayImei(device.imei)}`,
   ]
     .filter(Boolean)
     .join(' · ')

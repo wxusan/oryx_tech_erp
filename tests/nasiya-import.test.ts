@@ -84,4 +84,22 @@ describe('nasiyaImportedMessage', () => {
       expect(msg).not.toContain(w)
     }
   })
+
+  it('omits internal placeholder IMEIs from imported nasiya Telegram messages', () => {
+    const placeholderMsg = nasiyaImportedMessage({
+      shopName: 'Malika',
+      customerName: 'Ali',
+      customerPhone: '+998900000000',
+      device: { deviceModel: 'iPhone 15', storage: '256GB', color: 'Black', imei: 'IMPORT-abc' },
+      originalTotalAmount: 5_200_000,
+      alreadyPaidBeforeImport: 1_500_000,
+      remainingDebt: 3_700_000,
+      monthlyPayment: 740_000,
+      nextPaymentDate: NEXT,
+      adminName: 'Dilshod',
+    })
+
+    expect(placeholderMsg).not.toContain('IMPORT-')
+    expect(placeholderMsg).not.toContain('IMEI')
+  })
 })

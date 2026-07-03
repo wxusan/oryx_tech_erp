@@ -11,6 +11,7 @@
  */
 
 import { uzDate } from '@/lib/dates'
+import { telegramImei } from '@/lib/device-display'
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -78,7 +79,7 @@ export function formatDeviceSpecs(device: DeviceSpecs, opts: { battery?: boolean
     includeBattery && typeof device.batteryHealth === 'number'
       ? `Batareya: ${device.batteryHealth}%`
       : null,
-    optionalLine('IMEI', device.imei),
+    optionalLine('IMEI', telegramImei(device.imei)),
   ].filter((line): line is string => line !== null)
 }
 

@@ -16,6 +16,7 @@ import {
 } from '@/components/ui/dialog'
 import { paymentMethodLabel } from '@/lib/labels'
 import { uzDate, uzDateTime } from '@/lib/dates'
+import { displayImei } from '@/lib/device-display'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 
 interface Supplier {
@@ -393,7 +394,7 @@ export default function QurilmaDetailPage() {
     { label: 'Xotira', value: device.storage ?? '—' },
     { label: 'Batareya', value: device.batteryHealth != null ? `${device.batteryHealth}%` : '—' },
     { label: 'Kelish narxi', value: fmt(device.purchasePrice) },
-    { label: 'IMEI', value: device.imei },
+    { label: 'IMEI', value: displayImei(device.imei) },
     { label: 'Yetkazib beruvchi', value: device.supplier?.name ?? '—' },
     { label: 'Tel raqam', value: device.supplier?.phone ?? '—' },
     { label: "Qo'shilgan sana", value: uzDate(device.createdAt) },

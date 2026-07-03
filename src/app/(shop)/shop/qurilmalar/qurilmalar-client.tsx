@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { exportUrl } from '@/lib/api-client'
 import { uzDate } from '@/lib/dates'
+import { displayImei } from '@/lib/device-display'
 
 type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
 type DisplayStatus = 'Omborda' | 'Naqd sotildi' | 'Nasiyada' | 'Band qilingan' | 'Qaytarilgan' | "O'chirilgan"
@@ -157,7 +158,7 @@ export default function QurilmalarClient({ initialDevices }: { initialDevices: D
                   <td className="px-4 py-3 text-zinc-900 font-medium">
                     {Number(d.purchasePrice).toLocaleString('ru-RU')} so'm
                   </td>
-                  <td className="px-4 py-3 text-zinc-400 text-xs font-mono">{d.imei}</td>
+                  <td className="px-4 py-3 text-zinc-400 text-xs font-mono">{displayImei(d.imei)}</td>
                   <td className="px-4 py-3">
                     <StatusBadge status={d.status} />
                   </td>

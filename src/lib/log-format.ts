@@ -1,3 +1,5 @@
+import { displayImei } from '@/lib/device-display'
+
 const actionLabels: Record<string, string> = {
   CREATE: "Qo'shildi",
   CREATE_NASIYA: 'Nasiya yaratildi',
@@ -78,7 +80,7 @@ export function formatLogValue(value: unknown) {
   const data = value as Record<string, unknown>
   const parts = [
     stringPart(data.model),
-    stringPart(data.imei),
+    imeiPart(data.imei),
     stringPart(data.customerName),
     stringPart(data.name),
     stringPart(data.ownerName),
@@ -111,13 +113,17 @@ export function targetLabel(targetType: string, targetId: string, value: unknown
     stringPart(data.model) ??
     stringPart(data.customerName) ??
     stringPart(data.name) ??
-    stringPart(data.imei)
+    imeiPart(data.imei)
 
   return name ? `${label}: ${name}` : `${label}: ${targetId.slice(0, 8)}`
 }
 
 function stringPart(value: unknown) {
   return typeof value === 'string' && value.trim() ? value : undefined
+}
+
+function imeiPart(value: unknown) {
+  return typeof value === 'string' && value.trim() ? displayImei(value) : undefined
 }
 
 function moneyPart(value: unknown) {

@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ArrowLeft, Check } from 'lucide-react'
+import { displayImei } from '@/lib/device-display'
 import { calculateNasiyaAmounts, generatePaymentSchedule } from '@/lib/nasiya-utils'
 
 interface Device {
@@ -41,7 +42,7 @@ function deviceMeta(device: Device) {
     device.color,
     device.storage,
     device.batteryHealth != null ? `${device.batteryHealth}%` : null,
-    `IMEI: ${device.imei}`,
+    `IMEI: ${displayImei(device.imei)}`,
   ]
     .filter(Boolean)
     .join(' · ')

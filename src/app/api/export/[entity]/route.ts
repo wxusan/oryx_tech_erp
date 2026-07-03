@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/node'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { csvRows } from '@/lib/csv'
+import { displayImei } from '@/lib/device-display'
 import { prisma } from '@/lib/prisma'
 import { deviceStatusLabel, nasiyaStatusLabel, paymentMethodLabel } from '@/lib/labels'
 import { deriveNasiyaOverdue } from '@/lib/nasiya-utils'
@@ -148,7 +149,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
       ],
       rows: devices.map((d) => [
         d.model,
-        d.imei,
+        displayImei(d.imei),
         d.color,
         d.storage,
         d.batteryHealth,
@@ -370,7 +371,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
       ],
       rows: returns.map((item) => [
         item.device.model,
-        item.device.imei,
+        displayImei(item.device.imei),
         item.sale?.customer.name ?? item.nasiya?.customer.name ?? '',
         item.refundAmount.toString(),
         paymentMethodLabel(item.refundMethod),

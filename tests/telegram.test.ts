@@ -59,6 +59,14 @@ describe('helpers', () => {
     expect(lines).toEqual(['Qurilma: Redmi'])
   })
 
+  it('formatDeviceSpecs omits internal import placeholder IMEIs', () => {
+    const lines = formatDeviceSpecs({ deviceModel: 'Redmi', storage: null, color: null, batteryHealth: null, imei: 'IMPORT-abc' })
+    const msg = lines.join('\n')
+
+    expect(msg).not.toContain('IMPORT-')
+    expect(msg).not.toContain('IMEI')
+  })
+
   it('formatPaymentMethod maps known values and returns null otherwise', () => {
     expect(formatPaymentMethod('CASH')).toBe('Naqd')
     expect(formatPaymentMethod('TRANSFER')).toBe("O'tkazma")
@@ -133,6 +141,19 @@ describe('device messages', () => {
     expect(msg).not.toContain('IMEI')
     expect(msg).not.toContain('Yetkazib beruvchi')
     expect(msg).not.toContain('Admin:')
+  })
+
+  it('device added omits internal import placeholder IMEIs', () => {
+    const msg = deviceAddedMessage({
+      shopName: 'Malika',
+      device: { deviceModel: 'Redmi 12', storage: null, color: null, batteryHealth: null, imei: 'IMPORT-abc' },
+      purchasePrice: 1_000_000,
+      supplierPhone: null,
+      adminName: null,
+    })
+
+    expect(msg).not.toContain('IMPORT-')
+    expect(msg).not.toContain('IMEI')
   })
 
   it('device sold includes specs, prices, and remaining debt', () => {
