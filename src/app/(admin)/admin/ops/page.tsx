@@ -33,6 +33,7 @@ interface OpsPayload {
   windowDays: number
   levelCounts: Record<string, number>
   notificationCounts: Record<string, number>
+  notificationWarnings: string[]
   events: OpsEvent[]
   recentFailedNotifications: FailedNotification[]
   lastCron: { event: string; message: string; metadata: unknown; createdAt: string } | null
@@ -116,6 +117,20 @@ export default function AdminOpsPage() {
         </div>
       ) : data ? (
         <>
+          {data.notificationWarnings.length > 0 && (
+            <div className="space-y-2">
+              {data.notificationWarnings.map((warning) => (
+                <div
+                  key={warning}
+                  className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800"
+                >
+                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+                  <span>{warning}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Level + queue counts */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
             {(['INFO', 'WARN', 'ERROR'] as const).map((lvl) => (

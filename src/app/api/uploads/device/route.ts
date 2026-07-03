@@ -3,6 +3,7 @@ import { NextResponse } from 'next/server'
 import { badRequest, forbidden, ok, serverError } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
+import { hasValidImageSignature } from '@/lib/server/image-signature'
 import { getSupabaseAdminClient, PRIVATE_STORAGE_BUCKET } from '@/lib/supabase-admin'
 
 export const runtime = 'nodejs'
@@ -89,6 +90,9 @@ export async function POST(request: Request) {
     const supabase = await ensurePrivateBucket()
     const key = `shops/${shopId}/devices/${Date.now()}-${randomUUID()}.${extension}`
     const bytes = Buffer.from(await file.arrayBuffer())
+    if (!hasValidImageSignature(bytes, file.type)) {
+      return badRequest('Rasm fayli formati noto\'g\'ri yoki shikastlangan')
+    }
     const { error } = await supabase.storage.from(PRIVATE_STORAGE_BUCKET).upload(key, bytes, {
       contentType: file.type,
       upsert: false,

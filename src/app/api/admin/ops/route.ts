@@ -94,11 +94,23 @@ export async function GET(req: NextRequest) {
       CANCELLED: 0,
     }
     for (const group of notifGroups) notificationCounts[group.status] = group._count._all
+    const notificationWarnings = [
+      notificationCounts.PENDING > 100
+        ? `Bildirishnoma navbati katta: ${notificationCounts.PENDING} ta PENDING`
+        : null,
+      notificationCounts.FAILED > 0
+        ? `FAILED bildirishnomalar bor: ${notificationCounts.FAILED} ta`
+        : null,
+      notificationCounts.CANCELLED > 0
+        ? `CANCELLED bildirishnomalar bor: ${notificationCounts.CANCELLED} ta`
+        : null,
+    ].filter((item): item is string => item !== null)
 
     return ok({
       windowDays: 7,
       levelCounts,
       notificationCounts,
+      notificationWarnings,
       events,
       recentFailedNotifications,
       lastCron,

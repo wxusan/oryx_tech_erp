@@ -96,6 +96,12 @@ describe('admin ops endpoint access control', () => {
   it('requires super admin', () => {
     expect(raw).toContain('requireSuperAdmin()')
   })
+  it('surfaces notification backlog/failure warnings', () => {
+    expect(raw).toContain('notificationWarnings')
+    expect(raw).toContain('notificationCounts.PENDING > 100')
+    expect(raw).toContain('notificationCounts.FAILED > 0')
+    expect(raw).toContain('notificationCounts.CANCELLED > 0')
+  })
   it('omits notification message bodies (customer PII) from the payload', () => {
     // Scope to the failed-notification query's select block — OpsEvent.message
     // (a system message, no PII) is fine, but Notification.message is not.
