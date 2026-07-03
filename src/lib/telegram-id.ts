@@ -54,23 +54,3 @@ export async function isTelegramIdTaken(
 }
 
 export type TelegramOwner = NonNullable<Awaited<ReturnType<typeof findTelegramOwner>>>
-
-/** Message shown when a Telegram user is not linked to any Oryx ERP account. */
-export const START_NOT_LINKED_MESSAGE =
-  "Telegram akkauntingiz hali Oryx ERP hisobiga ulanmagan. Admin panelda Telegram ID kiriting yoki /link KOD yuboring."
-
-/**
- * Build the /start welcome message for a recognised owner. Pure function so it
- * can be unit-tested without a database. Role-specific: super admins get a
- * generic welcome, shop admins get their shop name.
- */
-export function buildStartWelcome(owner: TelegramOwner): string {
-  if (owner.type === 'SUPER_ADMIN') {
-    return `Assalomu alaykum, ${owner.user.name}. Siz Oryx ERP super admin sifatida ulandingiz.`
-  }
-
-  return (
-    `Assalomu alaykum, ${owner.user.name}. ` +
-    `Siz ${owner.user.shop.name} do'koni uchun Oryx ERP bildirishnomalariga ulandingiz.`
-  )
-}

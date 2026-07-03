@@ -12,6 +12,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addDeviceSchema } from '@/lib/validations'
 import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
 import { notifyShopAdmins } from '@/lib/notification-service'
+import { deviceAddedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import type { ZodError } from 'zod'
@@ -170,15 +171,33 @@ export async function POST(req: NextRequest) {
 
     // Deliver notifications after the response is sent (non-blocking) so the
     // add-device request never waits on Telegram HTTP calls.
-    after(() =>
-      notifyShopAdmins(
-        resolvedShopId,
-        `Yangi qurilma qo'shildi\nModel: ${model}\nIMEI: ${imei}\nKelish narxi: ${Number(purchasePrice).toLocaleString('ru-RU')} so'm`,
-        'DEVICE_CREATED',
-        device.id,
-        'Device',
-      ).catch((e) => logger.warn('device create notification failed', { event: 'notification.flush_failed', route: '/api/devices', error: e })),
-    )
+    after(async () => {
+      try {
+        const shop = await prisma.shop.findUnique({
+          where: { id: resolvedShopId },
+          select: { name: true },
+        })
+        await notifyShopAdmins(
+          resolvedShopId,
+          deviceAddedMessage({
+            shopName: shop?.name ?? '',
+            device: { deviceModel: model, storage, color, batteryHealth, imei },
+            purchasePrice,
+            supplierPhone,
+            adminName: session.user.name,
+          }),
+          'DEVICE_CREATED',
+          device.id,
+          'Device',
+        )
+      } catch (e) {
+        logger.warn('device create notification failed', {
+          event: 'notification.flush_failed',
+          route: '/api/devices',
+          error: e,
+        })
+      }
+    })
 
     return created(device, "Qurilma muvaffaqiyatli qo'shildi")
   } catch (err) {

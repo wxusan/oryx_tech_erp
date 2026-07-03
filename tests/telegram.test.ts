@@ -1,194 +1,340 @@
 import { describe, it, expect } from 'vitest'
+import { normalizeTelegramId } from '@/lib/telegram-id'
 import {
-  formatNasiyaNotification,
-  paymentMethodLabel,
-  formatDeviceReturnNotification,
-  formatDeviceRestockNotification,
-} from '@/lib/telegram'
-import {
-  normalizeTelegramId,
-  buildStartWelcome,
-  START_NOT_LINKED_MESSAGE,
-  type TelegramOwner,
-} from '@/lib/telegram-id'
+  formatDeviceSpecs,
+  formatPaymentMethod,
+  cleanNote,
+  startSuperAdminMessage,
+  startShopAdminMessage,
+  startUnknownMessage,
+  unknownCommandMessage,
+  deviceAddedMessage,
+  deviceSoldMessage,
+  deviceReturnedMessage,
+  deviceRestockedMessage,
+  nasiyaCreatedMessage,
+  nasiyaPaymentMessage,
+  nasiyaDueTodayMessage,
+  nasiyaOverdueMessage,
+  salePaymentMessage,
+  saleDueTodayMessage,
+  saleOverdueMessage,
+} from '@/lib/telegram-templates'
+
+const fullDevice = {
+  deviceModel: 'iPhone 15 Pro',
+  storage: '256GB',
+  color: 'Titanium',
+  batteryHealth: 88,
+  imei: '123456789012345',
+}
 
 describe('normalizeTelegramId', () => {
-  it('trims surrounding whitespace', () => {
-    expect(normalizeTelegramId('  123456789  ')).toBe('123456789')
-  })
-
-  it('returns null for empty / whitespace-only / nullish input', () => {
+  it('trims and nullifies empty input', () => {
+    expect(normalizeTelegramId('  123  ')).toBe('123')
     expect(normalizeTelegramId('')).toBeNull()
-    expect(normalizeTelegramId('   ')).toBeNull()
     expect(normalizeTelegramId(null)).toBeNull()
-    expect(normalizeTelegramId(undefined)).toBeNull()
-  })
-
-  it('leaves a valid numeric id unchanged (compared as a string)', () => {
-    const id = '987654321'
-    expect(normalizeTelegramId(id)).toBe(id)
   })
 })
 
-describe('buildStartWelcome', () => {
-  it('welcomes a super admin generically by name', () => {
-    const owner: TelegramOwner = {
-      type: 'SUPER_ADMIN',
-      user: { id: 'sa1', name: 'Abdulloh', login: 'abdulloh' },
-    }
-    const msg = buildStartWelcome(owner)
+describe('helpers', () => {
+  it('formatDeviceSpecs includes battery only when requested and numeric', () => {
+    expect(formatDeviceSpecs(fullDevice)).toContain('Batareya: 88%')
+    expect(formatDeviceSpecs(fullDevice, { battery: false })).not.toContain('Batareya')
+  })
+
+  it('formatDeviceSpecs omits empty optional lines', () => {
+    const lines = formatDeviceSpecs({ deviceModel: 'Redmi', storage: null, color: '', batteryHealth: null, imei: null })
+    expect(lines).toEqual(['Qurilma: Redmi'])
+  })
+
+  it('formatPaymentMethod maps known values and returns null otherwise', () => {
+    expect(formatPaymentMethod('CASH')).toBe('Naqd')
+    expect(formatPaymentMethod('TRANSFER')).toBe("O'tkazma")
+    expect(formatPaymentMethod('???')).toBeNull()
+    expect(formatPaymentMethod(null)).toBeNull()
+  })
+
+  it('cleanNote collapses newlines and nullifies empty', () => {
+    expect(cleanNote('  a\n  b ')).toBe('a b')
+    expect(cleanNote('')).toBeNull()
+  })
+})
+
+describe('bot direct replies', () => {
+  it('super admin welcome uses the name and mentions super admin', () => {
+    const msg = startSuperAdminMessage('Abdulloh')
     expect(msg).toContain('Abdulloh')
     expect(msg).toContain('super admin')
-    expect(msg).not.toContain("do'koni")
   })
 
-  it('welcomes a shop admin with their shop name', () => {
-    const owner: TelegramOwner = {
-      type: 'SHOP_ADMIN',
-      user: {
-        id: 'ad1',
-        name: 'Dilshod',
-        login: 'dilshod',
-        shop: { id: 's1', name: 'Malika Electronics', status: 'ACTIVE' },
-      },
-    }
-    const msg = buildStartWelcome(owner)
+  it('shop admin welcome includes the shop name', () => {
+    const msg = startShopAdminMessage('Dilshod', 'Malika Electronics')
     expect(msg).toContain('Dilshod')
     expect(msg).toContain('Malika Electronics')
-    expect(msg).toContain("do'koni")
+  })
+
+  it('unknown-user reply tells them to check Telegram ID and never mentions /link', () => {
+    const msg = startUnknownMessage()
+    expect(msg).toContain('Telegram ID')
+    expect(msg.toLowerCase()).not.toContain('/link')
+    expect(msg).not.toContain('KOD')
+  })
+
+  it('unknown command points to /start and never mentions /link', () => {
+    const msg = unknownCommandMessage()
+    expect(msg).toContain('/start')
+    expect(msg.toLowerCase()).not.toContain('/link')
   })
 })
 
-describe('START_NOT_LINKED_MESSAGE', () => {
-  it('tells the user how to link (Telegram ID + /link)', () => {
-    expect(START_NOT_LINKED_MESSAGE).toContain('Telegram ID')
-    expect(START_NOT_LINKED_MESSAGE).toContain('/link')
+describe('device messages', () => {
+  it('device added includes all specs + purchase price', () => {
+    const msg = deviceAddedMessage({
+      shopName: 'Malika',
+      device: fullDevice,
+      purchasePrice: 6_000_000,
+      supplierPhone: '+998901234567',
+      adminName: 'Dilshod',
+    })
+    expect(msg).toContain('iPhone 15 Pro')
+    expect(msg).toContain('Xotira: 256GB')
+    expect(msg).toContain('Rang: Titanium')
+    expect(msg).toContain('Batareya: 88%')
+    expect(msg).toContain('IMEI: 123456789012345')
+    expect(msg).toMatch(/Kelish narxi: 6.?000.?000 so'm/)
+    expect(msg).toContain('Yetkazib beruvchi: +998901234567')
+    expect(msg).toContain('Admin: Dilshod')
+  })
+
+  it('device added omits empty optional lines', () => {
+    const msg = deviceAddedMessage({
+      shopName: 'Malika',
+      device: { deviceModel: 'Redmi 12', storage: null, color: null, batteryHealth: null, imei: null },
+      purchasePrice: 1_000_000,
+      supplierPhone: null,
+      adminName: null,
+    })
+    expect(msg).not.toContain('Xotira')
+    expect(msg).not.toContain('Rang')
+    expect(msg).not.toContain('Batareya')
+    expect(msg).not.toContain('IMEI')
+    expect(msg).not.toContain('Yetkazib beruvchi')
+    expect(msg).not.toContain('Admin:')
+  })
+
+  it('device sold includes specs, prices, and remaining debt', () => {
+    const msg = deviceSoldMessage({
+      shopName: 'Malika',
+      device: fullDevice,
+      customerName: 'Ali',
+      customerPhone: '+998900000000',
+      salePrice: 8_500_000,
+      paidAmount: 5_000_000,
+      remaining: 3_500_000,
+      paymentMethod: 'CASH',
+      adminName: 'Dilshod',
+    })
+    expect(msg).toContain('Xotira: 256GB')
+    expect(msg).toContain('Batareya: 88%')
+    expect(msg).toContain('IMEI: 123456789012345')
+    expect(msg).toMatch(/Sotuv narxi: 8.?500.?000 so'm/)
+    expect(msg).toMatch(/To'langan: 5.?000.?000 so'm/)
+    expect(msg).toMatch(/Qolgan qarz: 3.?500.?000 so'm/)
+    expect(msg).toContain("To'lov usuli: Naqd")
+  })
+
+  it("device sold shows Qolgan qarz: Yo'q when fully paid", () => {
+    const msg = deviceSoldMessage({
+      shopName: 'Malika',
+      device: fullDevice,
+      customerName: 'Ali',
+      salePrice: 8_500_000,
+      paidAmount: 8_500_000,
+      remaining: 0,
+      paymentMethod: 'CASH',
+    })
+    expect(msg).toContain("Qolgan qarz: Yo'q")
+  })
+
+  it('device returned shows 0 refund and reason', () => {
+    const msg = deviceReturnedMessage({
+      shopName: 'Malika',
+      device: fullDevice,
+      refundAmount: 0,
+      refundMethod: null,
+      note: 'mijoz bekor qildi',
+    })
+    expect(msg).toMatch(/Qaytarilgan summa: 0 so'm/)
+    expect(msg).not.toContain('Qaytarish usuli')
+    expect(msg).toContain('Sabab: mijoz bekor qildi')
+  })
+
+  it('device restocked includes reason', () => {
+    const msg = deviceRestockedMessage({ shopName: 'Malika', device: fullDevice, note: "ko'rikdan o'tdi", adminName: 'Dilshod' })
+    expect(msg).toContain("Sabab: ko'rikdan o'tdi")
+    expect(msg).toContain('Admin: Dilshod')
   })
 })
 
-describe('paymentMethodLabel', () => {
-  it('maps every known method to an Uzbek label', () => {
-    expect(paymentMethodLabel('CASH')).toBe('Naqd')
-    expect(paymentMethodLabel('TRANSFER')).toBe("O'tkazma")
-    expect(paymentMethodLabel('CARD')).toBe('Karta')
-    expect(paymentMethodLabel('OTHER')).toBe('Boshqa')
-  })
-
-  it('falls back to a dash for unknown / missing methods', () => {
-    expect(paymentMethodLabel(undefined)).toBe('-')
-    expect(paymentMethodLabel(null)).toBe('-')
-    expect(paymentMethodLabel('SOMETHING_ELSE')).toBe('-')
-  })
-})
-
-describe('formatNasiyaNotification', () => {
-  const base = {
-    shopName: 'Malika Mobile',
-    deviceModel: 'iPhone 15 Pro',
-    customerName: 'Ali Valiyev',
-    customerPhone: '+998901112233',
+describe('nasiya messages', () => {
+  const baseNasiya = {
+    shopName: 'Malika',
+    customerName: 'Ali',
+    customerPhone: '+998900000000',
+    device: fullDevice,
     totalAmount: 5_200_000,
     downPayment: 1_500_000,
+    baseRemainingAmount: 3_700_000,
     months: 6,
     monthlyPayment: 616_667,
-    firstDueDate: new Date('2026-08-01T00:00:00.000Z'),
+    nextPaymentDate: new Date(2026, 7, 1),
+    adminName: 'Dilshod',
   }
 
-  it('omits percent lines when nasiya percent is 0', () => {
-    const msg = formatNasiyaNotification({
-      ...base,
-      baseRemainingAmount: 3_700_000,
+  it('0% nasiya omits interest lines', () => {
+    const msg = nasiyaCreatedMessage({
+      ...baseNasiya,
       interestPercent: 0,
       interestAmount: 0,
       finalNasiyaAmount: 3_700_000,
     })
-
-    expect(msg).toContain('Qolgan summa')
+    expect(msg).not.toContain('Nasiya foizi')
+    expect(msg).not.toContain('Foiz summasi')
     expect(msg).toContain('Nasiya jami')
-    expect(msg).not.toContain('Nasiya foizi:')
-    expect(msg).not.toContain('Foiz summasi:')
+    expect(msg).toContain('Keyingi to\'lov: 01.08.2026')
   })
 
-  it('includes percent and interest amount when nasiya percent is above 0', () => {
-    const msg = formatNasiyaNotification({
-      ...base,
-      baseRemainingAmount: 3_700_000,
+  it('20% nasiya includes interest percent and amount', () => {
+    const msg = nasiyaCreatedMessage({
+      ...baseNasiya,
       interestPercent: 20,
       interestAmount: 740_000,
       finalNasiyaAmount: 4_440_000,
-      monthlyPayment: 740_000,
     })
-
     expect(msg).toContain('Nasiya foizi: 20%')
-    expect(msg).toContain('Foiz summasi:')
-    expect(msg).toMatch(/740.?000/)
-    expect(msg).toMatch(/4.?440.?000/)
+    expect(msg).toMatch(/Foiz summasi: 740.?000 so'm/)
+    expect(msg).toContain('Qolgan summa')
+  })
+
+  it('nasiya payment never shows a raw nasiya id and includes the essentials', () => {
+    const msg = nasiyaPaymentMessage({
+      shopName: 'Malika',
+      customerName: 'Ali',
+      customerPhone: '+998900000000',
+      device: fullDevice,
+      month: 3,
+      paidAmount: 1_000_000,
+      paymentMethod: 'CARD',
+      remaining: 2_000_000,
+      note: 'naqd berdi',
+      adminName: 'Dilshod',
+    })
+    expect(msg).not.toMatch(/[a-z0-9]{20,}/) // no cuid-like raw id
+    expect(msg).not.toContain('Nasiya:')
+    expect(msg).toContain('Mijoz: Ali')
+    expect(msg).toContain('Oy: 3-oy')
+    expect(msg).toMatch(/To'langan: 1.?000.?000 so'm/)
+    expect(msg).toContain("To'lov usuli: Karta")
+    expect(msg).toMatch(/Qolgan qarz: 2.?000.?000 so'm/)
+    expect(msg).not.toContain('Batareya')
+  })
+
+  it('nasiya payment shows To\'liq yopildi when cleared and Bir nechta oy for multi', () => {
+    const cleared = nasiyaPaymentMessage({
+      shopName: 'M', customerName: 'A', device: fullDevice, month: 'MULTIPLE',
+      paidAmount: 500_000, paymentMethod: 'CASH', remaining: 0,
+    })
+    expect(cleared).toContain("Qolgan qarz: To'liq yopildi")
+    expect(cleared).toContain('Oy: Bir nechta oy')
+  })
+
+  it('nasiya due reminder includes month, amount and due date', () => {
+    const msg = nasiyaDueTodayMessage({
+      customerName: 'Ali', customerPhone: '+998900000000', device: fullDevice,
+      month: 2, amountDue: 616_667, dueDate: new Date(2026, 7, 1),
+    })
+    expect(msg).toContain('Oy: 2-oy')
+    expect(msg).toMatch(/To'lov summasi: 616.?667 so'm/)
+    expect(msg).toContain('Muddat: 01.08.2026')
+  })
+
+  it('nasiya overdue includes daysLate', () => {
+    const msg = nasiyaOverdueMessage({
+      customerName: 'Ali', customerPhone: '+998900000000', device: fullDevice,
+      month: 2, amountDue: 616_667, dueDate: new Date(2026, 6, 1), daysLate: 12,
+    })
+    expect(msg).toContain('Kechikkan: 12 kun')
   })
 })
 
-describe('formatDeviceReturnNotification', () => {
-  it('includes model, IMEI, refund amount + method, reason and actor', () => {
-    const msg = formatDeviceReturnNotification({
-      deviceModel: 'iPhone 13 Pro',
-      imei: '123456789012345',
-      refundAmount: 8_500_000,
-      refundMethod: 'CASH',
-      note: 'mijoz bekor qildi',
-      actorName: 'Dilshod',
+describe('sale debt messages', () => {
+  it('sale payment shows remaining debt and cleared label', () => {
+    const open = salePaymentMessage({
+      shopName: 'M', customerName: 'A', customerPhone: '+998900000000', device: fullDevice,
+      paidAmount: 1_000_000, paymentMethod: 'CASH', remaining: 500_000, note: null, adminName: 'D',
     })
-    expect(msg).toContain('qaytarildi')
-    expect(msg).toContain('iPhone 13 Pro')
-    expect(msg).toContain('123456789012345')
-    // Grouped amount, separator-agnostic (ru-RU locale groups with spaces).
-    expect(msg).toMatch(/8.?500.?000/)
-    expect(msg).toContain("so'm")
-    expect(msg).toContain('Naqd')
-    expect(msg).toContain('mijoz bekor qildi')
-    expect(msg).toContain('Dilshod')
+    expect(open).toMatch(/Qolgan qarz: 500.?000 so'm/)
+    expect(open).not.toContain('Izoh') // note null -> omitted
+    const cleared = salePaymentMessage({
+      shopName: 'M', customerName: 'A', device: fullDevice,
+      paidAmount: 500_000, paymentMethod: 'CASH', remaining: 0,
+    })
+    expect(cleared).toContain("Qolgan qarz: To'liq yopildi")
   })
 
-  it('omits the refund-method line when nothing was refunded', () => {
-    const msg = formatDeviceReturnNotification({
-      deviceModel: 'Galaxy S23',
-      imei: '999',
-      refundAmount: 0,
-      note: 'shartnoma bekor',
+  it('sale due + overdue include due date and daysLate', () => {
+    const due = saleDueTodayMessage({
+      customerName: 'A', customerPhone: '+998900000000', device: fullDevice,
+      remainingAmount: 2_000_000, dueDate: new Date(2026, 7, 1),
     })
-    expect(msg).not.toContain('Usul:')
-  })
-
-  it('omits the actor line when no actor is provided', () => {
-    const msg = formatDeviceReturnNotification({
-      deviceModel: 'Galaxy S23',
-      imei: '999',
-      refundAmount: 0,
-      note: 'shartnoma bekor',
+    expect(due).toContain('Muddat: 01.08.2026')
+    const overdue = saleOverdueMessage({
+      customerName: 'A', customerPhone: '+998900000000', device: fullDevice,
+      remainingAmount: 2_000_000, dueDate: new Date(2026, 6, 1), daysLate: 9,
     })
-    expect(msg).not.toContain('Admin:')
+    expect(overdue).toContain('Kechikkan: 9 kun')
   })
 })
 
-describe('formatDeviceRestockNotification', () => {
-  it('includes model, IMEI, reason and actor', () => {
-    const msg = formatDeviceRestockNotification({
-      deviceModel: 'iPhone 13 Pro',
-      imei: '123456789012345',
-      note: "qayta ko'rikdan o'tdi",
-      actorName: 'Dilshod',
-    })
-    expect(msg).toContain('sotuvga chiqarildi')
-    expect(msg).toContain('iPhone 13 Pro')
-    expect(msg).toContain('123456789012345')
-    expect(msg).toContain("qayta ko'rikdan o'tdi")
-    expect(msg).toContain('Dilshod')
+describe('global safety across every template', () => {
+  const messages = [
+    startSuperAdminMessage('A'),
+    startShopAdminMessage('A', 'Shop'),
+    startUnknownMessage(),
+    unknownCommandMessage(),
+    deviceAddedMessage({ shopName: 'S', device: fullDevice, purchasePrice: 1, supplierPhone: '1', adminName: 'A' }),
+    deviceSoldMessage({ shopName: 'S', device: fullDevice, customerName: 'A', customerPhone: '1', salePrice: 1, paidAmount: 1, remaining: 0, paymentMethod: 'CASH', adminName: 'A' }),
+    deviceReturnedMessage({ shopName: 'S', device: fullDevice, refundAmount: 1, refundMethod: 'CASH', note: 'n', adminName: 'A' }),
+    deviceRestockedMessage({ shopName: 'S', device: fullDevice, note: 'n', adminName: 'A' }),
+    nasiyaCreatedMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, totalAmount: 1, downPayment: 1, baseRemainingAmount: 1, interestPercent: 20, interestAmount: 1, finalNasiyaAmount: 1, months: 6, monthlyPayment: 1, nextPaymentDate: new Date(), adminName: 'A' }),
+    nasiyaPaymentMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, paidAmount: 1, paymentMethod: 'CASH', remaining: 1, note: 'n', adminName: 'A' }),
+    nasiyaDueTodayMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, dueDate: new Date() }),
+    nasiyaOverdueMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, dueDate: new Date(), daysLate: 1 }),
+    salePaymentMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, paidAmount: 1, paymentMethod: 'CASH', remaining: 1, note: 'n', adminName: 'A' }),
+    saleDueTodayMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, remainingAmount: 1, dueDate: new Date() }),
+    saleOverdueMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, remainingAmount: 1, dueDate: new Date(), daysLate: 1 }),
+  ]
+
+  it('never mentions /link or a link KOD instruction', () => {
+    for (const msg of messages) {
+      expect(msg.toLowerCase()).not.toContain('/link')
+      expect(msg).not.toContain('KOD')
+    }
   })
 
-  it('omits the actor line when no actor is provided', () => {
-    const msg = formatDeviceRestockNotification({
-      deviceModel: 'Galaxy S23',
-      imei: '999',
-      note: 'omborga qaytdi',
-    })
-    expect(msg).not.toContain('Admin:')
+  it('contains no Markdown-style literal asterisks', () => {
+    for (const msg of messages) {
+      expect(msg).not.toContain('*')
+    }
+  })
+
+  it('leaks no sensitive field names / URLs', () => {
+    const forbidden = ['passportPhotoUrl', 'password', 'passwordHash', 'token', 'DATABASE_URL', 'signedUrl', 'attachmentUrl', 'http://', 'https://']
+    for (const msg of messages) {
+      for (const word of forbidden) {
+        expect(msg).not.toContain(word)
+      }
+    }
   })
 })

@@ -36,7 +36,6 @@ function profileSelect() {
     login: true,
     telegramId: true,
     telegramVerifiedAt: true,
-    telegramLinkCode: true,
     passwordChangedAt: true,
     shop: {
       select: {
@@ -124,7 +123,6 @@ export async function PATCH(req: NextRequest) {
           data: {
             telegramId,
             telegramVerifiedAt: telegramId ? new Date() : null,
-            telegramLinkCode: telegramId ? null : undefined,
           },
         })
 

@@ -30,9 +30,38 @@ describe('telegram webhook /start recognition guard', () => {
     expect(src).toContain('telegramVerifiedAt: new Date()')
   })
 
-  it('replies with a role/shop-specific welcome and a not-linked fallback', () => {
-    expect(src).toContain('buildStartWelcome(owner)')
-    expect(src).toContain('START_NOT_LINKED_MESSAGE')
+  it('replies with role-specific welcome templates and an unknown-user reply', () => {
+    expect(src).toContain('startSuperAdminMessage(owner.user.name)')
+    expect(src).toContain('startShopAdminMessage(owner.user.name, owner.user.shop.name)')
+    expect(src).toContain('startUnknownMessage()')
+  })
+
+  it('has no /link command handler and never mentions /link or link codes', () => {
+    expect(src).not.toContain("bot.command('link'")
+    expect(src).not.toContain('/link')
+    expect(src).not.toContain('telegramLinkCode')
+  })
+})
+
+describe('telegram link-code flow fully removed', () => {
+  it('the ShopAdmin schema no longer has telegramLinkCode', () => {
+    expect(read('prisma/schema.prisma')).not.toContain('telegramLinkCode')
+  })
+
+  it('a migration drops the telegramLinkCode column', () => {
+    const sql = read('prisma/migrations/202607030004_remove_telegram_link_code/migration.sql')
+    expect(sql).toContain('DROP COLUMN IF EXISTS "telegramLinkCode"')
+  })
+
+  it('provisioning routes no longer generate link codes', () => {
+    expect(read('src/app/api/shops/route.ts')).not.toContain('telegramLinkCode')
+    expect(read('src/app/api/shops/[id]/admins/route.ts')).not.toContain('telegramLinkCode')
+  })
+
+  it('the shop settings UI no longer shows a link command', () => {
+    const ui = read('src/app/(shop)/shop/settings/page.tsx')
+    expect(ui).not.toContain('telegramLinkCode')
+    expect(ui).not.toContain('/link')
   })
 })
 
@@ -40,7 +69,7 @@ describe('device return notification guard', () => {
   const src = read('src/app/api/devices/[id]/return/route.ts')
 
   it('queues a RETURN notification for verified shop admins inside the txn', () => {
-    expect(src).toContain('formatDeviceReturnNotification')
+    expect(src).toContain('deviceReturnedMessage')
     expect(src).toContain("type: 'RETURN'")
     // Recipient isolation: shop-scoped, active, non-deleted, verified only.
     expect(src).toContain('telegramVerifiedAt: { not: null }')
@@ -57,7 +86,7 @@ describe('device restock notification guard', () => {
   const src = read('src/app/api/devices/[id]/restock/route.ts')
 
   it('queues a RESTOCK notification for verified shop admins inside the txn', () => {
-    expect(src).toContain('formatDeviceRestockNotification')
+    expect(src).toContain('deviceRestockedMessage')
     expect(src).toContain("type: 'RESTOCK'")
     expect(src).toContain('telegramVerifiedAt: { not: null }')
     expect(src).toContain('isActive: true')

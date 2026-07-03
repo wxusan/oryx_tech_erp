@@ -30,7 +30,6 @@ interface ShopAdmin {
   phone: string
   telegramId: string | null
   telegramVerifiedAt: string | null
-  telegramLinkCode: string | null
   login: string
   isActive: boolean
 }
@@ -623,8 +622,8 @@ export default function ShopDetailPage() {
                   <TableCell className="text-sm text-zinc-500">
                     {admin.telegramVerifiedAt ? (
                       <span className="text-emerald-700">Ulangan</span>
-                    ) : admin.telegramLinkCode ? (
-                      <span className="font-mono text-zinc-700">/link {admin.telegramLinkCode}</span>
+                    ) : admin.telegramId ? (
+                      <span className="text-zinc-500">Tasdiqlanmagan</span>
                     ) : (
                       '—'
                     )}

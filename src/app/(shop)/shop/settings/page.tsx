@@ -2,7 +2,7 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { signOut } from 'next-auth/react'
-import { CheckCircle2, Copy, KeyRound, Link2, Loader2, Send, ShieldCheck, UserRound } from 'lucide-react'
+import { CheckCircle2, KeyRound, Link2, Loader2, Send, ShieldCheck, UserRound } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -26,7 +26,6 @@ interface ShopAdminProfile {
   login: string
   telegramId: string | null
   telegramVerifiedAt: string | null
-  telegramLinkCode: string | null
   passwordChangedAt: string
   shop: {
     id: string
@@ -76,7 +75,6 @@ export default function ShopSettingsPage() {
   const [profile, setProfile] = useState<ShopAdminProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [copied, setCopied] = useState(false)
   const [passwordForm, setPasswordForm] = useState<PasswordForm>(emptyPasswordForm)
   const [passwordError, setPasswordError] = useState('')
   const [passwordSuccess, setPasswordSuccess] = useState('')
@@ -145,23 +143,15 @@ export default function ShopSettingsPage() {
   const telegramStatus = useMemo(() => {
     if (!profile) return { label: '-', tone: 'secondary' as const }
     if (profile.telegramVerifiedAt) return { label: 'Ulangan', tone: 'default' as const }
-    if (profile.telegramLinkCode) return { label: 'Ulanmagan', tone: 'outline' as const }
-    return { label: "Kod yo'q", tone: 'secondary' as const }
+    if (profile.telegramId) return { label: 'Tasdiqlanmagan', tone: 'outline' as const }
+    return { label: 'Ulanmagan', tone: 'secondary' as const }
   }, [profile])
 
-  const linkCommand = profile?.telegramLinkCode ? `/link ${profile.telegramLinkCode}` : ''
   const canSubmitPassword =
     passwordForm.currentPassword.length > 0 &&
     passwordForm.newPassword.length >= 8 &&
     passwordForm.confirmPassword.length >= 8 &&
     !passwordLoading
-
-  async function copyLinkCommand() {
-    if (!linkCommand) return
-    await navigator.clipboard.writeText(linkCommand)
-    setCopied(true)
-    window.setTimeout(() => setCopied(false), 1400)
-  }
 
   async function handleAccountSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -545,27 +535,15 @@ export default function ShopSettingsPage() {
                   <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
                   Telegram ID tasdiqlangan. Bildirishnomalar shu ID ga yuboriladi.
                 </div>
-              ) : linkCommand ? (
-                <div className="space-y-3 rounded-md border border-zinc-200 bg-zinc-50 p-3">
-                  <div className="text-xs font-medium text-zinc-500">Ulash kodi</div>
-                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                    <code className="min-h-9 flex-1 rounded-md border border-zinc-200 bg-white px-3 py-2 text-sm font-semibold text-zinc-900">
-                      {linkCommand}
-                    </code>
-                    <Button type="button" variant="outline" className="h-9 rounded-md" onClick={copyLinkCommand}>
-                      <Copy className="size-4" />
-                      {copied ? 'Nusxalandi' : 'Nusxa olish'}
-                    </Button>
-                  </div>
-                  <div className="flex items-start gap-2 text-sm text-zinc-600">
-                    <Link2 className="mt-0.5 size-4 shrink-0 text-zinc-400" />
-                    Telegram botga kiring va xabar sifatida <span className="font-mono font-semibold">{linkCommand}</span>{' '}
-                    yuboring.
-                  </div>
+              ) : profile.telegramId ? (
+                <div className="flex items-start gap-3 rounded-md border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-600">
+                  <Link2 className="mt-0.5 size-4 shrink-0 text-zinc-400" />
+                  Telegram ID saqlandi. Tasdiqlash uchun botga <span className="font-mono font-semibold">/start</span>{' '}
+                  yuboring.
                 </div>
               ) : (
                 <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                  Telegram ulash kodi topilmadi. Bosh admin bilan bog'laning.
+                  Telegram ID kiritilmagan. Yuqorida ID kiriting, so'ng botga <span className="font-mono font-semibold">/start</span> yuboring.
                 </div>
               )}
             </CardContent>

@@ -18,7 +18,7 @@ import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpe
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { logger } from '@/lib/logger'
-import { formatDeviceRestockNotification } from '@/lib/telegram'
+import { deviceRestockedMessage } from '@/lib/telegram-templates'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -52,6 +52,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
+        include: { shop: { select: { name: true } } },
       })
       if (!device) throw { status: 404, message: 'Qurilma topilmadi' }
       if (device.status !== 'RETURNED') {
@@ -89,11 +90,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         select: { telegramId: true },
       })
       if (shopAdmins.length > 0) {
-        const message = formatDeviceRestockNotification({
-          deviceModel: device.model,
-          imei: device.imei,
+        const message = deviceRestockedMessage({
+          shopName: device.shop.name,
+          device: {
+            deviceModel: device.model,
+            storage: device.storage,
+            color: device.color,
+            batteryHealth: device.batteryHealth,
+            imei: device.imei,
+          },
           note: parsed.data.note,
-          actorName: session.user.name,
+          adminName: session.user.name,
         })
         for (const admin of shopAdmins) {
           await tx.notification.create({

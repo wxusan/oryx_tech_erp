@@ -7,7 +7,7 @@ import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpe
 import { invalidateShopReturnMutation } from '@/lib/server/cache-tags'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { logger } from '@/lib/logger'
-import { formatDeviceReturnNotification } from '@/lib/telegram'
+import { deviceReturnedMessage } from '@/lib/telegram-templates'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -43,6 +43,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
         include: {
+          shop: { select: { name: true } },
           sales: { where: { deletedAt: null }, orderBy: { createdAt: 'desc' }, take: 1 },
           nasiya: { where: { deletedAt: null, status: { not: 'CANCELLED' } }, orderBy: { createdAt: 'desc' }, take: 1 },
         },
@@ -130,13 +131,19 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         select: { telegramId: true },
       })
       if (shopAdmins.length > 0) {
-        const message = formatDeviceReturnNotification({
-          deviceModel: device.model,
-          imei: device.imei,
+        const message = deviceReturnedMessage({
+          shopName: device.shop.name,
+          device: {
+            deviceModel: device.model,
+            storage: device.storage,
+            color: device.color,
+            batteryHealth: device.batteryHealth,
+            imei: device.imei,
+          },
           refundAmount: parsed.data.refundAmount,
           refundMethod: parsed.data.refundMethod,
           note: parsed.data.note,
-          actorName: session.user.name,
+          adminName: session.user.name,
         })
         for (const admin of shopAdmins) {
           await tx.notification.create({

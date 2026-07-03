@@ -14,6 +14,7 @@ import { createNasiyaSchema } from '@/lib/validations'
 import { calculateNasiyaAmounts, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { nasiyaCreatedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
@@ -67,6 +68,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
+        include: { shop: { select: { name: true } } },
       })
 
       if (!device) throw { status: 404, message: "Qurilma topilmadi" }
@@ -156,16 +158,34 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const shopAdmins = await tx.shopAdmin.findMany({
         where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
       })
+      const nasiyaMessage = nasiyaCreatedMessage({
+        shopName: device.shop.name,
+        customerName,
+        customerPhone,
+        device: {
+          deviceModel: device.model,
+          storage: device.storage,
+          color: device.color,
+          batteryHealth: device.batteryHealth,
+          imei: device.imei,
+        },
+        totalAmount: amounts.totalAmount,
+        downPayment: amounts.downPayment,
+        baseRemainingAmount: amounts.baseRemainingAmount,
+        interestPercent: amounts.interestPercent,
+        interestAmount: amounts.interestAmount,
+        finalNasiyaAmount: amounts.finalNasiyaAmount,
+        months,
+        monthlyPayment: amounts.monthlyPayment,
+        nextPaymentDate: scheduleItems[0]?.dueDate ?? null,
+        adminName: session.user.name,
+      })
       for (const admin of shopAdmins) {
-        const interestLines =
-          amounts.interestPercent > 0
-            ? `\n📈 Nasiya foizi: ${amounts.interestPercent}%\n➕ Foiz summasi: ${amounts.interestAmount.toLocaleString()} so'm`
-            : ''
         await tx.notification.create({
           data: {
             shopId,
             type: 'NASIYA',
-            message: `✅ Yangi nasiya\n📱 ${device.model}\n👤 ${customerName}\n📞 ${customerPhone}\n💰 Jami narx: ${amounts.totalAmount.toLocaleString()} so'm\n💵 Boshlang'ich to'lov: ${amounts.downPayment.toLocaleString()} so'm\n📌 Qolgan summa: ${amounts.baseRemainingAmount.toLocaleString()} so'm${interestLines}\n🧾 Nasiya jami: ${amounts.finalNasiyaAmount.toLocaleString()} so'm\n🔁 Oylik to'lov: ${amounts.monthlyPayment.toLocaleString()} so'm`,
+            message: nasiyaMessage,
             telegramId: admin.telegramId!,
             scheduledAt: new Date(),
             relatedId: nasiya.id,

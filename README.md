@@ -137,7 +137,7 @@ If you cannot confirm the DB matches, prefer a fresh database instead of guessin
 2. Generate `TELEGRAM_WEBHOOK_SECRET` (`openssl rand -hex 32`) and
    `CRON_SECRET` (used to authorize `/api/telegram/send` and `/api/cron/reminders`;
    `INTERNAL_API_SECRET` overrides it if set).
-3. Register the webhook so Telegram can deliver `/start` and `/link` to the app:
+3. Register the webhook so Telegram can deliver `/start` to the app:
 
    ```bash
    curl "https://api.telegram.org/bot<TOKEN>/setWebhook" \
@@ -152,16 +152,16 @@ If you cannot confirm the DB matches, prefer a fresh database instead of guessin
 
 ### Linking an account
 
-Two ways to link a Telegram account to a super admin or shop admin:
+Enter the numeric Telegram ID in the admin/shop settings page, then send
+`/start` to the bot from that Telegram account. The bot looks the ID up in both
+the `SuperAdmin` and `ShopAdmin` tables (`findTelegramOwner`), stamps
+`telegramVerifiedAt` if it was missing, and replies with a role/shop-specific
+welcome. Unknown IDs get a "not linked" reply telling the user to check their
+Telegram ID in the panel.
 
-- **Manual ID + `/start`** — enter the numeric Telegram ID in the admin/shop
-  settings page, then send `/start` to the bot from that Telegram account. The
-  bot looks the ID up in both the `SuperAdmin` and `ShopAdmin` tables
-  (`findTelegramOwner`), stamps `telegramVerifiedAt` if it was missing, and
-  replies with a role/shop-specific welcome. Unknown IDs get a "not linked" hint.
-- **`/link CODE`** — a shop admin's settings page shows a one-time
-  `telegramLinkCode`; sending `/link <CODE>` sets `telegramId` +
-  `telegramVerifiedAt`, consumes the code, and sends the shop welcome.
+> There is **no `/link CODE` flow** — it was removed. See
+> [docs/telegram-messages.md](docs/telegram-messages.md) for the full message
+> catalog and the removed/future items.
 
 > Note: manually entering an ID marks it verified immediately (so notifications
 > start flowing without waiting for `/start`). The typed ID is trusted as-is —
@@ -197,8 +197,8 @@ day per admin), so running it on consecutive days re-notifies chronic debtors.
 Telegram's webhook needs a public HTTPS URL, so it can't reach `localhost`.
 For local QA you can still exercise delivery:
 
-- Set `TELEGRAM_BOT_TOKEN` to a real bot and link an admin (`/link <CODE>` in the
-  bot, or enter the ID manually) so `telegramId` + `telegramVerifiedAt` are
+- Set `TELEGRAM_BOT_TOKEN` to a real bot and link an admin (enter the Telegram
+  ID in settings, then send `/start`) so `telegramId` + `telegramVerifiedAt` are
   populated. Outbound sends (sale/return/restock/nasiya/payment/reminder) then
   reach that Telegram account directly — no inbound webhook required.
 - To exercise event notifications, perform the action in the UI and watch the
@@ -207,7 +207,7 @@ For local QA you can still exercise delivery:
   nasiya/sale payment. Each produces one message to the shop's verified admins.
 - To flush queued notifications on demand:
   `curl -X POST -H "Authorization: Bearer $CRON_SECRET" http://localhost:3000/api/telegram/send`
-- To exercise the inbound webhook (`/start`, `/link`) locally, expose the dev
+- To exercise the inbound webhook (`/start`) locally, expose the dev
   server with a tunnel (e.g. `ngrok http 3000`) and register the webhook with
   `setWebhook` + `secret_token=$TELEGRAM_WEBHOOK_SECRET`. `/start` must welcome a
   linked user; if it stays silent, confirm the webhook is registered (inbound

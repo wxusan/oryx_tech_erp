@@ -124,7 +124,6 @@ export interface ShopAdmin {
   login: string
   telegramId: string | null
   telegramVerifiedAt?: string | null
-  telegramLinkCode?: string | null
   isActive: boolean
   createdAt: string
   deletedAt: string | null

@@ -8,7 +8,6 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import bcrypt from 'bcrypt'
-import { randomBytes } from 'crypto'
 import { ok, created, badRequest, conflict, notFound, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
@@ -16,10 +15,6 @@ import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 import { z, ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
-
-function telegramLinkCode() {
-  return randomBytes(12).toString('hex').toUpperCase()
-}
 
 // ---------------------------------------------------------------------------
 // Schemas
@@ -113,7 +108,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           login: parsed.data.login,
           telegramId,
           telegramVerifiedAt: telegramId ? new Date() : null,
-          telegramLinkCode: telegramId ? null : telegramLinkCode(),
           passwordHash,
         },
       })

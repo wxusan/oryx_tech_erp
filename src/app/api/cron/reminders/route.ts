@@ -27,6 +27,12 @@ import { processPendingNotifications } from '@/lib/notification-service'
 import { invalidateShopOverdueCron } from '@/lib/server/cache-tags'
 import { tashkentDayRange } from '@/lib/timezone'
 import { recordOpsEvent } from '@/lib/server/ops-events'
+import {
+  nasiyaDueTodayMessage,
+  nasiyaOverdueMessage,
+  saleDueTodayMessage,
+  saleOverdueMessage,
+} from '@/lib/telegram-templates'
 
 export const maxDuration = 60
 
@@ -87,7 +93,19 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   for (const schedule of dueToday) {
     const { nasiya } = schedule
-    const msg = `⏰ Bugungi to'lov eslatmasi\n👤 ${nasiya.customer.name}\n📞 ${nasiya.customer.phone}\n📱 ${nasiya.device.model}\n💵 ${outstandingAmount(schedule.expectedAmount, schedule.paidAmount).toLocaleString()} so'm`
+    const msg = nasiyaDueTodayMessage({
+      customerName: nasiya.customer.name,
+      customerPhone: nasiya.customer.phone,
+      device: {
+        deviceModel: nasiya.device.model,
+        storage: nasiya.device.storage,
+        color: nasiya.device.color,
+        imei: nasiya.device.imei,
+      },
+      month: schedule.monthNumber,
+      amountDue: outstandingAmount(schedule.expectedAmount, schedule.paidAmount),
+      dueDate: schedule.delayedUntil ?? schedule.dueDate,
+    })
     for (const admin of nasiya.shop.admins) {
       const dedupeKey = `REMINDER:${dayKey}:${admin.telegramId}:${schedule.id}`
       await prisma.notification.upsert({
@@ -147,7 +165,20 @@ export async function GET(request: NextRequest): Promise<Response> {
   for (const schedule of overdue) {
     const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
     const daysLate = Math.floor((today.getTime() - effectiveDue.getTime()) / 86400000)
-    const msg = `🔴 Muddati o'tgan to'lov\n👤 ${schedule.nasiya.customer.name}\n📞 ${schedule.nasiya.customer.phone}\n📱 ${schedule.nasiya.device.model}\n💵 ${outstandingAmount(schedule.expectedAmount, schedule.paidAmount).toLocaleString()} so'm\n⏳ ${daysLate} kun kechikmoqda`
+    const msg = nasiyaOverdueMessage({
+      customerName: schedule.nasiya.customer.name,
+      customerPhone: schedule.nasiya.customer.phone,
+      device: {
+        deviceModel: schedule.nasiya.device.model,
+        storage: schedule.nasiya.device.storage,
+        color: schedule.nasiya.device.color,
+        imei: schedule.nasiya.device.imei,
+      },
+      month: schedule.monthNumber,
+      amountDue: outstandingAmount(schedule.expectedAmount, schedule.paidAmount),
+      dueDate: effectiveDue,
+      daysLate,
+    })
     await prisma.$transaction(async (tx) => {
       for (const admin of schedule.nasiya.shop.admins) {
         const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
@@ -207,7 +238,18 @@ export async function GET(request: NextRequest): Promise<Response> {
   })
 
   for (const sale of salePaymentsDueToday) {
-    const msg = `⏰ Bugungi qarz to'lovi\n👤 ${sale.customer.name}\n📞 ${sale.customer.phone}\n📱 ${sale.device.model}\n💵 ${Number(sale.remainingAmount).toLocaleString()} so'm`
+    const msg = saleDueTodayMessage({
+      customerName: sale.customer.name,
+      customerPhone: sale.customer.phone,
+      device: {
+        deviceModel: sale.device.model,
+        storage: sale.device.storage,
+        color: sale.device.color,
+        imei: sale.device.imei,
+      },
+      remainingAmount: Number(sale.remainingAmount),
+      dueDate: sale.dueDate ?? new Date(),
+    })
     for (const admin of sale.shop.admins) {
       const dedupeKey = `SALE_REMINDER:${dayKey}:${admin.telegramId}:${sale.id}`
       await prisma.notification.upsert({
@@ -248,7 +290,19 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   for (const sale of overdueSales) {
     const daysLate = sale.dueDate ? Math.floor((today.getTime() - sale.dueDate.getTime()) / 86400000) : 0
-    const msg = `🔴 Muddati o'tgan qarz to'lovi\n👤 ${sale.customer.name}\n📞 ${sale.customer.phone}\n📱 ${sale.device.model}\n💵 ${Number(sale.remainingAmount).toLocaleString()} so'm\n⏳ ${daysLate} kun kechikmoqda`
+    const msg = saleOverdueMessage({
+      customerName: sale.customer.name,
+      customerPhone: sale.customer.phone,
+      device: {
+        deviceModel: sale.device.model,
+        storage: sale.device.storage,
+        color: sale.device.color,
+        imei: sale.device.imei,
+      },
+      remainingAmount: Number(sale.remainingAmount),
+      dueDate: sale.dueDate ?? new Date(),
+      daysLate,
+    })
     for (const admin of sale.shop.admins) {
       const dedupeKey = `SALE_OVERDUE:${dayKey}:${admin.telegramId}:${sale.id}`
       await prisma.notification.upsert({

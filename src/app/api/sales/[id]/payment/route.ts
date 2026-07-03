@@ -5,6 +5,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addSalePaymentSchema } from '@/lib/validations'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { salePaymentMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import type { ZodError } from 'zod'
@@ -64,7 +65,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       const sale = await tx.sale.findFirst({
         where: { id: saleId, shopId, deletedAt: null },
-        include: { device: true, customer: true },
+        include: { device: true, customer: true, shop: { select: { name: true } } },
       })
       if (!sale) throw { status: 404, message: 'Sotuv topilmadi' }
 
@@ -137,12 +138,28 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const shopAdmins = await tx.shopAdmin.findMany({
         where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
       })
+      const paymentMessage = salePaymentMessage({
+        shopName: sale.shop.name,
+        customerName: sale.customer.name,
+        customerPhone: sale.customer.phone,
+        device: {
+          deviceModel: sale.device.model,
+          storage: sale.device.storage,
+          color: sale.device.color,
+          imei: sale.device.imei,
+        },
+        paidAmount: amount,
+        paymentMethod: parsed.data.paymentMethod,
+        remaining: nextRemaining,
+        note: auditNote,
+        adminName: session.user.name,
+      })
       for (const admin of shopAdmins) {
         await tx.notification.create({
           data: {
             shopId,
             type: 'PAYMENT_RECEIVED',
-            message: `💰 To'lov qabul qilindi\n📱 ${sale.device.model}\n👤 ${sale.customer.name}\n💵 Qabul qilingan: ${amount.toLocaleString()} so'm\n🧾 Qolgan qarz: ${nextRemaining.toLocaleString()} so'm`,
+            message: paymentMessage,
             telegramId: admin.telegramId!,
             scheduledAt: new Date(),
             relatedId: saleId,

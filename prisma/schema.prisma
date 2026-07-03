@@ -175,7 +175,6 @@ model ShopAdmin {
   login              String
   telegramId         String?
   telegramVerifiedAt DateTime?
-  telegramLinkCode   String?   @unique
   passwordHash       String
   passwordChangedAt  DateTime  @default(now())
   sessionVersion     Int       @default(1)

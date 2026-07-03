@@ -12,6 +12,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { createSaleSchema } from '@/lib/validations'
 import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { deviceSoldMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
@@ -50,6 +51,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
+        include: { shop: { select: { name: true } } },
       })
 
       if (!device) throw { status: 404, message: "Qurilma topilmadi" }
@@ -123,7 +125,23 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           data: {
             shopId,
             type: 'SALE',
-            message: `✅ Yangi sotuv\n📱 ${device.model}\n👤 ${customerName}\n📞 ${customerPhone}\n💰 ${salePrice.toLocaleString()} so'm`,
+            message: deviceSoldMessage({
+              shopName: device.shop.name,
+              device: {
+                deviceModel: device.model,
+                storage: device.storage,
+                color: device.color,
+                batteryHealth: device.batteryHealth,
+                imei: device.imei,
+              },
+              customerName,
+              customerPhone,
+              salePrice,
+              paidAmount: paid,
+              remaining,
+              paymentMethod,
+              adminName: session.user.name,
+            }),
             telegramId: admin.telegramId!,
             scheduledAt: new Date(),
             relatedId: sale.id,

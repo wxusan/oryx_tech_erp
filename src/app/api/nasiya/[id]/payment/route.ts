@@ -15,6 +15,7 @@ import { addNasiyaPaymentSchema } from '@/lib/validations'
 import { calculateRemaining } from '@/lib/nasiya-utils'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { nasiyaPaymentMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import type { ZodError } from 'zod'
@@ -59,7 +60,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       // Verify nasiya exists and belongs to this shop
       const nasiya = await tx.nasiya.findFirst({
         where: { id: nasiyaId, shopId, deletedAt: null, status: { not: 'CANCELLED' } },
-        include: { schedules: true },
+        include: {
+          schedules: true,
+          shop: { select: { name: true } },
+          customer: { select: { name: true, phone: true } },
+          device: { select: { model: true, storage: true, color: true, imei: true } },
+        },
       })
       if (!nasiya) throw { status: 404, message: "Nasiya topilmadi" }
 
@@ -222,12 +228,29 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         const shopAdmins = await tx.shopAdmin.findMany({
           where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
         })
+        const paymentMessage = nasiyaPaymentMessage({
+          shopName: nasiya.shop.name,
+          customerName: nasiya.customer.name,
+          customerPhone: nasiya.customer.phone,
+          device: {
+            deviceModel: nasiya.device.model,
+            storage: nasiya.device.storage,
+            color: nasiya.device.color,
+            imei: nasiya.device.imei,
+          },
+          month: allocations.length === 1 ? selectedSchedule.monthNumber : 'MULTIPLE',
+          paidAmount: amount,
+          paymentMethod,
+          remaining,
+          note: auditNote,
+          adminName: session.user.name,
+        })
         for (const admin of shopAdmins) {
           await tx.notification.create({
             data: {
               shopId,
               type: 'PAYMENT_RECEIVED',
-              message: `💰 To'lov qabul qilindi\n📱 Nasiya: ${nasiyaId}\n💵 ${amount.toLocaleString()} so'm`,
+              message: paymentMessage,
               telegramId: admin.telegramId!,
               scheduledAt: new Date(),
               relatedId: allocations.length === 1 ? allocations[0].scheduleId : nasiyaId,

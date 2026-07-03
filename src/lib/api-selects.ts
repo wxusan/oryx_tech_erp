@@ -8,7 +8,6 @@ export const shopAdminPublicSelect = {
   login: true,
   telegramId: true,
   telegramVerifiedAt: true,
-  telegramLinkCode: true,
   isActive: true,
   createdAt: true,
   deletedAt: true,
