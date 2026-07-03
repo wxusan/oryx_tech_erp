@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { uzDate } from '@/lib/dates'
 
 interface Customer {
   id: string
@@ -156,7 +157,7 @@ export default function CustomersPage() {
                   <td className="px-4 py-3 font-mono text-zinc-600">{customer.phone}</td>
                   <td className="px-4 py-3 text-zinc-600">{customer._count?.sales ?? 0}</td>
                   <td className="px-4 py-3 text-zinc-600">{customer._count?.nasiya ?? 0}</td>
-                  <td className="px-4 py-3 text-zinc-500">{new Date(customer.createdAt).toLocaleDateString('uz-UZ')}</td>
+                  <td className="px-4 py-3 text-zinc-500">{uzDate(customer.createdAt)}</td>
                   <td className="px-4 py-3 text-right">
                     <Button variant="outline" onClick={() => openEdit(customer)} className="h-8 rounded border-zinc-200 px-3 text-xs">
                       Tahrirlash

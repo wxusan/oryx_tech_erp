@@ -21,6 +21,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { requireApiSession } from '@/lib/api-auth'
 import { getShopStats } from '@/lib/server/shop-stats'
+import { uzDate, uzMonthYear } from '@/lib/dates'
 
 interface UpcomingPayment {
   nasiya: {
@@ -84,7 +85,7 @@ export default async function DashboardPage() {
           </p>
         </div>
         <Badge variant="outline" className="h-6 w-fit rounded-md border-zinc-200 text-zinc-600">
-          {new Date().toLocaleDateString('uz-UZ', { month: 'long', year: 'numeric' })}
+          {uzMonthYear(new Date())}
         </Badge>
       </div>
 
@@ -219,7 +220,7 @@ export default async function DashboardPage() {
                       <div>
                         <div className="text-sm font-medium text-zinc-900">{p.nasiya.customer.name}</div>
                         <div className="mt-0.5 text-xs text-zinc-500">
-                          {p.nasiya.device.model} · {new Date(p.dueDate).toLocaleDateString('uz-UZ')}
+                          {p.nasiya.device.model} · {uzDate(p.dueDate)}
                         </div>
                         <Badge variant="outline" className="mt-2 rounded-md border-zinc-200 text-zinc-500">
                           {statusLabel(p.status)}
@@ -248,7 +249,7 @@ export default async function DashboardPage() {
                     <div key={i} className="flex items-center justify-between py-2 border-b border-zinc-100 last:border-0">
                       <div className="text-sm text-zinc-700">{activityLabel(a.action)}</div>
                       <div className="text-xs text-zinc-400 ml-4 whitespace-nowrap">
-                        {new Date(a.createdAt).toLocaleDateString('uz-UZ')}
+                        {uzDate(a.createdAt)}
                       </div>
                     </div>
                   ))

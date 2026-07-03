@@ -20,6 +20,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
 import {
@@ -31,7 +32,8 @@ import {
 } from '@/components/ui/select'
 import { paymentMethodLabel } from '@/lib/labels'
 import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
-import { ArrowLeft } from 'lucide-react'
+import { uzDate, uzDateTime, uzMonthYear } from '@/lib/dates'
+import { ArrowLeft, Pencil } from 'lucide-react'
 
 interface NasiyaSchedule {
   id: string
@@ -73,6 +75,7 @@ interface Nasiya {
   remainingAmount: number
   status: string
   reminderEnabled: boolean
+  note?: string | null
   device: { model: string }
   customer: { name: string; phone: string; passportPhotoUrl?: string | null }
   schedules: NasiyaSchedule[]
@@ -132,21 +135,9 @@ function rowDisplayStatus(row: NasiyaSchedule): RowStatus {
   return scheduleDisplayStatus(row) as RowStatus
 }
 
-function formatScheduleMonth(row: NasiyaSchedule) {
-  const dueDate = new Date(row.dueDate)
-  if (Number.isNaN(dueDate.getTime())) return `${row.monthNumber}-oy`
-
-  return dueDate.toLocaleDateString('uz-UZ', {
-    month: 'long',
-    year: 'numeric',
-  })
-}
-
-function scheduleLabel(row: NasiyaSchedule, nasiya: Nasiya) {
-  const due = new Date(row.dueDate).toLocaleDateString('uz-UZ')
-  const balance = scheduleBalance(row)
-  const month = formatScheduleMonth(row)
-  return `${month} (${row.monthNumber}-oy) - ${nasiya.customer.name}, ${nasiya.device.model} - ${due} - qolgan ${fmt(balance)} so'm`
+/** Short, readable label for the selected-month trigger: "3-oy · Sentabr 2026". */
+function scheduleTriggerLabel(row: NasiyaSchedule) {
+  return `${row.monthNumber}-oy · ${uzMonthYear(row.dueDate)}`
 }
 
 export default function NasiyaDetailPage() {
@@ -170,6 +161,11 @@ export default function NasiyaDetailPage() {
   const [selectedScheduleId, setSelectedScheduleId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [payError, setPayError] = useState('')
+
+  const [editOpen, setEditOpen] = useState(false)
+  const [editNote, setEditNote] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState('')
 
   const fetchNasiya = useCallback(() => {
     if (!id) return
@@ -240,6 +236,36 @@ export default function NasiyaDetailPage() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nasiyaId, nasiyaShopId])
+
+  function openEdit() {
+    setEditNote(nasiya?.note ?? '')
+    setEditError('')
+    setEditOpen(true)
+  }
+
+  async function handleEditSave() {
+    if (!nasiya || editSaving) return
+    setEditSaving(true)
+    setEditError('')
+    try {
+      const res = await fetch(`/api/nasiya/${nasiya.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note: editNote.trim() }),
+      })
+      const json = await res.json()
+      if (json.success) {
+        setEditOpen(false)
+        fetchNasiya()
+      } else {
+        setEditError(json.error || "Saqlashda xatolik")
+      }
+    } catch {
+      setEditError("Saqlashda xatolik")
+    } finally {
+      setEditSaving(false)
+    }
+  }
 
   async function handleToggleReminder() {
     if (!nasiya || reminderSubmitting) return
@@ -345,13 +371,30 @@ export default function NasiyaDetailPage() {
           <h1 className="text-2xl font-bold text-zinc-900">{nasiya.customer.name}</h1>
           <p className="text-sm text-zinc-500 mt-0.5">{nasiya.device.model} · {nasiya.customer.phone}</p>
         </div>
-        <Button
-          onClick={() => setPaymentModalOpen(true)}
-          className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded"
-        >
-          To'lov qabul qilish
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={openEdit}
+            className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded"
+          >
+            <Pencil size={14} />
+            Tahrirlash
+          </Button>
+          <Button
+            onClick={() => setPaymentModalOpen(true)}
+            className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded"
+          >
+            To'lov qabul qilish
+          </Button>
+        </div>
       </div>
+
+      {nasiya.note && (
+        <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
+          <div className="text-xs font-medium text-zinc-500">Izoh</div>
+          <div className="mt-1 text-sm text-zinc-800 whitespace-pre-wrap">{nasiya.note}</div>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
@@ -465,9 +508,7 @@ export default function NasiyaDetailPage() {
             {sortedSchedules.map((row) => (
               <tr key={row.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                 <td className="px-4 py-3 text-zinc-500">{row.monthNumber}</td>
-                <td className="px-4 py-3 text-zinc-700">
-                  {new Date(row.dueDate).toLocaleDateString('uz-UZ')}
-                </td>
+                <td className="px-4 py-3 text-zinc-700">{uzDate(row.dueDate)}</td>
                 <td className="px-4 py-3 font-medium text-zinc-900">{fmt(row.expectedAmount)} so'm</td>
                 <td className="px-4 py-3 text-zinc-700">{fmt(row.paidAmount)} so'm</td>
                 <td className="px-4 py-3">
@@ -499,7 +540,7 @@ export default function NasiyaDetailPage() {
             <tbody>
               {nasiya.payments.map((payment) => (
                 <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
-                  <td className="px-4 py-3 text-zinc-700">{new Date(payment.paidAt).toLocaleDateString('uz-UZ')}</td>
+                  <td className="px-4 py-3 text-zinc-700">{uzDate(payment.paidAt)}</td>
                   <td className="px-4 py-3 font-medium text-zinc-900">{fmt(payment.amount)} so'm</td>
                   <td className="px-4 py-3 text-zinc-700">{paymentMethodLabel(payment.paymentMethod)}</td>
                   <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
@@ -527,7 +568,7 @@ export default function NasiyaDetailPage() {
                   {l.note && <div className="text-xs text-zinc-500 mt-0.5">{l.note}</div>}
                 </div>
                 <div className="text-xs text-zinc-400 whitespace-nowrap flex-shrink-0">
-                  {new Date(l.createdAt).toLocaleString('uz-UZ')}
+                  {uzDateTime(l.createdAt)}
                 </div>
               </li>
             ))}
@@ -539,132 +580,209 @@ export default function NasiyaDetailPage() {
 
       {/* Payment Dialog */}
       <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
-        <DialogContent className="max-w-lg rounded-lg">
-          <DialogHeader>
-            <DialogTitle className="text-zinc-900">To'lov qabul qilish</DialogTitle>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-xl gap-0 overflow-hidden rounded-xl p-0 sm:w-full">
+          <DialogHeader className="border-b border-zinc-100 px-5 py-4">
+            <DialogTitle className="text-base font-semibold text-zinc-900">To'lov qabul qilish</DialogTitle>
+            <DialogDescription className="text-sm text-zinc-500">
+              {nasiya.customer.name} · {nasiya.device.model}
+            </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-1">
+
+          <div className="max-h-[65vh] space-y-4 overflow-y-auto px-5 py-4">
             {payError && (
-              <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
                 {payError}
               </div>
             )}
 
             {pendingSchedules.length > 0 && (
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-zinc-700">
                   Qaysi oy to'lovi? <span className="text-red-500">*</span>
                 </label>
                 <Select value={selectedScheduleId} onValueChange={(v) => v && setSelectedScheduleId(v)}>
-                  <SelectTrigger className="h-10 w-full text-sm border-zinc-200 rounded-lg [&>span]:truncate">
+                  <SelectTrigger className="h-11 w-full rounded-lg border-zinc-200 text-sm [&>span]:truncate">
                     <SelectValue placeholder="To'lov oyini tanlang">
-                      {selectedSchedule ? scheduleLabel(selectedSchedule, nasiya) : "To'lov oyini tanlang"}
+                      {selectedSchedule ? scheduleTriggerLabel(selectedSchedule) : "To'lov oyini tanlang"}
                     </SelectValue>
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-72">
                     {pendingSchedules.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>
-                        {scheduleLabel(s, nasiya)}
+                      <SelectItem key={s.id} value={s.id} className="py-2">
+                        <div className="flex flex-col gap-0.5">
+                          <span className="font-medium text-zinc-900">
+                            {s.monthNumber}-oy · {uzMonthYear(s.dueDate)}
+                          </span>
+                          <span className="text-xs text-zinc-500">
+                            {uzDate(s.dueDate)} · qolgan {fmt(scheduleBalance(s))} so'm
+                          </span>
+                        </div>
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
                 {selectedSchedule && (
-                  <div className="mt-2 flex flex-wrap items-center gap-2">
-                    <Badge variant="outline" className="rounded-md border-zinc-200 text-zinc-600">
-                      {scheduleStatusLabels[rowDisplayStatus(selectedSchedule)]}
-                    </Badge>
-                    <span className="text-xs text-zinc-500">
-                      Shu oy uchun qolgan summa: {fmt(selectedScheduleOutstanding)} so'm
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5">
+                    <div className="flex items-center gap-2">
+                      <Badge variant="outline" className="rounded-md border-zinc-200 bg-white text-zinc-600">
+                        {scheduleStatusLabels[rowDisplayStatus(selectedSchedule)]}
+                      </Badge>
+                      <span className="text-xs text-zinc-500">Shu oy uchun qolgan</span>
+                    </div>
+                    <span className="text-sm font-semibold text-zinc-900">
+                      {fmt(selectedScheduleOutstanding)} so'm
                     </span>
                   </div>
                 )}
               </div>
             )}
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Miqdor {!carryOver && <span className="text-red-500">*</span>}
-              </label>
-              <Input
-                type="number"
-                value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
-                placeholder={selectedScheduleOutstanding ? String(selectedScheduleOutstanding) : '1000000'}
-                disabled={carryOver}
-                className="h-10 text-sm border-zinc-200 rounded-lg"
-              />
-              {!carryOver && selectedScheduleOutstanding > 0 && (
-                <p className="mt-1.5 text-xs text-zinc-500">
-                  Tavsiya: {fmt(selectedScheduleOutstanding)} so'm
-                </p>
-              )}
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                To'lov usuli {!carryOver && <span className="text-red-500">*</span>}
-              </label>
-              <Select value={payMethod} onValueChange={(v) => v && setPayMethod(v)}>
-                <SelectTrigger className="h-10 text-sm border-zinc-200 rounded-lg" disabled={carryOver}>
-                  <SelectValue placeholder="Usulni tanlang" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="CASH">Naqd</SelectItem>
-                  <SelectItem value="CARD">Karta</SelectItem>
-                  <SelectItem value="TRANSFER">Bank</SelectItem>
-                  <SelectItem value="OTHER">Boshqa</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                {carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"} <span className="text-red-500">*</span>
-              </label>
-              <Input
-                type="date"
-                value={payDate}
-                onChange={(e) => setPayDate(e.target.value)}
-                className="h-10 text-sm border-zinc-200 rounded-lg"
-              />
-            </div>
-            <div className="flex items-center gap-2">
+            <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-zinc-200 px-3 py-2.5 hover:bg-zinc-50">
               <input
                 type="checkbox"
                 id="carry-over"
                 checked={carryOver}
                 onChange={(e) => setCarryOver(e.target.checked)}
-                className="w-4 h-4 rounded border-zinc-300"
+                className="mt-0.5 h-4 w-4 rounded border-zinc-300"
               />
-              <label htmlFor="carry-over" className="text-sm text-zinc-700 cursor-pointer">
+              <span className="text-sm text-zinc-700">
                 Mijoz bu oy to'lamadi, muddatni uzaytirish
-              </label>
+                <span className="mt-0.5 block text-xs text-zinc-400">
+                  Belgilansa, to'lov emas — tanlangan oy keyingi sanaga suriladi.
+                </span>
+              </span>
+            </label>
+
+            {!carryOver && (
+              <div className="space-y-2">
+                <label className="block text-xs font-medium text-zinc-700">
+                  Miqdor <span className="text-red-500">*</span>
+                </label>
+                <div className="relative">
+                  <Input
+                    type="number"
+                    inputMode="numeric"
+                    value={payAmount}
+                    onChange={(e) => setPayAmount(e.target.value)}
+                    placeholder={selectedScheduleOutstanding ? String(selectedScheduleOutstanding) : '1000000'}
+                    className="h-12 rounded-lg border-zinc-200 pr-14 text-lg font-semibold"
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-zinc-400">
+                    so'm
+                  </span>
+                </div>
+                {selectedScheduleOutstanding > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setPayAmount(String(selectedScheduleOutstanding))}
+                    className="text-xs font-medium text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline"
+                  >
+                    Tavsiya: {fmt(selectedScheduleOutstanding)} so'm
+                  </button>
+                )}
+              </div>
+            )}
+
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {!carryOver && (
+                <div className="space-y-2">
+                  <label className="block text-xs font-medium text-zinc-700">
+                    To'lov usuli <span className="text-red-500">*</span>
+                  </label>
+                  <Select value={payMethod} onValueChange={(v) => v && setPayMethod(v)}>
+                    <SelectTrigger className="h-11 w-full rounded-lg border-zinc-200 text-sm">
+                      <SelectValue placeholder="Usulni tanlang" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="CASH">Naqd</SelectItem>
+                      <SelectItem value="CARD">Karta</SelectItem>
+                      <SelectItem value="TRANSFER">Bank o'tkazmasi</SelectItem>
+                      <SelectItem value="OTHER">Boshqa</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              <div className={carryOver ? 'space-y-2 sm:col-span-2' : 'space-y-2'}>
+                <label className="block text-xs font-medium text-zinc-700">
+                  {carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"} <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  type="date"
+                  value={payDate}
+                  onChange={(e) => setPayDate(e.target.value)}
+                  className="h-11 rounded-lg border-zinc-200 text-sm"
+                />
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-zinc-700">
                 Izoh <span className="text-red-500">*</span>
               </label>
               <Textarea
                 value={payNote}
                 onChange={(e) => setPayNote(e.target.value)}
                 placeholder={carryOver ? "Masalan: mijoz 10 kunga kechiktirishni so'radi" : "Masalan: mijoz oylik to'lovni naqd berdi"}
-                className="text-sm border-zinc-200 rounded-lg min-h-[80px]"
+                className="min-h-[80px] rounded-lg border-zinc-200 text-sm"
               />
             </div>
           </div>
-          <DialogFooter className="gap-2">
+
+          <DialogFooter className="gap-2 border-t border-zinc-100 px-5 py-4">
             <Button
               variant="outline"
               onClick={() => { setPaymentModalOpen(false); setPayError('') }}
-              className="border-zinc-200 text-zinc-700 rounded"
+              className="rounded-lg border-zinc-200 text-zinc-700"
             >
               Bekor qilish
             </Button>
             <Button
               disabled={!canSubmit || submitting}
               onClick={handlePaymentSubmit}
-              className="bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
+              className="rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
             >
-              {submitting ? 'Saqlanmoqda...' : 'Saqlash'}
+              {submitting ? 'Saqlanmoqda...' : carryOver ? 'Muddatni uzaytirish' : "To'lovni saqlash"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit (safe fields) Dialog */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md rounded-xl sm:w-full">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900">Nasiya izohini tahrirlash</DialogTitle>
+            <DialogDescription className="text-sm text-zinc-500">
+              Moliyaviy shartlar (summa, foiz, oylik) bu yerdan o'zgartirilmaydi — faqat izoh.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-1">
+            {editError && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                {editError}
+              </div>
+            )}
+            <Textarea
+              value={editNote}
+              onChange={(e) => setEditNote(e.target.value)}
+              placeholder="Nasiya bo'yicha izoh..."
+              className="min-h-[100px] rounded-lg border-zinc-200 text-sm"
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setEditOpen(false)}
+              className="rounded-lg border-zinc-200 text-zinc-700"
+            >
+              Bekor qilish
+            </Button>
+            <Button
+              disabled={editSaving}
+              onClick={handleEditSave}
+              className="rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
+            >
+              {editSaving ? 'Saqlanmoqda...' : 'Saqlash'}
             </Button>
           </DialogFooter>
         </DialogContent>

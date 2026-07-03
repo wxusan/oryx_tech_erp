@@ -2,6 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { uzDate } from '@/lib/dates'
 
 type NasiyaStatus = 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
 type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan' | 'Bekor qilingan'
@@ -164,7 +165,7 @@ export default function NasiyalarClient({
                       <div className="text-xs text-zinc-500 mb-2">
                         {n.device.model} · {n.customer.phone}
                         {n.nextPaymentDate && (
-                          <> · Keyingi to'lov: {new Date(n.nextPaymentDate).toLocaleDateString('uz-UZ')}</>
+                          <> · Keyingi to'lov: {uzDate(n.nextPaymentDate)}</>
                         )}
                       </div>
 

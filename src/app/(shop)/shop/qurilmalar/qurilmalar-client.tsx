@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { exportUrl } from '@/lib/api-client'
+import { uzDate } from '@/lib/dates'
 
 type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
 type DisplayStatus = 'Omborda' | 'Naqd sotildi' | 'Nasiyada' | 'Band qilingan' | 'Qaytarilgan' | "O'chirilgan"
@@ -161,7 +162,7 @@ export default function QurilmalarClient({ initialDevices }: { initialDevices: D
                     <StatusBadge status={d.status} />
                   </td>
                   <td className="px-4 py-3 text-zinc-500">
-                    {new Date(d.createdAt).toLocaleDateString('uz-UZ')}
+                    {uzDate(d.createdAt)}
                   </td>
                   <td className="px-4 py-3">
                     <Link href={`/shop/qurilmalar/${d.id}`} prefetch={false}>

@@ -11,8 +11,9 @@ import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession } from '@/lib/api-auth'
-import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
+import { ok, badRequest, conflict, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
+import { Prisma } from '@/generated/prisma/client'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -25,7 +26,10 @@ const updateDeviceSchema = z.object({
   model: z.string().min(1).optional(),
   color: z.string().optional(),
   storage: z.string().optional(),
-  batteryHealth: z.number().optional(),
+  batteryHealth: z.number().int().min(0).max(100).optional(),
+  purchasePrice: z.number().positive("Kelish narxi 0 dan katta bo'lishi kerak").optional(),
+  imei: z.string().trim().min(1, 'IMEI kiritilishi shart').optional(),
+  supplierPhone: z.string().trim().optional(),
   note: z.string().optional(),
   reason: z.string().optional(),
 })
@@ -147,7 +151,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const { reason, ...updateData } = parsed.data
     const hasDeviceChanges = Object.entries(updateData).some(([key, value]) => {
       if (value === undefined) return false
-      return existing[key as keyof typeof existing] !== value
+      return String(existing[key as keyof typeof existing] ?? '') !== String(value)
     })
 
     const [saleCount, nasiyaCount] = await prisma.$transaction([
@@ -156,6 +160,24 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     ])
     const isFinanciallyLinked =
       ['SOLD_CASH', 'SOLD_NASIYA'].includes(existing.status) || saleCount > 0 || nasiyaCount > 0
+
+    // Money is locked once a device is sold / nasiya'd — the purchase price feeds
+    // profit reporting and must not be silently rewritten after the fact.
+    if (isFinanciallyLinked && updateData.purchasePrice !== undefined) {
+      return badRequest("Sotilgan yoki nasiya qurilmaning kelish narxini o'zgartirib bo'lmaydi")
+    }
+
+    // IMEI uniqueness among the shop's ACTIVE devices (mirrors the DB partial
+    // unique index). A blank/duplicate IMEI would corrupt device identity.
+    const imeiChanged = updateData.imei !== undefined && updateData.imei !== existing.imei
+    if (imeiChanged) {
+      const duplicate = await prisma.device.findFirst({
+        where: { shopId: existing.shopId, imei: updateData.imei, deletedAt: null, id: { not: deviceId } },
+        select: { id: true },
+      })
+      if (duplicate) return conflict('Bu IMEI bilan faol qurilma allaqachon mavjud')
+    }
+
     const auditNote = reason?.trim() || updateData.note?.trim()
     if (hasDeviceChanges && isFinanciallyLinked) {
       if (!auditNote) {
@@ -190,6 +212,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
             color: existing.color,
             storage: existing.storage,
             batteryHealth: existing.batteryHealth,
+            purchasePrice: Number(existing.purchasePrice),
+            imei: existing.imei,
+            supplierPhone: existing.supplierPhone,
             note: existing.note,
           },
           newValue: {
@@ -207,6 +232,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     return ok(device, "Qurilma muvaffaqiyatli yangilandi")
   } catch (err) {
+    // Backstop for the active-IMEI partial unique index if two edits race.
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return conflict('Bu IMEI bilan faol qurilma allaqachon mavjud')
+    }
     console.error('[PATCH /api/devices/[id]]', err)
     return serverError()
   }

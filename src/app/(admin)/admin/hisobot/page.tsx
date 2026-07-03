@@ -21,6 +21,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import type { ApiResponse } from '@/types'
+import { uzLongDate } from '@/lib/dates'
 
 interface AdminStats {
   thisMonthRevenue: number
@@ -56,11 +57,7 @@ function formatMoney(value: number) {
 }
 
 function formatDate(value: string) {
-  return new Date(value).toLocaleDateString('uz-UZ', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
+  return uzLongDate(value)
 }
 
 function daysUntil(value: string) {

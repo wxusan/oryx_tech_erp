@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
+import { uzMonthYear } from '@/lib/dates'
 import {
   Table,
   TableBody,
@@ -111,7 +112,7 @@ export default function DashboardPage() {
           </p>
         </div>
         <Badge variant="outline" className="h-6 w-fit rounded-md border-zinc-200 text-zinc-600">
-          {new Date().toLocaleDateString('uz-UZ', { month: 'long', year: 'numeric' })}
+          {uzMonthYear(new Date())}
         </Badge>
       </div>
 

@@ -15,6 +15,8 @@ import {
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
+import { uzDateTime } from '@/lib/dates'
 import type { ApiResponse } from '@/types'
 
 interface ShopAdminProfile {
@@ -31,6 +33,18 @@ interface ShopAdminProfile {
     name: string
     shopNumber: string
   }
+}
+
+interface ShopProfile {
+  id: string
+  name: string
+  ownerName: string
+  ownerPhone: string
+  shopNumber: string
+  address: string
+  note: string | null
+  status: string
+  subscriptionDue: string
 }
 
 interface PasswordForm {
@@ -55,14 +69,7 @@ async function readApiError(response: Response) {
 }
 
 function formatDate(value: string | null | undefined) {
-  if (!value) return '-'
-  return new Date(value).toLocaleString('uz-UZ', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-  })
+  return uzDateTime(value)
 }
 
 export default function ShopSettingsPage() {
@@ -79,16 +86,48 @@ export default function ShopSettingsPage() {
   const [telegramSuccess, setTelegramSuccess] = useState('')
   const [telegramLoading, setTelegramLoading] = useState(false)
 
+  // Own account (name/phone) editing
+  const [accountName, setAccountName] = useState('')
+  const [accountPhone, setAccountPhone] = useState('')
+  const [accountError, setAccountError] = useState('')
+  const [accountSuccess, setAccountSuccess] = useState('')
+  const [accountLoading, setAccountLoading] = useState(false)
+
+  // Shop profile editing
+  const [shop, setShop] = useState<ShopProfile | null>(null)
+  const [shopForm, setShopForm] = useState({ name: '', ownerName: '', ownerPhone: '', address: '', note: '' })
+  const [shopError, setShopError] = useState('')
+  const [shopSuccess, setShopSuccess] = useState('')
+  const [shopSaving, setShopSaving] = useState(false)
+
   useEffect(() => {
     let mounted = true
 
-    fetch('/api/shop-admin/profile')
-      .then(async (response) => {
+    Promise.all([
+      fetch('/api/shop-admin/profile').then(async (response) => {
         if (!response.ok) throw new Error(await readApiError(response))
-        const json: ApiResponse<ShopAdminProfile> = await response.json()
-        if (mounted) {
-          setProfile(json.data ?? null)
-          setTelegramId(json.data?.telegramId ?? '')
+        return (await response.json()) as ApiResponse<ShopAdminProfile>
+      }),
+      fetch('/api/shop/profile').then(async (response) => {
+        if (!response.ok) return null
+        return (await response.json()) as ApiResponse<ShopProfile>
+      }),
+    ])
+      .then(([profileJson, shopJson]) => {
+        if (!mounted) return
+        setProfile(profileJson.data ?? null)
+        setTelegramId(profileJson.data?.telegramId ?? '')
+        setAccountName(profileJson.data?.name ?? '')
+        setAccountPhone(profileJson.data?.phone ?? '')
+        if (shopJson?.data) {
+          setShop(shopJson.data)
+          setShopForm({
+            name: shopJson.data.name,
+            ownerName: shopJson.data.ownerName,
+            ownerPhone: shopJson.data.ownerPhone,
+            address: shopJson.data.address ?? '',
+            note: shopJson.data.note ?? '',
+          })
         }
       })
       .catch((err: Error) => {
@@ -122,6 +161,80 @@ export default function ShopSettingsPage() {
     await navigator.clipboard.writeText(linkCommand)
     setCopied(true)
     window.setTimeout(() => setCopied(false), 1400)
+  }
+
+  async function handleAccountSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setAccountError('')
+    setAccountSuccess('')
+
+    if (accountName.trim().length < 2) {
+      setAccountError("Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      return
+    }
+    if (accountPhone.trim().length < 9) {
+      setAccountError("Telefon raqam kamida 9 ta raqam bo'lishi kerak")
+      return
+    }
+
+    setAccountLoading(true)
+    try {
+      const response = await fetch('/api/shop-admin/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: accountName.trim(), phone: accountPhone.trim() }),
+      })
+      if (!response.ok) throw new Error(await readApiError(response))
+      const json: ApiResponse<ShopAdminProfile> = await response.json()
+      setProfile(json.data ?? null)
+      setAccountSuccess('Profil yangilandi.')
+    } catch (err) {
+      setAccountError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
+    } finally {
+      setAccountLoading(false)
+    }
+  }
+
+  async function handleShopSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setShopError('')
+    setShopSuccess('')
+
+    if (shopForm.name.trim().length < 2) {
+      setShopError("Do'kon nomi kamida 2 ta harfdan iborat bo'lishi kerak")
+      return
+    }
+    if (shopForm.ownerName.trim().length < 2) {
+      setShopError("Egasi ismi kamida 2 ta harfdan iborat bo'lishi kerak")
+      return
+    }
+    if (shopForm.ownerPhone.trim().length < 9) {
+      setShopError("Telefon raqam kamida 9 ta raqam bo'lishi kerak")
+      return
+    }
+
+    setShopSaving(true)
+    try {
+      const response = await fetch('/api/shop/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: shopForm.name.trim(),
+          ownerName: shopForm.ownerName.trim(),
+          ownerPhone: shopForm.ownerPhone.trim(),
+          address: shopForm.address.trim(),
+          note: shopForm.note.trim(),
+        }),
+      })
+      if (!response.ok) throw new Error(await readApiError(response))
+      const json: ApiResponse<ShopProfile> = await response.json()
+      if (json.data) setShop(json.data)
+      setShopSuccess("Do'kon ma'lumotlari yangilandi.")
+    } catch (err) {
+      setShopError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
+    } finally {
+      setShopSaving(false)
+    }
   }
 
   async function handlePasswordSubmit(event: FormEvent<HTMLFormElement>) {
@@ -227,20 +340,154 @@ export default function ShopSettingsPage() {
               </CardAction>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <Info label="Ism" value={profile.name} />
-                <Info label="Telefon" value={profile.phone} />
-                <Info label="Login" value={profile.login} mono />
-                <Info label="Do'kon raqami" value={profile.shop.shopNumber} />
-              </div>
-              <div className="rounded-md border border-zinc-200 bg-zinc-50 p-3">
-                <div className="text-xs font-medium text-zinc-500">Parol oxirgi yangilangan</div>
-                <div className="mt-1 text-sm font-semibold text-zinc-900">
-                  {formatDate(profile.passwordChangedAt)}
+              <form onSubmit={handleAccountSubmit} className="space-y-3">
+                {accountError && (
+                  <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                    {accountError}
+                  </div>
+                )}
+                {accountSuccess && (
+                  <div className="flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                    <CheckCircle2 className="size-4" />
+                    {accountSuccess}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div>
+                    <Label htmlFor="account-name" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                      Ism
+                    </Label>
+                    <Input
+                      id="account-name"
+                      value={accountName}
+                      onChange={(event) => setAccountName(event.target.value)}
+                      className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="account-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                      Telefon
+                    </Label>
+                    <Input
+                      id="account-phone"
+                      value={accountPhone}
+                      onChange={(event) => setAccountPhone(event.target.value)}
+                      className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                    />
+                  </div>
+                  <Info label="Login" value={profile.login} mono />
+                  <Info label="Do'kon raqami" value={profile.shop.shopNumber} />
                 </div>
-              </div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-xs text-zinc-500">
+                    Parol oxirgi yangilangan: {formatDate(profile.passwordChangedAt)}
+                  </div>
+                  <Button
+                    type="submit"
+                    disabled={accountLoading}
+                    className="h-9 rounded-md bg-zinc-900 text-white hover:bg-zinc-800"
+                  >
+                    {accountLoading ? <Loader2 className="size-4 animate-spin" /> : <UserRound className="size-4" />}
+                    Saqlash
+                  </Button>
+                </div>
+              </form>
             </CardContent>
           </Card>
+
+          {shop && (
+            <Card className="rounded-lg lg:col-span-2">
+              <CardHeader className="border-b border-zinc-100">
+                <CardTitle>Do'kon ma'lumotlari</CardTitle>
+                <CardDescription>Do'kon nomi va aloqa ma'lumotlarini tahrirlash</CardDescription>
+                <CardAction>
+                  <Badge variant="outline" className="rounded-md border-zinc-200 text-zinc-600">
+                    #{shop.shopNumber}
+                  </Badge>
+                </CardAction>
+              </CardHeader>
+              <CardContent>
+                <form onSubmit={handleShopSubmit} className="space-y-4">
+                  {shopError && (
+                    <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                      {shopError}
+                    </div>
+                  )}
+                  {shopSuccess && (
+                    <div className="flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                      <CheckCircle2 className="size-4" />
+                      {shopSuccess}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div>
+                      <Label htmlFor="shop-name" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                        Do'kon nomi
+                      </Label>
+                      <Input
+                        id="shop-name"
+                        value={shopForm.name}
+                        onChange={(e) => setShopForm((f) => ({ ...f, name: e.target.value }))}
+                        className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="shop-owner" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                        Egasi ismi
+                      </Label>
+                      <Input
+                        id="shop-owner"
+                        value={shopForm.ownerName}
+                        onChange={(e) => setShopForm((f) => ({ ...f, ownerName: e.target.value }))}
+                        className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="shop-owner-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                        Egasi telefoni
+                      </Label>
+                      <Input
+                        id="shop-owner-phone"
+                        value={shopForm.ownerPhone}
+                        onChange={(e) => setShopForm((f) => ({ ...f, ownerPhone: e.target.value }))}
+                        className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="shop-address" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                        Manzil
+                      </Label>
+                      <Input
+                        id="shop-address"
+                        value={shopForm.address}
+                        onChange={(e) => setShopForm((f) => ({ ...f, address: e.target.value }))}
+                        className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <Label htmlFor="shop-note" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                      Izoh
+                    </Label>
+                    <Textarea
+                      id="shop-note"
+                      value={shopForm.note}
+                      onChange={(e) => setShopForm((f) => ({ ...f, note: e.target.value }))}
+                      className="min-h-[70px] rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    disabled={shopSaving}
+                    className="h-9 rounded-md bg-zinc-900 text-white hover:bg-zinc-800"
+                  >
+                    {shopSaving ? <Loader2 className="size-4 animate-spin" /> : null}
+                    Do'kon ma'lumotlarini saqlash
+                  </Button>
+                </form>
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="rounded-lg">
             <CardHeader className="border-b border-zinc-100">

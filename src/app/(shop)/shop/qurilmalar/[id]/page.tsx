@@ -15,7 +15,8 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { paymentMethodLabel } from '@/lib/labels'
-import { ArrowLeft, Trash2 } from 'lucide-react'
+import { uzDate, uzDateTime } from '@/lib/dates'
+import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 
 interface Supplier {
   name: string
@@ -59,6 +60,7 @@ interface Device {
   batteryHealth: number | null
   purchasePrice: number
   imei: string
+  supplierPhone: string | null
   supplier: Supplier | null
   status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
   imageUrls: string[]
@@ -147,6 +149,19 @@ export default function QurilmaDetailPage() {
   const [restockNote, setRestockNote] = useState('')
   const [restockError, setRestockError] = useState('')
   const [restocking, setRestocking] = useState(false)
+  const [editOpen, setEditOpen] = useState(false)
+  const [editForm, setEditForm] = useState({
+    model: '',
+    color: '',
+    storage: '',
+    batteryHealth: '',
+    purchasePrice: '',
+    imei: '',
+    supplierPhone: '',
+    note: '',
+  })
+  const [editError, setEditError] = useState('')
+  const [editSaving, setEditSaving] = useState(false)
 
   const fetchDevice = useCallback(() => {
     if (!id) return
@@ -182,6 +197,70 @@ export default function QurilmaDetailPage() {
       cancelled = true
     }
   }, [id])
+
+  function openEdit() {
+    if (!device) return
+    setEditForm({
+      model: device.model,
+      color: device.color ?? '',
+      storage: device.storage ?? '',
+      batteryHealth: device.batteryHealth != null ? String(device.batteryHealth) : '',
+      purchasePrice: String(device.purchasePrice),
+      imei: device.imei,
+      supplierPhone: device.supplierPhone ?? '',
+      note: '',
+    })
+    setEditError('')
+    setEditOpen(true)
+  }
+
+  async function handleEditSave() {
+    if (!device || editSaving) return
+    if (editForm.model.trim().length < 1) {
+      setEditError('Model kiritilishi shart')
+      return
+    }
+    if (editForm.imei.trim().length < 1) {
+      setEditError('IMEI kiritilishi shart')
+      return
+    }
+    const price = Number(editForm.purchasePrice)
+    if (!Number.isFinite(price) || price <= 0) {
+      setEditError("Kelish narxi 0 dan katta bo'lishi kerak")
+      return
+    }
+    const battery = editForm.batteryHealth.trim() === '' ? undefined : Number(editForm.batteryHealth)
+    if (battery !== undefined && (!Number.isInteger(battery) || battery < 0 || battery > 100)) {
+      setEditError('Batareya 0 va 100 orasida bo\'lishi kerak')
+      return
+    }
+    setEditSaving(true)
+    setEditError('')
+    try {
+      const res = await fetch(`/api/devices/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: editForm.model.trim(),
+          color: editForm.color.trim(),
+          storage: editForm.storage.trim(),
+          ...(battery !== undefined ? { batteryHealth: battery } : {}),
+          purchasePrice: price,
+          imei: editForm.imei.trim(),
+          supplierPhone: editForm.supplierPhone.trim(),
+          note: editForm.note.trim() || undefined,
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.error || 'Saqlashda xatolik')
+      setEditOpen(false)
+      await fetchDevice()
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Saqlashda xatolik')
+    } finally {
+      setEditSaving(false)
+    }
+  }
 
   async function handleDelete() {
     if (!deleteNote.trim()) return
@@ -317,7 +396,7 @@ export default function QurilmaDetailPage() {
     { label: 'IMEI', value: device.imei },
     { label: 'Yetkazib beruvchi', value: device.supplier?.name ?? '—' },
     { label: 'Tel raqam', value: device.supplier?.phone ?? '—' },
-    { label: "Qo'shilgan sana", value: new Date(device.createdAt).toLocaleDateString('uz-UZ') },
+    { label: "Qo'shilgan sana", value: uzDate(device.createdAt) },
     { label: 'Status', value: statusLabels[device.status] ?? device.status },
   ]
 
@@ -348,6 +427,16 @@ export default function QurilmaDetailPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
+          {device.status === 'IN_STOCK' && (
+            <Button
+              variant="outline"
+              onClick={openEdit}
+              className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded"
+            >
+              <Pencil size={14} />
+              Tahrirlash
+            </Button>
+          )}
           {showSaleActions && (
             <>
               <Link href={`/shop/sotuv/new?deviceId=${device.id}`}>
@@ -472,7 +561,7 @@ export default function QurilmaDetailPage() {
             {latestSale.dueDate && (
               <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Muddat</span>
-                <span className="text-zinc-900 font-medium">{new Date(latestSale.dueDate).toLocaleDateString('uz-UZ')}</span>
+                <span className="text-zinc-900 font-medium">{uzDate(latestSale.dueDate)}</span>
               </div>
             )}
             <div className="flex gap-4 text-sm">
@@ -482,7 +571,7 @@ export default function QurilmaDetailPage() {
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">Sotilgan sana</span>
               <span className="text-zinc-900 font-medium">
-                {new Date(latestSale.createdAt).toLocaleDateString('uz-UZ')}
+                {uzDate(latestSale.createdAt)}
               </span>
             </div>
             {saleHasDebt && (
@@ -560,7 +649,7 @@ export default function QurilmaDetailPage() {
                   {l.note && <div className="text-xs text-zinc-500 mt-0.5">{l.note}</div>}
                 </div>
                 <div className="text-xs text-zinc-400 whitespace-nowrap flex-shrink-0">
-                  {new Date(l.createdAt).toLocaleString('uz-UZ')}
+                  {uzDateTime(l.createdAt)}
                 </div>
               </li>
             ))}
@@ -569,6 +658,116 @@ export default function QurilmaDetailPage() {
           <div className="px-4 py-6 text-sm text-zinc-500">Amallar tarixi yo&apos;q</div>
         )}
       </div>
+
+      {/* Edit Dialog (IN_STOCK / RETURNED only) */}
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg gap-0 overflow-hidden rounded-xl p-0 sm:w-full">
+          <DialogHeader className="border-b border-zinc-100 px-5 py-4">
+            <DialogTitle className="text-base font-semibold text-zinc-900">Qurilmani tahrirlash</DialogTitle>
+          </DialogHeader>
+          <div className="max-h-[65vh] space-y-4 overflow-y-auto px-5 py-4">
+            {editError && (
+              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                {editError}
+              </div>
+            )}
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-zinc-700">
+                Model <span className="text-red-500">*</span>
+              </label>
+              <Input
+                value={editForm.model}
+                onChange={(e) => setEditForm((f) => ({ ...f, model: e.target.value }))}
+                className="h-10 rounded-lg border-zinc-200 text-sm"
+              />
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-zinc-700">Rang</label>
+                <Input
+                  value={editForm.color}
+                  onChange={(e) => setEditForm((f) => ({ ...f, color: e.target.value }))}
+                  className="h-10 rounded-lg border-zinc-200 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-zinc-700">Xotira</label>
+                <Input
+                  value={editForm.storage}
+                  onChange={(e) => setEditForm((f) => ({ ...f, storage: e.target.value }))}
+                  className="h-10 rounded-lg border-zinc-200 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-zinc-700">Batareya (%)</label>
+                <Input
+                  type="number"
+                  min="0"
+                  max="100"
+                  value={editForm.batteryHealth}
+                  onChange={(e) => setEditForm((f) => ({ ...f, batteryHealth: e.target.value }))}
+                  className="h-10 rounded-lg border-zinc-200 text-sm"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="block text-xs font-medium text-zinc-700">
+                  Kelish narxi <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  type="number"
+                  min="0"
+                  value={editForm.purchasePrice}
+                  onChange={(e) => setEditForm((f) => ({ ...f, purchasePrice: e.target.value }))}
+                  className="h-10 rounded-lg border-zinc-200 text-sm"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-zinc-700">
+                IMEI <span className="text-red-500">*</span>
+              </label>
+              <Input
+                value={editForm.imei}
+                onChange={(e) => setEditForm((f) => ({ ...f, imei: e.target.value }))}
+                className="h-10 rounded-lg border-zinc-200 text-sm font-mono"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-zinc-700">Yetkazib beruvchi tel</label>
+              <Input
+                value={editForm.supplierPhone}
+                onChange={(e) => setEditForm((f) => ({ ...f, supplierPhone: e.target.value }))}
+                className="h-10 rounded-lg border-zinc-200 text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-zinc-700">Izoh</label>
+              <Textarea
+                value={editForm.note}
+                onChange={(e) => setEditForm((f) => ({ ...f, note: e.target.value }))}
+                placeholder="Ixtiyoriy izoh"
+                className="min-h-[70px] rounded-lg border-zinc-200 text-sm"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2 border-t border-zinc-100 px-5 py-4">
+            <Button
+              variant="outline"
+              onClick={() => setEditOpen(false)}
+              className="rounded-lg border-zinc-200 text-zinc-700"
+            >
+              Bekor qilish
+            </Button>
+            <Button
+              disabled={editSaving}
+              onClick={handleEditSave}
+              className="rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
+            >
+              {editSaving ? 'Saqlanmoqda...' : 'Saqlash'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Delete Dialog */}
       <Dialog open={deleteModalOpen} onOpenChange={setDeleteModalOpen}>

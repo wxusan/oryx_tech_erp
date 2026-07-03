@@ -23,6 +23,10 @@ const updateTelegramSchema = z.object({
     .or(z.literal('')),
 })
 
+const updateProfileSchema = z.object({
+  name: z.string().trim().min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
+})
+
 function profileSelect() {
   return {
     id: true,
@@ -119,6 +123,39 @@ export async function PATCH(req: NextRequest) {
       })
 
       return ok(updated, telegramId ? 'Telegram ID yangilandi.' : "Telegram ID o'chirildi.")
+    }
+
+    if (typeof body === 'object' && body !== null && 'name' in body) {
+      const parsed = updateProfileSchema.safeParse(body)
+      if (!parsed.success) {
+        const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
+        return badRequest(firstError)
+      }
+
+      const admin = await prisma.superAdmin.findFirst({
+        where: { id: guarded.session.user.id, deletedAt: null },
+        select: { id: true, name: true, login: true },
+      })
+      if (!admin) return notFound('Bosh admin topilmadi')
+
+      const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await tx.superAdmin.update({ where: { id: admin.id }, data: { name: parsed.data.name } })
+        await tx.log.create({
+          data: {
+            shopId: null,
+            actorId: admin.id,
+            actorType: 'SUPER_ADMIN',
+            action: 'UPDATE',
+            targetType: 'SuperAdmin',
+            targetId: admin.id,
+            oldValue: { name: admin.name, login: admin.login },
+            newValue: { name: parsed.data.name },
+          },
+        })
+        return tx.superAdmin.findUniqueOrThrow({ where: { id: admin.id }, select: profileSelect() })
+      })
+
+      return ok(updated, 'Profil yangilandi.')
     }
 
     const parsed = changePasswordSchema.safeParse(body)

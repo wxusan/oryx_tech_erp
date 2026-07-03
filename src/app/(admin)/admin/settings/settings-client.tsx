@@ -76,6 +76,10 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
   const [telegramError, setTelegramError] = useState('')
   const [telegramSuccess, setTelegramSuccess] = useState('')
   const [telegramLoading, setTelegramLoading] = useState(false)
+  const [name, setName] = useState('')
+  const [nameError, setNameError] = useState('')
+  const [nameSuccess, setNameSuccess] = useState('')
+  const [nameLoading, setNameLoading] = useState(false)
 
   useEffect(() => {
     let mounted = true
@@ -87,6 +91,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
         if (mounted) {
           setProfile(json.data ?? null)
           setTelegramId(json.data?.telegramId ?? '')
+          setName(json.data?.name ?? '')
         }
       })
       .catch((err: Error) => {
@@ -139,6 +144,33 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       setPasswordError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
     } finally {
       setPasswordLoading(false)
+    }
+  }
+
+  async function handleNameSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setNameError('')
+    setNameSuccess('')
+    if (name.trim().length < 2) {
+      setNameError("Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      return
+    }
+    setNameLoading(true)
+    try {
+      const response = await fetch('/api/admin/profile', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() }),
+      })
+      if (!response.ok) throw new Error(await readApiError(response))
+      const json: ApiResponse<SuperAdminProfile> = await response.json()
+      setProfile(json.data ?? null)
+      setName(json.data?.name ?? '')
+      setNameSuccess('Profil yangilandi.')
+    } catch (err) {
+      setNameError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
+    } finally {
+      setNameLoading(false)
     }
   }
 
@@ -210,8 +242,41 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
             <CardContent className="space-y-4">
               {profile ? (
                 <>
+                  <form onSubmit={handleNameSubmit} className="space-y-3">
+                    {nameError && (
+                      <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                        {nameError}
+                      </div>
+                    )}
+                    {nameSuccess && (
+                      <div className="flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                        <CheckCircle2 className="size-4" />
+                        {nameSuccess}
+                      </div>
+                    )}
+                    <div className="flex items-end gap-2">
+                      <div className="flex-1">
+                        <Label htmlFor="admin-name" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                          Ism
+                        </Label>
+                        <Input
+                          id="admin-name"
+                          value={name}
+                          onChange={(event) => setName(event.target.value)}
+                          className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                        />
+                      </div>
+                      <Button
+                        type="submit"
+                        disabled={nameLoading}
+                        className="h-9 rounded-md bg-zinc-900 text-white hover:bg-zinc-800"
+                      >
+                        {nameLoading ? <Loader2 className="size-4 animate-spin" /> : <UserRound className="size-4" />}
+                        Saqlash
+                      </Button>
+                    </div>
+                  </form>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <Info label="Ism" value={profile.name} />
                     <Info label="Login" value={profile.login || '-'} mono />
                     <Info label="Rol" value={profile.role} />
                     <Info label="Telegram ID" value={profile.telegramId || '-'} mono />

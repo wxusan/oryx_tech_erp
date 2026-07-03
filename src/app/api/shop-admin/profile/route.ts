@@ -23,6 +23,11 @@ const updateTelegramSchema = z.object({
     .or(z.literal('')),
 })
 
+const updateProfileSchema = z.object({
+  name: z.string().trim().min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak").optional(),
+  phone: z.string().trim().min(9, "Telefon raqam kamida 9 ta raqam bo'lishi kerak").optional(),
+})
+
 function profileSelect() {
   return {
     id: true,
@@ -143,6 +148,52 @@ export async function PATCH(req: NextRequest) {
       })
 
       return ok(updated, telegramId ? 'Telegram ID yangilandi.' : "Telegram ID o'chirildi.")
+    }
+
+    if (typeof body === 'object' && body !== null && ('name' in body || 'phone' in body)) {
+      const parsed = updateProfileSchema.safeParse(body)
+      if (!parsed.success) {
+        const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
+        return badRequest(firstError)
+      }
+      if (parsed.data.name === undefined && parsed.data.phone === undefined) {
+        return badRequest("O'zgartirish uchun ma'lumot kiritilmadi")
+      }
+
+      const admin = await prisma.shopAdmin.findFirst({
+        where: {
+          id: session.user.id,
+          shopId: session.user.shopId,
+          isActive: true,
+          deletedAt: null,
+        },
+        select: { id: true, shopId: true, name: true, phone: true, login: true },
+      })
+      if (!admin) return notFound('Admin topilmadi')
+
+      const profileUpdate = {
+        ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+        ...(parsed.data.phone !== undefined ? { phone: parsed.data.phone } : {}),
+      }
+
+      const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await tx.shopAdmin.update({ where: { id: admin.id }, data: profileUpdate })
+        await tx.log.create({
+          data: {
+            shopId: admin.shopId,
+            actorId: admin.id,
+            actorType: 'SHOP_ADMIN',
+            action: 'UPDATE',
+            targetType: 'ShopAdmin',
+            targetId: admin.id,
+            oldValue: { name: admin.name, phone: admin.phone, login: admin.login },
+            newValue: profileUpdate,
+          },
+        })
+        return tx.shopAdmin.findUniqueOrThrow({ where: { id: admin.id }, select: profileSelect() })
+      })
+
+      return ok(updated, 'Profil yangilandi.')
     }
 
     const parsed = changePasswordSchema.safeParse(body)

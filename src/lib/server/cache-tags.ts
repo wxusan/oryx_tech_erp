@@ -152,3 +152,7 @@ export function invalidateShopOverdueCron(shopId: string) {
 export function invalidateShopLogMutation(shopId: string) {
   invalidateShopCache(shopId, [shopCacheTag.logs], ['/shop/logs'])
 }
+
+export function invalidateShopProfileMutation(shopId: string) {
+  invalidateShopCache(shopId, [shopCacheTag.logs], ['/shop/settings', '/shop/dashboard', '/shop/logs'])
+}
