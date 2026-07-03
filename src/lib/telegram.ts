@@ -1,4 +1,5 @@
 import { Bot } from 'grammy'
+import { logger } from '@/lib/logger'
 
 // ---------------------------------------------------------------------------
 // Bot instance — shared across the application
@@ -20,20 +21,37 @@ export function getBot(): Bot {
 // Core send helper
 // ---------------------------------------------------------------------------
 
+export interface TelegramSendResult {
+  ok: boolean
+  errorCode?: number
+  description?: string
+}
+
 /**
  * Send a Markdown message to a single Telegram user.
- * Returns true on success, false on any error (network, blocked bot, etc.)
+ * Returns { ok: true } on success, or { ok: false, errorCode, description } on
+ * any error (network, blocked bot, etc.). grammy's GrammyError carries the
+ * Telegram API error_code + description, which we surface for observability.
  */
 export async function sendTelegramMessage(
   telegramId: string,
   text: string,
-): Promise<boolean> {
+): Promise<TelegramSendResult> {
   try {
     await getBot().api.sendMessage(telegramId, text)
-    return true
+    return { ok: true }
   } catch (error) {
-    console.error(`[Telegram] sendMessage failed (id=${telegramId}):`, error)
-    return false
+    const anyErr = error as { error_code?: number; description?: string }
+    const errorCode = typeof anyErr?.error_code === 'number' ? anyErr.error_code : undefined
+    const description = typeof anyErr?.description === 'string' ? anyErr.description : undefined
+    // Redacting logger — never prints the bot token even if it appears in a URL.
+    logger.warn('Telegram sendMessage failed', {
+      event: 'telegram.send_failed',
+      entityType: 'Telegram',
+      errorCode,
+      error,
+    })
+    return { ok: false, errorCode, description }
   }
 }
 

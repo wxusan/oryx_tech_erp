@@ -6,6 +6,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { invalidateShopReturnMutation } from '@/lib/server/cache-tags'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { logger } from '@/lib/logger'
 import { formatDeviceReturnNotification } from '@/lib/telegram'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -159,7 +160,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     // Flush freshly-queued notifications after the response (non-blocking).
     // Rows are already committed, so cron is the backstop if this misses.
-    after(() => processPendingNotifications().catch((e) => console.error('[notify] flush failed', e)))
+    after(() => processPendingNotifications().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
 
     return ok(result, 'Qurilma qaytarildi va bog\'langan sotuv/nasiya bekor qilindi')
   } catch (err: unknown) {

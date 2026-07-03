@@ -15,8 +15,12 @@
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
+    "prisma:migrate:dev": "node scripts/check-db-safety.mjs migrate-dev && prisma migrate dev",
     "prisma:migrate:deploy": "prisma migrate deploy",
     "migrate:deploy": "prisma migrate deploy",
+    "db:push": "node scripts/check-db-safety.mjs push",
+    "db:push:local": "node scripts/check-db-safety.mjs push --allow-local && prisma db push",
+    "db:safety": "node scripts/check-db-safety.mjs",
     "seed:super-admin": "node scripts/seed-super-admin.mjs",
     "seed:demo": "node scripts/seed-demo.mjs"
   },

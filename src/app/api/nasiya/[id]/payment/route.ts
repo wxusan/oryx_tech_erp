@@ -15,6 +15,7 @@ import { addNasiyaPaymentSchema } from '@/lib/validations'
 import { calculateRemaining } from '@/lib/nasiya-utils'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { logger } from '@/lib/logger'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import type { ZodError } from 'zod'
 
@@ -272,7 +273,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     // Flush freshly-queued notifications after the response (non-blocking).
     // The rows are already committed, so cron is the backstop if this misses.
-    after(() => processPendingNotifications().catch((e) => console.error('[notify] flush failed', e)))
+    after(() => processPendingNotifications().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
 
     return ok(result, result.duplicate ? "To'lov allaqachon qabul qilingan" : "To'lov muvaffaqiyatli qabul qilindi")
   } catch (err: unknown) {

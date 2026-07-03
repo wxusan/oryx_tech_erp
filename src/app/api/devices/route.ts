@@ -12,6 +12,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addDeviceSchema } from '@/lib/validations'
 import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
 import { notifyShopAdmins } from '@/lib/notification-service'
+import { logger } from '@/lib/logger'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import type { ZodError } from 'zod'
 
@@ -176,7 +177,7 @@ export async function POST(req: NextRequest) {
         'DEVICE_CREATED',
         device.id,
         'Device',
-      ).catch((e) => console.error('[notify] device create failed', e)),
+      ).catch((e) => logger.warn('device create notification failed', { event: 'notification.flush_failed', route: '/api/devices', error: e })),
     )
 
     return created(device, "Qurilma muvaffaqiyatli qo'shildi")

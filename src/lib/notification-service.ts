@@ -13,6 +13,8 @@
 
 import { prisma } from '@/lib/prisma'
 import { sendTelegramMessage } from './telegram'
+import { logger } from '@/lib/logger'
+import { recordOpsEvent } from '@/lib/server/ops-events'
 
 const MAX_NOTIFICATION_ATTEMPTS = 5
 
@@ -68,9 +70,13 @@ export async function queueNotification(
       },
     })
 
-    console.log(
-      `[NotificationService] Queued notification id=${notification.id} type=${params.type} shop=${params.shopId} telegram=${params.telegramId}`,
-    )
+    logger.info('notification queued', {
+      event: 'notification.queued',
+      shopId: params.shopId,
+      entityType: 'Notification',
+      entityId: notification.id,
+      status: params.type,
+    })
 
     // Attempt immediate delivery for notifications scheduled now or in the past.
     // Use the queue processor so the PROCESSING claim remains atomic with
@@ -79,8 +85,15 @@ export async function queueNotification(
       await processPendingNotifications()
     }
   } catch (error) {
-    console.error('[NotificationService] queueNotification error:', error)
     // Do not re-throw — notification failure must never crash the main flow.
+    await recordOpsEvent({
+      level: 'ERROR',
+      event: 'notification.queue_failed',
+      message: 'Failed to queue notification',
+      shopId: params.shopId,
+      status: params.type,
+      metadata: { error: error instanceof Error ? error.message : String(error) },
+    })
   }
 }
 
@@ -96,12 +109,28 @@ export async function queueNotification(
  *   - POST /api/telegram/send   (after every sale / nasiya / payment)
  *   - GET  /api/cron/reminders  (scheduled cron job)
  */
-export async function processPendingNotifications(): Promise<{
+export interface NotificationRunSummary {
+  attempted: number
   sent: number
   failed: number
-}> {
+  cancelled: number
+  durationMs: number
+}
+
+export async function processPendingNotifications(): Promise<NotificationRunSummary> {
+  const startedAt = Date.now()
+  let attempted = 0
   let sent = 0
   let failed = 0
+  let cancelled = 0
+
+  const finalize = (): NotificationRunSummary => ({
+    attempted,
+    sent,
+    failed,
+    cancelled,
+    durationMs: Date.now() - startedAt,
+  })
 
   try {
     const now = new Date()
@@ -148,13 +177,14 @@ export async function processPendingNotifications(): Promise<{
           },
         })
         if (claim.count !== 1) continue
+        attempted++
 
-        const ok = await sendTelegramMessage(
+        const result = await sendTelegramMessage(
           notification.telegramId,
           notification.message,
         )
 
-        if (ok) {
+        if (result.ok) {
           sent++
           await prisma.notification.update({
             where: { id: notification.id },
@@ -166,49 +196,81 @@ export async function processPendingNotifications(): Promise<{
             },
           })
         } else {
-          failed++
           const attemptCount = notification.attemptCount + 1
+          const exhausted = attemptCount >= MAX_NOTIFICATION_ATTEMPTS
+          // Keep the Telegram error code/description (NOT the token) for triage.
+          const lastError = result.description
+            ? `Telegram ${result.errorCode ?? ''}: ${result.description}`.trim()
+            : 'Telegram send failed'
+          if (exhausted) cancelled++
+          else failed++
           await prisma.notification.update({
             where: { id: notification.id },
             data: {
-              status: attemptCount >= MAX_NOTIFICATION_ATTEMPTS ? 'CANCELLED' : 'FAILED',
-              nextAttemptAt: attemptCount >= MAX_NOTIFICATION_ATTEMPTS
-                ? null
-                : new Date(Date.now() + nextAttemptDelayMs(attemptCount)),
-              lastError: 'Telegram send failed',
+              status: exhausted ? 'CANCELLED' : 'FAILED',
+              nextAttemptAt: exhausted ? null : new Date(Date.now() + nextAttemptDelayMs(attemptCount)),
+              lastError,
             },
           })
+          // Only alert once — when retries are exhausted and the message is dropped.
+          if (exhausted) {
+            await recordOpsEvent({
+              level: 'ERROR',
+              event: 'notification.cancelled',
+              message: 'Notification cancelled after max attempts',
+              shopId: notification.shopId,
+              entityType: 'Notification',
+              entityId: notification.id,
+              status: notification.type,
+              errorCode: result.errorCode ?? undefined,
+              metadata: { attempts: attemptCount, reason: result.description ?? 'send failed' },
+            })
+          }
         }
       } catch (innerError) {
-        failed++
-        console.error(
-          `[NotificationService] Failed to process notification id=${notification.id}:`,
-          innerError,
-        )
+        const attemptCount = notification.attemptCount + 1
+        const exhausted = attemptCount >= MAX_NOTIFICATION_ATTEMPTS
+        if (exhausted) cancelled++
+        else failed++
         await prisma.notification.update({
           where: { id: notification.id },
           data:  {
-            status: notification.attemptCount + 1 >= MAX_NOTIFICATION_ATTEMPTS ? 'CANCELLED' : 'FAILED',
-            nextAttemptAt: notification.attemptCount + 1 >= MAX_NOTIFICATION_ATTEMPTS
-              ? null
-              : new Date(Date.now() + nextAttemptDelayMs(notification.attemptCount + 1)),
+            status: exhausted ? 'CANCELLED' : 'FAILED',
+            nextAttemptAt: exhausted ? null : new Date(Date.now() + nextAttemptDelayMs(attemptCount)),
             lastError: innerError instanceof Error ? innerError.message : 'Unknown notification error',
           },
+        })
+        await recordOpsEvent({
+          level: 'ERROR',
+          event: exhausted ? 'notification.cancelled' : 'notification.process_error',
+          message: 'Error while processing a notification',
+          shopId: notification.shopId,
+          entityType: 'Notification',
+          entityId: notification.id,
+          status: notification.type,
+          metadata: { attempts: attemptCount, error: innerError instanceof Error ? innerError.message : String(innerError) },
         })
       }
     }
 
-    console.log(
-      `[NotificationService] processPendingNotifications complete — sent=${sent}, failed=${failed}`,
-    )
+    if (attempted > 0) {
+      logger.info('notification run complete', {
+        event: 'notification.run',
+        status: failed + cancelled > 0 ? 'partial' : 'ok',
+        ...finalize(),
+      })
+    }
   } catch (error) {
-    console.error(
-      '[NotificationService] processPendingNotifications error:',
-      error,
-    )
+    await recordOpsEvent({
+      level: 'ERROR',
+      event: 'notification.run_failed',
+      message: 'processPendingNotifications crashed',
+      status: 'error',
+      metadata: { error: error instanceof Error ? error.message : String(error), ...finalize() },
+    })
   }
 
-  return { sent, failed }
+  return finalize()
 }
 
 // ---------------------------------------------------------------------------
@@ -243,9 +305,11 @@ export async function notifyShopAdmins(
     )
 
     if (targets.length === 0) {
-      console.log(
-        `[NotificationService] No verified Telegram admins for shop=${shopId}`,
-      )
+      logger.info('no verified telegram admins for shop', {
+        event: 'notification.no_recipients',
+        shopId,
+        status: type,
+      })
       return
     }
 
@@ -262,10 +326,20 @@ export async function notifyShopAdmins(
       ),
     )
 
-    console.log(
-      `[NotificationService] Queued for ${targets.length} admin(s) in shop=${shopId}`,
-    )
+    logger.info('queued notification for shop admins', {
+      event: 'notification.broadcast',
+      shopId,
+      status: type,
+      attempt: targets.length,
+    })
   } catch (error) {
-    console.error('[NotificationService] notifyShopAdmins error:', error)
+    await recordOpsEvent({
+      level: 'ERROR',
+      event: 'notification.broadcast_failed',
+      message: 'notifyShopAdmins failed',
+      shopId,
+      status: type,
+      metadata: { error: error instanceof Error ? error.message : String(error) },
+    })
   }
 }

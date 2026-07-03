@@ -61,6 +61,12 @@ enum ActorType {
   SHOP_ADMIN
 }
 
+enum OpsLevel {
+  INFO
+  WARN
+  ERROR
+}
+
 enum PaymentMethod {
   CASH
   TRANSFER
@@ -549,4 +555,34 @@ model Log {
   @@index([targetType, targetId])
   @@index([createdAt])
   @@index([shopId, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// OpsEvent — system health / job / failure telemetry.
+//
+// This is NOT the business audit `Log` (user/admin actions). OpsEvent records
+// infrastructure signals: cron runs, notification processing outcomes, Telegram
+// send/webhook failures, migration-guard blocks. `metadata` must stay small and
+// MUST NOT contain secrets, full request bodies, or signed private URLs.
+// ---------------------------------------------------------------------------
+
+model OpsEvent {
+  id         String    @id @default(cuid())
+  level      OpsLevel  @default(INFO)
+  event      String
+  message    String
+  shopId     String?
+  actorId    String?
+  actorType  ActorType?
+  entityType String?
+  entityId   String?
+  status     String?
+  errorCode  String?
+  metadata   Json?
+  createdAt  DateTime  @default(now())
+
+  @@index([level])
+  @@index([event])
+  @@index([createdAt])
+  @@index([event, createdAt])
 }

@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useEffect, useState } from 'react'
-import { BarChart3, LayoutDashboard, Store, CreditCard, ScrollText, Settings } from 'lucide-react'
+import { Activity, BarChart3, LayoutDashboard, Store, CreditCard, ScrollText, Settings } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
 
@@ -13,6 +13,7 @@ const navItems = [
   { label: "To'lovlar", href: "/admin/payments", icon: CreditCard },
   { label: "Hisobot", href: "/admin/hisobot", icon: BarChart3 },
   { label: "Loglar", href: "/admin/logs", icon: ScrollText },
+  { label: "Tizim", href: "/admin/ops", icon: Activity },
   { label: "Sozlamalar", href: "/admin/settings", icon: Settings },
 ]
 

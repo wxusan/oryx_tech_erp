@@ -26,6 +26,7 @@ import { hasValidInternalSecret, internalSecret } from '@/lib/api-auth'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { invalidateShopOverdueCron } from '@/lib/server/cache-tags'
 import { tashkentDayRange } from '@/lib/timezone'
+import { recordOpsEvent } from '@/lib/server/ops-events'
 
 export const maxDuration = 60
 
@@ -46,6 +47,10 @@ export async function GET(request: NextRequest): Promise<Response> {
     return new Response('Unauthorized', { status: 401 })
   }
 
+  const startedAt = Date.now()
+  await recordOpsEvent({ level: 'INFO', event: 'cron.reminders.started', message: 'Reminders cron started' })
+
+  try {
   const { start: today, end: tomorrow, dayKey } = tashkentDayRange()
 
   // -------------------------------------------------------------------------
@@ -264,12 +269,39 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   // Flush pending Telegram notifications before the cron response completes.
-  await processPendingNotifications()
+  const delivery = await processPendingNotifications()
 
-  return Response.json({
+  const summary = {
     reminders: dueToday.length,
     overdue: overdue.length,
     saleReminders: salePaymentsDueToday.length,
     saleOverdue: overdueSales.length,
+  }
+
+  await recordOpsEvent({
+    level: delivery.failed + delivery.cancelled > 0 ? 'WARN' : 'INFO',
+    event: 'cron.reminders.completed',
+    message: 'Reminders cron completed',
+    status: 'ok',
+    metadata: {
+      ...summary,
+      notificationsAttempted: delivery.attempted,
+      notificationsSent: delivery.sent,
+      notificationsFailed: delivery.failed,
+      notificationsCancelled: delivery.cancelled,
+      durationMs: Date.now() - startedAt,
+    },
   })
+
+  return Response.json(summary)
+  } catch (error) {
+    await recordOpsEvent({
+      level: 'ERROR',
+      event: 'cron.reminders.failed',
+      message: 'Reminders cron failed',
+      status: 'error',
+      metadata: { error: error instanceof Error ? error.message : String(error), durationMs: Date.now() - startedAt },
+    })
+    return new Response('Cron failed', { status: 500 })
+  }
 }

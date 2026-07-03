@@ -12,6 +12,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { createSaleSchema } from '@/lib/validations'
 import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { logger } from '@/lib/logger'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import type { ZodError } from 'zod'
@@ -158,7 +159,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     // Flush freshly-queued notifications after the response (non-blocking).
     // The rows are already committed, so cron is the backstop if this misses.
-    after(() => processPendingNotifications().catch((e) => console.error('[notify] flush failed', e)))
+    after(() => processPendingNotifications().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
 
     return created(result, "Qurilma muvaffaqiyatli sotildi")
   } catch (err: unknown) {

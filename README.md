@@ -65,7 +65,7 @@ and are applied with `prisma migrate deploy`.
 
 ### Rules
 
-- **Use `prisma migrate deploy` only.** Never run `prisma db push` or
+- **Use `npm run prisma:migrate:deploy` only.** Never run `prisma db push` or
   `prisma migrate dev` against a real (dev/QA/prod) database.
 - **Why:** active-only uniqueness for device IMEI and customer phone is enforced
   by **raw-SQL partial unique indexes** (`... WHERE "deletedAt" IS NULL`) that
@@ -74,6 +74,21 @@ and are applied with `prisma migrate deploy`.
   indexes are created in `prisma/migrations/202607020002_integrity_return_ledger`
   and must always be preserved.
 - If unsure about a database's state, **use a fresh Supabase database for QA.**
+
+#### Guarded scripts (enforced, not just documented)
+
+`scripts/check-db-safety.mjs` inspects `DIRECT_URL`/`DATABASE_URL` and the
+environment before any destructive Prisma command:
+
+| Command | Behaviour |
+| --- | --- |
+| `npm run db:push` | **Always blocked** with a clear message. |
+| `npm run db:push:local` | Allowed **only** when the DB host is `localhost`/`127.0.0.1`. Blocked for any remote/prod host or when `VERCEL`/`NODE_ENV=production` is set. |
+| `npm run prisma:migrate:dev` | Blocked against a remote/prod DB; allowed for a local DB in dev. |
+| `npm run prisma:migrate:deploy` | The one explicit way to apply migrations to a real DB. |
+
+The **build never runs migrations**: `prebuild`/`postinstall` run only
+`prisma generate`; Vercel's `buildCommand` is `npm run build` (= `next build`).
 
 ### Fresh database (recommended)
 
@@ -200,6 +215,25 @@ For local QA you can still exercise delivery:
 
 > Migrations are never run automatically during a Vercel build (see below). Run
 > them deliberately with `npm run prisma:migrate:deploy`.
+
+## Observability & Ops
+
+- **Structured logging** — `src/lib/logger.ts` emits JSON logs in production
+  (readable lines in dev) and **redacts** secrets (passwords, tokens, cookies,
+  connection strings, Telegram bot tokens, signed storage URLs). Use it instead
+  of `console.*` for operational logging.
+- **OpsEvent table** — system health/failure telemetry, separate from the
+  business audit `Log`. Written via `recordOpsEvent` for: cron start/complete/
+  fail, notification cancellations after retries, notification/webhook/send
+  failures. Never stores secrets or notification bodies (customer PII).
+- **Health check** — `GET /api/health` is public and minimal: `ok`, `timestamp`,
+  short `commit`, and a `database` probe. Returns `503` if the DB is unreachable.
+- **Super-admin ops** — `GET /api/admin/ops` (super admin only) returns recent
+  OpsEvents, level counts, the notification-queue breakdown, recent
+  failed/cancelled notifications (no message bodies), and the last cron run. The
+  UI lives at **`/admin/ops`** ("Tizim").
+- Cron (`/api/cron/reminders`) records an OpsEvent when it starts, completes
+  (with reminder/overdue/notification counts + `durationMs`), or fails.
 
 ## Vercel Deployment
 

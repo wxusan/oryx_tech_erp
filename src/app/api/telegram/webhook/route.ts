@@ -19,6 +19,8 @@
 import { type NextRequest } from 'next/server'
 import { getBot } from '@/lib/telegram'
 import { prisma } from '@/lib/prisma'
+import { logger } from '@/lib/logger'
+import { recordOpsEvent } from '@/lib/server/ops-events'
 import {
   buildStartWelcome,
   findTelegramOwner,
@@ -48,7 +50,7 @@ function webhookBot() {
     const owner = await findTelegramOwner(telegramId)
     if (!owner) {
       await ctx.reply(START_NOT_LINKED_MESSAGE)
-      console.log(`[TelegramWebhook] /start not linked telegramId=${telegramId}`)
+      logger.info('telegram /start from unlinked id', { event: 'telegram.start_unlinked' })
       return
     }
 
@@ -68,12 +70,17 @@ function webhookBot() {
         })
       }
     } catch (error) {
-      console.error(`[TelegramWebhook] /start verify stamp failed telegramId=${telegramId}:`, error)
+      logger.warn('telegram /start verify stamp failed', {
+        event: 'telegram.verify_stamp_failed',
+        actorId: owner.user.id,
+        actorType: owner.type,
+        error,
+      })
     }
 
     await ctx.reply(buildStartWelcome(owner))
 
-    console.log(`[TelegramWebhook] /start from telegramId=${telegramId} type=${owner.type}`)
+    logger.info('telegram /start linked', { event: 'telegram.start', actorType: owner.type })
   })
 
   bot.command('link', async (ctx) => {
@@ -126,7 +133,7 @@ function webhookBot() {
     // the freshly-linked admin can't be re-read for any reason).
     const owner = await findTelegramOwner(telegramId)
     await ctx.reply(owner ? buildStartWelcome(owner) : 'Telegram akkauntingiz Oryx ERP bilan ulandi.')
-    console.log(`[TelegramWebhook] /link success telegramId=${telegramId}`)
+    logger.info('telegram /link success', { event: 'telegram.link' })
   })
 
   bot.on('message', async (ctx) => {
@@ -165,13 +172,13 @@ export async function POST(request: NextRequest): Promise<Response> {
   // --- Secret token verification ---
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET
   if (!secret) {
-    console.warn('[TelegramWebhook] TELEGRAM_WEBHOOK_SECRET is not configured')
+    logger.warn('telegram webhook secret not configured', { event: 'telegram.webhook_misconfigured' })
     return new Response('Webhook secret is not configured', { status: 503 })
   }
 
   const incoming = request.headers.get('x-telegram-bot-api-secret-token')
   if (incoming !== secret) {
-    console.warn('[TelegramWebhook] Invalid or missing secret token')
+    logger.warn('telegram webhook rejected invalid secret token', { event: 'telegram.webhook_unauthorized' })
     return new Response('Unauthorized', { status: 401 })
   }
 
@@ -191,7 +198,15 @@ export async function POST(request: NextRequest): Promise<Response> {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     await bot.handleUpdate(update as any)
   } catch (error) {
-    console.error('[TelegramWebhook] handleUpdate error:', error)
+    // Persist webhook command failures — otherwise a broken /start or /link is
+    // invisible until a user complains.
+    await recordOpsEvent({
+      level: 'ERROR',
+      event: 'telegram.webhook_error',
+      message: 'Telegram handleUpdate failed',
+      status: 'error',
+      metadata: { error: error instanceof Error ? error.message : String(error) },
+    })
     // Always return 200 to Telegram so it does not retry indefinitely.
   }
 
