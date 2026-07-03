@@ -107,7 +107,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           phone: parsed.data.phone,
           login: parsed.data.login,
           telegramId,
-          telegramVerifiedAt: telegramId ? new Date() : null,
+          telegramVerifiedAt: null,
           passwordHash,
         },
       })

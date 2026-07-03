@@ -21,6 +21,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const { session } = guarded
 
     const { id } = await ctx.params
+    const idempotencyKey = req.headers.get('idempotency-key')?.trim()
+    if (!idempotencyKey) {
+      return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
+    }
+
     const body: unknown = await req.json()
     const parsed = addShopPaymentSchema.safeParse(body)
 
@@ -36,6 +41,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         })
         if (!shop) throw { status: 404, message: "Do'kon topilmadi" }
 
+        const existingPayment = await tx.shopPayment.findUnique({
+          where: { shopId_idempotencyKey: { shopId: id, idempotencyKey } },
+        })
+        if (existingPayment) {
+          const duplicateShop = await tx.shop.findUniqueOrThrow({
+            where: { id },
+            include: {
+              admins: { where: { deletedAt: null, isActive: true }, select: shopAdminPublicSelect },
+              payments: {
+                where: { deletedAt: null },
+                orderBy: { paidAt: 'desc' },
+                take: 5,
+                include: { recordedBy: { select: { name: true, login: true } } },
+              },
+            },
+          })
+          return { shop: duplicateShop, duplicate: true }
+        }
+
         const base = max([new Date(), shop.subscriptionDue])
         const newDue = addMonths(base, parsed.data.months)
 
@@ -46,6 +70,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             months: parsed.data.months,
             paymentMethod: parsed.data.paymentMethod,
             note: parsed.data.note,
+            idempotencyKey,
             recordedById: session.user.id,
           },
         })
@@ -83,13 +108,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           },
         })
 
-        return updated
+        return { shop: updated, duplicate: false }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
-    let updatedShop
+    let result: Awaited<ReturnType<typeof runPaymentTransaction>> | undefined
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        updatedShop = await runPaymentTransaction()
+        result = await runPaymentTransaction()
         break
       } catch (err) {
         if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034' && attempt < 2) {
@@ -99,13 +124,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }
     }
 
-    if (!updatedShop) return serverError()
+    if (!result) return serverError()
 
-    return ok(updatedShop, "To'lov muvaffaqiyatli qo'shildi")
+    return ok(result.shop, result.duplicate ? "To'lov allaqachon qabul qilingan" : "To'lov muvaffaqiyatli qo'shildi")
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }
       if (e.status === 404) return notFound(e.message)
+    }
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return serverError("Idempotency-Key bo'yicha to'lov allaqachon yozilgan. Iltimos, sahifani yangilang.")
     }
     console.error('[POST /api/shops/[id]/payment]', err)
     return serverError()

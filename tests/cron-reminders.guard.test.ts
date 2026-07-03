@@ -35,4 +35,16 @@ describe('cron overdue-reminder guard (req 12)', () => {
     expect(src).toContain('reminderEnabled: true')
     expect(src).toContain('deletedAt: null')
   })
+
+  it('respects disabled sale reminders for both due-today and overdue sales', () => {
+    const dueTodayStart = src.indexOf('const salePaymentsDueToday = await prisma.sale.findMany')
+    const overdueStart = src.indexOf('const overdueSales = await prisma.sale.findMany')
+    const dueTodayBlock = src.slice(dueTodayStart, overdueStart)
+    const overdueBlock = src.slice(overdueStart, src.indexOf('for (const sale of overdueSales)'))
+
+    expect(dueTodayBlock).toContain('reminderEnabled: true')
+    expect(dueTodayBlock).toContain('dueDate: { gte: today, lt: tomorrow }')
+    expect(overdueBlock).toContain('reminderEnabled: true')
+    expect(overdueBlock).toContain('dueDate: { lt: today }')
+  })
 })

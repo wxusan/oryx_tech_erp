@@ -47,7 +47,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       deferredToNext,
     } = parsed.data
     const idempotencyKey = req.headers.get('idempotency-key')?.trim()
-    if (amount > 0 && !idempotencyKey) {
+    if ((amount > 0 || deferredToNext) && !idempotencyKey) {
       return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
     }
 
@@ -68,6 +68,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       })
       if (!nasiya) throw { status: 404, message: "Nasiya topilmadi" }
+
+      if (deferredToNext && idempotencyKey) {
+        const existingDeferral = await tx.nasiyaDeferral.findUnique({
+          where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+        })
+        if (existingDeferral) {
+          if (existingDeferral.nasiyaId !== nasiyaId || existingDeferral.nasiyaScheduleId !== nasiyaScheduleId) {
+            throw { status: 409, message: 'Idempotency-Key boshqa nasiya kechiktirish amali uchun ishlatilgan' }
+          }
+          return {
+            nasiyaId,
+            nasiyaScheduleId: existingDeferral.nasiyaScheduleId,
+            amount: 0,
+            remaining: Number(nasiya.remainingAmount),
+            allocations: [],
+            duplicate: true,
+          }
+        }
+      }
 
       if (amount > 0 && idempotencyKey) {
         const existingPayment = await tx.nasiyaPayment.findUnique({
@@ -138,6 +157,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         if (updatedSchedule.count !== 1) {
           throw { status: 409, message: "To'lov bir vaqtda yangilangan, qayta urinib ko'ring" }
         }
+        await tx.nasiyaDeferral.create({
+          data: {
+            shopId,
+            nasiyaId,
+            nasiyaScheduleId,
+            delayedUntil: delayedUntil!,
+            note: auditNote,
+            idempotencyKey: idempotencyKey!,
+            createdBy: session.user.id,
+          },
+        })
       } else {
         if (selectedOutstanding <= 0) {
           throw { status: 409, message: "Tanlangan oy to'lovi allaqachon yopilgan" }

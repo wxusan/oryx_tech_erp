@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
             phone: admin.phone,
             login: admin.login,
             telegramId: admin.telegramId,
-            telegramVerifiedAt: admin.telegramId ? new Date() : null,
+            telegramVerifiedAt: null,
             passwordHash,
           },
         })

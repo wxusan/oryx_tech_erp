@@ -126,10 +126,11 @@ export function startShopAdminMessage(adminName: string, shopName: string): stri
   )
 }
 
-export function startUnknownMessage(): string {
+export function startUnknownMessage(telegramId: string): string {
   return compose(
     '⚠️ Telegram akkauntingiz Oryx ERP hisobiga ulanmagan.',
     "Iltimos, admin panelda Telegram ID'ingiz to'g'ri kiritilganini tekshiring.",
+    `Sizning Telegram ID: ${telegramId}`,
   )
 }
 

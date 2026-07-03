@@ -143,22 +143,24 @@ model Shop {
 // ---------------------------------------------------------------------------
 
 model ShopPayment {
-  id            String        @id @default(cuid())
-  shopId        String
-  amount        Decimal       @db.Decimal(12, 2)
-  months        Int
-  paymentMethod PaymentMethod
-  note          String?
-  paidAt        DateTime      @default(now())
-  deletedAt     DateTime?
-  deletedBy     String?
-  deleteNote    String?
+  id             String        @id @default(cuid())
+  shopId         String
+  amount         Decimal       @db.Decimal(12, 2)
+  months         Int
+  paymentMethod  PaymentMethod
+  note           String?
+  idempotencyKey String?
+  paidAt         DateTime      @default(now())
+  deletedAt      DateTime?
+  deletedBy      String?
+  deleteNote     String?
 
   // FK
   recordedById String
   recordedBy   SuperAdmin @relation(fields: [recordedById], references: [id])
   shop         Shop       @relation(fields: [shopId], references: [id])
 
+  @@unique([shopId, idempotencyKey])
   @@index([shopId])
   @@index([paidAt])
 }
@@ -458,6 +460,27 @@ model NasiyaSchedule {
 }
 
 // ---------------------------------------------------------------------------
+// NasiyaDeferral
+// ---------------------------------------------------------------------------
+
+model NasiyaDeferral {
+  id               String   @id @default(cuid())
+  shopId           String
+  nasiyaId         String
+  nasiyaScheduleId String
+  delayedUntil     DateTime
+  note             String?
+  idempotencyKey   String
+  createdBy        String
+  createdAt        DateTime @default(now())
+
+  @@unique([shopId, idempotencyKey])
+  @@index([nasiyaId])
+  @@index([nasiyaScheduleId])
+  @@index([shopId])
+}
+
+// ---------------------------------------------------------------------------
 // NasiyaPayment
 // ---------------------------------------------------------------------------
 
@@ -587,8 +610,8 @@ model Log {
 // ---------------------------------------------------------------------------
 
 model OpsEvent {
-  id         String    @id @default(cuid())
-  level      OpsLevel  @default(INFO)
+  id         String     @id @default(cuid())
+  level      OpsLevel   @default(INFO)
   event      String
   message    String
   shopId     String?
@@ -599,7 +622,7 @@ model OpsEvent {
   status     String?
   errorCode  String?
   metadata   Json?
-  createdAt  DateTime  @default(now())
+  createdAt  DateTime   @default(now())
 
   @@index([level])
   @@index([event])

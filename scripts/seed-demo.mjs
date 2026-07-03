@@ -146,7 +146,6 @@ async function seedShop(superAdminId, index, shop) {
     login: shop.adminLogin,
     telegramId: shop.telegramId,
     telegramVerifiedAt: shop.telegramId ? dateFromNow(-12) : null,
-    telegramLinkCode: shop.telegramId ? null : `DEMO${index + 1}LINK`,
     passwordHash,
     passwordChangedAt: dateFromNow(-30),
     sessionVersion: 1,

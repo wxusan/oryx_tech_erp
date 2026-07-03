@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizeTelegramId } from '@/lib/telegram-id'
+import { nextTelegramVerifiedAt, normalizeTelegramId } from '@/lib/telegram-id'
 import {
   formatDeviceSpecs,
   formatPaymentMethod,
@@ -34,6 +34,17 @@ describe('normalizeTelegramId', () => {
     expect(normalizeTelegramId('  123  ')).toBe('123')
     expect(normalizeTelegramId('')).toBeNull()
     expect(normalizeTelegramId(null)).toBeNull()
+  })
+})
+
+describe('nextTelegramVerifiedAt', () => {
+  it('keeps verification only when the Telegram ID is unchanged', () => {
+    const verifiedAt = new Date('2026-07-03T00:00:00.000Z')
+
+    expect(nextTelegramVerifiedAt('12345', verifiedAt, '12345')).toBe(verifiedAt)
+    expect(nextTelegramVerifiedAt('12345', verifiedAt, '99999')).toBeNull()
+    expect(nextTelegramVerifiedAt('12345', verifiedAt, null)).toBeNull()
+    expect(nextTelegramVerifiedAt(null, null, '12345')).toBeNull()
   })
 })
 
@@ -75,8 +86,9 @@ describe('bot direct replies', () => {
   })
 
   it('unknown-user reply tells them to check Telegram ID and never mentions /link', () => {
-    const msg = startUnknownMessage()
+    const msg = startUnknownMessage('123456789')
     expect(msg).toContain('Telegram ID')
+    expect(msg).toContain('Sizning Telegram ID: 123456789')
     expect(msg.toLowerCase()).not.toContain('/link')
     expect(msg).not.toContain('KOD')
   })
@@ -301,7 +313,7 @@ describe('global safety across every template', () => {
   const messages = [
     startSuperAdminMessage('A'),
     startShopAdminMessage('A', 'Shop'),
-    startUnknownMessage(),
+    startUnknownMessage('123456789'),
     unknownCommandMessage(),
     deviceAddedMessage({ shopName: 'S', device: fullDevice, purchasePrice: 1, supplierPhone: '1', adminName: 'A' }),
     deviceSoldMessage({ shopName: 'S', device: fullDevice, customerName: 'A', customerPhone: '1', salePrice: 1, paidAmount: 1, remaining: 0, paymentMethod: 'CASH', adminName: 'A' }),

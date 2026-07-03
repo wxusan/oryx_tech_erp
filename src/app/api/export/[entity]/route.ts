@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/node'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { csvRows } from '@/lib/csv'
 import { prisma } from '@/lib/prisma'
 import { deviceStatusLabel, nasiyaStatusLabel, paymentMethodLabel } from '@/lib/labels'
 import { deriveNasiyaOverdue } from '@/lib/nasiya-utils'
@@ -22,15 +23,6 @@ class ExportTooLargeError extends Error {
   ) {
     super(`Export ${entity} has ${count} rows`)
   }
-}
-
-function csvValue(value: unknown) {
-  const raw = value instanceof Date ? value.toISOString() : value == null ? '' : String(value)
-  return `"${raw.replaceAll('"', '""')}"`
-}
-
-function csv(headers: string[], rows: unknown[][]) {
-  return [headers, ...rows].map((row) => row.map(csvValue).join(',')).join('\n')
 }
 
 function fileHeaders(entity: string, format: ExportFormat, contentType: string) {
@@ -118,7 +110,7 @@ async function xlsxResponse(entity: string, data: ExportData) {
 
 function exportResponse(entity: string, format: ExportFormat, data: ExportData) {
   if (format === 'xlsx') return xlsxResponse(entity, data)
-  return csvResponse(entity, csv(data.headers, data.rows))
+  return csvResponse(entity, csvRows(data.headers, data.rows))
 }
 
 async function exportData(entity: string, shopId: string, role: string): Promise<ExportData | null> {

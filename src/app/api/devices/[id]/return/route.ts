@@ -53,6 +53,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         throw { status: 409, message: 'Faqat sotilgan qurilmani qaytarish mumkin' }
       }
 
+      const sale = device.sales[0]
+      const nasiya = device.nasiya[0]
+      const maxRefund = sale
+        ? Number(sale.amountPaid)
+        : nasiya
+          ? Number(
+              (
+                await tx.nasiyaPayment.aggregate({
+                  where: { nasiyaId: nasiya.id, shopId, deletedAt: null },
+                  _sum: { amount: true },
+                })
+              )._sum.amount ?? 0,
+            )
+          : 0
+
+      if (parsed.data.refundAmount > maxRefund) {
+        throw { status: 400, message: 'Qaytariladigan summa mijozdan olingan summadan oshmasligi kerak.' }
+      }
+
       const guardedReturn = await tx.device.updateMany({
         where: { id: deviceId, shopId, deletedAt: null, status: { in: ['SOLD_CASH', 'SOLD_NASIYA'] } },
         data: { status: 'RETURNED', updatedAt: new Date(), note: parsed.data.note },
@@ -61,7 +80,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         throw { status: 409, message: 'Qurilma qaytarish amali allaqachon bajarilgan' }
       }
 
-      const sale = device.sales[0]
       if (sale) {
         await tx.sale.update({
           where: { id: sale.id },
@@ -73,7 +91,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         })
       }
 
-      const nasiya = device.nasiya[0]
       if (nasiya) {
         await tx.nasiya.update({
           where: { id: nasiya.id },

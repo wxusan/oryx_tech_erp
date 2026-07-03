@@ -50,7 +50,7 @@ function webhookBot() {
 
     const owner = await findTelegramOwner(telegramId)
     if (!owner) {
-      await ctx.reply(startUnknownMessage())
+      await ctx.reply(startUnknownMessage(telegramId))
       logger.info('telegram /start from unlinked id', { event: 'telegram.start_unlinked' })
       return
     }
@@ -61,12 +61,12 @@ function webhookBot() {
     try {
       if (owner.type === 'SUPER_ADMIN') {
         await prisma.superAdmin.updateMany({
-          where: { id: owner.user.id, telegramVerifiedAt: null },
+          where: { id: owner.user.id, telegramId, telegramVerifiedAt: null },
           data: { telegramVerifiedAt: new Date() },
         })
       } else {
         await prisma.shopAdmin.updateMany({
-          where: { id: owner.user.id, telegramVerifiedAt: null },
+          where: { id: owner.user.id, telegramId, telegramVerifiedAt: null },
           data: { telegramVerifiedAt: new Date() },
         })
       }

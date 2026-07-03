@@ -316,11 +316,12 @@ export default function NasiyaDetailPage() {
     setSubmitting(true)
     setPayError('')
     try {
+      const idempotencyKey = crypto.randomUUID()
       const res = await fetch(`/api/nasiya/${id}/payment`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(carryOver ? {} : { 'Idempotency-Key': crypto.randomUUID() }),
+          'Idempotency-Key': idempotencyKey,
         },
         body: JSON.stringify({
           nasiyaScheduleId: selectedScheduleId,

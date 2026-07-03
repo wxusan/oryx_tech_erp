@@ -274,6 +274,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       deletedAt: null,
       paidFully: false,
       remainingAmount: { gt: 0 },
+      reminderEnabled: true,
       dueDate: { lt: today },
       shop: { status: 'ACTIVE', deletedAt: null },
     },

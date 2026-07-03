@@ -30,10 +30,14 @@ describe('telegram webhook /start recognition guard', () => {
     expect(src).toContain('telegramVerifiedAt: new Date()')
   })
 
+  it('stamps verification only for the exact Telegram ID that sent /start', () => {
+    expect(src).toContain('where: { id: owner.user.id, telegramId, telegramVerifiedAt: null }')
+  })
+
   it('replies with role-specific welcome templates and an unknown-user reply', () => {
     expect(src).toContain('startSuperAdminMessage(owner.user.name)')
     expect(src).toContain('startShopAdminMessage(owner.user.name, owner.user.shop.name)')
-    expect(src).toContain('startUnknownMessage()')
+    expect(src).toContain('startUnknownMessage(telegramId)')
   })
 
   it('has no /link command handler and never mentions /link or link codes', () => {
@@ -62,6 +66,32 @@ describe('telegram link-code flow fully removed', () => {
     const ui = read('src/app/(shop)/shop/settings/page.tsx')
     expect(ui).not.toContain('telegramLinkCode')
     expect(ui).not.toContain('/link')
+  })
+})
+
+describe('telegram manual ID save verification guard', () => {
+  const manualSetters = [
+    'src/app/api/shop-admin/profile/route.ts',
+    'src/app/api/admin/profile/route.ts',
+    'src/app/api/shops/[id]/admins/route.ts',
+    'src/app/api/shops/route.ts',
+  ]
+
+  it('manual Telegram ID saves never stamp verification immediately', () => {
+    for (const file of manualSetters) {
+      expect(read(file), file).not.toContain('telegramVerifiedAt: telegramId ? new Date() : null')
+      expect(read(file), file).not.toContain('telegramVerifiedAt: admin.telegramId ? new Date() : null')
+    }
+  })
+
+  it('profile updates preserve verification only through the shared unchanged-ID helper', () => {
+    expect(read('src/app/api/shop-admin/profile/route.ts')).toContain('nextTelegramVerifiedAt(')
+    expect(read('src/app/api/admin/profile/route.ts')).toContain('nextTelegramVerifiedAt(')
+  })
+
+  it('newly provisioned admins with Telegram IDs start unverified until /start', () => {
+    expect(read('src/app/api/shops/[id]/admins/route.ts')).toContain('telegramVerifiedAt: null')
+    expect(read('src/app/api/shops/route.ts')).toContain('telegramVerifiedAt: null')
   })
 })
 

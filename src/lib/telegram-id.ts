@@ -11,6 +11,18 @@ export function normalizeTelegramId(value: string | null | undefined) {
   return trimmed ? trimmed : null
 }
 
+export function nextTelegramVerifiedAt<T extends Date | string | null>(
+  currentTelegramId: string | null | undefined,
+  currentTelegramVerifiedAt: T,
+  nextTelegramId: string | null,
+): T | null {
+  if (nextTelegramId && currentTelegramId === nextTelegramId) {
+    return currentTelegramVerifiedAt
+  }
+
+  return null
+}
+
 export async function findTelegramOwner(telegramId: string) {
   const [superAdmin, shopAdmin] = await Promise.all([
     prisma.superAdmin.findFirst({
@@ -22,7 +34,7 @@ export async function findTelegramOwner(telegramId: string) {
         telegramId,
         deletedAt: null,
         isActive: true,
-        shop: { deletedAt: null },
+        shop: { deletedAt: null, status: 'ACTIVE' },
       },
       select: {
         id: true,

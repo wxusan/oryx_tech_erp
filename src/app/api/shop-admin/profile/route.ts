@@ -5,7 +5,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { badRequest, conflict, forbidden, notFound, ok, serverError } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
-import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
+import { isTelegramIdTaken, nextTelegramVerifiedAt, normalizeTelegramId } from '@/lib/telegram-id'
 
 const changePasswordSchema = z.object({
   currentPassword: z.string({ error: 'Joriy parol kiritilishi shart' }).min(1, 'Joriy parol kiritilishi shart'),
@@ -109,6 +109,7 @@ export async function PATCH(req: NextRequest) {
           login: true,
           name: true,
           telegramId: true,
+          telegramVerifiedAt: true,
         },
       })
 
@@ -122,7 +123,7 @@ export async function PATCH(req: NextRequest) {
           where: { id: admin.id },
           data: {
             telegramId,
-            telegramVerifiedAt: telegramId ? new Date() : null,
+            telegramVerifiedAt: nextTelegramVerifiedAt(admin.telegramId, admin.telegramVerifiedAt, telegramId),
           },
         })
 
