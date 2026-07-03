@@ -72,6 +72,37 @@ export async function POST(req: NextRequest) {
       })
       if (dup) return conflict('Bu IMEI raqami allaqachon mavjud')
     }
+
+    const duplicateImport = await prisma.nasiya.findFirst({
+      where: {
+        shopId,
+        deletedAt: null,
+        isImported: true,
+        status: { not: 'CANCELLED' },
+        remainingAtImport: Math.round(data.remainingDebt),
+        monthlyPayment: Math.round(data.monthlyPayment),
+        ...(data.originalSaleDate ? { originalSaleDate: data.originalSaleDate } : {}),
+        customer: {
+          is: {
+            shopId,
+            deletedAt: null,
+            OR: [...(normalizedPhone ? [{ normalizedPhone }] : []), { phone: data.customerPhone }],
+          },
+        },
+        device: {
+          is: {
+            shopId,
+            deletedAt: null,
+            model: data.deviceModel,
+          },
+        },
+      },
+      select: { id: true },
+    })
+    if (duplicateImport) {
+      return conflict("Bu mijoz va qurilma uchun shunga o'xshash eski nasiya allaqachon import qilingan")
+    }
+
     const storedImei = enteredImei || `IMPORT-${randomBytes(4).toString('hex').toUpperCase()}`
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {

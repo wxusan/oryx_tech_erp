@@ -50,7 +50,8 @@ export default async function ShopReportPage() {
   const stats = await getShopStats(guarded.session, guarded.shopId)
 
   const monthLabel = uzMonthLabel(new Date())
-  const collected = stats.cashCollectedThisMonth ?? stats.cashReceivedThisMonth
+  const collected = stats.grossCashInThisMonth ?? stats.cashCollectedThisMonth ?? stats.cashReceivedThisMonth
+  const netCash = stats.netCashFlowThisMonth ?? stats.netCashAfterReturnsThisMonth
   const expected = stats.expectedThisMonth
   const overdue = stats.overdueMoney
   const refunds = stats.returnRefundsThisMonth
@@ -61,25 +62,27 @@ export default async function ShopReportPage() {
   const collectionRate = collectionBase > 0 ? Math.round((collected / collectionBase) * 100) : 0
 
   const cashFlowData = [
-    { name: 'Tushum', amount: collected, fill: 'var(--color-collected)' },
-    { name: 'Qaytarildi', amount: refunds, fill: 'var(--color-refunds)' },
+    { name: 'Brutto tushum', amount: collected, fill: 'var(--color-collected)' },
+    { name: 'Net pul', amount: netCash, fill: 'var(--color-net)' },
+    { name: 'Qaytarilgan summa', amount: refunds, fill: 'var(--color-refunds)' },
     { name: 'Kutilmoqda', amount: expected, fill: 'var(--color-expected)' },
     { name: 'Kechikkan', amount: overdue, fill: 'var(--color-overdue)' },
   ]
 
   const businessData = [
     { name: 'Ombor', amount: inventory, fill: 'var(--color-inventory)' },
-    { name: 'Sotuvdan foyda', amount: grossProfit, fill: 'var(--color-gross)' },
+    { name: 'Hisoblangan foyda', amount: grossProfit, fill: 'var(--color-gross)' },
     { name: 'Nasiya foizi', amount: interestProfit, fill: 'var(--color-interest)' },
   ]
 
   const chartConfig = {
-    collected: { label: 'Tushum', color: '#2563eb' },
-    refunds: { label: 'Qaytarildi', color: '#9333ea' },
+    collected: { label: 'Yig‘ilgan pul, brutto', color: '#2563eb' },
+    net: { label: 'Qaytarishlardan keyingi net pul', color: '#15803d' },
+    refunds: { label: 'Qaytarilgan summa', color: '#9333ea' },
     expected: { label: 'Kutilmoqda', color: '#0f766e' },
     overdue: { label: 'Kechikkan', color: '#dc2626' },
     inventory: { label: 'Ombor', color: '#64748b' },
-    gross: { label: 'Sotuvdan foyda', color: '#16a34a' },
+    gross: { label: 'Hisoblangan foyda', color: '#16a34a' },
     interest: { label: 'Nasiya foizi', color: '#0891b2' },
   } satisfies ChartConfig
 
@@ -97,7 +100,7 @@ export default async function ShopReportPage() {
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Hisobot</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Tushum, qarzdorlik, ombor tannarxi va foyda ko'rsatkichlari
+            Brutto/net pul oqimi, qarzdorlik, ombor tannarxi va hisoblangan foyda ko'rsatkichlari
           </p>
         </div>
         <div className="grid grid-cols-1 gap-2 rounded-lg border border-zinc-200 bg-white p-2 text-xs text-zinc-500 sm:flex">

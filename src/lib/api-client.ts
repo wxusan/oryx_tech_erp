@@ -264,6 +264,18 @@ export interface AdminDashboardStats {
 
 export interface ShopDashboardStats {
   totalDevices: number
+  cashReceivedThisMonth: number
+  cashCollectedThisMonth: number
+  grossCashInThisMonth: number
+  netCashAfterReturnsThisMonth: number
+  netCashFlowThisMonth: number
+  returnRefundsThisMonth: number
+  returnsThisMonth: number
+  accrualGrossProfitThisMonth: number
+  nasiyaInterestThisMonth: number
+  expectedProfitWithInterestThisMonth: number
+  inventoryPurchaseCost: number
+  overdueMoney: number
   soldThisMonth: number
   activeNasiyalar: number
   expectedThisMonth: number

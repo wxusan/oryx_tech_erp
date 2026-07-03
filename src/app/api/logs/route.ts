@@ -9,9 +9,15 @@
 import { NextRequest } from 'next/server'
 import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
-import { ok, serverError } from '@/lib/api-helpers'
+import { badRequest, ok, serverError } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
 import { enrichLogsWithActors } from '@/lib/server/log-actors'
+
+function parseDateParam(value: string | null | undefined, endOfDay = false) {
+  if (!value) return null
+  const date = new Date(endOfDay ? `${value}T23:59:59.999Z` : value)
+  return Number.isNaN(date.getTime()) ? null : date
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -46,6 +52,11 @@ export async function GET(req: NextRequest) {
     const skip = Number.isFinite(requestedSkip)
       ? Math.trunc(Math.max(requestedSkip, 0))
       : 0
+    const fromDate = parseDateParam(from)
+    const toDate = parseDateParam(to, true)
+    if ((from && !fromDate) || (to && !toDate)) {
+      return badRequest("Sana formati noto'g'ri")
+    }
 
     const where: Prisma.LogWhereInput = {
       ...(shopId && shopId !== 'all' ? { shopId } : {}),
@@ -55,8 +66,8 @@ export async function GET(req: NextRequest) {
       ...(from || to
         ? {
             createdAt: {
-              ...(from ? { gte: new Date(from) } : {}),
-              ...(to ? { lte: new Date(to + 'T23:59:59.999Z') } : {}),
+              ...(fromDate ? { gte: fromDate } : {}),
+              ...(toDate ? { lte: toDate } : {}),
             },
           }
         : {}),

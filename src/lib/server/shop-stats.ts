@@ -76,7 +76,6 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
         shopId,
         deletedAt: null,
         paidAt: { gte: monthStart, lt: monthEnd },
-        sale: { deletedAt: null },
       },
     }),
 
@@ -103,7 +102,6 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
         shopId,
         deletedAt: null,
         paidAt: { gte: monthStart, lt: monthEnd },
-        nasiya: { deletedAt: null, status: { not: 'CANCELLED' } },
       },
     }),
 
@@ -259,9 +257,11 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
     accrualGrossProfitThisMonth,
     nasiyaInterestThisMonth,
     expectedProfitWithInterestThisMonth: accrualGrossProfitThisMonth + nasiyaInterestThisMonth,
+    grossCashInThisMonth: cashReceivedThisMonth,
     cashCollectedThisMonth: cashReceivedThisMonth,
     returnRefundsThisMonth,
     returnsThisMonth,
+    netCashFlowThisMonth: cashReceivedThisMonth - returnRefundsThisMonth,
     netCashAfterReturnsThisMonth: cashReceivedThisMonth - returnRefundsThisMonth,
     overdueCount,
     recentActivity,

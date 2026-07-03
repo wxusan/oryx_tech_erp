@@ -14,6 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ArrowLeft, Check } from 'lucide-react'
+import { calculateNasiyaAmounts, generatePaymentSchedule } from '@/lib/nasiya-utils'
 
 interface Device {
   id: string
@@ -33,12 +34,6 @@ function fmt(n: number) {
 
 function today() {
   return new Date().toISOString().slice(0, 10)
-}
-
-function addMonths(dateStr: string, months: number): string {
-  const d = new Date(dateStr)
-  d.setMonth(d.getMonth() + months)
-  return d.toISOString().slice(0, 10)
 }
 
 function deviceMeta(device: Device) {
@@ -131,33 +126,42 @@ export default function NewNasiyaPage() {
     return !q || d.model.toLowerCase().includes(q) || (d.color ?? '').toLowerCase().includes(q) || d.imei.includes(q)
   })
 
-  const remaining = useMemo(() => {
-    const t = parseFloat(totalPrice) || 0
-    const d = parseFloat(downPayment) || 0
-    return Math.max(0, t - d)
-  }, [totalPrice, downPayment])
+  const calculation = useMemo(() => {
+    try {
+      return calculateNasiyaAmounts({
+        totalAmount: Number(totalPrice),
+        downPayment: Number(downPayment),
+        months: Number(months),
+        interestPercent: Number(interestPercent || 0),
+      })
+    } catch {
+      return {
+        totalAmount: Number(totalPrice) || 0,
+        downPayment: Number(downPayment) || 0,
+        baseRemainingAmount: Math.max(0, (Number(totalPrice) || 0) - (Number(downPayment) || 0)),
+        interestPercent: Number(interestPercent || 0),
+        interestAmount: 0,
+        finalNasiyaAmount: 0,
+        monthlyPayment: 0,
+      }
+    }
+  }, [totalPrice, downPayment, months, interestPercent])
 
-  const interestAmount = useMemo(() => {
-    const percent = parseInt(interestPercent) || 0
-    return Math.round((remaining * Math.max(0, percent)) / 100)
-  }, [remaining, interestPercent])
-
-  const finalNasiyaAmount = remaining + interestAmount
-
-  const monthlyPayment = useMemo(() => {
-    const m = parseInt(months) || 1
-    return m > 0 ? finalNasiyaAmount / m : 0
-  }, [finalNasiyaAmount, months])
+  const remaining = calculation.baseRemainingAmount
+  const interestAmount = calculation.interestAmount
+  const finalNasiyaAmount = calculation.finalNasiyaAmount
+  const monthlyPayment = calculation.monthlyPayment
 
   const schedule = useMemo(() => {
     if (!startDate || !months) return []
     const m = parseInt(months) || 12
-    return Array.from({ length: m }, (_, i) => ({
-      month: i + 1,
-      date: addMonths(startDate, i + 1),
-      amount: monthlyPayment,
+    if (finalNasiyaAmount <= 0) return []
+    return generatePaymentSchedule(new Date(startDate), m, finalNasiyaAmount).map((item) => ({
+      month: item.monthNumber,
+      date: item.dueDate.toISOString().slice(0, 10),
+      amount: item.expectedAmount,
     }))
-  }, [startDate, months, monthlyPayment])
+  }, [startDate, months, finalNasiyaAmount])
 
   const step2Valid = customerName.trim() && customerPhone.trim() && passportFile
   const step3Valid =

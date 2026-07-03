@@ -26,6 +26,10 @@ const telegramIdInputSchema = z
   .optional()
   .or(z.literal(''))
 
+const deviceImageKeySchema = z
+  .string()
+  .regex(/^shops\/[^/]+\/devices\/[^/]+$/, 'Faqat Oryx private storage rasmi qabul qilinadi')
+
 const paymentMethodSchema = z.enum(['CASH', 'TRANSFER', 'CARD', 'OTHER'], {
   error: "To'lov usuli noto'g'ri",
 })
@@ -44,12 +48,13 @@ const privateFileKeySchema = z
 // ---------------------------------------------------------------------------
 
 const shopAdminInputSchema = z.object({
-  name: z.string({ error: "Admin ismi kiritilishi shart" }).min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
+  name: z.string({ error: "Admin ismi kiritilishi shart" }).min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak").max(100),
   phone: phoneSchema,
   telegramId: telegramIdInputSchema,
   login: z
     .string({ error: "Login kiritilishi shart" })
     .min(3, "Login kamida 3 ta belgidan iborat bo'lishi kerak")
+    .max(64, "Login 64 ta belgidan oshmasligi kerak")
     .regex(/^[a-zA-Z0-9_]+$/, "Login faqat lotin harflari, raqamlar va _ belgisidan iborat bo'lishi kerak"),
   password: passwordSchema,
 })
@@ -57,16 +62,19 @@ const shopAdminInputSchema = z.object({
 export const createShopSchema = z.object({
   name: z
     .string({ error: "Do'kon nomi kiritilishi shart" })
-    .min(2, "Do'kon nomi kamida 2 ta harfdan iborat bo'lishi kerak"),
+    .min(2, "Do'kon nomi kamida 2 ta harfdan iborat bo'lishi kerak")
+    .max(120, "Do'kon nomi 120 ta belgidan oshmasligi kerak"),
   ownerName: z
     .string({ error: "Egasi ismi kiritilishi shart" })
-    .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
+    .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+    .max(100, "Ism 100 ta belgidan oshmasligi kerak"),
   ownerPhone: phoneSchema,
   shopNumber: z
     .string({ error: "Do'kon raqami kiritilishi shart" })
-    .min(1, "Do'kon raqami bo'sh bo'lmasligi kerak"),
-  address: z.string().optional(),
-  note: z.string().optional(),
+    .min(1, "Do'kon raqami bo'sh bo'lmasligi kerak")
+    .max(64, "Do'kon raqami 64 ta belgidan oshmasligi kerak"),
+  address: z.string().max(255, "Manzil 255 ta belgidan oshmasligi kerak").optional(),
+  note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
   admins: z
     .array(shopAdminInputSchema)
     .min(1, "Kamida bitta admin qo'shilishi shart"),
@@ -81,9 +89,10 @@ export type CreateShopInput = z.infer<typeof createShopSchema>
 export const addDeviceSchema = z.object({
   model: z
     .string({ error: "Model kiritilishi shart" })
-    .min(1, "Model bo'sh bo'lmasligi kerak"),
-  color: z.string().optional(),
-  storage: z.string().optional(),
+    .min(1, "Model bo'sh bo'lmasligi kerak")
+    .max(120, "Model 120 ta belgidan oshmasligi kerak"),
+  color: z.string().max(50, "Rang 50 ta belgidan oshmasligi kerak").optional(),
+  storage: z.string().max(50, "Xotira 50 ta belgidan oshmasligi kerak").optional(),
   batteryHealth: z
     .number()
     .int("Batareya holati butun son bo'lishi kerak")
@@ -98,10 +107,10 @@ export const addDeviceSchema = z.object({
     .trim()
     .min(5, "IMEI juda qisqa")
     .max(32, "IMEI juda uzun"),
-  supplierName: z.string().optional(),
+  supplierName: z.string().max(100, "Ta'minotchi nomi 100 ta belgidan oshmasligi kerak").optional(),
   supplierPhone: phoneSchema.optional(),
-  note: z.string().optional(),
-  imageUrls: z.array(z.string().url("Rasm URL noto'g'ri formatda")).optional(),
+  note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
+  imageUrls: z.array(deviceImageKeySchema).optional(),
 })
 
 export type AddDeviceInput = z.infer<typeof addDeviceSchema>
@@ -115,7 +124,8 @@ export const createSaleSchema = z
     deviceId: z.string({ error: "Qurilma ID kiritilishi shart" }).min(1),
     customerName: z
       .string({ error: "Xaridor ismi kiritilishi shart" })
-      .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
+      .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      .max(100, "Ism 100 ta belgidan oshmasligi kerak"),
     customerPhone: phoneSchema,
     salePrice: z
       .number({ error: "Sotish narxi kiritilishi shart" })
@@ -125,7 +135,7 @@ export const createSaleSchema = z
     amountPaid: z.number().positive("To'langan summa musbat son bo'lishi kerak").optional(),
     dueDate: z.coerce.date().optional(),
     reminderEnabled: z.boolean().optional().default(false),
-    note: z.string().optional(),
+    note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
   })
   .refine(
     (data) => {
@@ -177,8 +187,8 @@ export const addSalePaymentSchema = z.object({
   paymentMethod: paymentMethodSchema,
   paidAt: z.coerce.date().optional(),
   nextDueDate: z.coerce.date().optional(),
-  note: z.string().optional(),
-  reason: z.string().optional(),
+  note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
+  reason: z.string().max(1000, "Sabab 1000 ta belgidan oshmasligi kerak").optional(),
   idempotencyKey: z.string().min(8).max(120).optional(),
 })
 
@@ -193,7 +203,8 @@ export const createNasiyaSchema = z
     deviceId: z.string({ error: "Qurilma ID kiritilishi shart" }).min(1),
     customerName: z
       .string({ error: "Xaridor ismi kiritilishi shart" })
-      .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
+      .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      .max(100, "Ism 100 ta belgidan oshmasligi kerak"),
     customerPhone: phoneSchema,
     passportPhotoUrl: privateFileKeySchema,
     totalAmount: z
@@ -217,7 +228,7 @@ export const createNasiyaSchema = z
     monthlyPayment: z.number().positive("Oylik to'lov musbat son bo'lishi kerak").optional(),
     startDate: z.coerce.date({ error: "Boshlanish sanasi kiritilishi shart" }),
     paymentMethod: paymentMethodSchema,
-    note: z.string().optional(),
+    note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
   })
   .refine((data) => data.downPayment <= data.totalAmount, {
     message: "Boshlang'ich to'lov umumiy summadan oshmasligi kerak",
@@ -238,12 +249,13 @@ export const importNasiyaSchema = z
   .object({
     customerName: z
       .string({ error: "Xaridor ismi kiritilishi shart" })
-      .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
+      .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      .max(100, "Ism 100 ta belgidan oshmasligi kerak"),
     customerPhone: phoneSchema,
-    deviceModel: z.string({ error: "Qurilma nomi kiritilishi shart" }).min(1, "Qurilma nomi kiritilishi shart"),
-    imei: z.string().trim().optional(),
-    storage: z.string().trim().optional(),
-    color: z.string().trim().optional(),
+    deviceModel: z.string({ error: "Qurilma nomi kiritilishi shart" }).min(1, "Qurilma nomi kiritilishi shart").max(120),
+    imei: z.string().trim().max(32, "IMEI 32 ta belgidan oshmasligi kerak").optional(),
+    storage: z.string().trim().max(50, "Xotira 50 ta belgidan oshmasligi kerak").optional(),
+    color: z.string().trim().max(50, "Rang 50 ta belgidan oshmasligi kerak").optional(),
     batteryHealth: z.number().int().min(0).max(100).optional(),
     originalTotalAmount: z
       .number({ error: "Eski nasiya umumiy summasi kiritilishi shart" })
@@ -285,7 +297,7 @@ export const addNasiyaPaymentSchema = z
     paymentMethod: paymentMethodSchema.optional(),
     date: z.coerce.date({ error: "To'lov sanasi kiritilishi shart" }),
     delayedUntil: z.coerce.date().optional(),
-    note: z.string().optional(),
+    note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
     deferredToNext: z.boolean().optional().default(false),
   })
   .refine((data) => (data.note?.trim().length ?? 0) >= 5, {
@@ -329,7 +341,7 @@ export const addShopPaymentSchema = z.object({
     .int("Oy soni butun son bo'lishi kerak")
     .min(1, "Kamida 1 oy bo'lishi kerak"),
   paymentMethod: paymentMethodSchema,
-  note: z.string().optional(),
+  note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
 })
 
 export type AddShopPaymentInput = z.infer<typeof addShopPaymentSchema>

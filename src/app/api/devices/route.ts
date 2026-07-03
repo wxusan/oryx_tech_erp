@@ -122,6 +122,9 @@ export async function POST(req: NextRequest) {
     )
     if (!resolved.ok) return resolved.response
     const resolvedShopId = resolved.shopId
+    if (imageUrls?.some((url) => !url.startsWith(`shops/${resolvedShopId}/devices/`))) {
+      return badRequest('Qurilma rasmi faqat shu do\'kon private storage papkasidan bo\'lishi kerak')
+    }
 
     // Check active IMEI uniqueness within shop. Soft-deleted rows may be reused.
     const existing = await prisma.device.findFirst({

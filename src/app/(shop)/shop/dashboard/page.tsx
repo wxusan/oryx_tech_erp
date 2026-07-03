@@ -71,9 +71,11 @@ export default async function DashboardPage() {
 
   const stats = await getShopStats(guarded.session, guarded.shopId)
 
-  const collectionBase = stats.cashCollectedThisMonth + stats.expectedThisMonth
+  const grossCashIn = stats.grossCashInThisMonth ?? stats.cashCollectedThisMonth
+  const netCashFlow = stats.netCashFlowThisMonth ?? stats.netCashAfterReturnsThisMonth
+  const collectionBase = grossCashIn + stats.expectedThisMonth
   const collectionRate = collectionBase > 0
-    ? Math.round((stats.cashCollectedThisMonth / collectionBase) * 100)
+    ? Math.round((grossCashIn / collectionBase) * 100)
     : 0
 
   return (
@@ -94,16 +96,19 @@ export default async function DashboardPage() {
             <Card className="rounded-lg lg:col-span-5">
               <CardHeader className="border-b border-zinc-100">
                 <CardTitle>Bu oy pul oqimi</CardTitle>
-                <CardDescription>Tushgan pul va oy oxirigacha kutilayotgan to'lov</CardDescription>
+                <CardDescription>Brutto tushum, qaytarishlardan keyingi net va kutilayotgan to'lov</CardDescription>
                 <CardAction>
                   <WalletCards className="size-5 text-zinc-400" />
                 </CardAction>
               </CardHeader>
               <CardContent className="space-y-5">
                 <div>
-                  <div className="text-xs font-medium uppercase text-zinc-500">Tushgan pul</div>
+                  <div className="text-xs font-medium uppercase text-zinc-500">Yig'ilgan pul, brutto</div>
                   <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-900">
-                    {fmt(stats.cashCollectedThisMonth)}
+                    {fmt(grossCashIn)}
+                  </div>
+                  <div className="mt-1 text-xs text-zinc-500">
+                    Qaytarishlardan keyingi net pul: {fmt(netCashFlow)}
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -114,7 +119,7 @@ export default async function DashboardPage() {
                   <Progress value={collectionRate} />
                   <div className="flex items-center justify-between text-xs text-zinc-500">
                     <span>Kutilmoqda: {fmt(stats.expectedThisMonth)}</span>
-                    <span>Jami oqim: {fmt(collectionBase)}</span>
+                    <span>Brutto + kutilayotgan: {fmt(collectionBase)}</span>
                   </div>
                 </div>
               </CardContent>
@@ -123,7 +128,7 @@ export default async function DashboardPage() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:col-span-7">
               <Card className="rounded-lg">
                 <CardHeader>
-                  <CardDescription>Sotuvdan foyda</CardDescription>
+                  <CardDescription>Hisoblangan foyda</CardDescription>
                   <CardAction><TrendingUp className="size-4 text-zinc-400" /></CardAction>
                 </CardHeader>
                 <CardContent>
@@ -131,7 +136,7 @@ export default async function DashboardPage() {
                     {fmt(stats.accrualGrossProfitThisMonth)}
                   </div>
                   <p className="mt-2 text-xs text-zinc-500">
-                    Bu oy sotilgan qurilmalar bo'yicha
+                    Hisoblangan savdo summasi tannarxdan ayrilgan
                     {stats.nasiyaInterestThisMonth > 0 ? ` · Nasiya foizi: ${fmt(stats.nasiyaInterestThisMonth)}` : ''}
                   </p>
                 </CardContent>
@@ -182,7 +187,7 @@ export default async function DashboardPage() {
             <Card className="rounded-lg" size="sm">
               <CardContent className="flex items-center justify-between gap-3">
                 <div>
-                  <div className="text-xs text-zinc-500">Bu oy sotildi</div>
+                  <div className="text-xs text-zinc-500">Naqd sotuvlar</div>
                   <div className="mt-1 text-xl font-bold text-zinc-900">{stats.soldThisMonth}</div>
                 </div>
                 <ReceiptText className="size-5 text-zinc-400" />

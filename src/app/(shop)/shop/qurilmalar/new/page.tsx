@@ -94,7 +94,7 @@ export default function NewDevicePage() {
           throw new Error(json.error || 'Qurilma rasmini yuklashda xatolik')
         }
 
-        return json.data.url as string
+        return json.data.key as string
       }),
     )
   }
