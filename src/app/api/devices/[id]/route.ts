@@ -83,6 +83,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
           select: {
             id: true,
             totalAmount: true,
+            finalNasiyaAmount: true,
             remainingAmount: true,
             customer: {
               select: { name: true, phone: true },

@@ -23,6 +23,10 @@ export interface ShopNasiyaListItem {
   id: string
   totalAmount: number
   remainingAmount: number
+  baseRemainingAmount: number
+  interestPercent: number
+  interestAmount: number
+  finalNasiyaAmount: number
   /** Stored parent status (kept for reference / debugging). */
   status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
   /** Live display status derived from schedules (matches the dashboard). */
@@ -124,6 +128,10 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
       id: true,
       totalAmount: true,
       remainingAmount: true,
+      baseRemainingAmount: true,
+      interestPercent: true,
+      interestAmount: true,
+      finalNasiyaAmount: true,
       status: true,
       createdAt: true,
       customer: {
@@ -178,6 +186,10 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
         id: nasiya.id,
         totalAmount: Number(nasiya.totalAmount),
         remainingAmount: Number(nasiya.remainingAmount),
+        baseRemainingAmount: Number(nasiya.baseRemainingAmount),
+        interestPercent: Number(nasiya.interestPercent),
+        interestAmount: Number(nasiya.interestAmount),
+        finalNasiyaAmount: Number(nasiya.finalNasiyaAmount),
         status: nasiya.status,
         displayStatus: derived.displayStatus,
         isOverdue: derived.isOverdue,

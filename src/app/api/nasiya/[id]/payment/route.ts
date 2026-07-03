@@ -196,7 +196,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       // Recalculate nasiya totals
       const allSchedules = await tx.nasiyaSchedule.findMany({ where: { nasiyaId } })
       const totalPaid = allSchedules.reduce((sum: number, s: { paidAmount: unknown }) => sum + Number(s.paidAmount), 0)
-      const remaining = calculateRemaining(Number(nasiya.totalAmount) - Number(nasiya.downPayment), totalPaid)
+      const remaining = calculateRemaining(Number(nasiya.finalNasiyaAmount), totalPaid)
 
       const allFullyPaid = allSchedules.every(
         (s: { status: string }) => s.status === 'PAID',

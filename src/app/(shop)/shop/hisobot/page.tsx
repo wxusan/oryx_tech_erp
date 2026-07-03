@@ -56,6 +56,7 @@ export default async function ShopReportPage() {
   const refunds = stats.returnRefundsThisMonth
   const inventory = stats.inventoryPurchaseCost
   const grossProfit = stats.accrualGrossProfitThisMonth ?? stats.realProfitThisMonth
+  const interestProfit = stats.nasiyaInterestThisMonth ?? 0
   const collectionBase = collected + expected
   const collectionRate = collectionBase > 0 ? Math.round((collected / collectionBase) * 100) : 0
 
@@ -69,6 +70,7 @@ export default async function ShopReportPage() {
   const businessData = [
     { name: 'Ombor', amount: inventory, fill: 'var(--color-inventory)' },
     { name: 'Sotuvdan foyda', amount: grossProfit, fill: 'var(--color-gross)' },
+    { name: 'Nasiya foizi', amount: interestProfit, fill: 'var(--color-interest)' },
   ]
 
   const chartConfig = {
@@ -78,6 +80,7 @@ export default async function ShopReportPage() {
     overdue: { label: 'Kechikkan', color: '#dc2626' },
     inventory: { label: 'Ombor', color: '#64748b' },
     gross: { label: 'Sotuvdan foyda', color: '#16a34a' },
+    interest: { label: 'Nasiya foizi', color: '#0891b2' },
   } satisfies ChartConfig
 
   return (
@@ -197,6 +200,7 @@ export default async function ShopReportPage() {
                   ["Yig'ilgan", fmt(collected)],
                   ['Kutilayotgan', fmt(expected)],
                   ['Kechikkan', fmt(overdue)],
+                  ['Nasiya foizi', fmt(interestProfit)],
                   ['Ombor', fmt(inventory)],
                 ].map(([label, value]) => (
                   <div key={label} className="flex items-center justify-between border-b border-zinc-100 pb-2 last:border-0 last:pb-0">

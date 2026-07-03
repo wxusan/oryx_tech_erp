@@ -218,13 +218,16 @@ export interface Nasiya {
   customerId: string
   totalAmount: number
   downPayment: number
+  baseRemainingAmount: number
+  interestPercent: number
+  interestAmount: number
+  finalNasiyaAmount: number
   remainingAmount: number
   months: number
   monthlyPayment: number
   startDate: string
   status: string
   reminderEnabled: boolean
-  appleIdNote: string | null
   note: string | null
   createdAt: string
   updatedAt: string

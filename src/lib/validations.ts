@@ -4,6 +4,7 @@
  */
 
 import { z } from 'zod'
+import { MAX_NASIYA_INTEREST_PERCENT } from '@/lib/nasiya-utils'
 
 // ---------------------------------------------------------------------------
 // Shared field schemas
@@ -206,25 +207,22 @@ export const createNasiyaSchema = z
       .int("Oy soni butun son bo'lishi kerak")
       .min(1, "Kamida 1 oy bo'lishi kerak")
       .max(24, "Ko'pi bilan 24 oy bo'lishi mumkin"),
-    monthlyPayment: z
-      .number({ error: "Oylik to'lov kiritilishi shart" })
-      .positive("Oylik to'lov musbat son bo'lishi kerak"),
+    interestPercent: z
+      .number({ error: "Nasiya foizi kiritilishi shart" })
+      .int("Nasiya foizi butun son bo'lishi kerak")
+      .min(0, "Nasiya foizi manfiy bo'lmasligi kerak")
+      .max(MAX_NASIYA_INTEREST_PERCENT, `Nasiya foizi ${MAX_NASIYA_INTEREST_PERCENT}% dan oshmasligi kerak`)
+      .optional()
+      .default(0),
+    monthlyPayment: z.number().positive("Oylik to'lov musbat son bo'lishi kerak").optional(),
     startDate: z.coerce.date({ error: "Boshlanish sanasi kiritilishi shart" }),
     paymentMethod: paymentMethodSchema,
-    appleIdNote: z.string().optional(),
     note: z.string().optional(),
   })
   .refine((data) => data.downPayment <= data.totalAmount, {
     message: "Boshlang'ich to'lov umumiy summadan oshmasligi kerak",
     path: ['downPayment'],
   })
-  .refine(
-    (data) => Math.abs(data.monthlyPayment - Math.round((data.totalAmount - data.downPayment) / data.months)) <= 1,
-    {
-      message: "Oylik to'lovlar qolgan summa bilan mos emas",
-      path: ['monthlyPayment'],
-    },
-  )
 
 export type CreateNasiyaInput = z.infer<typeof createNasiyaSchema>
 

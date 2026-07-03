@@ -86,6 +86,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
       },
       select: {
         totalAmount: true,
+        interestAmount: true,
         device: { select: { purchasePrice: true } },
       },
     }),
@@ -210,6 +211,10 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
   const accrualRevenueThisMonth =
     cashSalesThisMonth.reduce((sum, sale) => sum + Number(sale.salePrice), 0) +
     nasiyaSoldThisMonth.reduce((sum, nasiya) => sum + Number(nasiya.totalAmount), 0)
+  const nasiyaInterestThisMonth = nasiyaSoldThisMonth.reduce(
+    (sum, nasiya) => sum + Number(nasiya.interestAmount),
+    0,
+  )
   const accrualGrossProfitThisMonth = accrualRevenueThisMonth - soldDeviceCost - nasiyaDeviceCost
   const cashBasisProfitThisMonth = cashReceivedThisMonth - soldDeviceCost - nasiyaDeviceCost
   const outstanding = (expected: unknown, paid: unknown) => Math.max(0, Number(expected) - Number(paid))
@@ -246,6 +251,8 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
     inventoryPurchaseCost,
     realProfitThisMonth: cashBasisProfitThisMonth,
     accrualGrossProfitThisMonth,
+    nasiyaInterestThisMonth,
+    expectedProfitWithInterestThisMonth: accrualGrossProfitThisMonth + nasiyaInterestThisMonth,
     cashCollectedThisMonth: cashReceivedThisMonth,
     returnRefundsThisMonth,
     returnsThisMonth,

@@ -55,6 +55,10 @@ export async function GET(req: NextRequest) {
         id: true,
         totalAmount: true,
         remainingAmount: true,
+        baseRemainingAmount: true,
+        interestPercent: true,
+        interestAmount: true,
+        finalNasiyaAmount: true,
         status: true,
         createdAt: true,
         customer: {

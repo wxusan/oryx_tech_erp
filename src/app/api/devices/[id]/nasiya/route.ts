@@ -11,7 +11,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { createNasiyaSchema } from '@/lib/validations'
-import { generatePaymentSchedule } from '@/lib/nasiya-utils'
+import { calculateNasiyaAmounts, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
@@ -37,8 +37,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     const {
       customerName, customerPhone, passportPhotoUrl,
-      totalAmount, downPayment, months, monthlyPayment,
-      startDate, paymentMethod, appleIdNote, note,
+      totalAmount, downPayment, months, interestPercent,
+      startDate, paymentMethod, note,
     } = parsed.data
 
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
@@ -49,9 +49,19 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
     const normalizedPhone = normalizePhone(customerPhone)
 
-    const remainingAmount = totalAmount - downPayment
+    let amounts: ReturnType<typeof calculateNasiyaAmounts>
+    try {
+      amounts = calculateNasiyaAmounts({ totalAmount, downPayment, months, interestPercent })
+    } catch (error) {
+      return badRequest(error instanceof Error ? error.message : "Nasiya summasi noto'g'ri")
+    }
+
     // Generate exact schedule rows. The last month absorbs rounding remainder.
-    const scheduleItems = generatePaymentSchedule(startDate, months, remainingAmount)
+    const scheduleItems = generatePaymentSchedule(startDate, months, amounts.finalNasiyaAmount)
+    const scheduleTotal = scheduleItems.reduce((sum, item) => sum + item.expectedAmount, 0)
+    if (scheduleTotal !== amounts.finalNasiyaAmount) {
+      return badRequest("To'lov jadvali nasiya jami bilan mos emas")
+    }
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
@@ -101,13 +111,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           shopId,
           deviceId,
           customerId: customer.id,
-          totalAmount,
-          downPayment,
-          remainingAmount,
+          totalAmount: amounts.totalAmount,
+          downPayment: amounts.downPayment,
+          baseRemainingAmount: amounts.baseRemainingAmount,
+          interestPercent: amounts.interestPercent,
+          interestAmount: amounts.interestAmount,
+          finalNasiyaAmount: amounts.finalNasiyaAmount,
+          remainingAmount: amounts.finalNasiyaAmount,
           months,
-          monthlyPayment,
+          monthlyPayment: amounts.monthlyPayment,
           startDate,
-          appleIdNote,
           note,
           createdBy: session.user.id,
         },
@@ -124,13 +137,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         })),
       })
 
-      if (downPayment > 0) {
+      if (amounts.downPayment > 0) {
         await tx.nasiyaPayment.create({
           data: {
             nasiyaId: nasiya.id,
             nasiyaScheduleId: null,
             shopId,
-            amount: downPayment,
+            amount: amounts.downPayment,
             paymentMethod,
             paidAt: new Date(),
             note: "Boshlang'ich to'lov",
@@ -143,11 +156,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
       })
       for (const admin of shopAdmins) {
+        const interestLines =
+          amounts.interestPercent > 0
+            ? `\n📈 Nasiya foizi: ${amounts.interestPercent}%\n➕ Foiz summasi: ${amounts.interestAmount.toLocaleString()} so'm`
+            : ''
         await tx.notification.create({
           data: {
             shopId,
             type: 'NASIYA',
-            message: `✅ Yangi nasiya\n📱 ${device.model}\n👤 ${customerName}\n📞 ${customerPhone}\n💰 ${totalAmount.toLocaleString()} so'm`,
+            message: `✅ Yangi nasiya\n📱 ${device.model}\n👤 ${customerName}\n📞 ${customerPhone}\n💰 Jami narx: ${amounts.totalAmount.toLocaleString()} so'm\n💵 Boshlang'ich to'lov: ${amounts.downPayment.toLocaleString()} so'm\n📌 Qolgan summa: ${amounts.baseRemainingAmount.toLocaleString()} so'm${interestLines}\n🧾 Nasiya jami: ${amounts.finalNasiyaAmount.toLocaleString()} so'm\n🔁 Oylik to'lov: ${amounts.monthlyPayment.toLocaleString()} so'm`,
             telegramId: admin.telegramId!,
             scheduledAt: new Date(),
             relatedId: nasiya.id,
@@ -164,7 +181,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           action: 'CREATE_NASIYA',
           targetType: 'Nasiya',
           targetId: nasiya.id,
-          newValue: { customerName, totalAmount, downPayment, months },
+          newValue: {
+            customerName,
+            totalAmount: amounts.totalAmount,
+            downPayment: amounts.downPayment,
+            baseRemainingAmount: amounts.baseRemainingAmount,
+            interestPercent: amounts.interestPercent,
+            interestAmount: amounts.interestAmount,
+            finalNasiyaAmount: amounts.finalNasiyaAmount,
+            months,
+          },
         },
       })
 

@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  formatNasiyaNotification,
   paymentMethodLabel,
   formatDeviceReturnNotification,
   formatDeviceRestockNotification,
@@ -77,6 +78,51 @@ describe('paymentMethodLabel', () => {
     expect(paymentMethodLabel(undefined)).toBe('-')
     expect(paymentMethodLabel(null)).toBe('-')
     expect(paymentMethodLabel('SOMETHING_ELSE')).toBe('-')
+  })
+})
+
+describe('formatNasiyaNotification', () => {
+  const base = {
+    shopName: 'Malika Mobile',
+    deviceModel: 'iPhone 15 Pro',
+    customerName: 'Ali Valiyev',
+    customerPhone: '+998901112233',
+    totalAmount: 5_200_000,
+    downPayment: 1_500_000,
+    months: 6,
+    monthlyPayment: 616_667,
+    firstDueDate: new Date('2026-08-01T00:00:00.000Z'),
+  }
+
+  it('omits percent lines when nasiya percent is 0', () => {
+    const msg = formatNasiyaNotification({
+      ...base,
+      baseRemainingAmount: 3_700_000,
+      interestPercent: 0,
+      interestAmount: 0,
+      finalNasiyaAmount: 3_700_000,
+    })
+
+    expect(msg).toContain('Qolgan summa')
+    expect(msg).toContain('Nasiya jami')
+    expect(msg).not.toContain('Nasiya foizi:')
+    expect(msg).not.toContain('Foiz summasi:')
+  })
+
+  it('includes percent and interest amount when nasiya percent is above 0', () => {
+    const msg = formatNasiyaNotification({
+      ...base,
+      baseRemainingAmount: 3_700_000,
+      interestPercent: 20,
+      interestAmount: 740_000,
+      finalNasiyaAmount: 4_440_000,
+      monthlyPayment: 740_000,
+    })
+
+    expect(msg).toContain('Nasiya foizi: 20%')
+    expect(msg).toContain('Foiz summasi:')
+    expect(msg).toMatch(/740.?000/)
+    expect(msg).toMatch(/4.?440.?000/)
   })
 })
 

@@ -171,6 +171,7 @@ export function formatNewDeviceNotification(data: {
  * 📞 Tel: +998901234567
  * 💰 Jami narx: 12,000,000 so'm
  * 💵 Boshlang'ich to'lov: 3,000,000 so'm
+ * 📌 Qolgan summa: 9,000,000 so'm
  * 📅 Muddati: 9 oy
  * 🔁 Oylik to'lov: 1,000,000 so'm
  * 📆 Birinchi to'lov: 2024-02-15
@@ -184,6 +185,10 @@ export function formatNasiyaNotification(data: {
   customerPhone: string
   totalAmount: number
   downPayment: number
+  baseRemainingAmount?: number
+  interestPercent?: number
+  interestAmount?: number
+  finalNasiyaAmount?: number
   months: number
   monthlyPayment: number
   firstDueDate: Date
@@ -198,6 +203,14 @@ export function formatNasiyaNotification(data: {
     `📞 Tel: ${data.customerPhone}`,
     `💰 Jami narx: ${formatAmount(data.totalAmount)}`,
     `💵 Boshlang'ich to'lov: ${formatAmount(data.downPayment)}`,
+    `📌 Qolgan summa: ${formatAmount(data.baseRemainingAmount ?? Math.max(0, data.totalAmount - data.downPayment))}`,
+    ...(data.interestPercent && data.interestPercent > 0
+      ? [
+          `📈 Nasiya foizi: ${data.interestPercent}%`,
+          `➕ Foiz summasi: ${formatAmount(data.interestAmount ?? 0)}`,
+        ]
+      : []),
+    `🧾 Nasiya jami: ${formatAmount(data.finalNasiyaAmount ?? Math.max(0, data.totalAmount - data.downPayment))}`,
     `📅 Muddati: ${data.months} oy`,
     `🔁 Oylik to'lov: ${formatAmount(data.monthlyPayment)}`,
     `📆 Birinchi to'lov: ${formatDate(data.firstDueDate)}`,

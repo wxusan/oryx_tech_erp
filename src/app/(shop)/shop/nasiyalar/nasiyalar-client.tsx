@@ -17,6 +17,10 @@ interface Nasiya {
   id: string
   totalAmount: number
   remainingAmount: number
+  baseRemainingAmount: number
+  interestPercent: number
+  interestAmount: number
+  finalNasiyaAmount: number
   status: NasiyaStatus
   createdAt: string
   /** Live display status derived server-side from schedules (matches dashboard). */
@@ -141,8 +145,8 @@ export default function NasiyalarClient({
         /* List */
         <div className="space-y-2">
           {filtered.map((n) => {
-            const paidAmount = n.totalAmount - n.remainingAmount
-            const pct = n.totalAmount > 0 ? Math.round((paidAmount / n.totalAmount) * 100) : 0
+            const paidAmount = n.finalNasiyaAmount - n.remainingAmount
+            const pct = n.finalNasiyaAmount > 0 ? Math.round((paidAmount / n.finalNasiyaAmount) * 100) : 0
             const isOverdue = n.isOverdue
             return (
               <Link key={n.id} href={`/shop/nasiyalar/${n.id}`} prefetch={false} className="block">
@@ -177,7 +181,13 @@ export default function NasiyalarClient({
                       <div className="flex gap-3 mt-1 text-xs text-zinc-500">
                         <span>To'langan: {fmt(paidAmount)} so'm</span>
                         <span>·</span>
-                        <span>Jami: {fmt(n.totalAmount)} so'm</span>
+                        <span>Nasiya jami: {fmt(n.finalNasiyaAmount)} so'm</span>
+                        {n.interestAmount > 0 && (
+                          <>
+                            <span>·</span>
+                            <span>Foiz: {fmt(n.interestAmount)} so'm</span>
+                          </>
+                        )}
                       </div>
                     </div>
 

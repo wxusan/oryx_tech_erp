@@ -70,9 +70,9 @@ export default function NewNasiyaPage() {
   const [totalPrice, setTotalPrice] = useState('')
   const [downPayment, setDownPayment] = useState('')
   const [months, setMonths] = useState('12')
+  const [interestPercent, setInterestPercent] = useState('0')
   const [startDate, setStartDate] = useState(today)
   const [payMethod, setPayMethod] = useState<PaymentMethod | ''>('')
-  const [appleId, setAppleId] = useState(false)
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -137,10 +137,17 @@ export default function NewNasiyaPage() {
     return Math.max(0, t - d)
   }, [totalPrice, downPayment])
 
+  const interestAmount = useMemo(() => {
+    const percent = parseInt(interestPercent) || 0
+    return Math.round((remaining * Math.max(0, percent)) / 100)
+  }, [remaining, interestPercent])
+
+  const finalNasiyaAmount = remaining + interestAmount
+
   const monthlyPayment = useMemo(() => {
     const m = parseInt(months) || 1
-    return m > 0 ? remaining / m : 0
-  }, [remaining, months])
+    return m > 0 ? finalNasiyaAmount / m : 0
+  }, [finalNasiyaAmount, months])
 
   const schedule = useMemo(() => {
     if (!startDate || !months) return []
@@ -194,10 +201,10 @@ export default function NewNasiyaPage() {
           totalAmount: Number(totalPrice),
           downPayment: Number(downPayment),
           months: Number(months),
+          interestPercent: Number(interestPercent || 0),
           monthlyPayment: Math.round(monthlyPayment),
           startDate,
           paymentMethod: payMethod,
-          appleIdNote: appleId ? 'Apple ID eslatmasi yuborish' : undefined,
           note: note.trim() || undefined,
         }),
       })
@@ -441,6 +448,21 @@ export default function NewNasiyaPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  Nasiya foizi (%) <span className="text-red-500">*</span>
+                </label>
+                <Input
+                  type="number"
+                  min={0}
+                  max={300}
+                  step={1}
+                  value={interestPercent}
+                  onChange={(e) => setInterestPercent(e.target.value)}
+                  placeholder="0"
+                  className="h-9 text-sm border-zinc-200 rounded"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Oylar <span className="text-red-500">*</span>
                 </label>
                 <Select value={months} onValueChange={(v) => v && setMonths(v)}>
@@ -455,6 +477,26 @@ export default function NewNasiyaPage() {
                     ))}
                   </SelectContent>
                 </Select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  Foiz summasi
+                </label>
+                <Input
+                  readOnly
+                  value={interestAmount > 0 ? fmt(interestAmount) : '0'}
+                  className="h-9 text-sm border-zinc-200 rounded bg-zinc-50 text-zinc-500"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  Nasiya jami
+                </label>
+                <Input
+                  readOnly
+                  value={finalNasiyaAmount > 0 ? fmt(finalNasiyaAmount) : '0'}
+                  className="h-9 text-sm border-zinc-200 rounded bg-zinc-50 text-zinc-500"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
@@ -492,18 +534,6 @@ export default function NewNasiyaPage() {
                     <SelectItem value="OTHER">Boshqa</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
-              <div className="flex items-center gap-2 col-span-2">
-                <input
-                  type="checkbox"
-                  id="apple-id"
-                  checked={appleId}
-                  onChange={(e) => setAppleId(e.target.checked)}
-                  className="w-4 h-4 rounded border-zinc-300"
-                />
-                <label htmlFor="apple-id" className="text-sm text-zinc-700 cursor-pointer">
-                  Apple ID eslatmasi yuborish
-                </label>
               </div>
               <div className="col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>

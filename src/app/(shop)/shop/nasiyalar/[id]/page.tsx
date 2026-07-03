@@ -66,6 +66,10 @@ interface Nasiya {
   shopId: string
   totalAmount: number
   downPayment: number
+  baseRemainingAmount: number
+  interestPercent: number
+  interestAmount: number
+  finalNasiyaAmount: number
   remainingAmount: number
   status: string
   reminderEnabled: boolean
@@ -318,8 +322,8 @@ export default function NasiyaDetailPage() {
     )
   }
 
-  const paidAmount = nasiya.totalAmount - nasiya.remainingAmount
-  const pct = nasiya.totalAmount > 0 ? Math.round((paidAmount / nasiya.totalAmount) * 100) : 0
+  const paidAmount = nasiya.finalNasiyaAmount - nasiya.remainingAmount
+  const pct = nasiya.finalNasiyaAmount > 0 ? Math.round((paidAmount / nasiya.finalNasiyaAmount) * 100) : 0
   const monthlyPayment =
     nasiya.schedules?.length > 0
       ? nasiya.schedules[0].expectedAmount
@@ -352,10 +356,18 @@ export default function NasiyaDetailPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
         {[
-          { label: 'Jami summa', value: `${fmt(nasiya.totalAmount)} so'm` },
+          { label: 'Jami narx', value: `${fmt(nasiya.totalAmount)} so'm` },
           { label: "Boshlang'ich to'lov", value: `${fmt(nasiya.downPayment)} so'm` },
+          { label: 'Qolgan summa', value: `${fmt(nasiya.baseRemainingAmount)} so'm` },
+          ...(nasiya.interestAmount > 0
+            ? [
+                { label: 'Nasiya foizi', value: `${fmt(nasiya.interestPercent)}%` },
+                { label: 'Foiz summasi', value: `${fmt(nasiya.interestAmount)} so'm` },
+              ]
+            : []),
+          { label: 'Nasiya jami', value: `${fmt(nasiya.finalNasiyaAmount)} so'm` },
           { label: "To'langan", value: `${fmt(paidAmount)} so'm` },
-          { label: 'Qolgan', value: `${fmt(nasiya.remainingAmount)} so'm` },
+          { label: "Qarz qoldig'i", value: `${fmt(nasiya.remainingAmount)} so'm` },
           { label: 'Oylik', value: `${fmt(monthlyPayment)} so'm` },
         ].map((c) => (
           <Card key={c.label} className="rounded-lg" size="sm">
@@ -381,7 +393,7 @@ export default function NasiyaDetailPage() {
           <Progress value={pct} className="h-2.5 rounded-full" />
           <div className="flex justify-between text-xs text-zinc-400 mt-1.5">
             <span>0 so'm</span>
-            <span>{fmt(nasiya.totalAmount)} so'm</span>
+            <span>{fmt(nasiya.finalNasiyaAmount)} so'm</span>
           </div>
         </CardContent>
       </Card>

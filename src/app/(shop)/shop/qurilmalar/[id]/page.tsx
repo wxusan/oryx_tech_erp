@@ -45,6 +45,7 @@ interface NasiyaSchedule {
 interface Nasiya {
   id: string
   totalAmount: number
+  finalNasiyaAmount: number
   remainingAmount: number
   customer: { name: string; phone: string }
   schedules: NasiyaSchedule[]
@@ -324,9 +325,9 @@ export default function QurilmaDetailPage() {
   const latestSale = device.sales?.[0]
   const saleHasDebt = latestSale ? Number(latestSale.remainingAmount) > 0 && !latestSale.paidFully : false
   const latestNasiya = device.nasiya?.[0]
-  const nasiyaPct = latestNasiya
+  const nasiyaPct = latestNasiya && latestNasiya.finalNasiyaAmount > 0
     ? Math.round(
-        ((latestNasiya.totalAmount - latestNasiya.remainingAmount) / latestNasiya.totalAmount) * 100
+        ((latestNasiya.finalNasiyaAmount - latestNasiya.remainingAmount) / latestNasiya.finalNasiyaAmount) * 100
       )
     : 0
 
@@ -516,8 +517,8 @@ export default function QurilmaDetailPage() {
                 <span className="text-zinc-900 font-medium">{latestNasiya.customer.phone}</span>
               </div>
               <div className="flex gap-4 text-sm">
-                <span className="text-zinc-500 w-32">Jami summa</span>
-                <span className="text-zinc-900 font-medium">{fmt(latestNasiya.totalAmount)}</span>
+                <span className="text-zinc-500 w-32">Nasiya jami</span>
+                <span className="text-zinc-900 font-medium">{fmt(latestNasiya.finalNasiyaAmount)}</span>
               </div>
               <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Qolgan summa</span>

@@ -128,7 +128,10 @@ export default async function DashboardPage() {
                   <div className="text-2xl font-bold text-zinc-900">
                     {fmt(stats.accrualGrossProfitThisMonth)}
                   </div>
-                  <p className="mt-2 text-xs text-zinc-500">Bu oy sotilgan qurilmalar bo'yicha</p>
+                  <p className="mt-2 text-xs text-zinc-500">
+                    Bu oy sotilgan qurilmalar bo'yicha
+                    {stats.nasiyaInterestThisMonth > 0 ? ` · Nasiya foizi: ${fmt(stats.nasiyaInterestThisMonth)}` : ''}
+                  </p>
                 </CardContent>
               </Card>
 

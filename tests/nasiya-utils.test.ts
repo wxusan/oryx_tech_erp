@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  calculateNasiyaAmounts,
   generatePaymentSchedule,
   calculateRemaining,
   getNextPayment,
@@ -14,6 +15,92 @@ import { NasiyaScheduleStatus, type NasiyaSchedule } from '@/types'
 function sum(nums: number[]) {
   return nums.reduce((a, b) => a + b, 0)
 }
+
+describe('calculateNasiyaAmounts — interest applies only after down payment', () => {
+  it('keeps percent 0 compatible with the old remaining-amount logic', () => {
+    const calc = calculateNasiyaAmounts({
+      totalAmount: 5_200_000,
+      downPayment: 1_500_000,
+      interestPercent: 0,
+      months: 6,
+    })
+
+    expect(calc.baseRemainingAmount).toBe(3_700_000)
+    expect(calc.interestAmount).toBe(0)
+    expect(calc.finalNasiyaAmount).toBe(3_700_000)
+    expect(calc.monthlyPayment).toBe(616_667)
+  })
+
+  it('applies 20 percent only to the amount left after down payment', () => {
+    const calc = calculateNasiyaAmounts({
+      totalAmount: 5_200_000,
+      downPayment: 1_500_000,
+      interestPercent: 20,
+      months: 6,
+    })
+
+    expect(calc.baseRemainingAmount).toBe(3_700_000)
+    expect(calc.interestAmount).toBe(740_000)
+    expect(calc.finalNasiyaAmount).toBe(4_440_000)
+    expect(calc.monthlyPayment).toBe(740_000)
+  })
+
+  it('generates schedules from final nasiya amount after interest', () => {
+    const calc = calculateNasiyaAmounts({
+      totalAmount: 5_200_000,
+      downPayment: 1_500_000,
+      interestPercent: 20,
+      months: 6,
+    })
+    const schedule = generatePaymentSchedule(new Date('2026-07-01T00:00:00.000Z'), 6, calc.finalNasiyaAmount)
+
+    expect(schedule).toHaveLength(6)
+    expect(sum(schedule.map((row) => row.expectedAmount))).toBe(calc.finalNasiyaAmount)
+    expect(schedule.every((row) => row.expectedAmount === 740_000)).toBe(true)
+  })
+
+  it('rejects down payment above total price', () => {
+    expect(() =>
+      calculateNasiyaAmounts({
+        totalAmount: 5_200_000,
+        downPayment: 5_300_000,
+        interestPercent: 0,
+        months: 6,
+      }),
+    ).toThrow("Boshlang'ich to'lov")
+  })
+
+  it('rejects invalid percent values', () => {
+    expect(() =>
+      calculateNasiyaAmounts({
+        totalAmount: 5_200_000,
+        downPayment: 1_500_000,
+        interestPercent: -1,
+        months: 6,
+      }),
+    ).toThrow('Nasiya foizi')
+
+    expect(() =>
+      calculateNasiyaAmounts({
+        totalAmount: 5_200_000,
+        downPayment: 1_500_000,
+        interestPercent: 301,
+        months: 6,
+      }),
+    ).toThrow('Nasiya foizi')
+  })
+
+  it('rejects nasiya creation when no debt remains after down payment', () => {
+    expect(() =>
+      calculateNasiyaAmounts({
+        totalAmount: 5_200_000,
+        downPayment: 5_200_000,
+        interestPercent: 0,
+        months: 6,
+      }),
+    ).toThrow('qarz summasi')
+  })
+})
 
 /** Minimal NasiyaSchedule fixture — only the fields the utils read matter. */
 function schedule(overrides: Partial<NasiyaSchedule>): NasiyaSchedule {

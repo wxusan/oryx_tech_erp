@@ -6,6 +6,73 @@ import { addMonths } from 'date-fns'
 import type { PaymentScheduleItem, NasiyaSchedule } from '@/types'
 import { NasiyaScheduleStatus } from '@/types'
 
+export const MAX_NASIYA_INTEREST_PERCENT = 300
+
+export interface NasiyaAmountCalculation {
+  totalAmount: number
+  downPayment: number
+  baseRemainingAmount: number
+  interestPercent: number
+  interestAmount: number
+  finalNasiyaAmount: number
+  monthlyPayment: number
+}
+
+function roundMoney(value: number): number {
+  return Math.round(value)
+}
+
+/**
+ * Calculate the debt created by a nasiya sale.
+ *
+ * totalAmount remains the original device sale price. Interest is applied only
+ * to the amount left after the down payment.
+ */
+export function calculateNasiyaAmounts(params: {
+  totalAmount: number
+  downPayment: number
+  months: number
+  interestPercent?: number
+}): NasiyaAmountCalculation {
+  const totalAmount = roundMoney(params.totalAmount)
+  const downPayment = roundMoney(params.downPayment)
+  const interestPercent = params.interestPercent ?? 0
+
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+    throw new Error("Jami narx musbat son bo'lishi kerak")
+  }
+  if (!Number.isFinite(downPayment) || downPayment < 0) {
+    throw new Error("Boshlang'ich to'lov manfiy bo'lmasligi kerak")
+  }
+  if (downPayment > totalAmount) {
+    throw new Error("Boshlang'ich to'lov jami narxdan oshmasligi kerak")
+  }
+  if (!Number.isInteger(params.months) || params.months < 1 || params.months > 24) {
+    throw new Error("Oy soni 1 dan 24 gacha bo'lishi kerak")
+  }
+  if (!Number.isInteger(interestPercent) || interestPercent < 0 || interestPercent > MAX_NASIYA_INTEREST_PERCENT) {
+    throw new Error(`Nasiya foizi 0 dan ${MAX_NASIYA_INTEREST_PERCENT} gacha butun son bo'lishi kerak`)
+  }
+
+  const baseRemainingAmount = totalAmount - downPayment
+  const interestAmount = roundMoney((baseRemainingAmount * interestPercent) / 100)
+  const finalNasiyaAmount = baseRemainingAmount + interestAmount
+
+  if (finalNasiyaAmount <= 0) {
+    throw new Error("Nasiya uchun qarz summasi 0 dan katta bo'lishi kerak")
+  }
+
+  return {
+    totalAmount,
+    downPayment,
+    baseRemainingAmount,
+    interestPercent,
+    interestAmount,
+    finalNasiyaAmount,
+    monthlyPayment: roundMoney(finalNasiyaAmount / params.months),
+  }
+}
+
 /**
  * Generate a monthly payment schedule for a nasiya plan.
  *
