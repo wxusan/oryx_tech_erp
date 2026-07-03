@@ -51,6 +51,14 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         status: true,
         reminderEnabled: true,
         note: true,
+        isImported: true,
+        importSource: true,
+        importedAt: true,
+        originalSaleDate: true,
+        originalTotalAmount: true,
+        alreadyPaidBeforeImport: true,
+        remainingAtImport: true,
+        importNote: true,
         customer: {
           select: {
             id: true,

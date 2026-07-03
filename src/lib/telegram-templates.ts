@@ -348,6 +348,41 @@ export function nasiyaOverdueMessage(data: {
   )
 }
 
+/**
+ * Imported (pre-Oryx) nasiya. Deliberately titled "Eski nasiya import qilindi"
+ * (NOT "Yangi nasiya") and shows the original/already-paid amounts as context so
+ * no admin mistakes it for a new sale. Old amounts are informational only.
+ */
+export function nasiyaImportedMessage(data: {
+  shopName: string
+  customerName: string
+  customerPhone?: string | null
+  device: DeviceSpecs
+  originalTotalAmount: number
+  alreadyPaidBeforeImport: number
+  remainingDebt: number
+  monthlyPayment: number
+  nextPaymentDate: Date | string
+  adminName?: string | null
+}): string {
+  return compose(
+    '📥 Eski nasiya import qilindi',
+    optionalLine("Do'kon", data.shopName),
+    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    formatDeviceSpecs(data.device, { battery: false }),
+    block(
+      `Eski nasiya summasi: ${formatMoney(data.originalTotalAmount)}`,
+      `Importgacha to'langan: ${formatMoney(data.alreadyPaidBeforeImport)}`,
+      `Hozirgi qolgan qarz: ${formatMoney(data.remainingDebt)}`,
+    ),
+    block(
+      `Oylik to'lov: ${formatMoney(data.monthlyPayment)}`,
+      `Keyingi to'lov: ${formatUzDate(data.nextPaymentDate)}`,
+    ),
+    optionalLine('Admin', data.adminName),
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Normal sale debt messages
 // ---------------------------------------------------------------------------

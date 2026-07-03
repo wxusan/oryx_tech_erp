@@ -76,6 +76,14 @@ interface Nasiya {
   status: string
   reminderEnabled: boolean
   note?: string | null
+  isImported?: boolean
+  importSource?: string | null
+  importedAt?: string | null
+  originalSaleDate?: string | null
+  originalTotalAmount?: number | null
+  alreadyPaidBeforeImport?: number | null
+  remainingAtImport?: number | null
+  importNote?: string | null
   device: { model: string }
   customer: { name: string; phone: string; passportPhotoUrl?: string | null }
   schedules: NasiyaSchedule[]
@@ -112,8 +120,18 @@ function fmt(n: number) {
   return Number(n).toLocaleString('ru-RU')
 }
 
+function ImportField({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div className="text-xs text-amber-700/70">{label}</div>
+      <div className="mt-0.5 font-medium text-amber-900">{value}</div>
+    </div>
+  )
+}
+
 function nasiyaLogLabel(action: string) {
   if (action === 'CREATE_NASIYA') return 'Nasiya yaratildi'
+  if (action === 'IMPORT_NASIYA') return 'Eski nasiya import qilindi'
   if (action === 'PAYMENT') return "To'lov qabul qilindi"
   if (action === 'UPDATE_REMINDER') return "Eslatma o'zgartirildi"
   if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
@@ -393,6 +411,33 @@ export default function NasiyaDetailPage() {
         <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
           <div className="text-xs font-medium text-zinc-500">Izoh</div>
           <div className="mt-1 text-sm text-zinc-800 whitespace-pre-wrap">{nasiya.note}</div>
+        </div>
+      )}
+
+      {nasiya.isImported && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <div className="flex items-center gap-2">
+            <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
+              Eski nasiya
+            </span>
+            <span className="text-sm font-semibold text-amber-900">Import qilingan nasiya</span>
+          </div>
+          <p className="mt-1 text-xs text-amber-800/80">
+            Bu Oryx'dan oldingi eski nasiya. Importgacha to'langan pul joriy oy daromadiga qo'shilmaydi.
+          </p>
+          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
+            <ImportField label="Manba" value={nasiya.importSource === 'MANUAL' ? "Qo'lda" : nasiya.importSource ?? '—'} />
+            <ImportField label="Import sanasi" value={nasiya.importedAt ? uzDate(nasiya.importedAt) : '—'} />
+            <ImportField label="Eski sotuv sanasi" value={nasiya.originalSaleDate ? uzDate(nasiya.originalSaleDate) : '—'} />
+            <ImportField label="Eski nasiya summasi" value={`${fmt(nasiya.originalTotalAmount ?? 0)} so'm`} />
+            <ImportField label="Importgacha to'langan" value={`${fmt(nasiya.alreadyPaidBeforeImport ?? 0)} so'm`} />
+            <ImportField label="Import paytidagi qarz" value={`${fmt(nasiya.remainingAtImport ?? 0)} so'm`} />
+          </div>
+          {nasiya.importNote && (
+            <div className="mt-3 text-xs text-amber-800">
+              <span className="font-medium">Izoh:</span> {nasiya.importNote}
+            </div>
+          )}
         </div>
       )}
 

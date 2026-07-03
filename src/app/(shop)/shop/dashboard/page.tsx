@@ -40,6 +40,7 @@ function fmt(n: number) {
 
 function activityLabel(action: string) {
   if (action === 'CREATE_NASIYA') return 'Nasiya yaratildi'
+  if (action === 'IMPORT_NASIYA') return 'Eski nasiya import qilindi'
   if (action === 'CREATE') return "Yangi qo'shildi"
   if (action === 'PAYMENT') return "To'lov qabul qilindi"
   if (action === 'SELL') return 'Sotuv qilindi'

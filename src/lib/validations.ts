@@ -227,6 +227,50 @@ export const createNasiyaSchema = z
 export type CreateNasiyaInput = z.infer<typeof createNasiyaSchema>
 
 // ---------------------------------------------------------------------------
+// importNasiyaSchema — manual import of an EXISTING (pre-Oryx) nasiya.
+//
+// This is carried-over debt, NOT a new sale. originalTotalAmount and
+// alreadyPaidBeforeImport are informational; only remainingDebt drives the
+// future schedule and only future payments count as collected money.
+// ---------------------------------------------------------------------------
+
+export const importNasiyaSchema = z
+  .object({
+    customerName: z
+      .string({ error: "Xaridor ismi kiritilishi shart" })
+      .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
+    customerPhone: phoneSchema,
+    deviceModel: z.string({ error: "Qurilma nomi kiritilishi shart" }).min(1, "Qurilma nomi kiritilishi shart"),
+    imei: z.string().trim().optional(),
+    storage: z.string().trim().optional(),
+    color: z.string().trim().optional(),
+    batteryHealth: z.number().int().min(0).max(100).optional(),
+    originalTotalAmount: z
+      .number({ error: "Eski nasiya umumiy summasi kiritilishi shart" })
+      .positive("Eski nasiya summasi musbat son bo'lishi kerak"),
+    alreadyPaidBeforeImport: z
+      .number({ error: "Importgacha to'langan summa kiritilishi shart" })
+      .min(0, "Importgacha to'langan summa manfiy bo'lmasligi kerak")
+      .default(0),
+    remainingDebt: z
+      .number({ error: "Qolgan qarz kiritilishi shart" })
+      .positive("Qolgan qarz 0 dan katta bo'lishi kerak"),
+    monthlyPayment: z
+      .number({ error: "Oylik to'lov kiritilishi shart" })
+      .positive("Oylik to'lov 0 dan katta bo'lishi kerak"),
+    nextPaymentDate: z.coerce.date({ error: "Keyingi to'lov sanasi kiritilishi shart" }),
+    originalSaleDate: z.coerce.date().optional(),
+    totalMonths: z.number().int().min(1).max(60).optional(),
+    importNote: z.string().trim().max(500).optional(),
+  })
+  .refine((data) => data.remainingDebt <= data.originalTotalAmount, {
+    message: "Qolgan qarz eski nasiya umumiy summasidan oshmasligi kerak",
+    path: ['remainingDebt'],
+  })
+
+export type ImportNasiyaInput = z.infer<typeof importNasiyaSchema>
+
+// ---------------------------------------------------------------------------
 // addNasiyaPaymentSchema
 // ---------------------------------------------------------------------------
 

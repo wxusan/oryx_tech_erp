@@ -29,6 +29,8 @@ export interface ShopNasiyaListItem {
   finalNasiyaAmount: number
   /** Stored parent status (kept for reference / debugging). */
   status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
+  /** True for imported (pre-Oryx) nasiyas — shown with an "Eski nasiya" badge. */
+  isImported: boolean
   /** Live display status derived from schedules (matches the dashboard). */
   displayStatus: NasiyaDisplayStatus
   isOverdue: boolean
@@ -133,6 +135,7 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
       interestAmount: true,
       finalNasiyaAmount: true,
       status: true,
+      isImported: true,
       createdAt: true,
       customer: {
         select: {
@@ -191,6 +194,7 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
         interestAmount: Number(nasiya.interestAmount),
         finalNasiyaAmount: Number(nasiya.finalNasiyaAmount),
         status: nasiya.status,
+        isImported: nasiya.isImported,
         displayStatus: derived.displayStatus,
         isOverdue: derived.isOverdue,
         overdueAmount: derived.overdueAmount,

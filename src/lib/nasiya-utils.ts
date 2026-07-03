@@ -103,6 +103,52 @@ export function generatePaymentSchedule(
 }
 
 /**
+ * Generate the FUTURE payment schedule for an imported (pre-Oryx) nasiya.
+ *
+ * Unlike `generatePaymentSchedule` (which splits a total evenly over a fixed
+ * month count), an imported nasiya has a fixed `monthlyPayment` and only its
+ * remaining debt to cover, so:
+ *   - count = ceil(remainingDebt / monthlyPayment)
+ *   - every schedule = monthlyPayment, EXCEPT the last, which absorbs the
+ *     remainder so the schedule sums EXACTLY to remainingDebt
+ *   - due dates start at `nextPaymentDate` and step one month each
+ *   - all schedules are unpaid (paidAmount 0) — no historical paid months
+ *
+ * @param nextPaymentDate - due date of the first future instalment
+ * @param remainingDebt   - debt still owed at import (must be > 0)
+ * @param monthlyPayment  - agreed monthly instalment (must be > 0)
+ */
+export function generateImportSchedule(
+  nextPaymentDate: Date,
+  remainingDebt: number,
+  monthlyPayment: number,
+): PaymentScheduleItem[] {
+  const total = Math.round(remainingDebt)
+  const monthly = Math.round(monthlyPayment)
+  if (!Number.isFinite(total) || total <= 0) {
+    throw new Error("Qolgan qarz 0 dan katta bo'lishi kerak")
+  }
+  if (!Number.isFinite(monthly) || monthly <= 0) {
+    throw new Error("Oylik to'lov 0 dan katta bo'lishi kerak")
+  }
+
+  const count = Math.ceil(total / monthly)
+  const schedule: PaymentScheduleItem[] = []
+  let allocated = 0
+  for (let i = 1; i <= count; i++) {
+    const isLast = i === count
+    const expectedAmount = isLast ? total - allocated : monthly
+    allocated += expectedAmount
+    schedule.push({
+      monthNumber: i,
+      dueDate: addMonths(nextPaymentDate, i - 1),
+      expectedAmount,
+    })
+  }
+  return schedule
+}
+
+/**
  * Calculate the remaining unpaid amount for a nasiya plan.
  *
  * @param total - The total amount owed (after downPayment has been subtracted)

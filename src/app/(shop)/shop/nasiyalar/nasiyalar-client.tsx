@@ -23,6 +23,7 @@ interface Nasiya {
   interestAmount: number
   finalNasiyaAmount: number
   status: NasiyaStatus
+  isImported: boolean
   createdAt: string
   /** Live display status derived server-side from schedules (matches dashboard). */
   displayStatus: NasiyaStatus
@@ -109,6 +110,11 @@ export default function NasiyalarClient({
           >
             Excel yuklab olish
           </button>
+          <Link href="/shop/nasiyalar/import">
+            <button className="h-9 px-4 text-sm border border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded transition-colors">
+              + Eski nasiya kiritish
+            </button>
+          </Link>
           <Link href="/shop/nasiyalar/new">
             <button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors">
               + Yangi nasiya
@@ -161,6 +167,11 @@ export default function NasiyalarClient({
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium text-sm text-zinc-900">{n.customer.name}</span>
                         <StatusBadge status={n.displayStatus} />
+                        {n.isImported && (
+                          <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
+                            Eski nasiya
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs text-zinc-500 mb-2">
                         {n.device.model} · {n.customer.phone}

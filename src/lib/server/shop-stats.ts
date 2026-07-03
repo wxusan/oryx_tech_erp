@@ -53,7 +53,9 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
     upcomingPayments,
   ] = await Promise.all([
     prisma.device.count({
-      where: { shopId, deletedAt: null },
+      // Imported devices exist only to carry pre-Oryx debt — they were never
+      // stocked through Oryx, so they don't count as the shop's devices.
+      where: { shopId, deletedAt: null, isImported: false },
     }),
 
     prisma.sale.findMany({
@@ -83,6 +85,10 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
         shopId,
         deletedAt: null,
         createdAt: { gte: monthStart, lt: monthEnd },
+        // CRITICAL: imported (pre-Oryx) nasiyas are carried-over debt, not new
+        // sales. Their originalTotalAmount / interest / device cost must NEVER
+        // enter this month's gross, interest or profit.
+        isImported: false,
       },
       select: {
         totalAmount: true,
