@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import { convertUsdToUzs, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { uzDate } from '@/lib/dates'
@@ -183,16 +184,16 @@ export default function ImportNasiyaPage() {
 
       <Section title="Moliyaviy ma'lumot">
         <Field label={`Eski nasiya umumiy summasi (${currencyLabel(currency.currency)})`} required>
-          <Input type="number" min="0" step={currency.currency === 'USD' ? '0.01' : '1'} value={form.originalTotalAmount} onChange={(e) => set('originalTotalAmount')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
+          <MoneyInput currency={currency.currency} value={form.originalTotalAmount} onChange={set('originalTotalAmount')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
         <Field label={`Importgacha to'langan (${currencyLabel(currency.currency)})`}>
-          <Input type="number" min="0" step={currency.currency === 'USD' ? '0.01' : '1'} value={form.alreadyPaidBeforeImport} onChange={(e) => set('alreadyPaidBeforeImport')(e.target.value)} placeholder="0" className="h-10 rounded-lg border-zinc-200" />
+          <MoneyInput currency={currency.currency} value={form.alreadyPaidBeforeImport} onChange={set('alreadyPaidBeforeImport')} placeholder="0" className="h-10 rounded-lg border-zinc-200" />
         </Field>
         <Field label={`Hozirgi qolgan qarz (${currencyLabel(currency.currency)})`} required>
-          <Input type="number" min="0" step={currency.currency === 'USD' ? '0.01' : '1'} value={form.remainingDebt} onChange={(e) => set('remainingDebt')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
+          <MoneyInput currency={currency.currency} value={form.remainingDebt} onChange={set('remainingDebt')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
         <Field label={`Oylik to'lov (${currencyLabel(currency.currency)})`} required>
-          <Input type="number" min="0" step={currency.currency === 'USD' ? '0.01' : '1'} value={form.monthlyPayment} onChange={(e) => set('monthlyPayment')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
+          <MoneyInput currency={currency.currency} value={form.monthlyPayment} onChange={set('monthlyPayment')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
         <Field label="Keyingi to'lov sanasi" required>
           <Input type="date" value={form.nextPaymentDate} onChange={(e) => set('nextPaymentDate')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />

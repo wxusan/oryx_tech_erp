@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Card,
@@ -729,12 +730,10 @@ export default function NasiyaDetailPage() {
                   Miqdor ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
-                  <Input
-                    type="number"
-                    inputMode="numeric"
-                    step={currency.currency === 'USD' ? '0.01' : '1'}
+                  <MoneyInput
+                    currency={currency.currency}
                     value={payAmount}
-                    onChange={(e) => setPayAmount(e.target.value)}
+                    onChange={setPayAmount}
                     placeholder={
                       selectedScheduleOutstanding
                         ? currency.currency === 'USD' && currency.usdUzsRate

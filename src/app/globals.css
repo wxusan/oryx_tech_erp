@@ -164,3 +164,17 @@
     color: #ffffff;
   }
 }
+
+/* Remove browser number-stepper buttons. Money fields use the text-based
+   MoneyInput; this is a fallback for the remaining non-money number inputs
+   (battery %, interest %, month counts). */
+input[type='number']::-webkit-outer-spin-button,
+input[type='number']::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+input[type='number'] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}

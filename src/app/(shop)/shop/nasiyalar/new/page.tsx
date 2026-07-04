@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
@@ -441,11 +442,10 @@ export default function NewNasiyaPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Jami narx ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
-                <Input
-                  type="number"
-                  step={currency.currency === 'USD' ? '0.01' : '1'}
+                <MoneyInput
+                  currency={currency.currency}
                   value={totalPrice}
-                  onChange={(e) => setTotalPrice(e.target.value)}
+                  onChange={setTotalPrice}
                   placeholder={currency.currency === 'USD' ? '700.00' : '9500000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
@@ -454,11 +454,10 @@ export default function NewNasiyaPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Boshlang&apos;ich to&apos;lov ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
-                <Input
-                  type="number"
-                  step={currency.currency === 'USD' ? '0.01' : '1'}
+                <MoneyInput
+                  currency={currency.currency}
                   value={downPayment}
-                  onChange={(e) => setDownPayment(e.target.value)}
+                  onChange={setDownPayment}
                   placeholder={currency.currency === 'USD' ? '150.00' : '2000000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />

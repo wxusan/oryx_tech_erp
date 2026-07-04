@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import { convertUsdToUzs, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
@@ -224,11 +225,10 @@ export default function NewDevicePage() {
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                 Sotib olingan narx ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
               </label>
-              <Input
-                type="number"
-                step={currency.currency === 'USD' ? '0.01' : '1'}
+              <MoneyInput
+                currency={currency.currency}
                 value={form.purchasePrice}
-                onChange={set('purchasePrice')}
+                onChange={(v) => setForm((prev) => ({ ...prev, purchasePrice: v }))}
                 placeholder={currency.currency === 'USD' ? '600.00' : '7500000'}
                 className="h-9 text-sm border-zinc-200 rounded"
               />

@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/money-input'
 import { Label } from '@/components/ui/label'
 import type { ApiResponse } from '@/types'
 
@@ -425,13 +426,10 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
                     <Label htmlFor="manual-usd-rate" className="mb-1.5 block text-xs font-medium text-zinc-700">
                       1 USD uchun UZS
                     </Label>
-                    <Input
+                    <MoneyInput
                       id="manual-usd-rate"
-                      type="number"
-                      min="1"
-                      step="0.0001"
                       value={manualRate}
-                      onChange={(event) => setManualRate(event.target.value)}
+                      onChange={setManualRate}
                       placeholder="12500"
                       className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                     />

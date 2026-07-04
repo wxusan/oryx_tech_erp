@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Select,
@@ -314,11 +315,10 @@ export default function NewSotuvPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Sotuv narxi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
-                <Input
-                  type="number"
-                  step={currency.currency === 'USD' ? '0.01' : '1'}
+                <MoneyInput
+                  currency={currency.currency}
                   value={salePrice}
-                  onChange={(e) => setSalePrice(e.target.value)}
+                  onChange={setSalePrice}
                   placeholder={currency.currency === 'USD' ? '700.00' : '9500000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
@@ -378,11 +378,10 @@ export default function NewSotuvPage() {
                   <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                     Qancha to&apos;ladi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                   </label>
-                  <Input
-                    type="number"
-                    step={currency.currency === 'USD' ? '0.01' : '1'}
+                  <MoneyInput
+                    currency={currency.currency}
                     value={partialAmount}
-                    onChange={(e) => setPartialAmount(e.target.value)}
+                    onChange={setPartialAmount}
                     placeholder={currency.currency === 'USD' ? '400.00' : '5000000'}
                     className="h-9 text-sm border-zinc-200 rounded"
                   />

@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -786,11 +787,9 @@ export default function QurilmaDetailPage() {
                 <label className="block text-xs font-medium text-zinc-700">
                   Kelish narxi <span className="text-red-500">*</span>
                 </label>
-                <Input
-                  type="number"
-                  min="0"
+                <MoneyInput
                   value={editForm.purchasePrice}
-                  onChange={(e) => setEditForm((f) => ({ ...f, purchasePrice: e.target.value }))}
+                  onChange={(v) => setEditForm((f) => ({ ...f, purchasePrice: v }))}
                   className="h-10 rounded-lg border-zinc-200 text-sm"
                 />
               </div>
@@ -971,11 +970,10 @@ export default function QurilmaDetailPage() {
             )}
             <div>
               <label className="text-xs font-medium text-zinc-700 block mb-1.5">Miqdor ({currencyLabel(currency.currency)})</label>
-              <Input
-                type="number"
-                step={currency.currency === 'USD' ? '0.01' : '1'}
+              <MoneyInput
+                currency={currency.currency}
                 value={salePayAmount}
-                onChange={(e) => setSalePayAmount(e.target.value)}
+                onChange={setSalePayAmount}
                 className="h-9 text-sm border-zinc-200 rounded"
               />
             </div>
@@ -1049,13 +1047,11 @@ export default function QurilmaDetailPage() {
               <label htmlFor="return-refund-amount" className="text-xs font-medium text-zinc-700 block mb-1.5">
                 Qaytarilgan summa ({currencyLabel(currency.currency)})
               </label>
-              <Input
+              <MoneyInput
                 id="return-refund-amount"
-                type="number"
-                min="0"
-                step={currency.currency === 'USD' ? '0.01' : '1'}
+                currency={currency.currency}
                 value={returnRefundAmount}
-                onChange={(e) => setReturnRefundAmount(e.target.value)}
+                onChange={setReturnRefundAmount}
                 placeholder="0"
                 className="h-9 text-sm border-zinc-200 rounded"
               />

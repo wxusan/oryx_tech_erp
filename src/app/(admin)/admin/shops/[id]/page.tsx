@@ -12,6 +12,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Table,
@@ -898,11 +899,10 @@ export default function ShopDetailPage() {
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                 Miqdor (so&apos;m) <span className="text-red-500">*</span>
               </label>
-              <Input
-                type="number"
+              <MoneyInput
                 placeholder="500000"
                 value={payAmount}
-                onChange={(e) => setPayAmount(e.target.value)}
+                onChange={setPayAmount}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
             </div>
