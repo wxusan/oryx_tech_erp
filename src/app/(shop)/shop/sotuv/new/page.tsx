@@ -13,7 +13,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
+import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { displayImei } from '@/lib/device-display'
+import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, Check } from 'lucide-react'
 
 interface Device {
@@ -28,8 +30,8 @@ interface Device {
 
 type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
 
-function fmt(n: number) {
-  return Number(n).toLocaleString('ru-RU')
+function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']) {
+  return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
 }
 
 function deviceMeta(device: Device) {
@@ -45,6 +47,7 @@ function deviceMeta(device: Device) {
 
 export default function NewSotuvPage() {
   const router = useRouter()
+  const { currency } = useShopCurrency()
   const [step, setStep] = useState<1 | 2>(1)
   const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
@@ -67,9 +70,13 @@ export default function NewSotuvPage() {
 
   const handleSelectDevice = useCallback((d: Device) => {
     setSelectedDevice(d)
-    setSalePrice(String(d.purchasePrice))
+    setSalePrice(
+      currency.currency === 'USD' && currency.usdUzsRate
+        ? convertUzsToUsd(d.purchasePrice, currency.usdUzsRate).toFixed(2)
+        : String(d.purchasePrice),
+    )
     setStep(2)
-  }, [])
+  }, [currency.currency, currency.usdUzsRate])
 
   useEffect(() => {
     let ignore = false
@@ -136,6 +143,10 @@ export default function NewSotuvPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!canSubmit || !selectedDevice || submitting) return
+    if (currency.currency === 'USD' && !currency.usdUzsRate) {
+      setSubmitError('USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko\'ring.')
+      return
+    }
 
     setSubmitting(true)
     setSubmitError('')
@@ -148,6 +159,7 @@ export default function NewSotuvPage() {
           customerName: customerName.trim(),
           customerPhone: customerPhone.trim(),
           salePrice: Number(salePrice),
+          inputCurrency: currency.currency,
           paymentMethod: payMethod,
           paidFully: fullyPaid,
           amountPaid: fullyPaid ? undefined : Number(partialAmount),
@@ -239,7 +251,7 @@ export default function NewSotuvPage() {
                       <div className="font-medium text-sm text-zinc-900">{d.model}</div>
                       <div className="text-xs text-zinc-500 mt-0.5">{deviceMeta(d)}</div>
                     </div>
-                    <div className="text-sm font-bold text-zinc-900">{fmt(d.purchasePrice)} so&apos;m</div>
+                    <div className="text-sm font-bold text-zinc-900">{fmt(d.purchasePrice, currency)}</div>
                   </div>
                 </button>
               ))
@@ -258,7 +270,7 @@ export default function NewSotuvPage() {
                 <div className="text-xs text-zinc-500 mt-0.5">{deviceMeta(selectedDevice)}</div>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-sm font-bold text-zinc-900">{fmt(selectedDevice.purchasePrice)} so&apos;m</span>
+                <span className="text-sm font-bold text-zinc-900">{fmt(selectedDevice.purchasePrice, currency)}</span>
                 <button
                   type="button"
                   onClick={() => { setSelectedDevice(null); setStep(1) }}
@@ -300,13 +312,14 @@ export default function NewSotuvPage() {
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Sotuv narxi <span className="text-red-500">*</span>
+                  Sotuv narxi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
                 <Input
                   type="number"
+                  step={currency.currency === 'USD' ? '0.01' : '1'}
                   value={salePrice}
                   onChange={(e) => setSalePrice(e.target.value)}
-                  placeholder="9500000"
+                  placeholder={currency.currency === 'USD' ? '700.00' : '9500000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
               </div>
@@ -363,13 +376,14 @@ export default function NewSotuvPage() {
               <div className="mt-4 grid grid-cols-2 gap-4 pt-4 border-t border-zinc-100">
                 <div>
                   <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                    Qancha to&apos;ladi <span className="text-red-500">*</span>
+                    Qancha to&apos;ladi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                   </label>
                   <Input
                     type="number"
+                    step={currency.currency === 'USD' ? '0.01' : '1'}
                     value={partialAmount}
                     onChange={(e) => setPartialAmount(e.target.value)}
-                    placeholder="5000000"
+                    placeholder={currency.currency === 'USD' ? '400.00' : '5000000'}
                     className="h-9 text-sm border-zinc-200 rounded"
                   />
                 </div>

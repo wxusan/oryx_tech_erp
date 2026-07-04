@@ -15,6 +15,8 @@ import { notifyShopAdmins } from '@/lib/notification-service'
 import { deviceAddedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
+import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_NASIYA', 'RESERVED', 'RETURNED', 'DELETED'] as const
@@ -125,6 +127,12 @@ export async function POST(req: NextRequest) {
     if (imageUrls?.some((url) => !url.startsWith(`shops/${resolvedShopId}/devices/`))) {
       return badRequest('Qurilma rasmi faqat shu do\'kon private storage papkasidan bo\'lishi kerak')
     }
+    let purchaseInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    try {
+      purchaseInput = await moneyInputToUzs(purchasePrice, parsed.data.inputCurrency)
+    } catch (err) {
+      return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
+    }
 
     // Check active IMEI uniqueness within shop. Soft-deleted rows may be reused.
     const existing = await prisma.device.findFirst({
@@ -145,7 +153,7 @@ export async function POST(req: NextRequest) {
         data: {
           shopId: resolvedShopId,
           model, color, storage, batteryHealth,
-          purchasePrice,
+          purchasePrice: purchaseInput.amountUzs,
           imei,
           supplierId,
           supplierPhone,
@@ -163,7 +171,7 @@ export async function POST(req: NextRequest) {
           action: 'CREATE',
           targetType: 'Device',
           targetId: createdDevice.id,
-          newValue: { model, imei, purchasePrice },
+          newValue: { model, imei, purchasePrice: purchaseInput.amountUzs, ...moneyInputMeta(purchaseInput) },
         },
       })
 
@@ -180,14 +188,16 @@ export async function POST(req: NextRequest) {
           where: { id: resolvedShopId },
           select: { name: true },
         })
+        const currency = await getShopCurrencyContext(resolvedShopId)
         await notifyShopAdmins(
           resolvedShopId,
           deviceAddedMessage({
             shopName: shop?.name ?? '',
             device: { deviceModel: model, storage, color, batteryHealth, imei },
-            purchasePrice,
+            purchasePrice: purchaseInput.amountUzs,
             supplierPhone,
             adminName: session.user.name,
+            currency,
           }),
           'DEVICE_CREATED',
           device.id,

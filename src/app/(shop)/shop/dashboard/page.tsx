@@ -21,6 +21,8 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { requireApiSession } from '@/lib/api-auth'
 import { getShopStats } from '@/lib/server/shop-stats'
+import { getShopCurrencyContext } from '@/lib/server/currency'
+import { formatMoneyByCurrency, formatMoneyWithBase, type CurrencyContext } from '@/lib/currency'
 import { uzDate, uzMonthYear } from '@/lib/dates'
 
 interface UpcomingPayment {
@@ -34,8 +36,12 @@ interface UpcomingPayment {
   status: string
 }
 
-function fmt(n: number) {
-  return `${Number(n).toLocaleString('ru-RU')} so'm`
+function fmt(n: number, currency: CurrencyContext) {
+  return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
+}
+
+function fmtBase(n: number, currency: CurrencyContext) {
+  return formatMoneyWithBase(n, currency.currency, currency.usdUzsRate)
 }
 
 function activityLabel(action: string) {
@@ -69,7 +75,10 @@ export default async function DashboardPage() {
   const guarded = await requireApiSession()
   if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
 
-  const stats = await getShopStats(guarded.session, guarded.shopId)
+  const [stats, currency] = await Promise.all([
+    getShopStats(guarded.session, guarded.shopId),
+    getShopCurrencyContext(guarded.shopId),
+  ])
 
   const grossCashIn = stats.grossCashInThisMonth ?? stats.cashCollectedThisMonth
   const netCashFlow = stats.netCashFlowThisMonth ?? stats.netCashAfterReturnsThisMonth
@@ -88,7 +97,7 @@ export default async function DashboardPage() {
           </p>
         </div>
         <Badge variant="outline" className="h-6 w-fit rounded-md border-zinc-200 text-zinc-600">
-          {uzMonthYear(new Date())}
+          {uzMonthYear(new Date())} · {currency.currency}
         </Badge>
       </div>
 
@@ -105,10 +114,10 @@ export default async function DashboardPage() {
                 <div>
                   <div className="text-xs font-medium uppercase text-zinc-500">Yig'ilgan pul, brutto</div>
                   <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-900">
-                    {fmt(grossCashIn)}
+                    {fmt(grossCashIn, currency)}
                   </div>
                   <div className="mt-1 text-xs text-zinc-500">
-                    Qaytarishlardan keyingi net pul: {fmt(netCashFlow)}
+                    Qaytarishlardan keyingi net pul: {fmtBase(netCashFlow, currency)}
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -118,8 +127,8 @@ export default async function DashboardPage() {
                   </div>
                   <Progress value={collectionRate} />
                   <div className="flex items-center justify-between text-xs text-zinc-500">
-                    <span>Kutilmoqda: {fmt(stats.expectedThisMonth)}</span>
-                    <span>Brutto + kutilayotgan: {fmt(collectionBase)}</span>
+                    <span>Kutilmoqda: {fmt(stats.expectedThisMonth, currency)}</span>
+                    <span>Brutto + kutilayotgan: {fmt(collectionBase, currency)}</span>
                   </div>
                 </div>
               </CardContent>
@@ -133,11 +142,11 @@ export default async function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-zinc-900">
-                    {fmt(stats.accrualGrossProfitThisMonth)}
+                    {fmt(stats.accrualGrossProfitThisMonth, currency)}
                   </div>
                   <p className="mt-2 text-xs text-zinc-500">
                     Hisoblangan savdo summasi tannarxdan ayrilgan
-                    {stats.nasiyaInterestThisMonth > 0 ? ` · Nasiya foizi: ${fmt(stats.nasiyaInterestThisMonth)}` : ''}
+                    {stats.nasiyaInterestThisMonth > 0 ? ` · Nasiya foizi: ${fmt(stats.nasiyaInterestThisMonth, currency)}` : ''}
                   </p>
                 </CardContent>
               </Card>
@@ -149,7 +158,7 @@ export default async function DashboardPage() {
                 </CardHeader>
                 <CardContent>
                   <div className="text-2xl font-bold text-zinc-900">
-                    {fmt(stats.inventoryPurchaseCost)}
+                    {fmt(stats.inventoryPurchaseCost, currency)}
                   </div>
                   <p className="mt-2 text-xs text-zinc-500">Sotilmagan va band qilingan qurilmalar</p>
                 </CardContent>
@@ -163,7 +172,7 @@ export default async function DashboardPage() {
                   </CardHeader>
                   <CardContent>
                     <div className="text-2xl font-bold text-red-700">
-                      {fmt(stats.overdueMoney)}
+                      {fmt(stats.overdueMoney, currency)}
                     </div>
                     <p className="mt-2 text-xs text-red-700/70">
                       {stats.overdueCount} ta muddatdan o'tgan yozuv
@@ -206,7 +215,7 @@ export default async function DashboardPage() {
               <CardContent className="flex items-center justify-between gap-3">
                 <div>
                   <div className="text-xs text-zinc-500">Bu oy kutilmoqda</div>
-                  <div className="mt-1 text-xl font-bold text-zinc-900">{fmt(stats.expectedThisMonth)}</div>
+                  <div className="mt-1 text-xl font-bold text-zinc-900">{fmt(stats.expectedThisMonth, currency)}</div>
                 </div>
                 <CalendarClock className="size-5 text-zinc-400" />
               </CardContent>
@@ -233,7 +242,7 @@ export default async function DashboardPage() {
                         </Badge>
                       </div>
                       <div className="text-right">
-                        <div className="text-sm font-semibold text-zinc-900">{fmt(outstanding(p))}</div>
+                        <div className="text-sm font-semibold text-zinc-900">{fmt(outstanding(p), currency)}</div>
                         <div className="mt-0.5 text-xs text-zinc-400">qolgan</div>
                       </div>
                     </div>

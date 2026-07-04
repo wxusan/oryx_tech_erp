@@ -2,7 +2,7 @@
 
 import { type FormEvent, useEffect, useState } from 'react'
 import { signOut } from 'next-auth/react'
-import { CheckCircle2, KeyRound, Loader2, Send, ServerCog, ShieldCheck, UserRound } from 'lucide-react'
+import { CheckCircle2, CircleDollarSign, KeyRound, Loader2, Send, ServerCog, ShieldCheck, UserRound } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -38,6 +38,20 @@ interface PasswordForm {
   confirmPassword: string
 }
 
+interface CurrencyRateRecord {
+  id: string
+  rate: string | number
+  source: string
+  fetchedAt: string
+  effectiveDate: string | null
+}
+
+interface CurrencyRatePayload {
+  latest: CurrencyRateRecord | null
+  latestCbu: CurrencyRateRecord | null
+  latestManual: CurrencyRateRecord | null
+}
+
 const emptyPasswordForm: PasswordForm = {
   currentPassword: '',
   newPassword: '',
@@ -64,6 +78,11 @@ function formatDate(value: string | null | undefined) {
   })
 }
 
+function formatRate(value: CurrencyRateRecord | null | undefined) {
+  if (!value) return '-'
+  return `${Number(value.rate).toLocaleString('ru-RU')} so'm`
+}
+
 export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
   const [profile, setProfile] = useState<SuperAdminProfile | null>(null)
   const [loading, setLoading] = useState(true)
@@ -80,6 +99,12 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
   const [nameError, setNameError] = useState('')
   const [nameSuccess, setNameSuccess] = useState('')
   const [nameLoading, setNameLoading] = useState(false)
+  const [currencyRate, setCurrencyRate] = useState<CurrencyRatePayload | null>(null)
+  const [manualRate, setManualRate] = useState('')
+  const [rateLoading, setRateLoading] = useState(true)
+  const [rateSaving, setRateSaving] = useState(false)
+  const [rateError, setRateError] = useState('')
+  const [rateSuccess, setRateSuccess] = useState('')
 
   useEffect(() => {
     let mounted = true
@@ -99,6 +124,22 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       })
       .finally(() => {
         if (mounted) setLoading(false)
+      })
+
+    fetch('/api/admin/currency-rate')
+      .then(async (response) => {
+        if (!response.ok) throw new Error(await readApiError(response))
+        const json: ApiResponse<CurrencyRatePayload> = await response.json()
+        if (mounted) {
+          setCurrencyRate(json.data ?? null)
+          setManualRate(json.data?.latestManual ? String(Number(json.data.latestManual.rate)) : '')
+        }
+      })
+      .catch((err: Error) => {
+        if (mounted) setRateError(err.message || 'USD kursi yuklanmadi')
+      })
+      .finally(() => {
+        if (mounted) setRateLoading(false)
       })
 
     return () => {
@@ -203,6 +244,43 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       setTelegramError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
     } finally {
       setTelegramLoading(false)
+    }
+  }
+
+  async function handleRateSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setRateError('')
+    setRateSuccess('')
+
+    const rate = Number(manualRate)
+    if (!Number.isFinite(rate) || rate <= 0) {
+      setRateError("USD kursi 0 dan katta bo'lishi kerak")
+      return
+    }
+
+    setRateSaving(true)
+    try {
+      const response = await fetch('/api/admin/currency-rate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rate, note: 'Manual USD/UZS fallback rate updated from admin settings' }),
+      })
+      if (!response.ok) throw new Error(await readApiError(response))
+      const json: ApiResponse<CurrencyRateRecord> = await response.json()
+      const savedRate = json.data ?? null
+      if (savedRate) {
+        setCurrencyRate((current) => ({
+          latest: savedRate,
+          latestCbu: current?.latestCbu ?? null,
+          latestManual: savedRate,
+        }))
+        setManualRate(String(Number(savedRate.rate)))
+      }
+      setRateSuccess(json.message ?? 'Manual USD kursi saqlandi.')
+    } catch (err) {
+      setRateError(err instanceof Error ? err.message : 'USD kursini saqlashda xatolik')
+    } finally {
+      setRateSaving(false)
     }
   }
 
@@ -311,6 +389,63 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
                   </div>
                 ))}
               </div>
+            </CardContent>
+          </Card>
+
+          <Card className="rounded-lg lg:col-span-2">
+            <CardHeader className="border-b border-zinc-100">
+              <CardTitle>USD kursi</CardTitle>
+              <CardDescription>CBU ishlamasa, tizim oxirgi saqlangan manual kursdan foydalanadi</CardDescription>
+              <CardAction>
+                <CircleDollarSign className="size-5 text-zinc-400" />
+              </CardAction>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleRateSubmit} className="max-w-xl space-y-4">
+                {rateError && (
+                  <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                    {rateError}
+                  </div>
+                )}
+                {rateSuccess && (
+                  <div className="flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                    <CheckCircle2 className="size-4" />
+                    {rateSuccess}
+                  </div>
+                )}
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                  <Info label="Amaldagi" value={rateLoading ? 'Yuklanmoqda...' : formatRate(currencyRate?.latest)} />
+                  <Info label="CBU oxirgi" value={rateLoading ? 'Yuklanmoqda...' : formatRate(currencyRate?.latestCbu)} />
+                  <Info label="Manual oxirgi" value={rateLoading ? 'Yuklanmoqda...' : formatRate(currencyRate?.latestManual)} />
+                </div>
+
+                <div className="flex items-end gap-2">
+                  <div className="flex-1">
+                    <Label htmlFor="manual-usd-rate" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                      1 USD uchun UZS
+                    </Label>
+                    <Input
+                      id="manual-usd-rate"
+                      type="number"
+                      min="1"
+                      step="0.0001"
+                      value={manualRate}
+                      onChange={(event) => setManualRate(event.target.value)}
+                      placeholder="12500"
+                      className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    disabled={rateSaving || rateLoading}
+                    className="h-9 rounded-md bg-zinc-900 text-white hover:bg-zinc-800"
+                  >
+                    {rateSaving ? <Loader2 className="size-4 animate-spin" /> : <CircleDollarSign className="size-4" />}
+                    Kursni saqlash
+                  </Button>
+                </div>
+              </form>
             </CardContent>
           </Card>
 

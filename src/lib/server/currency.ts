@@ -1,0 +1,109 @@
+import 'server-only'
+
+import { prisma } from '@/lib/prisma'
+import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
+
+const CBU_USD_URL = 'https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/'
+const RATE_TTL_MS = 12 * 60 * 60 * 1000
+
+interface CbuRate {
+  Ccy?: string
+  Rate?: string
+  Date?: string
+}
+
+export class CurrencyRateUnavailableError extends Error {
+  constructor() {
+    super('USD kursi mavjud emas')
+  }
+}
+
+export async function getShopCurrencyContext(shopId: string): Promise<CurrencyContext> {
+  const shop = await prisma.shop.findUnique({
+    where: { id: shopId },
+    select: { preferredCurrency: true },
+  })
+  const currency = (shop?.preferredCurrency ?? 'UZS') as CurrencyCode
+  if (currency === 'UZS') return { currency, usdUzsRate: null }
+
+  try {
+    return { currency, usdUzsRate: await getUsdUzsRate() }
+  } catch {
+    return { currency, usdUzsRate: null }
+  }
+}
+
+export async function getUsdUzsRate(): Promise<number> {
+  const latestCbu = await latestStoredUsdRate('CBU')
+  if (latestCbu && Date.now() - latestCbu.fetchedAt.getTime() <= RATE_TTL_MS) {
+    return Number(latestCbu.rate)
+  }
+
+  try {
+    return await refreshUsdUzsRate()
+  } catch (err) {
+    await logRateFailure(err)
+    const latest = await latestStoredUsdRate()
+    if (latest) return Number(latest.rate)
+    throw new CurrencyRateUnavailableError()
+  }
+}
+
+export async function refreshUsdUzsRate(): Promise<number> {
+  const response = await fetch(CBU_USD_URL, {
+    headers: { accept: 'application/json' },
+    cache: 'no-store',
+  })
+  if (!response.ok) throw new Error(`CBU rate fetch failed: ${response.status}`)
+
+  const json = (await response.json()) as CbuRate[]
+  const item = json.find((row) => row.Ccy === 'USD') ?? json[0]
+  const rate = Number(String(item?.Rate ?? '').replace(',', '.'))
+  if (!Number.isFinite(rate) || rate <= 0) throw new Error('CBU USD rate response is invalid')
+
+  await prisma.currencyRate.create({
+    data: {
+      baseCurrency: 'USD',
+      quoteCurrency: 'UZS',
+      rate,
+      source: 'CBU',
+      fetchedAt: new Date(),
+      effectiveDate: parseCbuDate(item?.Date),
+    },
+  })
+
+  return rate
+}
+
+async function latestStoredUsdRate(source?: 'CBU' | 'MANUAL') {
+  return prisma.currencyRate.findFirst({
+    where: { baseCurrency: 'USD', quoteCurrency: 'UZS', ...(source ? { source } : {}) },
+    orderBy: { fetchedAt: 'desc' },
+    select: { rate: true, fetchedAt: true },
+  })
+}
+
+async function logRateFailure(err: unknown) {
+  try {
+    await prisma.opsEvent.create({
+      data: {
+        level: 'WARN',
+        event: 'currency.rate_fetch_failed',
+        message: 'CBU USD/UZS rate fetch failed; using stored fallback if available',
+        status: 'FAILED',
+        errorCode: err instanceof Error ? err.name : 'UnknownError',
+        metadata: { source: 'CBU' },
+      },
+    })
+  } catch {
+    // Currency display must not be taken down by observability failure.
+  }
+}
+
+function parseCbuDate(value?: string) {
+  if (!value) return null
+  const match = /^(\d{2})\.(\d{2})\.(\d{4})$/.exec(value)
+  if (!match) return null
+  const [, day, month, year] = match
+  return new Date(`${year}-${month}-${day}T00:00:00.000Z`)
+}

@@ -13,6 +13,7 @@ import {
   deviceReturnedMessage,
   deviceRestockedMessage,
   nasiyaCreatedMessage,
+  nasiyaImportedMessage,
   nasiyaPaymentMessage,
   nasiyaDueTodayMessage,
   nasiyaOverdueMessage,
@@ -177,6 +178,24 @@ describe('device messages', () => {
     expect(msg).toContain("To'lov usuli: Naqd")
   })
 
+  it('device sold in USD mode keeps base UZS context', () => {
+    const msg = deviceSoldMessage({
+      shopName: 'Malika',
+      device: fullDevice,
+      customerName: 'Ali',
+      salePrice: 1_250_000,
+      paidAmount: 625_000,
+      remaining: 625_000,
+      paymentMethod: 'CASH',
+      currency: { currency: 'USD', usdUzsRate: 12_500 },
+    })
+
+    expect(msg).toContain('Sotuv narxi: $100.00')
+    expect(msg).toMatch(/~1.?250.?000 so'm/)
+    expect(msg).toContain("To'langan: $50.00")
+    expect(msg).toContain('Qolgan qarz: $50.00')
+  })
+
   it("device sold shows Qolgan qarz: Yo'q when fully paid", () => {
     const msg = deviceSoldMessage({
       shopName: 'Malika',
@@ -299,6 +318,27 @@ describe('nasiya messages', () => {
     })
     expect(msg).toContain('Kechikkan: 12 kun')
   })
+
+  it('imported nasiya Telegram message omits placeholder IMEI and keeps USD plus UZS context', () => {
+    const msg = nasiyaImportedMessage({
+      shopName: 'Malika',
+      customerName: 'Ali',
+      customerPhone: '+998900000000',
+      device: { ...fullDevice, imei: 'IMPORT-abc' },
+      originalTotalAmount: 2_500_000,
+      alreadyPaidBeforeImport: 1_250_000,
+      remainingDebt: 1_250_000,
+      monthlyPayment: 625_000,
+      nextPaymentDate: new Date(2026, 7, 1),
+      currency: { currency: 'USD', usdUzsRate: 12_500 },
+    })
+
+    expect(msg).not.toContain('IMPORT-')
+    expect(msg).not.toContain('IMEI')
+    expect(msg).toContain('Eski nasiya summasi: $200.00')
+    expect(msg).toMatch(/~2.?500.?000 so'm/)
+    expect(msg).toContain("Oylik to'lov: $50.00")
+  })
 })
 
 describe('sale debt messages', () => {
@@ -341,6 +381,7 @@ describe('global safety across every template', () => {
     deviceReturnedMessage({ shopName: 'S', device: fullDevice, refundAmount: 1, refundMethod: 'CASH', note: 'n', adminName: 'A' }),
     deviceRestockedMessage({ shopName: 'S', device: fullDevice, note: 'n', adminName: 'A' }),
     nasiyaCreatedMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, totalAmount: 1, downPayment: 1, baseRemainingAmount: 1, interestPercent: 20, interestAmount: 1, finalNasiyaAmount: 1, months: 6, monthlyPayment: 1, nextPaymentDate: new Date(), adminName: 'A' }),
+    nasiyaImportedMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, originalTotalAmount: 1, alreadyPaidBeforeImport: 0, remainingDebt: 1, monthlyPayment: 1, nextPaymentDate: new Date(), adminName: 'A' }),
     nasiyaPaymentMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, paidAmount: 1, paymentMethod: 'CASH', remaining: 1, note: 'n', adminName: 'A' }),
     nasiyaDueTodayMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, dueDate: new Date() }),
     nasiyaOverdueMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, dueDate: new Date(), daysLate: 1 }),

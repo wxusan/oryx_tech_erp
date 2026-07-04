@@ -18,6 +18,8 @@ import { nasiyaCreatedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
+import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -46,14 +48,28 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const currency = await getShopCurrencyContext(shopId)
     if (passportPhotoUrl && !passportPhotoUrl.startsWith(`shops/${shopId}/passports/`)) {
       return badRequest("Pasport rasmi boshqa do'konga tegishli")
     }
     const normalizedPhone = normalizePhone(customerPhone)
+    let totalInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    let downPaymentInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    try {
+      totalInput = await moneyInputToUzs(totalAmount, parsed.data.inputCurrency)
+      downPaymentInput = await moneyInputToUzs(downPayment, parsed.data.inputCurrency)
+    } catch (err) {
+      return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
+    }
 
     let amounts: ReturnType<typeof calculateNasiyaAmounts>
     try {
-      amounts = calculateNasiyaAmounts({ totalAmount, downPayment, months, interestPercent })
+      amounts = calculateNasiyaAmounts({
+        totalAmount: totalInput.amountUzs,
+        downPayment: downPaymentInput.amountUzs,
+        months,
+        interestPercent,
+      })
     } catch (error) {
       return badRequest(error instanceof Error ? error.message : "Nasiya summasi noto'g'ri")
     }
@@ -179,6 +195,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         monthlyPayment: amounts.monthlyPayment,
         nextPaymentDate: scheduleItems[0]?.dueDate ?? null,
         adminName: session.user.name,
+        currency,
       })
       for (const admin of shopAdmins) {
         await tx.notification.create({
@@ -205,12 +222,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           newValue: {
             customerName,
             totalAmount: amounts.totalAmount,
+            inputTotalAmount: totalAmount,
             downPayment: amounts.downPayment,
+            inputDownPayment: downPayment,
             baseRemainingAmount: amounts.baseRemainingAmount,
             interestPercent: amounts.interestPercent,
             interestAmount: amounts.interestAmount,
             finalNasiyaAmount: amounts.finalNasiyaAmount,
             months,
+            ...moneyInputMeta(totalInput),
           },
         },
       })

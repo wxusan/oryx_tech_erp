@@ -1,4 +1,5 @@
 import { displayImei } from '@/lib/device-display'
+import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
 
 const actionLabels: Record<string, string> = {
   CREATE: "Qo'shildi",
@@ -30,6 +31,7 @@ const targetLabels: Record<string, string> = {
   Shop: "Do'kon",
   ShopAdmin: "Do'kon admini",
   SuperAdmin: 'Bosh admin',
+  CurrencyRate: 'Valyuta kursi',
 }
 
 const paymentMethodLabels: Record<string, string> = {
@@ -75,7 +77,7 @@ export function actionLabel(action: string, targetType: string) {
   return actionLabels[action] ?? 'Boshqa amal'
 }
 
-export function formatLogValue(value: unknown) {
+export function formatLogValue(value: unknown, currency?: CurrencyContext) {
   if (!value || typeof value !== 'object') return ''
   const data = value as Record<string, unknown>
   const parts = [
@@ -85,15 +87,15 @@ export function formatLogValue(value: unknown) {
     stringPart(data.name),
     stringPart(data.ownerName),
     typeof data.shopNumber === 'string' ? `#${data.shopNumber}` : undefined,
-    moneyPart(data.amount),
-    moneyPart(data.totalAmount),
-    moneyPart(data.baseRemainingAmount),
+    moneyPart(data.amount, currency),
+    moneyPart(data.totalAmount, currency),
+    moneyPart(data.baseRemainingAmount, currency),
     typeof data.interestPercent === 'number' ? `Nasiya foizi: ${data.interestPercent}%` : undefined,
-    moneyPart(data.interestAmount),
-    moneyPart(data.finalNasiyaAmount),
-    moneyPart(data.salePrice),
-    moneyPart(data.purchasePrice),
-    moneyPart(data.downPayment),
+    moneyPart(data.interestAmount, currency),
+    moneyPart(data.finalNasiyaAmount, currency),
+    moneyPart(data.salePrice, currency),
+    moneyPart(data.purchasePrice, currency),
+    moneyPart(data.downPayment, currency),
     typeof data.months === 'number' ? `${data.months} oy` : undefined,
     typeof data.paymentMethod === 'string' ? (paymentMethodLabels[data.paymentMethod] ?? "Noma'lum to'lov usuli") : undefined,
     typeof data.status === 'string' ? (statusLabels[data.status] ?? "Noma'lum holat") : undefined,
@@ -126,7 +128,8 @@ function imeiPart(value: unknown) {
   return typeof value === 'string' && value.trim() ? displayImei(value) : undefined
 }
 
-function moneyPart(value: unknown) {
+function moneyPart(value: unknown, currency?: CurrencyContext) {
   if (typeof value !== 'number') return undefined
-  return `${value.toLocaleString('ru-RU')} so'm`
+  if (!currency) return `${value.toLocaleString('ru-RU')} so'm`
+  return formatMoneyByCurrency(value, currency.currency, currency.usdUzsRate)
 }

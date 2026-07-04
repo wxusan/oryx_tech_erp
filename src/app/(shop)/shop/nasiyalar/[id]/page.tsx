@@ -32,7 +32,9 @@ import {
 } from '@/components/ui/select'
 import { paymentMethodLabel } from '@/lib/labels'
 import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
+import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { uzDate, uzDateTime, uzMonthYear } from '@/lib/dates'
+import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, Pencil } from 'lucide-react'
 
 interface NasiyaSchedule {
@@ -116,7 +118,8 @@ function RowBadge({ status }: { status: RowStatus }) {
   )
 }
 
-function fmt(n: number) {
+function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
+  if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
   return Number(n).toLocaleString('ru-RU')
 }
 
@@ -161,6 +164,7 @@ function scheduleTriggerLabel(row: NasiyaSchedule) {
 export default function NasiyaDetailPage() {
   const params = useParams()
   const id = params.id as string
+  const { currency } = useShopCurrency()
 
   const [nasiya, setNasiya] = useState<Nasiya | null>(null)
   const [loading, setLoading] = useState(true)
@@ -181,7 +185,11 @@ export default function NasiyaDetailPage() {
   const [payError, setPayError] = useState('')
 
   const [editOpen, setEditOpen] = useState(false)
+  const [editCustomerName, setEditCustomerName] = useState('')
+  const [editCustomerPhone, setEditCustomerPhone] = useState('')
   const [editNote, setEditNote] = useState('')
+  const [editImportNote, setEditImportNote] = useState('')
+  const [editReminderEnabled, setEditReminderEnabled] = useState(true)
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
 
@@ -256,7 +264,11 @@ export default function NasiyaDetailPage() {
   }, [nasiyaId, nasiyaShopId])
 
   function openEdit() {
+    setEditCustomerName(nasiya?.customer.name ?? '')
+    setEditCustomerPhone(nasiya?.customer.phone ?? '')
     setEditNote(nasiya?.note ?? '')
+    setEditImportNote(nasiya?.importNote ?? '')
+    setEditReminderEnabled(nasiya?.reminderEnabled ?? true)
     setEditError('')
     setEditOpen(true)
   }
@@ -269,7 +281,14 @@ export default function NasiyaDetailPage() {
       const res = await fetch(`/api/nasiya/${nasiya.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ note: editNote.trim() }),
+        body: JSON.stringify({
+          customerName: editCustomerName.trim(),
+          customerPhone: editCustomerPhone.trim(),
+          note: editNote.trim(),
+          importNote: nasiya.isImported ? editImportNote.trim() : undefined,
+          reminderEnabled: editReminderEnabled,
+          reason: editNote.trim() || editImportNote.trim() || "Nasiya ma'lumotlari tuzatildi",
+        }),
       })
       const json = await res.json()
       if (json.success) {
@@ -313,6 +332,10 @@ export default function NasiyaDetailPage() {
 
   async function handlePaymentSubmit() {
     if (!canSubmit || submitting) return
+    if (!carryOver && currency.currency === 'USD' && !currency.usdUzsRate) {
+      setPayError('USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko\'ring.')
+      return
+    }
     setSubmitting(true)
     setPayError('')
     try {
@@ -326,6 +349,7 @@ export default function NasiyaDetailPage() {
         body: JSON.stringify({
           nasiyaScheduleId: selectedScheduleId,
           amount: carryOver ? 0 : Number(payAmount),
+          inputCurrency: currency.currency,
           paymentMethod: carryOver ? undefined : payMethod,
           date: new Date(payDate).toISOString(),
           delayedUntil: carryOver ? new Date(payDate).toISOString() : undefined,
@@ -430,9 +454,9 @@ export default function NasiyaDetailPage() {
             <ImportField label="Manba" value={nasiya.importSource === 'MANUAL' ? "Qo'lda" : nasiya.importSource ?? '—'} />
             <ImportField label="Import sanasi" value={nasiya.importedAt ? uzDate(nasiya.importedAt) : '—'} />
             <ImportField label="Eski sotuv sanasi" value={nasiya.originalSaleDate ? uzDate(nasiya.originalSaleDate) : '—'} />
-            <ImportField label="Eski nasiya summasi" value={`${fmt(nasiya.originalTotalAmount ?? 0)} so'm`} />
-            <ImportField label="Importgacha to'langan" value={`${fmt(nasiya.alreadyPaidBeforeImport ?? 0)} so'm`} />
-            <ImportField label="Import paytidagi qarz" value={`${fmt(nasiya.remainingAtImport ?? 0)} so'm`} />
+            <ImportField label="Eski nasiya summasi" value={fmt(nasiya.originalTotalAmount ?? 0, currency)} />
+            <ImportField label="Importgacha to'langan" value={fmt(nasiya.alreadyPaidBeforeImport ?? 0, currency)} />
+            <ImportField label="Import paytidagi qarz" value={fmt(nasiya.remainingAtImport ?? 0, currency)} />
           </div>
           {nasiya.importNote && (
             <div className="mt-3 text-xs text-amber-800">
@@ -445,19 +469,19 @@ export default function NasiyaDetailPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
         {[
-          { label: 'Jami narx', value: `${fmt(nasiya.totalAmount)} so'm` },
-          { label: "Boshlang'ich to'lov", value: `${fmt(nasiya.downPayment)} so'm` },
-          { label: 'Qolgan summa', value: `${fmt(nasiya.baseRemainingAmount)} so'm` },
+          { label: 'Jami narx', value: fmt(nasiya.totalAmount, currency) },
+          { label: "Boshlang'ich to'lov", value: fmt(nasiya.downPayment, currency) },
+          { label: 'Qolgan summa', value: fmt(nasiya.baseRemainingAmount, currency) },
           ...(nasiya.interestAmount > 0
             ? [
                 { label: 'Nasiya foizi', value: `${fmt(nasiya.interestPercent)}%` },
-                { label: 'Foiz summasi', value: `${fmt(nasiya.interestAmount)} so'm` },
+                { label: 'Foiz summasi', value: fmt(nasiya.interestAmount, currency) },
               ]
             : []),
-          { label: 'Nasiya jami', value: `${fmt(nasiya.finalNasiyaAmount)} so'm` },
-          { label: "To'langan", value: `${fmt(paidAmount)} so'm` },
-          { label: "Qarz qoldig'i", value: `${fmt(nasiya.remainingAmount)} so'm` },
-          { label: 'Oylik', value: `${fmt(monthlyPayment)} so'm` },
+          { label: 'Nasiya jami', value: fmt(nasiya.finalNasiyaAmount, currency) },
+          { label: "To'langan", value: fmt(paidAmount, currency) },
+          { label: "Qarz qoldig'i", value: fmt(nasiya.remainingAmount, currency) },
+          { label: 'Oylik', value: fmt(monthlyPayment, currency) },
         ].map((c) => (
           <Card key={c.label} className="rounded-lg" size="sm">
             <CardContent>
@@ -476,13 +500,13 @@ export default function NasiyaDetailPage() {
         </CardHeader>
         <CardContent>
           <div className="flex justify-between text-sm mb-2">
-            <span className="text-zinc-600 font-medium">{fmt(paidAmount)} so'm to'landi</span>
+            <span className="text-zinc-600 font-medium">{fmt(paidAmount, currency)} to'landi</span>
             <span className="font-bold text-zinc-900">{pct}%</span>
           </div>
           <Progress value={pct} className="h-2.5 rounded-full" />
           <div className="flex justify-between text-xs text-zinc-400 mt-1.5">
-            <span>0 so'm</span>
-            <span>{fmt(nasiya.finalNasiyaAmount)} so'm</span>
+            <span>{fmt(0, currency)}</span>
+            <span>{fmt(nasiya.finalNasiyaAmount, currency)}</span>
           </div>
         </CardContent>
       </Card>
@@ -555,8 +579,8 @@ export default function NasiyaDetailPage() {
               <tr key={row.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                 <td className="px-4 py-3 text-zinc-500">{row.monthNumber}</td>
                 <td className="px-4 py-3 text-zinc-700">{uzDate(row.dueDate)}</td>
-                <td className="px-4 py-3 font-medium text-zinc-900">{fmt(row.expectedAmount)} so'm</td>
-                <td className="px-4 py-3 text-zinc-700">{fmt(row.paidAmount)} so'm</td>
+                <td className="px-4 py-3 font-medium text-zinc-900">{fmt(row.expectedAmount, currency)}</td>
+                <td className="px-4 py-3 text-zinc-700">{fmt(row.paidAmount, currency)}</td>
                 <td className="px-4 py-3">
                   <RowBadge status={rowDisplayStatus(row)} />
                 </td>
@@ -587,7 +611,7 @@ export default function NasiyaDetailPage() {
               {nasiya.payments.map((payment) => (
                 <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
                   <td className="px-4 py-3 text-zinc-700">{uzDate(payment.paidAt)}</td>
-                  <td className="px-4 py-3 font-medium text-zinc-900">{fmt(payment.amount)} so'm</td>
+                  <td className="px-4 py-3 font-medium text-zinc-900">{fmt(payment.amount, currency)}</td>
                   <td className="px-4 py-3 text-zinc-700">{paymentMethodLabel(payment.paymentMethod)}</td>
                   <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
                 </tr>
@@ -660,7 +684,7 @@ export default function NasiyaDetailPage() {
                             {s.monthNumber}-oy · {uzMonthYear(s.dueDate)}
                           </span>
                           <span className="text-xs text-zinc-500">
-                            {uzDate(s.dueDate)} · qolgan {fmt(scheduleBalance(s))} so'm
+                            {uzDate(s.dueDate)} · qolgan {fmt(scheduleBalance(s), currency)}
                           </span>
                         </div>
                       </SelectItem>
@@ -676,7 +700,7 @@ export default function NasiyaDetailPage() {
                       <span className="text-xs text-zinc-500">Shu oy uchun qolgan</span>
                     </div>
                     <span className="text-sm font-semibold text-zinc-900">
-                      {fmt(selectedScheduleOutstanding)} so'm
+                      {fmt(selectedScheduleOutstanding, currency)}
                     </span>
                   </div>
                 )}
@@ -702,28 +726,41 @@ export default function NasiyaDetailPage() {
             {!carryOver && (
               <div className="space-y-2">
                 <label className="block text-xs font-medium text-zinc-700">
-                  Miqdor <span className="text-red-500">*</span>
+                  Miqdor ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
                 <div className="relative">
                   <Input
                     type="number"
                     inputMode="numeric"
+                    step={currency.currency === 'USD' ? '0.01' : '1'}
                     value={payAmount}
                     onChange={(e) => setPayAmount(e.target.value)}
-                    placeholder={selectedScheduleOutstanding ? String(selectedScheduleOutstanding) : '1000000'}
+                    placeholder={
+                      selectedScheduleOutstanding
+                        ? currency.currency === 'USD' && currency.usdUzsRate
+                          ? convertUzsToUsd(selectedScheduleOutstanding, currency.usdUzsRate).toFixed(2)
+                          : String(selectedScheduleOutstanding)
+                        : currency.currency === 'USD' ? '100.00' : '1000000'
+                    }
                     className="h-12 rounded-lg border-zinc-200 pr-14 text-lg font-semibold"
                   />
                   <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-zinc-400">
-                    so'm
+                    {currencyLabel(currency.currency)}
                   </span>
                 </div>
                 {selectedScheduleOutstanding > 0 && (
                   <button
                     type="button"
-                    onClick={() => setPayAmount(String(selectedScheduleOutstanding))}
+                    onClick={() =>
+                      setPayAmount(
+                        currency.currency === 'USD' && currency.usdUzsRate
+                          ? convertUzsToUsd(selectedScheduleOutstanding, currency.usdUzsRate).toFixed(2)
+                          : String(selectedScheduleOutstanding),
+                      )
+                    }
                     className="text-xs font-medium text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline"
                   >
-                    Tavsiya: {fmt(selectedScheduleOutstanding)} so'm
+                    Tavsiya: {fmt(selectedScheduleOutstanding, currency)}
                   </button>
                 )}
               </div>
@@ -797,9 +834,9 @@ export default function NasiyaDetailPage() {
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-md rounded-xl sm:w-full">
           <DialogHeader>
-            <DialogTitle className="text-zinc-900">Nasiya izohini tahrirlash</DialogTitle>
+            <DialogTitle className="text-zinc-900">Nasiya ma'lumotlarini tahrirlash</DialogTitle>
             <DialogDescription className="text-sm text-zinc-500">
-              Moliyaviy shartlar (summa, foiz, oylik) bu yerdan o'zgartirilmaydi — faqat izoh.
+              Pul summalari to'lovlar va hisobotlarga bog'langan. Ularni tuzatish uchun alohida adjustment kerak.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-1">
@@ -808,12 +845,47 @@ export default function NasiyaDetailPage() {
                 {editError}
               </div>
             )}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-zinc-700">Mijoz ismi</label>
+                <Input
+                  value={editCustomerName}
+                  onChange={(e) => setEditCustomerName(e.target.value)}
+                  className="h-9 rounded-lg border-zinc-200 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-zinc-700">Telefon</label>
+                <Input
+                  value={editCustomerPhone}
+                  onChange={(e) => setEditCustomerPhone(e.target.value)}
+                  className="h-9 rounded-lg border-zinc-200 text-sm"
+                />
+              </div>
+            </div>
             <Textarea
               value={editNote}
               onChange={(e) => setEditNote(e.target.value)}
               placeholder="Nasiya bo'yicha izoh..."
               className="min-h-[100px] rounded-lg border-zinc-200 text-sm"
             />
+            {nasiya?.isImported && (
+              <Textarea
+                value={editImportNote}
+                onChange={(e) => setEditImportNote(e.target.value)}
+                placeholder="Import izohi..."
+                className="min-h-[80px] rounded-lg border-zinc-200 text-sm"
+              />
+            )}
+            <label className="flex items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+              <input
+                type="checkbox"
+                checked={editReminderEnabled}
+                onChange={(e) => setEditReminderEnabled(e.target.checked)}
+                className="mt-0.5 h-4 w-4 rounded border-zinc-300"
+              />
+              <span>Eslatma yoqilgan</span>
+            </label>
           </div>
           <DialogFooter className="gap-2">
             <Button

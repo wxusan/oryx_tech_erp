@@ -27,6 +27,8 @@ import { processPendingNotifications } from '@/lib/notification-service'
 import { invalidateShopOverdueCron } from '@/lib/server/cache-tags'
 import { tashkentDayRange } from '@/lib/timezone'
 import { recordOpsEvent } from '@/lib/server/ops-events'
+import { getUsdUzsRate } from '@/lib/server/currency'
+import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
 import {
   nasiyaDueTodayMessage,
   nasiyaOverdueMessage,
@@ -38,6 +40,18 @@ export const maxDuration = 60
 
 function outstandingAmount(expected: unknown, paid: unknown) {
   return Math.max(0, Number(expected) - Number(paid ?? 0))
+}
+
+let usdUzsRateForRun: Promise<number | null> | null = null
+
+function getUsdUzsRateForRun() {
+  usdUzsRateForRun ??= getUsdUzsRate().catch(() => null)
+  return usdUzsRateForRun
+}
+
+async function reminderCurrency(shop: { preferredCurrency: CurrencyCode }): Promise<CurrencyContext> {
+  if (shop.preferredCurrency !== 'USD') return { currency: 'UZS', usdUzsRate: null }
+  return { currency: 'USD', usdUzsRate: await getUsdUzsRateForRun() }
 }
 
 // ---------------------------------------------------------------------------
@@ -54,6 +68,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   }
 
   const startedAt = Date.now()
+  usdUzsRateForRun = null
   await recordOpsEvent({ level: 'INFO', event: 'cron.reminders.started', message: 'Reminders cron started' })
 
   try {
@@ -105,6 +120,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       month: schedule.monthNumber,
       amountDue: outstandingAmount(schedule.expectedAmount, schedule.paidAmount),
       dueDate: schedule.delayedUntil ?? schedule.dueDate,
+      currency: await reminderCurrency(nasiya.shop),
     })
     for (const admin of nasiya.shop.admins) {
       const dedupeKey = `REMINDER:${dayKey}:${admin.telegramId}:${schedule.id}`
@@ -178,6 +194,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       amountDue: outstandingAmount(schedule.expectedAmount, schedule.paidAmount),
       dueDate: effectiveDue,
       daysLate,
+      currency: await reminderCurrency(schedule.nasiya.shop),
     })
     await prisma.$transaction(async (tx) => {
       for (const admin of schedule.nasiya.shop.admins) {
@@ -249,6 +266,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       },
       remainingAmount: Number(sale.remainingAmount),
       dueDate: sale.dueDate ?? new Date(),
+      currency: await reminderCurrency(sale.shop),
     })
     for (const admin of sale.shop.admins) {
       const dedupeKey = `SALE_REMINDER:${dayKey}:${admin.telegramId}:${sale.id}`
@@ -303,6 +321,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       remainingAmount: Number(sale.remainingAmount),
       dueDate: sale.dueDate ?? new Date(),
       daysLate,
+      currency: await reminderCurrency(sale.shop),
     })
     for (const admin of sale.shop.admins) {
       const dedupeKey = `SALE_OVERDUE:${dayKey}:${admin.telegramId}:${sale.id}`

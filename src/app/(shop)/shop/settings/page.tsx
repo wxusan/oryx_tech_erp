@@ -44,6 +44,7 @@ interface ShopProfile {
   note: string | null
   status: string
   subscriptionDue: string
+  preferredCurrency: 'UZS' | 'USD'
 }
 
 interface PasswordForm {
@@ -93,7 +94,7 @@ export default function ShopSettingsPage() {
 
   // Shop profile editing
   const [shop, setShop] = useState<ShopProfile | null>(null)
-  const [shopForm, setShopForm] = useState({ name: '', ownerName: '', ownerPhone: '', address: '', note: '' })
+  const [shopForm, setShopForm] = useState({ name: '', ownerName: '', ownerPhone: '', address: '', note: '', preferredCurrency: 'UZS' as 'UZS' | 'USD' })
   const [shopError, setShopError] = useState('')
   const [shopSuccess, setShopSuccess] = useState('')
   const [shopSaving, setShopSaving] = useState(false)
@@ -125,6 +126,7 @@ export default function ShopSettingsPage() {
             ownerPhone: shopJson.data.ownerPhone,
             address: shopJson.data.address ?? '',
             note: shopJson.data.note ?? '',
+            preferredCurrency: shopJson.data.preferredCurrency ?? 'UZS',
           })
         }
       })
@@ -214,6 +216,7 @@ export default function ShopSettingsPage() {
           ownerPhone: shopForm.ownerPhone.trim(),
           address: shopForm.address.trim(),
           note: shopForm.note.trim(),
+          preferredCurrency: shopForm.preferredCurrency,
         }),
       })
       if (!response.ok) throw new Error(await readApiError(response))
@@ -389,7 +392,7 @@ export default function ShopSettingsPage() {
             <Card className="rounded-lg lg:col-span-2">
               <CardHeader className="border-b border-zinc-100">
                 <CardTitle>Do'kon ma'lumotlari</CardTitle>
-                <CardDescription>Do'kon nomi va aloqa ma'lumotlarini tahrirlash</CardDescription>
+                <CardDescription>Do'kon nomi, aloqa ma'lumotlari va pul ko'rinishini tahrirlash</CardDescription>
                 <CardAction>
                   <Badge variant="outline" className="rounded-md border-zinc-200 text-zinc-600">
                     #{shop.shopNumber}
@@ -453,6 +456,31 @@ export default function ShopSettingsPage() {
                         onChange={(e) => setShopForm((f) => ({ ...f, address: e.target.value }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                       />
+                    </div>
+                    <div>
+                      <Label className="mb-1.5 block text-xs font-medium text-zinc-700">
+                        Pul ko'rinishi
+                      </Label>
+                      <div className="inline-flex overflow-hidden rounded-md border border-zinc-200 bg-white">
+                        {(['UZS', 'USD'] as const).map((currency) => (
+                          <button
+                            key={currency}
+                            type="button"
+                            onClick={() => setShopForm((f) => ({ ...f, preferredCurrency: currency }))}
+                            className={[
+                              'h-9 px-4 text-sm font-medium transition-colors',
+                              shopForm.preferredCurrency === currency
+                                ? 'bg-zinc-900 text-white'
+                                : 'text-zinc-600 hover:bg-zinc-50',
+                            ].join(' ')}
+                          >
+                            {currency}
+                          </button>
+                        ))}
+                      </div>
+                      <p className="mt-1.5 text-xs text-zinc-500">
+                        UZS bazaviy hisob bo'lib qoladi; USD faqat ko'rish va kiritish uchun.
+                      </p>
                     </div>
                   </div>
                   <div>

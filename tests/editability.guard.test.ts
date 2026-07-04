@@ -77,7 +77,32 @@ describe('nasiya edit safety guard', () => {
   it('is shop-scoped, audit-logged and cache-invalidated', () => {
     expect(src).toContain("session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}")
     expect(src).toContain('tx.log.create')
-    expect(src).toContain('invalidateShopReminderMutation(existing.shopId)')
+    expect(src).toContain('invalidateShopNasiyaMutation(existing.shopId)')
+  })
+})
+
+describe('sale edit safety guard', () => {
+  const src = read('src/app/api/sales/[id]/route.ts')
+
+  it('accepts safe metadata fields but rejects direct money rewrites', () => {
+    const schema = schemaBody(src, 'updateSaleSchema')
+
+    for (const field of ['customerName', 'customerPhone', 'note', 'dueDate', 'reminderEnabled', 'paymentMethod']) {
+      expect(schema).toContain(`${field}:`)
+    }
+    for (const field of ['salePrice', 'amountPaid', 'remainingAmount', 'paidFully']) {
+      expect(schema).not.toContain(`${field}:`)
+      expect(src).toContain(`'${field}'`)
+    }
+    expect(src).toContain("Pul summalarini bevosita o'zgartirib bo'lmaydi")
+  })
+
+  it('is shop-scoped, normalizes phone, audit-logged and cache-invalidated', () => {
+    expect(src).toContain('resolveActiveShopId(session, requestedShopId)')
+    expect(src).toContain('where: { id: saleId, shopId, deletedAt: null }')
+    expect(src).toContain('normalizedPhone: normalizePhone(parsed.data.customerPhone)')
+    expect(src).toContain('tx.log.create')
+    expect(src).toContain('invalidateShopSaleMutation(shopId)')
   })
 })
 

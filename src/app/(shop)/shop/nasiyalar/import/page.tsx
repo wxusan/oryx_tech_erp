@@ -1,15 +1,18 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { convertUsdToUzs, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { uzDate } from '@/lib/dates'
+import { useShopCurrency } from '@/lib/use-shop-currency'
 
-function fmt(n: number) {
+function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
+  if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
   return Number(n).toLocaleString('ru-RU')
 }
 
@@ -36,6 +39,7 @@ function previewSchedule(remainingDebt: number, monthlyPayment: number, nextPaym
 
 export default function ImportNasiyaPage() {
   const router = useRouter()
+  const { currency } = useShopCurrency()
   const [form, setForm] = useState({
     customerName: '',
     customerPhone: '',
@@ -56,15 +60,27 @@ export default function ImportNasiyaPage() {
   const [saving, setSaving] = useState(false)
 
   const set = (key: keyof typeof form) => (value: string) => setForm((f) => ({ ...f, [key]: value }))
+  const moneyToUzs = useCallback(
+    (value: string) => {
+      const amount = Number(value) || 0
+      return currency.currency === 'USD' && currency.usdUzsRate
+        ? convertUsdToUzs(amount, currency.usdUzsRate)
+        : amount
+    },
+    [currency.currency, currency.usdUzsRate],
+  )
+
+  const remainingDebtUzs = moneyToUzs(form.remainingDebt)
+  const monthlyPaymentUzs = moneyToUzs(form.monthlyPayment)
 
   const preview = useMemo(
     () =>
       previewSchedule(
-        Number(form.remainingDebt),
-        Number(form.monthlyPayment),
+        remainingDebtUzs,
+        monthlyPaymentUzs,
         form.nextPaymentDate ? new Date(form.nextPaymentDate) : new Date(NaN),
       ),
-    [form.remainingDebt, form.monthlyPayment, form.nextPaymentDate],
+    [remainingDebtUzs, monthlyPaymentUzs, form.nextPaymentDate],
   )
 
   const canSubmit =
@@ -79,6 +95,10 @@ export default function ImportNasiyaPage() {
 
   async function handleSubmit() {
     if (!canSubmit) return
+    if (currency.currency === 'USD' && !currency.usdUzsRate) {
+      setError('USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko\'ring.')
+      return
+    }
     setSaving(true)
     setError('')
     try {
@@ -97,6 +117,7 @@ export default function ImportNasiyaPage() {
           alreadyPaidBeforeImport: form.alreadyPaidBeforeImport.trim() ? Number(form.alreadyPaidBeforeImport) : 0,
           remainingDebt: Number(form.remainingDebt),
           monthlyPayment: Number(form.monthlyPayment),
+          inputCurrency: currency.currency,
           nextPaymentDate: new Date(form.nextPaymentDate).toISOString(),
           originalSaleDate: form.originalSaleDate ? new Date(form.originalSaleDate).toISOString() : undefined,
           importNote: form.importNote.trim() || undefined,
@@ -161,17 +182,17 @@ export default function ImportNasiyaPage() {
       </Section>
 
       <Section title="Moliyaviy ma'lumot">
-        <Field label="Eski nasiya umumiy summasi" required>
-          <Input type="number" min="0" value={form.originalTotalAmount} onChange={(e) => set('originalTotalAmount')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
+        <Field label={`Eski nasiya umumiy summasi (${currencyLabel(currency.currency)})`} required>
+          <Input type="number" min="0" step={currency.currency === 'USD' ? '0.01' : '1'} value={form.originalTotalAmount} onChange={(e) => set('originalTotalAmount')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
         </Field>
-        <Field label="Importgacha to'langan">
-          <Input type="number" min="0" value={form.alreadyPaidBeforeImport} onChange={(e) => set('alreadyPaidBeforeImport')(e.target.value)} placeholder="0" className="h-10 rounded-lg border-zinc-200" />
+        <Field label={`Importgacha to'langan (${currencyLabel(currency.currency)})`}>
+          <Input type="number" min="0" step={currency.currency === 'USD' ? '0.01' : '1'} value={form.alreadyPaidBeforeImport} onChange={(e) => set('alreadyPaidBeforeImport')(e.target.value)} placeholder="0" className="h-10 rounded-lg border-zinc-200" />
         </Field>
-        <Field label="Hozirgi qolgan qarz" required>
-          <Input type="number" min="0" value={form.remainingDebt} onChange={(e) => set('remainingDebt')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
+        <Field label={`Hozirgi qolgan qarz (${currencyLabel(currency.currency)})`} required>
+          <Input type="number" min="0" step={currency.currency === 'USD' ? '0.01' : '1'} value={form.remainingDebt} onChange={(e) => set('remainingDebt')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
         </Field>
-        <Field label="Oylik to'lov" required>
-          <Input type="number" min="0" value={form.monthlyPayment} onChange={(e) => set('monthlyPayment')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
+        <Field label={`Oylik to'lov (${currencyLabel(currency.currency)})`} required>
+          <Input type="number" min="0" step={currency.currency === 'USD' ? '0.01' : '1'} value={form.monthlyPayment} onChange={(e) => set('monthlyPayment')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
         </Field>
         <Field label="Keyingi to'lov sanasi" required>
           <Input type="date" value={form.nextPaymentDate} onChange={(e) => set('nextPaymentDate')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
@@ -190,14 +211,14 @@ export default function ImportNasiyaPage() {
         <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
           <div className="text-sm font-semibold text-zinc-900">Jadval oldindan ko'rish</div>
           <div className="mt-2 grid grid-cols-2 gap-x-4 gap-y-1.5 text-sm sm:grid-cols-4">
-            <Preview label="Qolgan qarz" value={`${fmt(Number(form.remainingDebt))} so'm`} />
+            <Preview label="Qolgan qarz" value={fmt(remainingDebtUzs, currency)} />
             <Preview label="Oylar soni" value={`${preview.count} oy`} />
             <Preview label="Birinchi to'lov" value={uzDate(preview.firstDate)} />
             <Preview label="Oxirgi to'lov" value={uzDate(preview.lastDate)} />
           </div>
-          {preview.lastAmount !== Math.round(Number(form.monthlyPayment)) && (
+          {preview.lastAmount !== Math.round(monthlyPaymentUzs) && (
             <div className="mt-2 text-xs text-zinc-500">
-              Oxirgi oy to'lovi: <span className="font-medium text-zinc-800">{fmt(preview.lastAmount)} so'm</span>
+              Oxirgi oy to'lovi: <span className="font-medium text-zinc-800">{fmt(preview.lastAmount, currency)}</span>
             </div>
           )}
           <div className="mt-2 text-xs font-medium text-amber-700">Bu yangi sotuv emas.</div>

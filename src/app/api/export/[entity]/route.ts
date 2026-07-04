@@ -2,10 +2,12 @@ import { NextRequest } from 'next/server'
 import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/node'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { csvRows } from '@/lib/csv'
+import { formatMoneyByCurrency } from '@/lib/currency'
 import { displayImei } from '@/lib/device-display'
 import { prisma } from '@/lib/prisma'
 import { deviceStatusLabel, nasiyaStatusLabel, paymentMethodLabel } from '@/lib/labels'
 import { deriveNasiyaOverdue } from '@/lib/nasiya-utils'
+import { getShopCurrencyContext } from '@/lib/server/currency'
 
 type RouteContext = { params: Promise<{ entity: string }> }
 type ExportCell = string | number | boolean | Date | null | undefined
@@ -115,6 +117,7 @@ function exportResponse(entity: string, format: ExportFormat, data: ExportData) 
 }
 
 async function exportData(entity: string, shopId: string, role: string): Promise<ExportData | null> {
+  const currency = await getShopCurrencyContext(shopId)
   if (entity === 'devices') {
     const where = { shopId, deletedAt: null }
     const total = await assertExportSize(entity, prisma.device.count({ where }))
@@ -143,7 +146,8 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'color',
         'storage',
         'batteryHealth',
-        'purchasePrice',
+        'purchasePriceUzs',
+        'purchasePriceDisplay',
         'status',
         'createdAt',
       ],
@@ -154,6 +158,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         d.storage,
         d.batteryHealth,
         d.purchasePrice.toString(),
+        formatMoneyByCurrency(Number(d.purchasePrice), currency.currency, currency.usdUzsRate),
         deviceStatusLabel(d.status),
         d.createdAt,
       ]),
@@ -210,9 +215,12 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'customer',
         'phone',
         'device',
-        'salePrice',
-        'amountPaid',
-        'remainingAmount',
+        'salePriceUzs',
+        'salePriceDisplay',
+        'amountPaidUzs',
+        'amountPaidDisplay',
+        'remainingAmountUzs',
+        'remainingAmountDisplay',
         'paymentMethod',
         'paidFully',
         'dueDate',
@@ -223,8 +231,11 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         s.customer.phone,
         s.device.model,
         s.salePrice.toString(),
+        formatMoneyByCurrency(Number(s.salePrice), currency.currency, currency.usdUzsRate),
         s.amountPaid.toString(),
+        formatMoneyByCurrency(Number(s.amountPaid), currency.currency, currency.usdUzsRate),
         s.remainingAmount.toString(),
+        formatMoneyByCurrency(Number(s.remainingAmount), currency.currency, currency.usdUzsRate),
         paymentMethodLabel(s.paymentMethod),
         s.paidFully,
         s.dueDate,
@@ -282,13 +293,19 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'customer',
         'phone',
         'device',
-        'totalAmount',
-        'downPayment',
-        'baseRemainingAmount',
+        'totalAmountUzs',
+        'totalAmountDisplay',
+        'downPaymentUzs',
+        'downPaymentDisplay',
+        'baseRemainingAmountUzs',
+        'baseRemainingAmountDisplay',
         'interestPercent',
-        'interestAmount',
-        'finalNasiyaAmount',
-        'remainingAmount',
+        'interestAmountUzs',
+        'interestAmountDisplay',
+        'finalNasiyaAmountUzs',
+        'finalNasiyaAmountDisplay',
+        'remainingAmountUzs',
+        'remainingAmountDisplay',
         'months',
         'status',
         'createdAt',
@@ -305,12 +322,18 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         n.customer.phone,
         n.device.model,
         n.totalAmount.toString(),
+        formatMoneyByCurrency(Number(n.totalAmount), currency.currency, currency.usdUzsRate),
         n.downPayment.toString(),
+        formatMoneyByCurrency(Number(n.downPayment), currency.currency, currency.usdUzsRate),
         n.baseRemainingAmount.toString(),
+        formatMoneyByCurrency(Number(n.baseRemainingAmount), currency.currency, currency.usdUzsRate),
         n.interestPercent.toString(),
         n.interestAmount.toString(),
+        formatMoneyByCurrency(Number(n.interestAmount), currency.currency, currency.usdUzsRate),
         n.finalNasiyaAmount.toString(),
+        formatMoneyByCurrency(Number(n.finalNasiyaAmount), currency.currency, currency.usdUzsRate),
         n.remainingAmount.toString(),
+        formatMoneyByCurrency(Number(n.remainingAmount), currency.currency, currency.usdUzsRate),
         n.months,
         nasiyaStatusLabel(
           deriveNasiyaOverdue(
@@ -364,7 +387,8 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'device',
         'imei',
         'customer',
-        'refundAmount',
+        'refundAmountUzs',
+        'refundAmountDisplay',
         'refundMethod',
         'note',
         'createdAt',
@@ -374,6 +398,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         displayImei(item.device.imei),
         item.sale?.customer.name ?? item.nasiya?.customer.name ?? '',
         item.refundAmount.toString(),
+        formatMoneyByCurrency(Number(item.refundAmount), currency.currency, currency.usdUzsRate),
         paymentMethodLabel(item.refundMethod),
         item.note,
         item.createdAt,

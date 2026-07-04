@@ -16,6 +16,7 @@ import { prisma } from '@/lib/prisma'
 import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
 import { invalidateShopProfileMutation } from '@/lib/server/cache-tags'
+import { getShopCurrencyContext } from '@/lib/server/currency'
 
 function shopProfileSelect() {
   return {
@@ -28,6 +29,7 @@ function shopProfileSelect() {
     note: true,
     status: true,
     subscriptionDue: true,
+    preferredCurrency: true,
   } satisfies Prisma.ShopSelect
 }
 
@@ -37,6 +39,7 @@ const updateShopProfileSchema = z.object({
   ownerPhone: z.string().trim().min(9, "Telefon raqam kamida 9 ta raqam bo'lishi kerak").optional(),
   address: z.string().trim().optional(),
   note: z.string().trim().optional(),
+  preferredCurrency: z.enum(['UZS', 'USD']).optional(),
 })
 
 export async function GET() {
@@ -56,7 +59,8 @@ export async function GET() {
 
     if (!shop) return notFound("Do'kon topilmadi")
 
-    return ok(shop)
+    const currency = await getShopCurrencyContext(shop.id)
+    return ok({ ...shop, usdUzsRate: currency.usdUzsRate })
   } catch (err) {
     console.error('[GET /api/shop/profile]', err)
     return serverError()
@@ -87,6 +91,7 @@ export async function PATCH(req: NextRequest) {
       ...(parsed.data.ownerPhone !== undefined ? { ownerPhone: parsed.data.ownerPhone } : {}),
       ...(parsed.data.address !== undefined ? { address: parsed.data.address } : {}),
       ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
+      ...(parsed.data.preferredCurrency !== undefined ? { preferredCurrency: parsed.data.preferredCurrency } : {}),
     }
     if (Object.keys(updateData).length === 0) {
       return badRequest("O'zgartirish uchun ma'lumot kiritilmadi")
@@ -94,7 +99,7 @@ export async function PATCH(req: NextRequest) {
 
     const existing = await prisma.shop.findFirst({
       where: { id: shopId, deletedAt: null },
-      select: { id: true, name: true, ownerName: true, ownerPhone: true, address: true, note: true },
+      select: { id: true, name: true, ownerName: true, ownerPhone: true, address: true, note: true, preferredCurrency: true },
     })
     if (!existing) return notFound("Do'kon topilmadi")
 
@@ -114,6 +119,7 @@ export async function PATCH(req: NextRequest) {
             ownerPhone: existing.ownerPhone,
             address: existing.address,
             note: existing.note,
+            preferredCurrency: existing.preferredCurrency,
           },
           newValue: updateData,
         },
@@ -123,7 +129,8 @@ export async function PATCH(req: NextRequest) {
 
     invalidateShopProfileMutation(shopId)
 
-    return ok(updated, "Do'kon ma'lumotlari yangilandi")
+    const currency = await getShopCurrencyContext(shopId)
+    return ok({ ...updated, usdUzsRate: currency.usdUzsRate }, "Do'kon ma'lumotlari yangilandi")
   } catch (err) {
     console.error('[PATCH /api/shop/profile]', err)
     return serverError()

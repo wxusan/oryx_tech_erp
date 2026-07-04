@@ -10,7 +10,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Badge } from '@/components/ui/badge'
 import { actionLabel, actorLabel, formatLogValue, targetLabel } from '@/lib/log-format'
+import { logCategoryFor, logCategoryLabel, logCategoryOptions, type LogCategory } from '@/lib/log-categories'
+import type { CurrencyContext } from '@/lib/currency'
 
 type ActorType = 'SUPER_ADMIN' | 'SHOP_ADMIN'
 
@@ -44,6 +47,7 @@ interface DisplayLog {
   datetime: string
   actor: string
   actorType: ActorType
+  category: LogCategory
   action: string
   target: string
   note: string
@@ -62,25 +66,27 @@ function formatDateTime(value: string) {
   })
 }
 
-function displayLog(log: LogEntry): DisplayLog {
+function displayLog(log: LogEntry, currency: CurrencyContext): DisplayLog {
   return {
     id: log.id,
     datetime: formatDateTime(log.createdAt),
     actor: log.actorName || log.actorLogin || actorLabel(log.actorType),
     actorType: log.actorType,
+    category: logCategoryFor(log.action, log.targetType),
     action: actionLabel(log.action, log.targetType),
     target: targetLabel(log.targetType, log.targetId, log.newValue),
-    note: log.note || formatLogValue(log.newValue),
+    note: log.note || formatLogValue(log.newValue, currency),
   }
 }
 
 interface ShopLogsClientProps {
   initialPayload: LogsPayload
   initialRequestKey: string
+  currency: CurrencyContext
 }
 
-export default function ShopLogsClient({ initialPayload, initialRequestKey }: ShopLogsClientProps) {
-  const [logs, setLogs] = useState<DisplayLog[]>(() => initialPayload.logs.map(displayLog))
+export default function ShopLogsClient({ initialPayload, initialRequestKey, currency }: ShopLogsClientProps) {
+  const [logs, setLogs] = useState<DisplayLog[]>(() => initialPayload.logs.map((log) => displayLog(log, currency)))
   const [loadedKey, setLoadedKey] = useState(initialRequestKey)
   const [error, setError] = useState<string | null>(null)
   const [totalLogs, setTotalLogs] = useState(initialPayload.total)
@@ -88,6 +94,7 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey }: Sh
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [category, setCategory] = useState<LogCategory>('all')
   const [page, setPage] = useState(1)
 
   // Debounce the free-text search so typing doesn't fire a request per keystroke.
@@ -100,13 +107,14 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey }: Sh
     const params = new URLSearchParams()
 
     if (debouncedSearch.trim()) params.set('search', debouncedSearch.trim())
+    if (category !== 'all') params.set('category', category)
     if (dateFrom) params.set('from', dateFrom)
     if (dateTo) params.set('to', dateTo)
     params.set('skip', String((page - 1) * PER_PAGE))
     params.set('take', String(PER_PAGE))
 
     return params.toString()
-  }, [debouncedSearch, dateFrom, dateTo, page])
+  }, [debouncedSearch, dateFrom, dateTo, category, page])
 
   useEffect(() => {
     if (loadedKey === requestKey) return
@@ -126,7 +134,7 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey }: Sh
 
         setError(null)
         setTotalLogs(json.data.total)
-        setLogs(json.data.logs.map(displayLog))
+        setLogs(json.data.logs.map((log) => displayLog(log, currency)))
         setLoadedKey(requestKey)
       })
       .catch((err: unknown) => {
@@ -138,7 +146,7 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey }: Sh
       })
 
     return () => controller.abort()
-  }, [loadedKey, requestKey])
+  }, [currency, loadedKey, requestKey])
 
   const loading = loadedKey !== requestKey
   const totalPages = Math.max(1, Math.ceil(totalLogs / PER_PAGE))
@@ -181,12 +189,31 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey }: Sh
         </div>
       </div>
 
+      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 pb-px">
+        {logCategoryOptions.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => { setCategory(option.value); setPage(1) }}
+            className={[
+              'shrink-0 border-b-2 px-3 py-2 text-xs font-medium transition-colors',
+              category === option.value
+                ? 'border-zinc-900 text-zinc-900'
+                : 'border-transparent text-zinc-500 hover:text-zinc-800',
+            ].join(' ')}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+
       <div className="overflow-x-auto rounded border border-zinc-200 bg-white">
         <Table>
           <TableHeader>
             <TableRow className="border-zinc-200 bg-zinc-50">
               <TableHead className="w-36 pl-5 text-xs font-medium text-zinc-500">Sana / Vaqt</TableHead>
               <TableHead className="w-40 text-xs font-medium text-zinc-500">Kim</TableHead>
+              <TableHead className="w-36 text-xs font-medium text-zinc-500">Kategoriya</TableHead>
               <TableHead className="text-xs font-medium text-zinc-500">Amal</TableHead>
               <TableHead className="text-xs font-medium text-zinc-500">Nima haqida</TableHead>
               <TableHead className="pr-5 text-xs font-medium text-zinc-500">Eslatma</TableHead>
@@ -195,13 +222,13 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey }: Sh
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-sm text-zinc-400">
+                <TableCell colSpan={6} className="py-10 text-center text-sm text-zinc-400">
                   Yuklanmoqda...
                 </TableCell>
               </TableRow>
             ) : logs.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="py-10 text-center text-sm text-zinc-400">
+                <TableCell colSpan={6} className="py-10 text-center text-sm text-zinc-400">
                   Log topilmadi
                 </TableCell>
               </TableRow>
@@ -223,6 +250,11 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey }: Sh
                         {log.actorType === 'SUPER_ADMIN' ? 'Bosh admin' : "Do'kon"}
                       </span>
                     </div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="rounded-md border-zinc-200 text-xs text-zinc-600">
+                      {logCategoryLabel(log.category)}
+                    </Badge>
                   </TableCell>
                   <TableCell className="text-sm text-zinc-700">{log.action}</TableCell>
                   <TableCell className="text-sm text-zinc-600">{log.target}</TableCell>

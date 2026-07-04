@@ -19,10 +19,16 @@ import { Progress } from '@/components/ui/progress'
 import type { ChartConfig } from '@/components/ui/chart'
 import { requireApiSession } from '@/lib/api-auth'
 import { getShopStats } from '@/lib/server/shop-stats'
+import { getShopCurrencyContext } from '@/lib/server/currency'
+import { formatMoneyByCurrency, formatMoneyWithBase, type CurrencyContext } from '@/lib/currency'
 import HisobotChartsLoader from './hisobot-charts-loader'
 
-function fmt(value: number) {
-  return `${Number(value).toLocaleString('ru-RU')} so'm`
+function fmt(value: number, currency: CurrencyContext) {
+  return formatMoneyByCurrency(value, currency.currency, currency.usdUzsRate)
+}
+
+function fmtBase(value: number, currency: CurrencyContext) {
+  return formatMoneyWithBase(value, currency.currency, currency.usdUzsRate)
 }
 
 function uzMonthLabel(date: Date) {
@@ -47,7 +53,10 @@ export default async function ShopReportPage() {
   const guarded = await requireApiSession()
   if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
 
-  const stats = await getShopStats(guarded.session, guarded.shopId)
+  const [stats, currency] = await Promise.all([
+    getShopStats(guarded.session, guarded.shopId),
+    getShopCurrencyContext(guarded.shopId),
+  ])
 
   const monthLabel = uzMonthLabel(new Date())
   const collected = stats.grossCashInThisMonth ?? stats.cashCollectedThisMonth ?? stats.cashReceivedThisMonth
@@ -92,7 +101,7 @@ export default async function ShopReportPage() {
         <div>
           <div className="mb-2 flex flex-wrap items-center gap-2">
             <Badge variant="outline" className="rounded-md border-zinc-200 bg-white text-zinc-600">
-              {monthLabel}
+              {monthLabel} · {currency.currency}
             </Badge>
             <Badge variant={overdue > 0 ? 'destructive' : 'secondary'} className="rounded-md">
               {overdue > 0 ? "Kechikkan to'lov bor" : "Kechikkan to'lov yo'q"}
@@ -118,7 +127,7 @@ export default async function ShopReportPage() {
                 <CardAction><CircleDollarSign className="size-4 text-blue-600" /></CardAction>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-zinc-900">{fmt(collected)}</div>
+                <div className="text-2xl font-bold text-zinc-900">{fmt(collected, currency)}</div>
                 <div className="mt-3 space-y-2">
                   <div className="flex justify-between text-xs text-zinc-500">
                     <span>Kutilgan pulga nisbatan</span>
@@ -135,7 +144,7 @@ export default async function ShopReportPage() {
                 <CardAction><CalendarClock className="size-4 text-teal-700" /></CardAction>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-zinc-900">{fmt(expected)}</div>
+                <div className="text-2xl font-bold text-zinc-900">{fmt(expected, currency)}</div>
                 <p className="mt-3 text-xs text-zinc-500">Nasiya va qisman sotuvlardan qolgan oy ichidagi summa</p>
               </CardContent>
             </Card>
@@ -146,7 +155,7 @@ export default async function ShopReportPage() {
                 <CardAction><RotateCcw className="size-4 text-purple-600" /></CardAction>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-zinc-900">{fmt(refunds)}</div>
+                <div className="text-2xl font-bold text-zinc-900">{fmt(refunds, currency)}</div>
                 <p className="mt-3 text-xs text-zinc-500">
                   Bu oy {stats.returnsThisMonth} ta qaytarish bo'yicha yozilgan summa
                 </p>
@@ -159,7 +168,7 @@ export default async function ShopReportPage() {
                 <CardAction><AlertTriangle className="size-4 text-red-600" /></CardAction>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-red-700">{fmt(overdue)}</div>
+                <div className="text-2xl font-bold text-red-700">{fmt(overdue, currency)}</div>
                 <p className="mt-3 text-xs text-red-700/70">Bugun ko'rib chiqilishi kerak bo'lgan qarzdorlik</p>
               </CardContent>
             </Card>
@@ -170,7 +179,7 @@ export default async function ShopReportPage() {
                 <CardAction><Boxes className="size-4 text-slate-500" /></CardAction>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-zinc-900">{fmt(inventory)}</div>
+                <div className="text-2xl font-bold text-zinc-900">{fmt(inventory, currency)}</div>
                 <p className="mt-3 text-xs text-zinc-500">Hali sotilmagan qurilmalarga bog'langan pul</p>
               </CardContent>
             </Card>
@@ -180,6 +189,7 @@ export default async function ShopReportPage() {
             cashFlowData={cashFlowData}
             businessData={businessData}
             chartConfig={chartConfig}
+            currency={currency}
       />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
@@ -189,7 +199,7 @@ export default async function ShopReportPage() {
                 <CardAction><TrendingUp className="size-4 text-emerald-600" /></CardAction>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-zinc-900">{fmt(grossProfit)}</div>
+                <div className="text-2xl font-bold text-zinc-900">{fmt(grossProfit, currency)}</div>
                 <p className="mt-3 text-xs text-zinc-500">Sotilgan/nasiya qilingan qurilmalar bo'yicha</p>
               </CardContent>
             </Card>
@@ -200,11 +210,11 @@ export default async function ShopReportPage() {
               </CardHeader>
               <CardContent className="space-y-3">
                 {[
-                  ["Yig'ilgan", fmt(collected)],
-                  ['Kutilayotgan', fmt(expected)],
-                  ['Kechikkan', fmt(overdue)],
-                  ['Nasiya foizi', fmt(interestProfit)],
-                  ['Ombor', fmt(inventory)],
+                  ["Yig'ilgan", fmtBase(collected, currency)],
+                  ['Kutilayotgan', fmt(expected, currency)],
+                  ['Kechikkan', fmt(overdue, currency)],
+                  ['Nasiya foizi', fmt(interestProfit, currency)],
+                  ['Ombor', fmt(inventory, currency)],
                 ].map(([label, value]) => (
                   <div key={label} className="flex items-center justify-between border-b border-zinc-100 pb-2 last:border-0 last:pb-0">
                     <span className="text-sm text-zinc-500">{label}</span>

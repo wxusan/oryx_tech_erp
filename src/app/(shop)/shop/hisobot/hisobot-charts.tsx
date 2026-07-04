@@ -12,6 +12,7 @@ import {
   ChartTooltipContent,
 } from '@/components/ui/chart'
 import type { ChartConfig } from '@/components/ui/chart'
+import { convertUzsToUsd, formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
 
 interface ChartDatum {
   name: string
@@ -19,24 +20,30 @@ interface ChartDatum {
   fill: string
 }
 
-function fmt(value: number) {
-  return `${Number(value).toLocaleString('ru-RU')} so'm`
+function fmt(value: number, currency: CurrencyContext) {
+  return formatMoneyByCurrency(value, currency.currency, currency.usdUzsRate)
 }
 
-function fmtCompact(value: number) {
-  if (Math.abs(value) >= 1000000) return `${(value / 1000000).toFixed(1)}M`
-  if (Math.abs(value) >= 1000) return `${Math.round(value / 1000)}K`
-  return String(value)
+function fmtCompact(value: number, currency: CurrencyContext) {
+  const displayValue = currency.currency === 'USD' && currency.usdUzsRate
+    ? convertUzsToUsd(value, currency.usdUzsRate)
+    : value
+  if (Math.abs(displayValue) >= 1000000) return `${(displayValue / 1000000).toFixed(1)}M`
+  if (Math.abs(displayValue) >= 1000000) return `${(displayValue / 1000000).toFixed(1)}M`
+  if (Math.abs(displayValue) >= 1000) return `${Math.round(displayValue / 1000)}K`
+  return String(Math.round(displayValue))
 }
 
 export default function HisobotCharts({
   cashFlowData,
   businessData,
   chartConfig,
+  currency,
 }: {
   cashFlowData: ChartDatum[]
   businessData: ChartDatum[]
   chartConfig: ChartConfig
+  currency: CurrencyContext
 }) {
   return (
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-5">
@@ -50,7 +57,7 @@ export default function HisobotCharts({
             <BarChart accessibilityLayer data={cashFlowData} margin={{ left: 0, right: 10 }}>
               <CartesianGrid vertical={false} />
               <XAxis dataKey="name" tickLine={false} axisLine={false} tickMargin={10} />
-              <YAxis tickFormatter={fmtCompact} tickLine={false} axisLine={false} width={42} />
+              <YAxis tickFormatter={(value) => fmtCompact(Number(value), currency)} tickLine={false} axisLine={false} width={42} />
               <ChartTooltip
                 cursor={false}
                 content={
@@ -60,7 +67,7 @@ export default function HisobotCharts({
                       <div className="flex min-w-40 items-center justify-between gap-4">
                         <span className="text-zinc-500">{String(item.payload?.name ?? 'Summa')}</span>
                         <span className="font-mono font-semibold text-zinc-900">
-                          {fmt(Number(value))}
+                          {fmt(Number(value), currency)}
                         </span>
                       </div>
                     )}
@@ -82,7 +89,7 @@ export default function HisobotCharts({
           <ChartContainer config={chartConfig} className="h-[280px] w-full">
             <BarChart accessibilityLayer data={businessData} layout="vertical" margin={{ left: 8, right: 16 }}>
               <CartesianGrid horizontal={false} />
-              <XAxis type="number" tickFormatter={fmtCompact} tickLine={false} axisLine={false} />
+              <XAxis type="number" tickFormatter={(value) => fmtCompact(Number(value), currency)} tickLine={false} axisLine={false} />
               <YAxis dataKey="name" type="category" tickLine={false} axisLine={false} width={78} />
               <ChartTooltip
                 cursor={false}
@@ -93,7 +100,7 @@ export default function HisobotCharts({
                       <div className="flex min-w-40 items-center justify-between gap-4">
                         <span className="text-zinc-500">{String(item.payload?.name ?? 'Summa')}</span>
                         <span className="font-mono font-semibold text-zinc-900">
-                          {fmt(Number(value))}
+                          {fmt(Number(value), currency)}
                         </span>
                       </div>
                     )}

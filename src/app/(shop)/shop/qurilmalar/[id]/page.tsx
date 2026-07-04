@@ -10,6 +10,7 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogFooter,
@@ -17,6 +18,8 @@ import {
 import { paymentMethodLabel } from '@/lib/labels'
 import { uzDate, uzDateTime } from '@/lib/dates'
 import { displayImei } from '@/lib/device-display'
+import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
+import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 
 interface Supplier {
@@ -30,9 +33,11 @@ interface Sale {
   amountPaid: number
   remainingAmount: number
   dueDate: string | null
+  reminderEnabled: boolean
   paidFully: boolean
   customer?: { name: string; phone: string }
   paymentMethod: string
+  note: string | null
   createdAt: string
 }
 
@@ -99,7 +104,8 @@ function deviceActionLabel(action: string) {
   return action
 }
 
-function fmt(n: number) {
+function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
+  if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
   return Number(n).toLocaleString('ru-RU') + " so'm"
 }
 
@@ -124,6 +130,7 @@ export default function QurilmaDetailPage() {
   const params = useParams()
   const router = useRouter()
   const id = params.id as string
+  const { currency } = useShopCurrency()
 
   const [device, setDevice] = useState<Device | null>(null)
   const [loading, setLoading] = useState(true)
@@ -140,6 +147,15 @@ export default function QurilmaDetailPage() {
   const [salePayNote, setSalePayNote] = useState('')
   const [salePayError, setSalePayError] = useState('')
   const [salePayLoading, setSalePayLoading] = useState(false)
+  const [saleEditOpen, setSaleEditOpen] = useState(false)
+  const [saleEditCustomerName, setSaleEditCustomerName] = useState('')
+  const [saleEditCustomerPhone, setSaleEditCustomerPhone] = useState('')
+  const [saleEditPaymentMethod, setSaleEditPaymentMethod] = useState('')
+  const [saleEditDueDate, setSaleEditDueDate] = useState('')
+  const [saleEditReminderEnabled, setSaleEditReminderEnabled] = useState(false)
+  const [saleEditNote, setSaleEditNote] = useState('')
+  const [saleEditError, setSaleEditError] = useState('')
+  const [saleEditSaving, setSaleEditSaving] = useState(false)
   const [returnModalOpen, setReturnModalOpen] = useState(false)
   const [returnNote, setReturnNote] = useState('')
   const [returnRefundAmount, setReturnRefundAmount] = useState('')
@@ -299,6 +315,7 @@ export default function QurilmaDetailPage() {
         },
         body: JSON.stringify({
           amount: Number(salePayAmount),
+          inputCurrency: currency.currency,
           paymentMethod: salePayMethod,
           note: salePayNote.trim() || undefined,
         }),
@@ -316,6 +333,47 @@ export default function QurilmaDetailPage() {
       setSalePayError(err instanceof Error ? err.message : "To'lovni saqlashda xatolik")
     } finally {
       setSalePayLoading(false)
+    }
+  }
+
+  function openSaleEdit() {
+    if (!latestSale) return
+    setSaleEditCustomerName(latestSale.customer?.name ?? '')
+    setSaleEditCustomerPhone(latestSale.customer?.phone ?? '')
+    setSaleEditPaymentMethod(latestSale.paymentMethod)
+    setSaleEditDueDate(latestSale.dueDate ? latestSale.dueDate.slice(0, 10) : '')
+    setSaleEditReminderEnabled(latestSale.reminderEnabled)
+    setSaleEditNote('')
+    setSaleEditError('')
+    setSaleEditOpen(true)
+  }
+
+  async function handleSaleEdit() {
+    if (!latestSale || saleEditSaving) return
+    setSaleEditSaving(true)
+    setSaleEditError('')
+    try {
+      const res = await fetch(`/api/sales/${latestSale.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          customerName: saleEditCustomerName.trim(),
+          customerPhone: saleEditCustomerPhone.trim(),
+          paymentMethod: saleEditPaymentMethod,
+          dueDate: saleEditDueDate ? new Date(saleEditDueDate).toISOString() : null,
+          reminderEnabled: saleEditReminderEnabled,
+          note: saleEditNote.trim() || undefined,
+          reason: saleEditNote.trim() || "Sotuv ma'lumotlari tuzatildi",
+        }),
+      })
+      const json = await res.json()
+      if (!res.ok || !json.success) throw new Error(json.error || 'Sotuvni yangilashda xatolik')
+      setSaleEditOpen(false)
+      await fetchDevice()
+    } catch (err) {
+      setSaleEditError(err instanceof Error ? err.message : 'Sotuvni yangilashda xatolik')
+    } finally {
+      setSaleEditSaving(false)
     }
   }
 
@@ -337,6 +395,7 @@ export default function QurilmaDetailPage() {
         body: JSON.stringify({
           note: returnNote,
           refundAmount,
+          inputCurrency: currency.currency,
           refundMethod: refundAmount > 0 ? returnRefundMethod : undefined,
         }),
       })
@@ -393,7 +452,7 @@ export default function QurilmaDetailPage() {
     { label: 'Rang', value: device.color ?? '—' },
     { label: 'Xotira', value: device.storage ?? '—' },
     { label: 'Batareya', value: device.batteryHealth != null ? `${device.batteryHealth}%` : '—' },
-    { label: 'Kelish narxi', value: fmt(device.purchasePrice) },
+    { label: 'Kelish narxi', value: fmt(device.purchasePrice, currency) },
     { label: 'IMEI', value: displayImei(device.imei) },
     { label: 'Yetkazib beruvchi', value: device.supplier?.name ?? '—' },
     { label: 'Tel raqam', value: device.supplier?.phone ?? '—' },
@@ -533,8 +592,17 @@ export default function QurilmaDetailPage() {
       {/* Sale info section */}
       {device.status === 'SOLD_CASH' && latestSale && (
         <div className="border border-zinc-200 rounded overflow-hidden">
-          <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
+          <div className="flex items-center justify-between gap-3 px-4 py-3 bg-zinc-50 border-b border-zinc-200">
             <span className="text-sm font-semibold text-zinc-900">Sotuv ma'lumotlari</span>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={openSaleEdit}
+              className="h-8 rounded border-zinc-200 px-3 text-xs text-zinc-700"
+            >
+              <Pencil size={13} />
+              Tahrirlash
+            </Button>
           </div>
           <div className="p-4 space-y-2">
             <div className="flex gap-4 text-sm">
@@ -547,16 +615,16 @@ export default function QurilmaDetailPage() {
             </div>
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">Sotuv narxi</span>
-              <span className="text-zinc-900 font-medium">{fmt(latestSale.salePrice)}</span>
+              <span className="text-zinc-900 font-medium">{fmt(latestSale.salePrice, currency)}</span>
             </div>
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">To'langan</span>
-              <span className="text-zinc-900 font-medium">{fmt(latestSale.amountPaid)}</span>
+              <span className="text-zinc-900 font-medium">{fmt(latestSale.amountPaid, currency)}</span>
             </div>
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">Qolgan</span>
               <span className={saleHasDebt ? 'text-red-700 font-medium' : 'text-zinc-900 font-medium'}>
-                {fmt(latestSale.remainingAmount)}
+                {fmt(latestSale.remainingAmount, currency)}
               </span>
             </div>
             {latestSale.dueDate && (
@@ -578,7 +646,11 @@ export default function QurilmaDetailPage() {
             {saleHasDebt && (
               <Button
                 onClick={() => {
-                  setSalePayAmount(String(latestSale.remainingAmount))
+                  setSalePayAmount(
+                    currency.currency === 'USD' && currency.usdUzsRate
+                      ? convertUzsToUsd(latestSale.remainingAmount, currency.usdUzsRate).toFixed(2)
+                      : String(latestSale.remainingAmount),
+                  )
                   setSalePaymentOpen(true)
                 }}
                 className="mt-2 h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded"
@@ -608,11 +680,11 @@ export default function QurilmaDetailPage() {
               </div>
               <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Nasiya jami</span>
-                <span className="text-zinc-900 font-medium">{fmt(latestNasiya.finalNasiyaAmount)}</span>
+                <span className="text-zinc-900 font-medium">{fmt(latestNasiya.finalNasiyaAmount, currency)}</span>
               </div>
               <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Qolgan summa</span>
-                <span className="text-zinc-900 font-medium">{fmt(latestNasiya.remainingAmount)}</span>
+                <span className="text-zinc-900 font-medium">{fmt(latestNasiya.remainingAmount, currency)}</span>
               </div>
             </div>
             <div>
@@ -816,6 +888,76 @@ export default function QurilmaDetailPage() {
         </DialogContent>
       </Dialog>
 
+      <Dialog open={saleEditOpen} onOpenChange={setSaleEditOpen}>
+        <DialogContent className="max-w-md rounded">
+          <DialogHeader>
+            <DialogTitle className="text-zinc-900">Sotuv ma'lumotlarini tahrirlash</DialogTitle>
+            <DialogDescription className="text-sm text-zinc-500">
+              Pul summalarini o'zgartirish uchun tuzatish amali kerak bo'ladi.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            {saleEditError && (
+              <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                {saleEditError}
+              </div>
+            )}
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-zinc-700">Mijoz</label>
+                <Input value={saleEditCustomerName} onChange={(e) => setSaleEditCustomerName(e.target.value)} className="h-9 rounded border-zinc-200 text-sm" />
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-zinc-700">Telefon</label>
+                <Input value={saleEditCustomerPhone} onChange={(e) => setSaleEditCustomerPhone(e.target.value)} className="h-9 rounded border-zinc-200 text-sm" />
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-zinc-700">To'lov usuli</label>
+                <select
+                  value={saleEditPaymentMethod}
+                  onChange={(e) => setSaleEditPaymentMethod(e.target.value)}
+                  className="h-9 w-full rounded border border-zinc-200 bg-white px-2 text-sm"
+                >
+                  <option value="CASH">Naqd</option>
+                  <option value="CARD">Karta</option>
+                  <option value="TRANSFER">Bank</option>
+                  <option value="OTHER">Boshqa</option>
+                </select>
+              </div>
+              <div>
+                <label className="mb-1.5 block text-xs font-medium text-zinc-700">Qarz muddati</label>
+                <Input type="date" value={saleEditDueDate} onChange={(e) => setSaleEditDueDate(e.target.value)} className="h-9 rounded border-zinc-200 text-sm" />
+              </div>
+            </div>
+            <label className="flex items-center gap-2 rounded border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+              <input
+                type="checkbox"
+                checked={saleEditReminderEnabled}
+                onChange={(e) => setSaleEditReminderEnabled(e.target.checked)}
+                className="h-4 w-4 rounded border-zinc-300"
+              />
+              Eslatma yoqilgan
+            </label>
+            <Textarea
+              value={saleEditNote}
+              onChange={(e) => setSaleEditNote(e.target.value)}
+              placeholder="Tahrirlash sababi yoki izoh..."
+              className="min-h-[80px] rounded border-zinc-200 text-sm"
+            />
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setSaleEditOpen(false)} className="rounded border-zinc-200 text-zinc-700">
+              Bekor qilish
+            </Button>
+            <Button disabled={saleEditSaving} onClick={handleSaleEdit} className="rounded bg-zinc-900 text-white hover:bg-zinc-800">
+              {saleEditSaving ? 'Saqlanmoqda...' : 'Saqlash'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={salePaymentOpen} onOpenChange={setSalePaymentOpen}>
         <DialogContent className="max-w-md rounded">
           <DialogHeader>
@@ -828,9 +970,10 @@ export default function QurilmaDetailPage() {
               </div>
             )}
             <div>
-              <label className="text-xs font-medium text-zinc-700 block mb-1.5">Miqdor</label>
+              <label className="text-xs font-medium text-zinc-700 block mb-1.5">Miqdor ({currencyLabel(currency.currency)})</label>
               <Input
                 type="number"
+                step={currency.currency === 'USD' ? '0.01' : '1'}
                 value={salePayAmount}
                 onChange={(e) => setSalePayAmount(e.target.value)}
                 className="h-9 text-sm border-zinc-200 rounded"
@@ -904,12 +1047,13 @@ export default function QurilmaDetailPage() {
             </div>
             <div>
               <label htmlFor="return-refund-amount" className="text-xs font-medium text-zinc-700 block mb-1.5">
-                Qaytarilgan summa
+                Qaytarilgan summa ({currencyLabel(currency.currency)})
               </label>
               <Input
                 id="return-refund-amount"
                 type="number"
                 min="0"
+                step={currency.currency === 'USD' ? '0.01' : '1'}
                 value={returnRefundAmount}
                 onChange={(e) => setReturnRefundAmount(e.target.value)}
                 placeholder="0"

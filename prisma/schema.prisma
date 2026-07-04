@@ -74,6 +74,11 @@ enum PaymentMethod {
   OTHER
 }
 
+enum CurrencyCode {
+  UZS
+  USD
+}
+
 // ---------------------------------------------------------------------------
 // SuperAdmin
 // ---------------------------------------------------------------------------
@@ -113,6 +118,7 @@ model Shop {
   status          ShopStatus @default(ACTIVE)
   subscriptionDue DateTime
   telegramGroupId String?
+  preferredCurrency CurrencyCode @default(UZS)
   createdAt       DateTime   @default(now())
   updatedAt       DateTime   @updatedAt
   deletedAt       DateTime?
@@ -163,6 +169,24 @@ model ShopPayment {
   @@unique([shopId, idempotencyKey])
   @@index([shopId])
   @@index([paidAt])
+}
+
+// ---------------------------------------------------------------------------
+// CurrencyRate
+// ---------------------------------------------------------------------------
+
+model CurrencyRate {
+  id            String       @id @default(cuid())
+  baseCurrency  CurrencyCode
+  quoteCurrency CurrencyCode
+  rate          Decimal      @db.Decimal(12, 4)
+  source        String       @default("CBU")
+  fetchedAt     DateTime
+  effectiveDate DateTime?
+  createdAt     DateTime     @default(now())
+
+  @@index([baseCurrency, quoteCurrency, fetchedAt])
+  @@index([source, fetchedAt])
 }
 
 // ---------------------------------------------------------------------------

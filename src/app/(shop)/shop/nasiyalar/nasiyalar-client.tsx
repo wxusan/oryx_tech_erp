@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { uzDate } from '@/lib/dates'
+import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
 
 type NasiyaStatus = 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
 type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan' | 'Bekor qilingan'
@@ -66,16 +67,18 @@ function StatusBadge({ status }: { status: NasiyaStatus }) {
   )
 }
 
-function fmt(n: number) {
-  return Number(n).toLocaleString('ru-RU')
+function fmt(n: number, currency: CurrencyContext) {
+  return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
 }
 
 export default function NasiyalarClient({
   initialNasiyalar,
   initialFilter = 'Barchasi',
+  currency,
 }: {
   initialNasiyalar: Nasiya[]
   initialFilter?: NasiyaStatus | 'Barchasi'
+  currency: CurrencyContext
 }) {
   const [nasiyalar] = useState<Nasiya[]>(initialNasiyalar)
   const loading = false
@@ -191,20 +194,20 @@ export default function NasiyalarClient({
                         <span className="text-xs text-zinc-500 whitespace-nowrap">{pct}%</span>
                       </div>
                       <div className="flex gap-3 mt-1 text-xs text-zinc-500">
-                        <span>To'langan: {fmt(paidAmount)} so'm</span>
+                        <span>To'langan: {fmt(paidAmount, currency)}</span>
                         <span>·</span>
-                        <span>Nasiya jami: {fmt(n.finalNasiyaAmount)} so'm</span>
+                        <span>Nasiya jami: {fmt(n.finalNasiyaAmount, currency)}</span>
                         {n.interestAmount > 0 && (
                           <>
                             <span>·</span>
-                            <span>Foiz: {fmt(n.interestAmount)} so'm</span>
+                            <span>Foiz: {fmt(n.interestAmount, currency)}</span>
                           </>
                         )}
                       </div>
                     </div>
 
                     <div className="text-right flex-shrink-0">
-                      <div className="text-sm font-bold text-zinc-900">{fmt(n.remainingAmount)} so'm</div>
+                      <div className="text-sm font-bold text-zinc-900">{fmt(n.remainingAmount, currency)}</div>
                       <div className="text-xs text-zinc-400 mt-0.5">qolgan</div>
                     </div>
                   </div>

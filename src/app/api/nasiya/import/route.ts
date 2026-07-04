@@ -25,6 +25,8 @@ import { nasiyaImportedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
+import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 
 export async function POST(req: NextRequest) {
@@ -37,6 +39,7 @@ export async function POST(req: NextRequest) {
       return forbidden("Faqat do'kon adminlari eski nasiya import qila oladi")
     }
     const shopId = session.user.shopId
+    const currency = await getShopCurrencyContext(shopId)
 
     const body: unknown = await req.json()
     const parsed = importNasiyaSchema.safeParse(body)
@@ -48,17 +51,32 @@ export async function POST(req: NextRequest) {
 
     const enteredImei = data.imei?.trim() || ''
     const normalizedPhone = normalizePhone(data.customerPhone)
+    let originalTotalInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    let alreadyPaidInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    let remainingDebtInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    let monthlyPaymentInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    try {
+      originalTotalInput = await moneyInputToUzs(data.originalTotalAmount, data.inputCurrency)
+      alreadyPaidInput = await moneyInputToUzs(data.alreadyPaidBeforeImport, data.inputCurrency)
+      remainingDebtInput = await moneyInputToUzs(data.remainingDebt, data.inputCurrency)
+      monthlyPaymentInput = await moneyInputToUzs(data.monthlyPayment, data.inputCurrency)
+    } catch (err) {
+      return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
+    }
+    if (remainingDebtInput.amountUzs > originalTotalInput.amountUzs) {
+      return badRequest("Qolgan qarz eski nasiya umumiy summasidan oshmasligi kerak")
+    }
 
     // Build the future-only schedule up-front so we can reject bad money before
     // touching the DB, and reuse the exact rows inside the transaction.
     let schedule: ReturnType<typeof generateImportSchedule>
     try {
-      schedule = generateImportSchedule(data.nextPaymentDate, data.remainingDebt, data.monthlyPayment)
+      schedule = generateImportSchedule(data.nextPaymentDate, remainingDebtInput.amountUzs, monthlyPaymentInput.amountUzs)
     } catch (error) {
       return badRequest(error instanceof Error ? error.message : "To'lov jadvali noto'g'ri")
     }
     const scheduleTotal = schedule.reduce((sum, item) => sum + item.expectedAmount, 0)
-    if (scheduleTotal !== Math.round(data.remainingDebt)) {
+    if (scheduleTotal !== Math.round(remainingDebtInput.amountUzs)) {
       return badRequest("To'lov jadvali qolgan qarz bilan mos emas")
     }
 
@@ -79,8 +97,8 @@ export async function POST(req: NextRequest) {
         deletedAt: null,
         isImported: true,
         status: { not: 'CANCELLED' },
-        remainingAtImport: Math.round(data.remainingDebt),
-        monthlyPayment: Math.round(data.monthlyPayment),
+        remainingAtImport: Math.round(remainingDebtInput.amountUzs),
+        monthlyPayment: Math.round(monthlyPaymentInput.amountUzs),
         ...(data.originalSaleDate ? { originalSaleDate: data.originalSaleDate } : {}),
         customer: {
           is: {
@@ -138,7 +156,7 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      const remainingDebt = Math.round(data.remainingDebt)
+      const remainingDebt = Math.round(remainingDebtInput.amountUzs)
       const nasiya = await tx.nasiya.create({
         data: {
           shopId,
@@ -146,15 +164,15 @@ export async function POST(req: NextRequest) {
           customerId: customer.id,
           // Legacy accounting fields, mapped for display; excluded from current
           // gross/profit because isImported=true.
-          totalAmount: data.originalTotalAmount,
-          downPayment: data.alreadyPaidBeforeImport,
+          totalAmount: originalTotalInput.amountUzs,
+          downPayment: alreadyPaidInput.amountUzs,
           baseRemainingAmount: remainingDebt,
           interestPercent: 0,
           interestAmount: 0,
           finalNasiyaAmount: remainingDebt,
           remainingAmount: remainingDebt,
           months: schedule.length,
-          monthlyPayment: Math.round(data.monthlyPayment),
+          monthlyPayment: Math.round(monthlyPaymentInput.amountUzs),
           startDate: data.nextPaymentDate,
           note: data.importNote,
           createdBy: session.user.id,
@@ -164,8 +182,8 @@ export async function POST(req: NextRequest) {
           importedAt: new Date(),
           importedById: session.user.id,
           originalSaleDate: data.originalSaleDate ?? null,
-          originalTotalAmount: data.originalTotalAmount,
-          alreadyPaidBeforeImport: data.alreadyPaidBeforeImport,
+          originalTotalAmount: originalTotalInput.amountUzs,
+          alreadyPaidBeforeImport: alreadyPaidInput.amountUzs,
           remainingAtImport: remainingDebt,
           importNote: data.importNote,
         },
@@ -196,10 +214,16 @@ export async function POST(req: NextRequest) {
             customerName: data.customerName,
             model: data.deviceModel,
             imei: enteredImei || null,
-            originalTotalAmount: data.originalTotalAmount,
-            alreadyPaidBeforeImport: data.alreadyPaidBeforeImport,
+            originalTotalAmount: originalTotalInput.amountUzs,
+            inputOriginalTotalAmount: data.originalTotalAmount,
+            alreadyPaidBeforeImport: alreadyPaidInput.amountUzs,
+            inputAlreadyPaidBeforeImport: data.alreadyPaidBeforeImport,
             remainingAtImport: remainingDebt,
+            inputRemainingDebt: data.remainingDebt,
+            monthlyPayment: Math.round(monthlyPaymentInput.amountUzs),
+            inputMonthlyPayment: data.monthlyPayment,
             importSource: 'MANUAL',
+            ...moneyInputMeta(originalTotalInput),
           },
           note: data.importNote,
         },
@@ -219,12 +243,13 @@ export async function POST(req: NextRequest) {
           color: data.color,
           imei: enteredImei || null,
         },
-        originalTotalAmount: data.originalTotalAmount,
-        alreadyPaidBeforeImport: data.alreadyPaidBeforeImport,
+        originalTotalAmount: originalTotalInput.amountUzs,
+        alreadyPaidBeforeImport: alreadyPaidInput.amountUzs,
         remainingDebt,
-        monthlyPayment: Math.round(data.monthlyPayment),
+        monthlyPayment: Math.round(monthlyPaymentInput.amountUzs),
         nextPaymentDate: data.nextPaymentDate,
         adminName: session.user.name,
+        currency,
       })
       for (const admin of shopAdmins) {
         await tx.notification.create({

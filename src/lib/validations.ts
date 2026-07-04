@@ -34,6 +34,10 @@ const paymentMethodSchema = z.enum(['CASH', 'TRANSFER', 'CARD', 'OTHER'], {
   error: "To'lov usuli noto'g'ri",
 })
 
+const currencyCodeSchema = z.enum(['UZS', 'USD'], {
+  error: "Valyuta noto'g'ri",
+})
+
 const privateFileKeySchema = z
   .string()
   .trim()
@@ -111,6 +115,7 @@ export const addDeviceSchema = z.object({
   supplierPhone: phoneSchema.optional(),
   note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
   imageUrls: z.array(deviceImageKeySchema).optional(),
+  inputCurrency: currencyCodeSchema.optional(),
 })
 
 export type AddDeviceInput = z.infer<typeof addDeviceSchema>
@@ -136,6 +141,7 @@ export const createSaleSchema = z
     dueDate: z.coerce.date().optional(),
     reminderEnabled: z.boolean().optional().default(false),
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
+    inputCurrency: currencyCodeSchema.optional(),
   })
   .refine(
     (data) => {
@@ -190,6 +196,7 @@ export const addSalePaymentSchema = z.object({
   note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
   reason: z.string().max(1000, "Sabab 1000 ta belgidan oshmasligi kerak").optional(),
   idempotencyKey: z.string().min(8).max(120).optional(),
+  inputCurrency: currencyCodeSchema.optional(),
 })
 
 export type AddSalePaymentInput = z.infer<typeof addSalePaymentSchema>
@@ -229,6 +236,7 @@ export const createNasiyaSchema = z
     startDate: z.coerce.date({ error: "Boshlanish sanasi kiritilishi shart" }),
     paymentMethod: paymentMethodSchema,
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
+    inputCurrency: currencyCodeSchema.optional(),
   })
   .refine((data) => data.downPayment <= data.totalAmount, {
     message: "Boshlang'ich to'lov umumiy summadan oshmasligi kerak",
@@ -274,6 +282,7 @@ export const importNasiyaSchema = z
     originalSaleDate: z.coerce.date().optional(),
     totalMonths: z.number().int().min(1).max(60).optional(),
     importNote: z.string().trim().max(500).optional(),
+    inputCurrency: currencyCodeSchema.optional(),
   })
   .refine((data) => data.remainingDebt <= data.originalTotalAmount, {
     message: "Qolgan qarz eski nasiya umumiy summasidan oshmasligi kerak",
@@ -299,6 +308,7 @@ export const addNasiyaPaymentSchema = z
     delayedUntil: z.coerce.date().optional(),
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
     deferredToNext: z.boolean().optional().default(false),
+    inputCurrency: currencyCodeSchema.optional(),
   })
   .refine((data) => (data.note?.trim().length ?? 0) >= 5, {
     message: "To'lov izohi kamida 5 ta belgidan iborat bo'lishi kerak",

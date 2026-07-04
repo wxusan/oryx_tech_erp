@@ -8,6 +8,8 @@ import { processPendingNotifications } from '@/lib/notification-service'
 import { salePaymentMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
+import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -37,6 +39,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const currency = await getShopCurrencyContext(shopId)
+    let amountInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    try {
+      amountInput = await moneyInputToUzs(parsed.data.amount, parsed.data.inputCurrency)
+    } catch (err) {
+      return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
+    }
 
     const auditNote = parsed.data.reason?.trim() || parsed.data.note?.trim()
     const runPaymentTransaction = () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -74,7 +83,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         throw { status: 409, message: "Bu sotuv bo'yicha qarz yopilgan" }
       }
 
-      const amount = parsed.data.amount
+      const amount = amountInput.amountUzs
       if (amount > oldRemaining) {
         throw { status: 409, message: "To'lov qolgan qarzdan oshib ketdi" }
       }
@@ -129,6 +138,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             paidFully: updatedSale.paidFully,
             dueDate: updatedSale.dueDate,
             auditReason: auditNote,
+            inputAmount: parsed.data.amount,
+            ...moneyInputMeta(amountInput),
           },
           note: auditNote,
         },
@@ -153,6 +164,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         remaining: nextRemaining,
         note: auditNote,
         adminName: session.user.name,
+        currency,
       })
       for (const admin of shopAdmins) {
         await tx.notification.create({

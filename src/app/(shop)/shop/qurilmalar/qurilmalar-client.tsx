@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { exportUrl } from '@/lib/api-client'
 import { uzDate } from '@/lib/dates'
 import { displayImei } from '@/lib/device-display'
+import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
 
 type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
 type DisplayStatus = 'Omborda' | 'Naqd sotildi' | 'Nasiyada' | 'Band qilingan' | 'Qaytarilgan' | "O'chirilgan"
@@ -58,7 +59,7 @@ function StatusBadge({ status }: { status: DeviceStatus }) {
   )
 }
 
-export default function QurilmalarClient({ initialDevices }: { initialDevices: Device[] }) {
+export default function QurilmalarClient({ initialDevices, currency }: { initialDevices: Device[]; currency: CurrencyContext }) {
   const [devices] = useState<Device[]>(initialDevices)
   const loading = false
   const error = ''
@@ -156,7 +157,7 @@ export default function QurilmalarClient({ initialDevices }: { initialDevices: D
                   <td className="px-4 py-3 text-zinc-600">{d.storage ?? '—'}</td>
                   <td className="px-4 py-3 text-zinc-600">{d.batteryHealth != null ? `${d.batteryHealth}%` : '—'}</td>
                   <td className="px-4 py-3 text-zinc-900 font-medium">
-                    {Number(d.purchasePrice).toLocaleString('ru-RU')} so'm
+                    {formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate)}
                   </td>
                   <td className="px-4 py-3 text-zinc-400 text-xs font-mono">{displayImei(d.imei)}</td>
                   <td className="px-4 py-3">

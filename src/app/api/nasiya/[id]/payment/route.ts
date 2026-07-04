@@ -18,6 +18,8 @@ import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaPaymentMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
+import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -54,7 +56,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const currency = await getShopCurrencyContext(shopId)
     const auditNote = note?.trim()
+    let amountInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    try {
+      amountInput = amount > 0
+        ? await moneyInputToUzs(amount, parsed.data.inputCurrency)
+        : { amountUzs: 0, inputCurrency: parsed.data.inputCurrency ?? 'UZS', exchangeRateUsed: null }
+    } catch (err) {
+      return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
+    }
+    const amountUzs = amountInput.amountUzs
 
     const runPaymentTransaction = () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // Verify nasiya exists and belongs to this shop
@@ -88,7 +100,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         }
       }
 
-      if (amount > 0 && idempotencyKey) {
+      if (amountUzs > 0 && idempotencyKey) {
         const existingPayment = await tx.nasiyaPayment.findUnique({
           where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
         })
@@ -176,11 +188,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           (sum, schedule) => sum + Math.max(0, Number(schedule.expectedAmount) - Number(schedule.paidAmount)),
           0,
         )
-        if (amount > totalOutstanding) {
+        if (amountUzs > totalOutstanding) {
           throw { status: 409, message: "To'lov qolgan nasiya summasidan oshib ketdi" }
         }
 
-        let remainingPayment = amount
+        let remainingPayment = amountUzs
         for (const schedule of allocationRows) {
           if (remainingPayment <= 0) break
           const outstanding = Math.max(0, Number(schedule.expectedAmount) - Number(schedule.paidAmount))
@@ -220,7 +232,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             nasiyaId,
             nasiyaScheduleId: allocations.length === 1 ? allocations[0].scheduleId : null,
             shopId,
-            amount,
+            amount: amountUzs,
             paymentMethod,
             paidAt: date,
             note: auditNote,
@@ -254,7 +266,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
 
       // Notify all active shop admins with a verified telegramId
-      if (amount > 0) {
+      if (amountUzs > 0) {
         const shopAdmins = await tx.shopAdmin.findMany({
           where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
         })
@@ -269,11 +281,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             imei: nasiya.device.imei,
           },
           month: allocations.length === 1 ? selectedSchedule.monthNumber : 'MULTIPLE',
-          paidAmount: amount,
+          paidAmount: amountUzs,
           paymentMethod,
           remaining,
           note: auditNote,
           adminName: session.user.name,
+          currency,
         })
         for (const admin of shopAdmins) {
           await tx.notification.create({
@@ -298,12 +311,20 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           action: 'PAYMENT',
           targetType: 'NasiyaSchedule',
           targetId: nasiyaScheduleId,
-          newValue: { amount, paymentMethod, deferredToNext, allocations, auditReason: auditNote },
+          newValue: {
+            amount: amountUzs,
+            inputAmount: amount,
+            paymentMethod,
+            deferredToNext,
+            allocations,
+            auditReason: auditNote,
+            ...moneyInputMeta(amountInput),
+          },
           note: auditNote,
         },
       })
 
-      return { nasiyaId, nasiyaScheduleId, amount, remaining, allocations, duplicate: false }
+      return { nasiyaId, nasiyaScheduleId, amount: amountUzs, remaining, allocations, duplicate: false }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
     let result: Awaited<ReturnType<typeof runPaymentTransaction>> | undefined

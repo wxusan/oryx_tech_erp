@@ -12,6 +12,7 @@
 
 import { uzDate } from '@/lib/dates'
 import { telegramImei } from '@/lib/device-display'
+import { formatMoneyWithBase, type CurrencyContext } from '@/lib/currency'
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -21,6 +22,11 @@ import { telegramImei } from '@/lib/device-display'
 export function formatMoney(value: number | string | null | undefined): string {
   const n = Number(value ?? 0)
   return `${(Number.isFinite(n) ? n : 0).toLocaleString('ru-RU')} so'm`
+}
+
+function telegramMoney(value: number | string | null | undefined, currency?: CurrencyContext | null): string {
+  if (!currency) return formatMoney(value)
+  return formatMoneyWithBase(value, currency.currency, currency.usdUzsRate)
 }
 
 /** "30.09.2026" — locale-independent numeric date. */
@@ -103,8 +109,8 @@ function compose(...blocks: Array<string | string[] | null | undefined>): string
 }
 
 /** Remaining-debt line value: "Yo'q" / "To'liq yopildi" when cleared. */
-function remainingDebt(remaining: number, clearedLabel: "Yo'q" | "To'liq yopildi"): string {
-  return remaining <= 0 ? clearedLabel : formatMoney(remaining)
+function remainingDebt(remaining: number, clearedLabel: "Yo'q" | "To'liq yopildi", currency?: CurrencyContext | null): string {
+  return remaining <= 0 ? clearedLabel : telegramMoney(remaining, currency)
 }
 
 // ---------------------------------------------------------------------------
@@ -149,12 +155,13 @@ export function deviceAddedMessage(data: {
   purchasePrice: number
   supplierPhone?: string | null
   adminName?: string | null
+  currency?: CurrencyContext | null
 }): string {
   return compose(
     "📦 Yangi qurilma qo'shildi",
     optionalLine("Do'kon", data.shopName),
     formatDeviceSpecs(data.device),
-    block(`Kelish narxi: ${formatMoney(data.purchasePrice)}`, optionalLine('Yetkazib beruvchi', data.supplierPhone)),
+    block(`Kelish narxi: ${telegramMoney(data.purchasePrice, data.currency)}`, optionalLine('Yetkazib beruvchi', data.supplierPhone)),
     optionalLine('Admin', data.adminName),
   )
 }
@@ -169,6 +176,7 @@ export function deviceSoldMessage(data: {
   remaining: number
   paymentMethod?: string | null
   adminName?: string | null
+  currency?: CurrencyContext | null
 }): string {
   return compose(
     '✅ Qurilma sotildi',
@@ -176,9 +184,9 @@ export function deviceSoldMessage(data: {
     formatDeviceSpecs(data.device),
     block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
     block(
-      `Sotuv narxi: ${formatMoney(data.salePrice)}`,
-      `To'langan: ${formatMoney(data.paidAmount)}`,
-      `Qolgan qarz: ${remainingDebt(data.remaining, "Yo'q")}`,
+      `Sotuv narxi: ${telegramMoney(data.salePrice, data.currency)}`,
+      `To'langan: ${telegramMoney(data.paidAmount, data.currency)}`,
+      `Qolgan qarz: ${remainingDebt(data.remaining, "Yo'q", data.currency)}`,
       optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
     ),
     optionalLine('Admin', data.adminName),
@@ -192,6 +200,7 @@ export function deviceReturnedMessage(data: {
   refundMethod?: string | null
   note: string
   adminName?: string | null
+  currency?: CurrencyContext | null
 }): string {
   const showMethod = data.refundAmount > 0 || Boolean(formatPaymentMethod(data.refundMethod))
   return compose(
@@ -199,7 +208,7 @@ export function deviceReturnedMessage(data: {
     optionalLine("Do'kon", data.shopName),
     formatDeviceSpecs(data.device),
     block(
-      `Qaytarilgan summa: ${formatMoney(data.refundAmount)}`,
+      `Qaytarilgan summa: ${telegramMoney(data.refundAmount, data.currency)}`,
       showMethod ? optionalLine('Qaytarish usuli', formatPaymentMethod(data.refundMethod)) : null,
     ),
     block(optionalLine('Sabab', cleanNote(data.note)), optionalLine('Admin', data.adminName)),
@@ -239,24 +248,25 @@ export function nasiyaCreatedMessage(data: {
   monthlyPayment: number
   nextPaymentDate?: Date | string | null
   adminName?: string | null
+  currency?: CurrencyContext | null
 }): string {
   const hasInterest = data.interestPercent > 0
   const moneyBlock = hasInterest
     ? block(
-        `Narx: ${formatMoney(data.totalAmount)}`,
-        `Boshlang'ich to'lov: ${formatMoney(data.downPayment)}`,
-        `Qolgan summa: ${formatMoney(data.baseRemainingAmount)}`,
+        `Narx: ${telegramMoney(data.totalAmount, data.currency)}`,
+        `Boshlang'ich to'lov: ${telegramMoney(data.downPayment, data.currency)}`,
+        `Qolgan summa: ${telegramMoney(data.baseRemainingAmount, data.currency)}`,
       )
     : block(
-        `Narx: ${formatMoney(data.totalAmount)}`,
-        `Boshlang'ich to'lov: ${formatMoney(data.downPayment)}`,
-        `Nasiya jami: ${formatMoney(data.finalNasiyaAmount)}`,
+        `Narx: ${telegramMoney(data.totalAmount, data.currency)}`,
+        `Boshlang'ich to'lov: ${telegramMoney(data.downPayment, data.currency)}`,
+        `Nasiya jami: ${telegramMoney(data.finalNasiyaAmount, data.currency)}`,
       )
   const interestBlock = hasInterest
     ? block(
         `Nasiya foizi: ${data.interestPercent}%`,
-        `Foiz summasi: ${formatMoney(data.interestAmount)}`,
-        `Nasiya jami: ${formatMoney(data.finalNasiyaAmount)}`,
+        `Foiz summasi: ${telegramMoney(data.interestAmount, data.currency)}`,
+        `Nasiya jami: ${telegramMoney(data.finalNasiyaAmount, data.currency)}`,
       )
     : null
   return compose(
@@ -268,7 +278,7 @@ export function nasiyaCreatedMessage(data: {
     interestBlock,
     block(
       `Muddat: ${data.months} oy`,
-      `Oylik to'lov: ${formatMoney(data.monthlyPayment)}`,
+      `Oylik to'lov: ${telegramMoney(data.monthlyPayment, data.currency)}`,
       data.nextPaymentDate ? `Keyingi to'lov: ${formatUzDate(data.nextPaymentDate)}` : null,
     ),
     optionalLine('Admin', data.adminName),
@@ -286,6 +296,7 @@ export function nasiyaPaymentMessage(data: {
   remaining: number
   note?: string | null
   adminName?: string | null
+  currency?: CurrencyContext | null
 }): string {
   const monthLine =
     data.month === 'MULTIPLE'
@@ -300,9 +311,9 @@ export function nasiyaPaymentMessage(data: {
     formatDeviceSpecs(data.device, { battery: false }),
     block(
       monthLine,
-      `To'langan: ${formatMoney(data.paidAmount)}`,
+      `To'langan: ${telegramMoney(data.paidAmount, data.currency)}`,
       optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
-      `Qolgan qarz: ${remainingDebt(data.remaining, "To'liq yopildi")}`,
+      `Qolgan qarz: ${remainingDebt(data.remaining, "To'liq yopildi", data.currency)}`,
     ),
     block(optionalLine('Izoh', cleanNote(data.note)), optionalLine('Admin', data.adminName)),
   )
@@ -315,6 +326,7 @@ export function nasiyaDueTodayMessage(data: {
   month?: number | null
   amountDue: number
   dueDate: Date | string
+  currency?: CurrencyContext | null
 }): string {
   return compose(
     "⏰ Bugun nasiya to'lovi kuni",
@@ -322,7 +334,7 @@ export function nasiyaDueTodayMessage(data: {
     formatDeviceSpecs(data.device, { battery: false }),
     block(
       typeof data.month === 'number' ? `Oy: ${data.month}-oy` : null,
-      `To'lov summasi: ${formatMoney(data.amountDue)}`,
+      `To'lov summasi: ${telegramMoney(data.amountDue, data.currency)}`,
       `Muddat: ${formatUzDate(data.dueDate)}`,
     ),
   )
@@ -336,6 +348,7 @@ export function nasiyaOverdueMessage(data: {
   amountDue: number
   dueDate: Date | string
   daysLate: number
+  currency?: CurrencyContext | null
 }): string {
   return compose(
     "⚠️ Nasiya to'lovi muddati o'tgan",
@@ -343,7 +356,7 @@ export function nasiyaOverdueMessage(data: {
     formatDeviceSpecs(data.device, { battery: false }),
     block(
       typeof data.month === 'number' ? `Oy: ${data.month}-oy` : null,
-      `Qolgan to'lov: ${formatMoney(data.amountDue)}`,
+      `Qolgan to'lov: ${telegramMoney(data.amountDue, data.currency)}`,
       `Muddat: ${formatUzDate(data.dueDate)}`,
       `Kechikkan: ${data.daysLate} kun`,
     ),
@@ -366,6 +379,7 @@ export function nasiyaImportedMessage(data: {
   monthlyPayment: number
   nextPaymentDate: Date | string
   adminName?: string | null
+  currency?: CurrencyContext | null
 }): string {
   return compose(
     '📥 Eski nasiya import qilindi',
@@ -373,12 +387,12 @@ export function nasiyaImportedMessage(data: {
     block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      `Eski nasiya summasi: ${formatMoney(data.originalTotalAmount)}`,
-      `Importgacha to'langan: ${formatMoney(data.alreadyPaidBeforeImport)}`,
-      `Hozirgi qolgan qarz: ${formatMoney(data.remainingDebt)}`,
+      `Eski nasiya summasi: ${telegramMoney(data.originalTotalAmount, data.currency)}`,
+      `Importgacha to'langan: ${telegramMoney(data.alreadyPaidBeforeImport, data.currency)}`,
+      `Hozirgi qolgan qarz: ${telegramMoney(data.remainingDebt, data.currency)}`,
     ),
     block(
-      `Oylik to'lov: ${formatMoney(data.monthlyPayment)}`,
+      `Oylik to'lov: ${telegramMoney(data.monthlyPayment, data.currency)}`,
       `Keyingi to'lov: ${formatUzDate(data.nextPaymentDate)}`,
     ),
     optionalLine('Admin', data.adminName),
@@ -399,6 +413,7 @@ export function salePaymentMessage(data: {
   remaining: number
   note?: string | null
   adminName?: string | null
+  currency?: CurrencyContext | null
 }): string {
   return compose(
     "💰 Qarz to'lovi qabul qilindi",
@@ -406,9 +421,9 @@ export function salePaymentMessage(data: {
     block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      `To'langan: ${formatMoney(data.paidAmount)}`,
+      `To'langan: ${telegramMoney(data.paidAmount, data.currency)}`,
       optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
-      `Qolgan qarz: ${remainingDebt(data.remaining, "To'liq yopildi")}`,
+      `Qolgan qarz: ${remainingDebt(data.remaining, "To'liq yopildi", data.currency)}`,
     ),
     block(optionalLine('Izoh', cleanNote(data.note)), optionalLine('Admin', data.adminName)),
   )
@@ -420,12 +435,13 @@ export function saleDueTodayMessage(data: {
   device: DeviceSpecs
   remainingAmount: number
   dueDate: Date | string
+  currency?: CurrencyContext | null
 }): string {
   return compose(
     "⏰ Bugun qarz to'lovi kuni",
     block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
     formatDeviceSpecs(data.device, { battery: false }),
-    block(`To'lov summasi: ${formatMoney(data.remainingAmount)}`, `Muddat: ${formatUzDate(data.dueDate)}`),
+    block(`To'lov summasi: ${telegramMoney(data.remainingAmount, data.currency)}`, `Muddat: ${formatUzDate(data.dueDate)}`),
   )
 }
 
@@ -436,13 +452,14 @@ export function saleOverdueMessage(data: {
   remainingAmount: number
   dueDate: Date | string
   daysLate: number
+  currency?: CurrencyContext | null
 }): string {
   return compose(
     "⚠️ Qarz to'lovi muddati o'tgan",
     block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      `Qolgan qarz: ${formatMoney(data.remainingAmount)}`,
+      `Qolgan qarz: ${telegramMoney(data.remainingAmount, data.currency)}`,
       `Muddat: ${formatUzDate(data.dueDate)}`,
       `Kechikkan: ${data.daysLate} kun`,
     ),

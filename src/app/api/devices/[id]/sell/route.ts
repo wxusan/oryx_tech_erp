@@ -16,6 +16,8 @@ import { deviceSoldMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
+import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -46,7 +48,18 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const currency = await getShopCurrencyContext(shopId)
     const normalizedPhone = normalizePhone(customerPhone)
+    let salePriceInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    let amountPaidInput: Awaited<ReturnType<typeof moneyInputToUzs>> | null = null
+    try {
+      salePriceInput = await moneyInputToUzs(salePrice, parsed.data.inputCurrency)
+      if (amountPaid !== undefined) amountPaidInput = await moneyInputToUzs(amountPaid, parsed.data.inputCurrency)
+    } catch (err) {
+      return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
+    }
+    const salePriceUzs = salePriceInput.amountUzs
+    const amountPaidUzs = amountPaidInput?.amountUzs
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
@@ -82,15 +95,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             data: { shopId, name: customerName, phone: customerPhone, normalizedPhone },
           })
 
-      const paid = paidFully ? salePrice : amountPaid ?? 0
-      const remaining = salePrice - paid
+      const paid = paidFully ? salePriceUzs : amountPaidUzs ?? 0
+      const remaining = salePriceUzs - paid
 
       const sale = await tx.sale.create({
         data: {
           shopId,
           deviceId,
           customerId: customer.id,
-          salePrice,
+          salePrice: salePriceUzs,
           paymentMethod: parsed.data.paymentMethod,
           paidFully: remaining <= 0,
           amountPaid: paid,
@@ -136,11 +149,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               },
               customerName,
               customerPhone,
-              salePrice,
+              salePrice: salePriceUzs,
               paidAmount: paid,
               remaining,
               paymentMethod,
               adminName: session.user.name,
+              currency,
             }),
             telegramId: admin.telegramId!,
             scheduledAt: new Date(),
@@ -159,13 +173,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           targetType: 'Device',
           targetId: deviceId,
           newValue: {
-            salePrice,
+            salePrice: salePriceUzs,
+            inputAmount: salePrice,
             customerName,
             paymentMethod,
             amountPaid: paid,
             remainingAmount: remaining,
             dueDate,
             paidFully: remaining <= 0,
+            ...moneyInputMeta(salePriceInput),
           },
         },
       })

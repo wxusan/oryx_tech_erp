@@ -14,8 +14,10 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { ArrowLeft, Check } from 'lucide-react'
+import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { displayImei } from '@/lib/device-display'
 import { calculateNasiyaAmounts, generatePaymentSchedule } from '@/lib/nasiya-utils'
+import { useShopCurrency } from '@/lib/use-shop-currency'
 
 interface Device {
   id: string
@@ -29,7 +31,8 @@ interface Device {
 
 type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
 
-function fmt(n: number) {
+function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
+  if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
   return Math.round(n).toLocaleString('ru-RU')
 }
 
@@ -50,6 +53,7 @@ function deviceMeta(device: Device) {
 
 export default function NewNasiyaPage() {
   const router = useRouter()
+  const { currency } = useShopCurrency()
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [devices, setDevices] = useState<Device[]>([])
   const [loading, setLoading] = useState(true)
@@ -75,9 +79,13 @@ export default function NewNasiyaPage() {
 
   const handleSelectDevice = useCallback((d: Device) => {
     setSelectedDevice(d)
-    setTotalPrice(String(d.purchasePrice))
+    setTotalPrice(
+      currency.currency === 'USD' && currency.usdUzsRate
+        ? convertUzsToUsd(d.purchasePrice, currency.usdUzsRate).toFixed(2)
+        : String(d.purchasePrice),
+    )
     setStep(2)
-  }, [])
+  }, [currency.currency, currency.usdUzsRate])
 
   useEffect(() => {
     let ignore = false
@@ -127,26 +135,33 @@ export default function NewNasiyaPage() {
     return !q || d.model.toLowerCase().includes(q) || (d.color ?? '').toLowerCase().includes(q) || d.imei.includes(q)
   })
 
+  const totalPriceUzs = currency.currency === 'USD' && currency.usdUzsRate
+    ? convertUsdToUzs(Number(totalPrice) || 0, currency.usdUzsRate)
+    : Number(totalPrice) || 0
+  const downPaymentUzs = currency.currency === 'USD' && currency.usdUzsRate
+    ? convertUsdToUzs(Number(downPayment) || 0, currency.usdUzsRate)
+    : Number(downPayment) || 0
+
   const calculation = useMemo(() => {
     try {
       return calculateNasiyaAmounts({
-        totalAmount: Number(totalPrice),
-        downPayment: Number(downPayment),
+        totalAmount: totalPriceUzs,
+        downPayment: downPaymentUzs,
         months: Number(months),
         interestPercent: Number(interestPercent || 0),
       })
     } catch {
       return {
-        totalAmount: Number(totalPrice) || 0,
-        downPayment: Number(downPayment) || 0,
-        baseRemainingAmount: Math.max(0, (Number(totalPrice) || 0) - (Number(downPayment) || 0)),
+        totalAmount: totalPriceUzs,
+        downPayment: downPaymentUzs,
+        baseRemainingAmount: Math.max(0, totalPriceUzs - downPaymentUzs),
         interestPercent: Number(interestPercent || 0),
         interestAmount: 0,
         finalNasiyaAmount: 0,
         monthlyPayment: 0,
       }
     }
-  }, [totalPrice, downPayment, months, interestPercent])
+  }, [totalPriceUzs, downPaymentUzs, months, interestPercent])
 
   const remaining = calculation.baseRemainingAmount
   const interestAmount = calculation.interestAmount
@@ -176,6 +191,10 @@ export default function NewNasiyaPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!step3Valid || !selectedDevice || !passportFile || submitting) return
+    if (currency.currency === 'USD' && !currency.usdUzsRate) {
+      setSubmitError('USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko\'ring.')
+      return
+    }
 
     setSubmitting(true)
     setSubmitError('')
@@ -205,6 +224,7 @@ export default function NewNasiyaPage() {
           passportPhotoUrl,
           totalAmount: Number(totalPrice),
           downPayment: Number(downPayment),
+          inputCurrency: currency.currency,
           months: Number(months),
           interestPercent: Number(interestPercent || 0),
           monthlyPayment: Math.round(monthlyPayment),
@@ -297,7 +317,7 @@ export default function NewNasiyaPage() {
                       <div className="font-medium text-sm text-zinc-900">{d.model}</div>
                       <div className="text-xs text-zinc-500 mt-0.5">{deviceMeta(d)}</div>
                     </div>
-                    <div className="text-sm font-bold text-zinc-900">{fmt(d.purchasePrice)} so&apos;m</div>
+                    <div className="text-sm font-bold text-zinc-900">{fmt(d.purchasePrice, currency)}</div>
                   </div>
                 </button>
               ))
@@ -419,25 +439,27 @@ export default function NewNasiyaPage() {
             <div className="p-4 grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Jami narx <span className="text-red-500">*</span>
+                  Jami narx ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
                 <Input
                   type="number"
+                  step={currency.currency === 'USD' ? '0.01' : '1'}
                   value={totalPrice}
                   onChange={(e) => setTotalPrice(e.target.value)}
-                  placeholder="9500000"
+                  placeholder={currency.currency === 'USD' ? '700.00' : '9500000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Boshlang&apos;ich to&apos;lov <span className="text-red-500">*</span>
+                  Boshlang&apos;ich to&apos;lov ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
                 <Input
                   type="number"
+                  step={currency.currency === 'USD' ? '0.01' : '1'}
                   value={downPayment}
                   onChange={(e) => setDownPayment(e.target.value)}
-                  placeholder="2000000"
+                  placeholder={currency.currency === 'USD' ? '150.00' : '2000000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
               </div>
@@ -447,7 +469,7 @@ export default function NewNasiyaPage() {
                 </label>
                 <Input
                   readOnly
-                  value={remaining > 0 ? fmt(remaining) : '0'}
+                  value={remaining > 0 ? fmt(remaining, currency) : '0'}
                   className="h-9 text-sm border-zinc-200 rounded bg-zinc-50 text-zinc-500"
                 />
               </div>
@@ -489,7 +511,7 @@ export default function NewNasiyaPage() {
                 </label>
                 <Input
                   readOnly
-                  value={interestAmount > 0 ? fmt(interestAmount) : '0'}
+                  value={interestAmount > 0 ? fmt(interestAmount, currency) : '0'}
                   className="h-9 text-sm border-zinc-200 rounded bg-zinc-50 text-zinc-500"
                 />
               </div>
@@ -499,7 +521,7 @@ export default function NewNasiyaPage() {
                 </label>
                 <Input
                   readOnly
-                  value={finalNasiyaAmount > 0 ? fmt(finalNasiyaAmount) : '0'}
+                  value={finalNasiyaAmount > 0 ? fmt(finalNasiyaAmount, currency) : '0'}
                   className="h-9 text-sm border-zinc-200 rounded bg-zinc-50 text-zinc-500"
                 />
               </div>
@@ -509,7 +531,7 @@ export default function NewNasiyaPage() {
                 </label>
                 <Input
                   readOnly
-                  value={monthlyPayment > 0 ? fmt(monthlyPayment) : '0'}
+                  value={monthlyPayment > 0 ? fmt(monthlyPayment, currency) : '0'}
                   className="h-9 text-sm border-zinc-200 rounded bg-zinc-50 text-zinc-500"
                 />
               </div>
@@ -575,7 +597,7 @@ export default function NewNasiyaPage() {
                       <tr key={row.month} className="border-b border-zinc-100 last:border-0">
                         <td className="px-4 py-2 text-zinc-400">{row.month}</td>
                         <td className="px-4 py-2 text-zinc-700">{row.date}</td>
-                        <td className="px-4 py-2 font-medium text-zinc-900">{fmt(row.amount)} so&apos;m</td>
+                        <td className="px-4 py-2 font-medium text-zinc-900">{fmt(row.amount, currency)}</td>
                       </tr>
                     ))}
                   </tbody>

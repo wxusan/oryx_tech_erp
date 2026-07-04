@@ -12,9 +12,9 @@ describe('P0 refund cap guard', () => {
   it('caps refunds to money actually collected before marking the device returned', () => {
     expect(src).toContain('const maxRefund = sale')
     expect(src).toContain('tx.nasiyaPayment.aggregate')
-    expect(src).toContain('parsed.data.refundAmount > maxRefund')
+    expect(src).toContain('refundAmountUzs > maxRefund')
     expect(src).toContain('Qaytariladigan summa mijozdan olingan summadan oshmasligi kerak')
-    expect(src.indexOf('parsed.data.refundAmount > maxRefund')).toBeLessThan(src.indexOf('tx.device.updateMany'))
+    expect(src.indexOf('refundAmountUzs > maxRefund')).toBeLessThan(src.indexOf('tx.device.updateMany'))
   })
 })
 

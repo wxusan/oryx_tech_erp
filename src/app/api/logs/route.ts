@@ -12,6 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { badRequest, ok, serverError } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
 import { enrichLogsWithActors } from '@/lib/server/log-actors'
+import { isLogCategory, logCategoryWhere } from '@/lib/log-categories'
 
 function parseDateParam(value: string | null | undefined, endOfDay = false) {
   if (!value) return null
@@ -38,6 +39,7 @@ export async function GET(req: NextRequest) {
     const from = searchParams.get('from') ?? undefined
     const to = searchParams.get('to') ?? undefined
     const search = searchParams.get('search')?.trim()
+    const categoryParam = searchParams.get('category')?.trim()
     const targetIds = searchParams
       .getAll('targetId')
       .flatMap((value) => value.split(','))
@@ -57,6 +59,22 @@ export async function GET(req: NextRequest) {
     if ((from && !fromDate) || (to && !toDate)) {
       return badRequest("Sana formati noto'g'ri")
     }
+    if (categoryParam && !isLogCategory(categoryParam)) {
+      return badRequest("Log kategoriyasi noto'g'ri")
+    }
+    const category = isLogCategory(categoryParam) ? categoryParam : 'all'
+    const categoryWhere = logCategoryWhere(category)
+    const searchWhere: Prisma.LogWhereInput = search
+      ? {
+          OR: [
+            { action: { contains: search, mode: 'insensitive' } },
+            { targetType: { contains: search, mode: 'insensitive' } },
+            { targetId: { contains: search, mode: 'insensitive' } },
+            { note: { contains: search, mode: 'insensitive' } },
+            { shop: { name: { contains: search, mode: 'insensitive' } } },
+          ],
+        }
+      : {}
 
     const where: Prisma.LogWhereInput = {
       ...(shopId && shopId !== 'all' ? { shopId } : {}),
@@ -71,16 +89,8 @@ export async function GET(req: NextRequest) {
             },
           }
         : {}),
-      ...(search
-        ? {
-            OR: [
-              { action: { contains: search, mode: 'insensitive' } },
-              { targetType: { contains: search, mode: 'insensitive' } },
-              { targetId: { contains: search, mode: 'insensitive' } },
-              { note: { contains: search, mode: 'insensitive' } },
-              { shop: { name: { contains: search, mode: 'insensitive' } } },
-            ],
-          }
+      ...(Object.keys(categoryWhere).length > 0 || Object.keys(searchWhere).length > 0
+        ? { AND: [categoryWhere, searchWhere].filter((item) => Object.keys(item).length > 0) }
         : {}),
     }
 

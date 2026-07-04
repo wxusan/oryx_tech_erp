@@ -15,12 +15,30 @@ import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession } from '@/lib/api-auth'
 import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
-import { invalidateShopReminderMutation } from '@/lib/server/cache-tags'
+import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
+import { normalizePhone } from '@/lib/phone'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
+const forbiddenMoneyFields = [
+  'totalAmount',
+  'downPayment',
+  'baseRemainingAmount',
+  'interestPercent',
+  'interestAmount',
+  'finalNasiyaAmount',
+  'remainingAmount',
+  'months',
+  'monthlyPayment',
+] as const
+
 const updateNasiyaSchema = z.object({
+  customerName: z.string().trim().min(2, "Mijoz ismi kamida 2 ta harfdan iborat bo'lishi kerak").max(100).optional(),
+  customerPhone: z.string().trim().min(9, "Telefon raqam kamida 9 ta raqam bo'lishi kerak").max(20).optional(),
   note: z.string().trim().max(1000, "Izoh 1000 belgidan oshmasligi kerak").optional(),
+  importNote: z.string().trim().max(1000, "Import izohi 1000 belgidan oshmasligi kerak").optional(),
+  reminderEnabled: z.boolean().optional(),
+  reason: z.string().trim().min(5, "Tahrirlash sababi kamida 5 ta belgidan iborat bo'lishi kerak").max(1000).optional(),
 })
 
 export async function GET(_req: NextRequest, ctx: RouteContext) {
@@ -120,12 +138,24 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     const { id: nasiyaId } = await ctx.params
     const body: unknown = await req.json()
+    if (body && typeof body === 'object') {
+      const forbidden = forbiddenMoneyFields.find((field) => field in body)
+      if (forbidden) {
+        return badRequest("Pul summalari to'lovlar va hisobotlarga bog'langan. Ularni tuzatish uchun alohida adjustment kerak.")
+      }
+    }
     const parsed = updateNasiyaSchema.safeParse(body)
     if (!parsed.success) {
       const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
       return badRequest(firstError)
     }
-    if (parsed.data.note === undefined) {
+    if (
+      parsed.data.customerName === undefined &&
+      parsed.data.customerPhone === undefined &&
+      parsed.data.note === undefined &&
+      parsed.data.importNote === undefined &&
+      parsed.data.reminderEnabled === undefined
+    ) {
       return badRequest("O'zgartirish uchun ma'lumot kiritilmadi")
     }
 
@@ -136,15 +166,43 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         shop: { status: 'ACTIVE', deletedAt: null },
         ...(session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}),
       },
-      select: { id: true, shopId: true, note: true },
+      select: {
+        id: true,
+        shopId: true,
+        customerId: true,
+        note: true,
+        importNote: true,
+        reminderEnabled: true,
+        customer: { select: { name: true, phone: true, normalizedPhone: true } },
+      },
     })
     if (!existing) return notFound('Nasiya topilmadi')
 
     const updated = await prisma.$transaction(async (tx) => {
+      const customerUpdate = {
+        ...(parsed.data.customerName !== undefined ? { name: parsed.data.customerName } : {}),
+        ...(parsed.data.customerPhone !== undefined
+          ? { phone: parsed.data.customerPhone, normalizedPhone: normalizePhone(parsed.data.customerPhone) }
+          : {}),
+      }
+      if (Object.keys(customerUpdate).length > 0) {
+        await tx.customer.update({ where: { id: existing.customerId }, data: customerUpdate })
+      }
+      const nasiyaUpdate = {
+        ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
+        ...(parsed.data.importNote !== undefined ? { importNote: parsed.data.importNote } : {}),
+        ...(parsed.data.reminderEnabled !== undefined ? { reminderEnabled: parsed.data.reminderEnabled } : {}),
+      }
       const nasiya = await tx.nasiya.update({
         where: { id: existing.id },
-        data: { note: parsed.data.note },
-        select: { id: true, note: true },
+        data: nasiyaUpdate,
+        select: {
+          id: true,
+          note: true,
+          importNote: true,
+          reminderEnabled: true,
+          customer: { select: { name: true, phone: true } },
+        },
       })
       await tx.log.create({
         data: {
@@ -154,16 +212,23 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
           action: 'UPDATE',
           targetType: 'Nasiya',
           targetId: existing.id,
-          oldValue: { note: existing.note },
-          newValue: { note: parsed.data.note },
+          oldValue: {
+            customerName: existing.customer.name,
+            customerPhone: existing.customer.phone,
+            note: existing.note,
+            importNote: existing.importNote,
+            reminderEnabled: existing.reminderEnabled,
+          },
+          newValue: { ...nasiyaUpdate, ...customerUpdate, auditReason: parsed.data.reason ?? parsed.data.note },
+          note: parsed.data.reason ?? parsed.data.note,
         },
       })
       return nasiya
     })
 
-    invalidateShopReminderMutation(existing.shopId)
+    invalidateShopNasiyaMutation(existing.shopId)
 
-    return ok(updated, 'Nasiya izohi yangilandi')
+    return ok(updated, "Nasiya ma'lumotlari yangilandi")
   } catch (err) {
     console.error('[PATCH /api/nasiya/[id]]', err)
     return serverError()

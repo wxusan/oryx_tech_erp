@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic'
 import type { ChartConfig } from '@/components/ui/chart'
+import type { CurrencyContext } from '@/lib/currency'
 
 interface ChartDatum {
   name: string
@@ -23,16 +24,19 @@ export default function HisobotChartsLoader({
   cashFlowData,
   businessData,
   chartConfig,
+  currency,
 }: {
   cashFlowData: ChartDatum[]
   businessData: ChartDatum[]
   chartConfig: ChartConfig
+  currency: CurrencyContext
 }) {
   return (
     <HisobotCharts
       cashFlowData={cashFlowData}
       businessData={businessData}
       chartConfig={chartConfig}
+      currency={currency}
     />
   )
 }

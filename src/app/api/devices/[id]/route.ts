@@ -72,8 +72,10 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
               amountPaid: true,
               remainingAmount: true,
               dueDate: true,
+              reminderEnabled: true,
               paidFully: true,
               paymentMethod: true,
+              note: true,
               createdAt: true,
               customer: {
                 select: { name: true, phone: true },

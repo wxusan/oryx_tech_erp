@@ -8,6 +8,8 @@ import { invalidateShopReturnMutation } from '@/lib/server/cache-tags'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { logger } from '@/lib/logger'
 import { deviceReturnedMessage } from '@/lib/telegram-templates'
+import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { getShopCurrencyContext } from '@/lib/server/currency'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -16,6 +18,7 @@ const returnDeviceSchema = z.object({
   refundAmount: z.number().min(0, "Qaytarilgan summa manfiy bo'lmasligi kerak").optional().default(0),
   refundMethod: z.enum(['CASH', 'TRANSFER', 'CARD', 'OTHER']).optional(),
   shopId: z.string().optional(),
+  inputCurrency: z.enum(['UZS', 'USD']).optional(),
 }).refine((data) => data.refundAmount <= 0 || data.refundMethod !== undefined, {
   message: "Pul qaytarilgan bo'lsa, qaytarish usuli tanlanishi shart",
   path: ['refundMethod'],
@@ -38,6 +41,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, parsed.data.shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const currency = await getShopCurrencyContext(shopId)
+    let refundInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    try {
+      refundInput = parsed.data.refundAmount > 0
+        ? await moneyInputToUzs(parsed.data.refundAmount, parsed.data.inputCurrency)
+        : { amountUzs: 0, inputCurrency: parsed.data.inputCurrency ?? 'UZS', exchangeRateUsed: null }
+    } catch (err) {
+      return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
+    }
+    const refundAmountUzs = refundInput.amountUzs
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
@@ -68,7 +81,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             )
           : 0
 
-      if (parsed.data.refundAmount > maxRefund) {
+      if (refundAmountUzs > maxRefund) {
         throw { status: 400, message: 'Qaytariladigan summa mijozdan olingan summadan oshmasligi kerak.' }
       }
 
@@ -113,8 +126,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           deviceId,
           saleId: sale?.id,
           nasiyaId: nasiya?.id,
-          refundAmount: parsed.data.refundAmount,
-          refundMethod: parsed.data.refundAmount > 0 ? parsed.data.refundMethod : undefined,
+          refundAmount: refundAmountUzs,
+          refundMethod: refundAmountUzs > 0 ? parsed.data.refundMethod : undefined,
           note: parsed.data.note,
           createdBy: session.user.id,
         },
@@ -132,9 +145,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           newValue: {
             status: 'RETURNED',
             returnId: returnRecord.id,
-            refundAmount: parsed.data.refundAmount,
+            refundAmount: refundAmountUzs,
+            inputRefundAmount: parsed.data.refundAmount,
             refundMethod: parsed.data.refundMethod,
             note: parsed.data.note,
+            ...moneyInputMeta(refundInput),
           },
           note: parsed.data.note,
         },
@@ -157,10 +172,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             batteryHealth: device.batteryHealth,
             imei: device.imei,
           },
-          refundAmount: parsed.data.refundAmount,
+          refundAmount: refundAmountUzs,
           refundMethod: parsed.data.refundMethod,
           note: parsed.data.note,
           adminName: session.user.name,
+          currency,
         })
         for (const admin of shopAdmins) {
           await tx.notification.create({

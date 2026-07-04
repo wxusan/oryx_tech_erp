@@ -7,6 +7,8 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { convertUsdToUzs, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
+import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, ImagePlus, Loader2, X } from 'lucide-react'
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
@@ -26,6 +28,7 @@ interface FormData {
 
 export default function NewDevicePage() {
   const router = useRouter()
+  const { currency, currencyError } = useShopCurrency()
   const [form, setForm] = useState<FormData>({
     model: '',
     color: '',
@@ -104,6 +107,11 @@ export default function NewDevicePage() {
     if (!isValid || loading) return
     setLoading(true)
     setError('')
+    if (currency.currency === 'USD' && !currency.usdUzsRate) {
+      setError('USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko\'ring.')
+      setLoading(false)
+      return
+    }
     try {
       const imageUrls = await uploadDeviceImages()
       const res = await fetch('/api/devices', {
@@ -115,6 +123,7 @@ export default function NewDevicePage() {
           storage: form.storage,
           batteryHealth: form.battery ? Number(form.battery) : undefined,
           purchasePrice: Number(form.purchasePrice),
+          inputCurrency: currency.currency,
           imei: form.imei,
           supplierName: form.supplierName || undefined,
           supplierPhone: form.supplierPhone || undefined,
@@ -150,6 +159,11 @@ export default function NewDevicePage() {
       {error && (
         <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">
           {error}
+        </div>
+      )}
+      {currencyError && (
+        <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-4 py-3">
+          {currencyError}
         </div>
       )}
 
@@ -208,15 +222,21 @@ export default function NewDevicePage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Sotib olingan narx <span className="text-red-500">*</span>
+                Sotib olingan narx ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
               </label>
               <Input
                 type="number"
+                step={currency.currency === 'USD' ? '0.01' : '1'}
                 value={form.purchasePrice}
                 onChange={set('purchasePrice')}
-                placeholder="7500000"
+                placeholder={currency.currency === 'USD' ? '600.00' : '7500000'}
                 className="h-9 text-sm border-zinc-200 rounded"
               />
+              {currency.currency === 'USD' && currency.usdUzsRate && Number(form.purchasePrice) > 0 && (
+                <p className="mt-1 text-xs text-zinc-500">
+                  Saqlanadi: {formatMoneyByCurrency(convertUsdToUzs(Number(form.purchasePrice), currency.usdUzsRate), 'UZS')}
+                </p>
+              )}
             </div>
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">
