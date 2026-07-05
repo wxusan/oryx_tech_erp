@@ -13,6 +13,7 @@ import { prisma } from '@/lib/prisma'
 import { requireApiSession } from '@/lib/api-auth'
 import { ok, badRequest, conflict, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
+import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { Prisma } from '@/generated/prisma/client'
 import type { ZodError } from 'zod'
 
@@ -28,6 +29,9 @@ const updateDeviceSchema = z.object({
   storage: z.string().optional(),
   batteryHealth: z.number().int().min(0).max(100).optional(),
   purchasePrice: z.number().positive("Kelish narxi 0 dan katta bo'lishi kerak").optional(),
+  // Display/input currency of purchasePrice. UZS by default (back-compatible);
+  // USD is converted to UZS server-side — UZS remains the stored value.
+  inputCurrency: z.enum(['UZS', 'USD']).optional(),
   imei: z.string().trim().min(1, 'IMEI kiritilishi shart').optional(),
   supplierPhone: z.string().trim().optional(),
   note: z.string().optional(),
@@ -150,7 +154,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     if (!existing) return notFound("Qurilma topilmadi")
 
-    const { reason, ...updateData } = parsed.data
+    const { reason, inputCurrency, ...updateData } = parsed.data
     const hasDeviceChanges = Object.entries(updateData).some(([key, value]) => {
       if (value === undefined) return false
       return String(existing[key as keyof typeof existing] ?? '') !== String(value)
@@ -167,6 +171,18 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     // profit reporting and must not be silently rewritten after the fact.
     if (isFinanciallyLinked && updateData.purchasePrice !== undefined) {
       return badRequest("Sotilgan yoki nasiya qurilmaning kelish narxini o'zgartirib bo'lmaydi")
+    }
+
+    // Convert the entered purchase price to the UZS base. UZS passes through;
+    // USD is converted with the current rate. UZS is what gets stored.
+    let purchaseMeta: Awaited<ReturnType<typeof moneyInputToUzs>> | null = null
+    if (updateData.purchasePrice !== undefined) {
+      try {
+        purchaseMeta = await moneyInputToUzs(updateData.purchasePrice, inputCurrency)
+        updateData.purchasePrice = purchaseMeta.amountUzs
+      } catch {
+        return badRequest("USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko'ring.")
+      }
     }
 
     // IMEI uniqueness among the shop's ACTIVE devices (mirrors the DB partial
@@ -221,6 +237,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
           },
           newValue: {
             ...updateData,
+            ...(purchaseMeta ? moneyInputMeta(purchaseMeta) : {}),
             ...(auditNote && isFinanciallyLinked ? { editReason: auditNote } : {}),
           },
           note: auditNote && isFinanciallyLinked ? auditNote : undefined,

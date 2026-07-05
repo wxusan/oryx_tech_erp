@@ -19,7 +19,7 @@ import {
 import { paymentMethodLabel } from '@/lib/labels'
 import { uzDate, uzDateTime } from '@/lib/dates'
 import { displayImei } from '@/lib/device-display'
-import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
+import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 
@@ -223,7 +223,12 @@ export default function QurilmaDetailPage() {
       color: device.color ?? '',
       storage: device.storage ?? '',
       batteryHealth: device.batteryHealth != null ? String(device.batteryHealth) : '',
-      purchasePrice: String(device.purchasePrice),
+      // Stored value is UZS; show it in the shop's display currency (USD when
+      // toggled) so the input matches every other money field.
+      purchasePrice:
+        currency.currency === 'USD' && currency.usdUzsRate
+          ? convertUzsToUsd(device.purchasePrice, currency.usdUzsRate).toFixed(2)
+          : String(device.purchasePrice),
       imei: device.imei,
       supplierPhone: device.supplierPhone ?? '',
       note: '',
@@ -247,6 +252,10 @@ export default function QurilmaDetailPage() {
       setEditError("Kelish narxi 0 dan katta bo'lishi kerak")
       return
     }
+    if (currency.currency === 'USD' && !currency.usdUzsRate) {
+      setEditError("USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko'ring.")
+      return
+    }
     const battery = editForm.batteryHealth.trim() === '' ? undefined : Number(editForm.batteryHealth)
     if (battery !== undefined && (!Number.isInteger(battery) || battery < 0 || battery > 100)) {
       setEditError('Batareya 0 va 100 orasida bo\'lishi kerak')
@@ -264,6 +273,7 @@ export default function QurilmaDetailPage() {
           storage: editForm.storage.trim(),
           ...(battery !== undefined ? { batteryHealth: battery } : {}),
           purchasePrice: price,
+          inputCurrency: currency.currency,
           imei: editForm.imei.trim(),
           supplierPhone: editForm.supplierPhone.trim(),
           note: editForm.note.trim() || undefined,
@@ -785,13 +795,19 @@ export default function QurilmaDetailPage() {
               </div>
               <div className="space-y-1.5">
                 <label className="block text-xs font-medium text-zinc-700">
-                  Kelish narxi <span className="text-red-500">*</span>
+                  Kelish narxi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
                 <MoneyInput
+                  currency={currency.currency}
                   value={editForm.purchasePrice}
                   onChange={(v) => setEditForm((f) => ({ ...f, purchasePrice: v }))}
                   className="h-10 rounded-lg border-zinc-200 text-sm"
                 />
+                {currency.currency === 'USD' && currency.usdUzsRate && Number(editForm.purchasePrice) > 0 && (
+                  <p className="text-xs text-zinc-500">
+                    Saqlanadi: {formatMoneyByCurrency(convertUsdToUzs(Number(editForm.purchasePrice), currency.usdUzsRate), 'UZS')}
+                  </p>
+                )}
               </div>
             </div>
             <div className="space-y-1.5">
