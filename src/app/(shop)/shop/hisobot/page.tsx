@@ -71,8 +71,8 @@ export default async function ShopReportPage() {
   const collectionRate = collectionBase > 0 ? Math.round((collected / collectionBase) * 100) : 0
 
   const cashFlowData = [
-    { name: 'Brutto tushum', amount: collected, fill: 'var(--color-collected)' },
-    { name: 'Net pul', amount: netCash, fill: 'var(--color-net)' },
+    { name: 'Umumiy aylanma', amount: collected, fill: 'var(--color-collected)' },
+    { name: 'Sof tushum', amount: netCash, fill: 'var(--color-net)' },
     { name: 'Qaytarilgan summa', amount: refunds, fill: 'var(--color-refunds)' },
     { name: 'Kutilmoqda', amount: expected, fill: 'var(--color-expected)' },
     { name: 'Kechikkan', amount: overdue, fill: 'var(--color-overdue)' },
@@ -80,18 +80,18 @@ export default async function ShopReportPage() {
 
   const businessData = [
     { name: 'Ombor', amount: inventory, fill: 'var(--color-inventory)' },
-    { name: 'Hisoblangan foyda', amount: grossProfit, fill: 'var(--color-gross)' },
+    { name: 'Sotuv foydasi', amount: grossProfit, fill: 'var(--color-gross)' },
     { name: 'Nasiya foizi', amount: interestProfit, fill: 'var(--color-interest)' },
   ]
 
   const chartConfig = {
-    collected: { label: 'Yig‘ilgan pul, brutto', color: '#2563eb' },
-    net: { label: 'Qaytarishlardan keyingi net pul', color: '#15803d' },
+    collected: { label: 'Umumiy aylanma', color: '#2563eb' },
+    net: { label: 'Sof tushum', color: '#15803d' },
     refunds: { label: 'Qaytarilgan summa', color: '#9333ea' },
     expected: { label: 'Kutilmoqda', color: '#0f766e' },
     overdue: { label: 'Kechikkan', color: '#dc2626' },
     inventory: { label: 'Ombor', color: '#64748b' },
-    gross: { label: 'Hisoblangan foyda', color: '#16a34a' },
+    gross: { label: 'Sotuv foydasi', color: '#16a34a' },
     interest: { label: 'Nasiya foizi', color: '#0891b2' },
   } satisfies ChartConfig
 
@@ -109,7 +109,7 @@ export default async function ShopReportPage() {
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Hisobot</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Brutto/net pul oqimi, qarzdorlik, ombor tannarxi va hisoblangan foyda ko'rsatkichlari
+            Umumiy aylanma/sof tushum, qarzdorlik, ombor tannarxi va sotuv foydasi ko'rsatkichlari
           </p>
         </div>
         <div className="grid grid-cols-1 gap-2 rounded-lg border border-zinc-200 bg-white p-2 text-xs text-zinc-500 sm:flex">
@@ -195,12 +195,12 @@ export default async function ShopReportPage() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
             <Card className="rounded-lg">
               <CardHeader>
-                <CardDescription>Hisoblangan sotuv foydasi</CardDescription>
+                <CardDescription>Sotuv foydasi</CardDescription>
                 <CardAction><TrendingUp className="size-4 text-emerald-600" /></CardAction>
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-zinc-900">{fmt(grossProfit, currency)}</div>
-                <p className="mt-3 text-xs text-zinc-500">Sotilgan/nasiya qilingan qurilmalar bo'yicha</p>
+                <p className="mt-3 text-xs text-zinc-500">Sotilgan qurilmalar narxidan tannarx ayirilgandagi foyda</p>
               </CardContent>
             </Card>
 

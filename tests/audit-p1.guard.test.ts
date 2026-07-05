@@ -18,16 +18,19 @@ describe('P1 money/report clarity guard', () => {
     expect(src).toContain('netCashFlowThisMonth')
   })
 
-  it('dashboard/report labels distinguish gross cash, net cash, refunds and computed profit', () => {
+  it('dashboard/report labels distinguish gross turnover, net cash, refunds and sales profit', () => {
     const dashboard = read('src/app/(shop)/shop/dashboard/page.tsx')
     const report = read('src/app/(shop)/shop/hisobot/page.tsx')
 
-    expect(dashboard).toContain("Yig'ilgan pul, brutto")
-    expect(dashboard).toContain('Qaytarishlardan keyingi net pul')
-    expect(dashboard).toContain('Hisoblangan foyda')
-    expect(report).toContain('Brutto tushum')
-    expect(report).toContain('Net pul')
+    // "Umumiy aylanma" = gross turnover, "Sof tushum" = net cash after refunds,
+    // "Sotuv foydasi" = sale price minus purchase cost (not full net profit).
+    expect(dashboard).toContain('Umumiy aylanma')
+    expect(dashboard).toContain('Sof tushum')
+    expect(dashboard).toContain('Sotuv foydasi')
+    expect(report).toContain('Umumiy aylanma')
+    expect(report).toContain('Sof tushum')
     expect(report).toContain('Qaytarilgan summa')
+    expect(report).toContain('Sotuv foydasi')
   })
 })
 

@@ -118,19 +118,19 @@ export default async function DashboardPage() {
             <Card className="rounded-lg lg:col-span-5">
               <CardHeader className="border-b border-zinc-100">
                 <CardTitle>Bu oy pul oqimi</CardTitle>
-                <CardDescription>Brutto tushum, qaytarishlardan keyingi net va kutilayotgan to'lov</CardDescription>
+                <CardDescription>Umumiy aylanma, sof tushum va kutilayotgan to'lov</CardDescription>
                 <CardAction>
                   <WalletCards className="size-5 text-zinc-400" />
                 </CardAction>
               </CardHeader>
               <CardContent className="space-y-5">
                 <div>
-                  <div className="text-xs font-medium uppercase text-zinc-500">Yig'ilgan pul, brutto</div>
+                  <div className="text-xs font-medium uppercase text-zinc-500">Umumiy aylanma</div>
                   <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-900">
                     {fmt(grossCashIn, currency)}
                   </div>
                   <div className="mt-1 text-xs text-zinc-500">
-                    Qaytarishlardan keyingi net pul: {fmtBase(netCashFlow, currency)}
+                    Sof tushum: {fmtBase(netCashFlow, currency)}
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -141,7 +141,7 @@ export default async function DashboardPage() {
                   <Progress value={collectionRate} />
                   <div className="flex items-center justify-between text-xs text-zinc-500">
                     <span>Kutilmoqda: {fmt(stats.expectedThisMonth, currency)}</span>
-                    <span>Brutto + kutilayotgan: {fmt(collectionBase, currency)}</span>
+                    <span>Umumiy aylanma + kutilayotgan: {fmt(collectionBase, currency)}</span>
                   </div>
                 </div>
                 <KoLink href="/shop/hisobot" />
@@ -151,7 +151,7 @@ export default async function DashboardPage() {
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:col-span-7">
               <Card className="rounded-lg">
                 <CardHeader>
-                  <CardDescription>Hisoblangan foyda</CardDescription>
+                  <CardDescription>Sotuv foydasi</CardDescription>
                   <CardAction><TrendingUp className="size-4 text-zinc-400" /></CardAction>
                 </CardHeader>
                 <CardContent>
@@ -159,7 +159,7 @@ export default async function DashboardPage() {
                     {fmt(stats.accrualGrossProfitThisMonth, currency)}
                   </div>
                   <p className="mt-2 text-xs text-zinc-500">
-                    Hisoblangan savdo summasi tannarxdan ayrilgan
+                    Sotilgan qurilmalar narxidan tannarx ayirilgan
                     {stats.nasiyaInterestThisMonth > 0 ? ` · Nasiya foizi: ${fmt(stats.nasiyaInterestThisMonth, currency)}` : ''}
                   </p>
                   <KoLink href="/shop/hisobot" />
