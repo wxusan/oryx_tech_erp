@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -16,7 +16,7 @@ import {
 } from '@/components/ui/select'
 import { ArrowLeft, Check } from 'lucide-react'
 import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
-import { displayImei } from '@/lib/device-display'
+import { displayImei, deviceMatchesSearch } from '@/lib/device-display'
 import { calculateNasiyaAmounts, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 
@@ -78,16 +78,31 @@ export default function NewNasiyaPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
-  const handleSelectDevice = useCallback((d: Device) => {
-    setSelectedDevice(d)
-    setTotalPrice(
-      currency.currency === 'USD' && currency.usdUzsRate
-        ? convertUzsToUsd(d.purchasePrice, currency.usdUzsRate).toFixed(2)
-        : String(d.purchasePrice),
-    )
-    setStep(2)
-  }, [currency.currency, currency.usdUzsRate])
+  // Latest currency, readable from callbacks (incl. the mount-only loader) so the
+  // price prefill uses the resolved rate without making the loader depend on it.
+  const currencyRef = useRef(currency)
+  useEffect(() => {
+    currencyRef.current = currency
+  }, [currency])
 
+  // The device's price as a prefill suggestion, in the shop's display currency.
+  function priceFor(d: Device) {
+    const c = currencyRef.current
+    return c.currency === 'USD' && c.usdUzsRate
+      ? convertUzsToUsd(d.purchasePrice, c.usdUzsRate).toFixed(2)
+      : String(d.purchasePrice)
+  }
+
+  // Select a device (does NOT auto-advance) — the user confirms with "Keyingi
+  // bosqich". Kept as a plain function so it is never a hook dependency.
+  function selectDevice(d: Device) {
+    setSelectedDevice(d)
+    setTotalPrice(priceFor(d))
+  }
+
+  // Load sellable stock once on mount. Must NOT depend on currency-bound values,
+  // otherwise the list reloads (and drops the user's selection) when the shop
+  // currency resolves.
   useEffect(() => {
     let ignore = false
 
@@ -107,11 +122,15 @@ export default function NewNasiyaPage() {
         const nextDevices = json.data as Device[]
         setDevices(nextDevices)
 
+        // Deep-link from a device page (?deviceId=…): the device is already
+        // chosen, so select it and jump straight to the customer step.
         const deviceId = new URLSearchParams(window.location.search).get('deviceId')
         if (deviceId) {
           const device = nextDevices.find((d) => d.id === deviceId)
           if (device) {
-            handleSelectDevice(device)
+            setSelectedDevice(device)
+            setTotalPrice(priceFor(device))
+            setStep(2)
           } else {
             setLoadError('Tanlangan qurilma omborda topilmadi')
           }
@@ -129,12 +148,9 @@ export default function NewNasiyaPage() {
     return () => {
       ignore = true
     }
-  }, [handleSelectDevice])
+  }, [])
 
-  const filteredDevices = devices.filter((d) => {
-    const q = searchQuery.toLowerCase()
-    return !q || d.model.toLowerCase().includes(q) || (d.color ?? '').toLowerCase().includes(q) || d.imei.includes(q)
-  })
+  const filteredDevices = devices.filter((d) => deviceMatchesSearch(d, searchQuery))
 
   const totalPriceUzs = currency.currency === 'USD' && currency.usdUzsRate
     ? convertUsdToUzs(Number(totalPrice) || 0, currency.usdUzsRate)
@@ -305,25 +321,54 @@ export default function NewNasiyaPage() {
             ) : filteredDevices.length === 0 ? (
               <div className="px-4 py-6 text-center text-zinc-400 text-sm">Qurilma topilmadi</div>
             ) : (
-              filteredDevices.map((d, i) => (
-                <button
-                  key={d.id}
-                  onClick={() => handleSelectDevice(d)}
-                  className={`w-full text-left px-4 py-3 hover:bg-zinc-50 transition-colors ${
-                    i < filteredDevices.length - 1 ? 'border-b border-zinc-100' : ''
-                  }`}
-                >
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <div className="font-medium text-sm text-zinc-900">{d.model}</div>
-                      <div className="text-xs text-zinc-500 mt-0.5">{deviceMeta(d)}</div>
+              filteredDevices.map((d, i) => {
+                const isSelected = selectedDevice?.id === d.id
+                return (
+                  <button
+                    key={d.id}
+                    type="button"
+                    onClick={() => selectDevice(d)}
+                    aria-pressed={isSelected}
+                    className={`w-full text-left px-4 py-3 cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-inset ${
+                      isSelected ? 'bg-zinc-900/[0.03] ring-2 ring-inset ring-zinc-900' : 'hover:bg-zinc-50'
+                    } ${i < filteredDevices.length - 1 ? 'border-b border-zinc-100' : ''}`}
+                  >
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-3">
+                        <span
+                          className={`flex size-5 shrink-0 items-center justify-center rounded-full border ${
+                            isSelected ? 'border-zinc-900 bg-zinc-900 text-white' : 'border-zinc-300'
+                          }`}
+                        >
+                          {isSelected && <Check size={12} />}
+                        </span>
+                        <div>
+                          <div className="font-medium text-sm text-zinc-900">{d.model}</div>
+                          <div className="text-xs text-zinc-500 mt-0.5">{deviceMeta(d)}</div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isSelected && (
+                          <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-[10px] font-medium text-white">
+                            Tanlandi
+                          </span>
+                        )}
+                        <div className="text-sm font-bold text-zinc-900">{fmt(d.purchasePrice, currency)}</div>
+                      </div>
                     </div>
-                    <div className="text-sm font-bold text-zinc-900">{fmt(d.purchasePrice, currency)}</div>
-                  </div>
-                </button>
-              ))
+                  </button>
+                )
+              })
             )}
           </div>
+          <Button
+            type="button"
+            disabled={!selectedDevice}
+            onClick={() => setStep(2)}
+            className="h-9 w-full bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
+          >
+            Keyingi bosqich
+          </Button>
         </div>
       )}
 
