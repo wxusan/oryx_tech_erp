@@ -1,7 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
-import Link from 'next/link'
+import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -16,6 +15,7 @@ import {
 } from '@/components/ui/select'
 import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { displayImei, deviceMatchesSearch } from '@/lib/device-display'
+import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, Check } from 'lucide-react'
 
@@ -59,6 +59,8 @@ export default function NewSotuvPage() {
   // Step 2 form
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
+  const [phoneError, setPhoneError] = useState('')
+  const phoneRef = useRef<HTMLInputElement>(null)
   // null = untouched (show the device's price as a live currency-aware
   // suggestion); a string = the value the user typed.
   const [salePriceInput, setSalePriceInput] = useState<string | null>(null)
@@ -88,6 +90,19 @@ export default function NewSotuvPage() {
   function selectDevice(d: Device) {
     setSelectedDevice(d)
     setSalePriceInput(null)
+  }
+
+  // Stepper: only previous (completed) steps are clickable. Going back never
+  // needs validation and never wipes entered data.
+  function goToStep(n: 1 | 2) {
+    if (n < step) setStep(n)
+  }
+
+  // Page "Orqaga": step back within the flow first, otherwise leave the page
+  // (existing behavior — return to the operation picker).
+  function handleBack() {
+    if (step > 1) setStep((step - 1) as 1 | 2)
+    else router.push('/shop/yangi-operatsiya')
   }
 
   // Load sellable stock once on mount. Must NOT depend on currency-bound values,
@@ -153,6 +168,13 @@ export default function NewSotuvPage() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!canSubmit || !selectedDevice || submitting) return
+    // Phone format is checked here (not only server-side) so the error lands
+    // under the field instead of as a late toast.
+    if (!isValidPhone(customerPhone)) {
+      setPhoneError(PHONE_ERROR)
+      phoneRef.current?.focus()
+      return
+    }
     if (currency.currency === 'USD' && !currency.usdUzsRate) {
       setSubmitError('USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko\'ring.')
       return
@@ -192,10 +214,14 @@ export default function NewSotuvPage() {
 
   return (
     <div className="p-6 space-y-5 max-w-2xl">
-      <Link href="/shop/yangi-operatsiya" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
+      <button
+        type="button"
+        onClick={handleBack}
+        className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900"
+      >
         <ArrowLeft size={14} />
         Orqaga
-      </Link>
+      </button>
 
       <div>
         <h1 className="text-xl font-bold text-zinc-900">Naqd sotuv</h1>
@@ -207,25 +233,33 @@ export default function NewSotuvPage() {
         {[
           { n: 1, label: 'Qurilma tanlash' },
           { n: 2, label: 'Sotuv ma\'lumotlari' },
-        ].map(({ n, label }) => (
-          <div key={n} className="flex items-center gap-2">
-            <div
-              className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
-                step > n
-                  ? 'bg-zinc-900 text-white'
-                  : step === n
-                  ? 'bg-zinc-900 text-white'
-                  : 'bg-zinc-100 text-zinc-400'
-              }`}
-            >
-              {step > n ? <Check size={12} /> : n}
+        ].map(({ n, label }) => {
+          const clickable = n < step
+          return (
+            <div key={n} className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => goToStep(n as 1 | 2)}
+                disabled={!clickable}
+                aria-current={step === n ? 'step' : undefined}
+                aria-disabled={!clickable}
+                className={`flex items-center gap-2 ${clickable ? 'cursor-pointer' : 'cursor-default'}`}
+              >
+                <span
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold ${
+                    step >= n ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-400'
+                  }`}
+                >
+                  {step > n ? <Check size={12} /> : n}
+                </span>
+                <span className={`text-sm ${step === n ? 'font-medium text-zinc-900' : 'text-zinc-400'}`}>
+                  {label}
+                </span>
+              </button>
+              {n < 2 && <div className="w-8 h-px bg-zinc-200 mx-1" />}
             </div>
-            <span className={`text-sm ${step === n ? 'font-medium text-zinc-900' : 'text-zinc-400'}`}>
-              {label}
-            </span>
-            {n < 2 && <div className="w-8 h-px bg-zinc-200 mx-1" />}
-          </div>
-        ))}
+          )
+        })}
       </div>
 
       {step === 1 && (
@@ -343,11 +377,17 @@ export default function NewSotuvPage() {
                   Mijoz tel <span className="text-red-500">*</span>
                 </label>
                 <Input
+                  ref={phoneRef}
                   value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  onChange={(e) => {
+                    setCustomerPhone(e.target.value)
+                    if (phoneError) setPhoneError('')
+                  }}
                   placeholder="+998 90 000 00 00"
+                  aria-invalid={!!phoneError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
+                {phoneError && <p className="mt-1 text-xs text-red-600">{phoneError}</p>}
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">

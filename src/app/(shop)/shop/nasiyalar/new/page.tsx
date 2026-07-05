@@ -1,7 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import Link from 'next/link'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -17,6 +16,7 @@ import {
 import { ArrowLeft, Check } from 'lucide-react'
 import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { displayImei, deviceMatchesSearch } from '@/lib/device-display'
+import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { calculateNasiyaAmounts, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 
@@ -66,6 +66,9 @@ export default function NewNasiyaPage() {
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
   const [passportFile, setPassportFile] = useState<File | null>(null)
+  const [nameError, setNameError] = useState('')
+  const [phoneError, setPhoneError] = useState('')
+  const phoneRef = useRef<HTMLInputElement>(null)
 
   // Step 3
   // null = untouched (show the device's price as a live currency-aware
@@ -97,6 +100,39 @@ export default function NewNasiyaPage() {
   function selectDevice(d: Device) {
     setSelectedDevice(d)
     setTotalPriceInput(null)
+  }
+
+  // Stepper: only previous (completed) steps are clickable. Going back never
+  // needs validation and never wipes entered data.
+  function goToStep(n: 1 | 2 | 3) {
+    if (n < step) setStep(n)
+  }
+
+  // Page "Orqaga": step back within the flow first, otherwise leave the page
+  // (existing behavior — return to the operation picker).
+  function handleBack() {
+    if (step > 1) setStep((step - 1) as 1 | 2 | 3)
+    else router.push('/shop/yangi-operatsiya')
+  }
+
+  // Step 2 → Step 3: validate customer name + phone here so the error appears
+  // under the field on this step, not only at final save. Server still
+  // re-validates on submit (source of truth).
+  function handleContinueToTerms() {
+    let ok = true
+    if (customerName.trim().length < 2) {
+      setNameError("Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      ok = false
+    }
+    if (!isValidPhone(customerPhone)) {
+      setPhoneError(PHONE_ERROR)
+      ok = false
+    }
+    if (!ok) {
+      if (!isValidPhone(customerPhone)) phoneRef.current?.focus()
+      return
+    }
+    setStep(3)
   }
 
   // Load sellable stock once on mount. Must NOT depend on currency-bound values,
@@ -264,10 +300,14 @@ export default function NewNasiyaPage() {
 
   return (
     <div className="p-6 space-y-5 max-w-2xl">
-      <Link href="/shop/yangi-operatsiya" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
+      <button
+        type="button"
+        onClick={handleBack}
+        className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900"
+      >
         <ArrowLeft size={14} />
         Orqaga
-      </Link>
+      </button>
 
       <div>
         <h1 className="text-xl font-bold text-zinc-900">Yangi nasiya</h1>
@@ -280,18 +320,28 @@ export default function NewNasiyaPage() {
           const n = idx + 1 as 1 | 2 | 3
           const done = step > n
           const active = step === n
+          const clickable = n < step
           return (
             <div key={n} className="flex items-center gap-1">
-              <div
-                className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
-                  done ? 'bg-zinc-900 text-white' : active ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-400'
-                }`}
+              <button
+                type="button"
+                onClick={() => goToStep(n)}
+                disabled={!clickable}
+                aria-current={active ? 'step' : undefined}
+                aria-disabled={!clickable}
+                className={`flex items-center gap-1 ${clickable ? 'cursor-pointer' : 'cursor-default'}`}
               >
-                {done ? <Check size={12} /> : n}
-              </div>
-              <span className={`text-sm ${active ? 'font-medium text-zinc-900' : done ? 'text-zinc-500' : 'text-zinc-400'}`}>
-                {label}
-              </span>
+                <span
+                  className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 ${
+                    done || active ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-400'
+                  }`}
+                >
+                  {done ? <Check size={12} /> : n}
+                </span>
+                <span className={`text-sm ${active ? 'font-medium text-zinc-900' : done ? 'text-zinc-500' : 'text-zinc-400'}`}>
+                  {label}
+                </span>
+              </button>
               {n < 3 && <div className="w-6 h-px bg-zinc-200 mx-1" />}
             </div>
           )
@@ -401,21 +451,32 @@ export default function NewNasiyaPage() {
                 </label>
                 <Input
                   value={customerName}
-                  onChange={(e) => setCustomerName(e.target.value)}
+                  onChange={(e) => {
+                    setCustomerName(e.target.value)
+                    if (nameError) setNameError('')
+                  }}
                   placeholder="To'liq ism"
+                  aria-invalid={!!nameError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
+                {nameError && <p className="mt-1 text-xs text-red-600">{nameError}</p>}
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Mijoz tel raqami <span className="text-red-500">*</span>
                 </label>
                 <Input
+                  ref={phoneRef}
                   value={customerPhone}
-                  onChange={(e) => setCustomerPhone(e.target.value)}
+                  onChange={(e) => {
+                    setCustomerPhone(e.target.value)
+                    if (phoneError) setPhoneError('')
+                  }}
                   placeholder="+998 90 000 00 00"
+                  aria-invalid={!!phoneError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
+                {phoneError && <p className="mt-1 text-xs text-red-600">{phoneError}</p>}
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
@@ -452,8 +513,9 @@ export default function NewNasiyaPage() {
               Orqaga
             </Button>
             <Button
+              type="button"
               disabled={!step2Valid}
-              onClick={() => setStep(3)}
+              onClick={handleContinueToTerms}
               className="flex-1 bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
             >
               Davom etish
