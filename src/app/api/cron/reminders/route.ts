@@ -1,29 +1,41 @@
 /**
  * GET /api/cron/reminders
  *
- * Daily cron job that:
- *   1. Sends a reminder to shop admins for every NasiyaSchedule due today.
- *   2. Sends an overdue alert for every NasiyaSchedule past its due date
- *      that is still PENDING or PARTIAL, and marks them OVERDUE.
+ * Cron job (safe to run every ~10 min — all generation is idempotent) that:
+ *   1. Generates a reminder for every NasiyaSchedule / Sale due today.
+ *   2. Generates an overdue alert for every schedule/sale past its due date
+ *      that is still unpaid, and marks them OVERDUE.
+ *   3. Drains the notification queue, delivering any messages that are now due.
+ *
+ * PLANNED reminders (due-today + overdue) are NOT sent immediately: each is
+ * scheduled at 11:00–11:30 Asia/Tashkent with a deterministic per-notification
+ * jitter (see scheduledReminderSendAt), so they never all fire in the same
+ * second. A later cron run inside that window delivers them. IMMEDIATE events
+ * (sale/nasiya/payment/device) are queued with scheduledAt = now elsewhere and
+ * are unaffected.
  *
  * Vercel cron configuration (vercel.json):
  * {
- *   "crons": [{ "path": "/api/cron/reminders", "schedule": "0 3 * * *" }]
+ *   "crons": [{ "path": "/api/cron/reminders", "schedule": "*\/10 * * * *" }]
  * }
- * This runs at 08:00 Asia/Tashkent.
+ * Runs every 10 minutes (UTC). Idempotent: dedupeKey guarantees one message per
+ * (day, admin, schedule/sale); the drain only sends rows whose jittered
+ * scheduledAt has arrived. Sub-daily cron needs Vercel Pro or an external
+ * scheduler hitting this endpoint with the CRON_SECRET bearer token.
  *
  * Vercel Cron sends Authorization: Bearer <CRON_SECRET> automatically when the
  * env var is configured. The same header can be used by external schedulers:
  *   Authorization: Bearer <CRON_SECRET>
  *
  * Response:
- *   { reminders: number, overdue: number }
+ *   { reminders, overdue, saleReminders, saleOverdue }
  */
 
 import { type NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { hasValidInternalSecret, internalSecret } from '@/lib/api-auth'
 import { processPendingNotifications } from '@/lib/notification-service'
+import { scheduledReminderSendAt } from '@/lib/notification-schedule'
 import { invalidateShopOverdueCron } from '@/lib/server/cache-tags'
 import { tashkentDayRange } from '@/lib/timezone'
 import { recordOpsEvent } from '@/lib/server/ops-events'
@@ -133,7 +145,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           type: 'REMINDER',
           message: msg,
           telegramId: admin.telegramId!,
-          scheduledAt: new Date(),
+          scheduledAt: scheduledReminderSendAt(dedupeKey),
           relatedId: schedule.id,
           relatedType: 'NasiyaSchedule',
         },
@@ -178,6 +190,10 @@ export async function GET(request: NextRequest): Promise<Response> {
     },
   })
 
+  // Shops where a schedule/nasiya actually flipped to OVERDUE this run. Only
+  // these need a cache bust — repeated (idempotent) cron runs must not thrash.
+  const transitionedShopIds = new Set<string>()
+
   for (const schedule of overdue) {
     const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
     const daysLate = Math.floor((today.getTime() - effectiveDue.getTime()) / 86400000)
@@ -196,7 +212,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       daysLate,
       currency: await reminderCurrency(schedule.nasiya.shop),
     })
-    await prisma.$transaction(async (tx) => {
+    const transitioned = await prisma.$transaction(async (tx) => {
       for (const admin of schedule.nasiya.shop.admins) {
         const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
         await tx.notification.upsert({
@@ -208,29 +224,31 @@ export async function GET(request: NextRequest): Promise<Response> {
             type: 'OVERDUE',
             message: msg,
             telegramId: admin.telegramId!,
-            scheduledAt: new Date(),
+            scheduledAt: scheduledReminderSendAt(dedupeKey),
             relatedId: schedule.id,
             relatedType: 'NasiyaSchedule',
           },
         })
       }
 
-      await tx.nasiyaSchedule.updateMany({
+      const scheduleUpdate = await tx.nasiyaSchedule.updateMany({
         where: { id: schedule.id, status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] } },
         data: { status: 'OVERDUE' },
       })
-      await tx.nasiya.update({
-        where: { id: schedule.nasiya.id },
+      const nasiyaUpdate = await tx.nasiya.updateMany({
+        where: { id: schedule.nasiya.id, status: { not: 'OVERDUE' } },
         data: { status: 'OVERDUE' },
       })
+      return scheduleUpdate.count > 0 || nasiyaUpdate.count > 0
     })
+    if (transitioned) transitionedShopIds.add(schedule.nasiya.shopId)
   }
 
-  // Bust caches for shops whose nasiya schedules / parent status were just
-  // marked OVERDUE so the list, dashboard and reports refresh immediately
-  // instead of serving a stale "Faol" snapshot until the tag TTL expires.
-  const overdueShopIds = new Set(overdue.map((schedule) => schedule.nasiya.shopId))
-  for (const overdueShopId of overdueShopIds) {
+  // Bust caches only for shops whose nasiya schedules / parent status ACTUALLY
+  // flipped to OVERDUE this run, so the list, dashboard and reports refresh
+  // immediately — while the frequent cron cadence never thrashes caches on
+  // idempotent no-op runs.
+  for (const overdueShopId of transitionedShopIds) {
     invalidateShopOverdueCron(overdueShopId)
   }
 
@@ -279,7 +297,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           type: 'SALE_REMINDER',
           message: msg,
           telegramId: admin.telegramId!,
-          scheduledAt: new Date(),
+          scheduledAt: scheduledReminderSendAt(dedupeKey),
           relatedId: sale.id,
           relatedType: 'Sale',
         },
@@ -334,7 +352,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           type: 'SALE_OVERDUE',
           message: msg,
           telegramId: admin.telegramId!,
-          scheduledAt: new Date(),
+          scheduledAt: scheduledReminderSendAt(dedupeKey),
           relatedId: sale.id,
           relatedType: 'Sale',
         },
@@ -361,8 +379,10 @@ export async function GET(request: NextRequest): Promise<Response> {
       ...summary,
       notificationsAttempted: delivery.attempted,
       notificationsSent: delivery.sent,
+      notificationsSentWithImage: delivery.sentWithImage,
       notificationsFailed: delivery.failed,
       notificationsCancelled: delivery.cancelled,
+      overdueTransitions: transitionedShopIds.size,
       durationMs: Date.now() - startedAt,
     },
   })

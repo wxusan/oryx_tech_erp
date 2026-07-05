@@ -44,16 +44,40 @@ export async function sendTelegramMessage(
     await getBot().api.sendMessage(telegramId, text)
     return { ok: true }
   } catch (error) {
-    const anyErr = error as { error_code?: number; description?: string }
-    const errorCode = typeof anyErr?.error_code === 'number' ? anyErr.error_code : undefined
-    const description = typeof anyErr?.description === 'string' ? anyErr.description : undefined
-    // Redacting logger — never prints the bot token even if it appears in a URL.
-    logger.warn('Telegram sendMessage failed', {
-      event: 'telegram.send_failed',
-      entityType: 'Telegram',
-      errorCode,
-      error,
-    })
-    return { ok: false, errorCode, description }
+    return handleSendError('sendMessage', error)
   }
+}
+
+/**
+ * Send a photo with an optional caption to a single Telegram user.
+ *
+ * `photoUrl` MUST be a URL Telegram can fetch (e.g. a short-lived signed URL) —
+ * never a permanent private URL. The caption is the same plain text a message
+ * would carry (no parse_mode). Same result contract as sendTelegramMessage.
+ */
+export async function sendTelegramPhoto(
+  telegramId: string,
+  photoUrl: string,
+  caption?: string,
+): Promise<TelegramSendResult> {
+  try {
+    await getBot().api.sendPhoto(telegramId, photoUrl, caption ? { caption } : undefined)
+    return { ok: true }
+  } catch (error) {
+    return handleSendError('sendPhoto', error)
+  }
+}
+
+function handleSendError(method: 'sendMessage' | 'sendPhoto', error: unknown): TelegramSendResult {
+  const anyErr = error as { error_code?: number; description?: string }
+  const errorCode = typeof anyErr?.error_code === 'number' ? anyErr.error_code : undefined
+  const description = typeof anyErr?.description === 'string' ? anyErr.description : undefined
+  // Redacting logger — never prints the bot token even if it appears in a URL.
+  logger.warn(`Telegram ${method} failed`, {
+    event: 'telegram.send_failed',
+    entityType: 'Telegram',
+    errorCode,
+    error,
+  })
+  return { ok: false, errorCode, description }
 }

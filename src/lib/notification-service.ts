@@ -12,7 +12,9 @@
 // ---------------------------------------------------------------------------
 
 import { prisma } from '@/lib/prisma'
-import { sendTelegramMessage } from './telegram'
+import { sendTelegramMessage, sendTelegramPhoto } from './telegram'
+import { chooseTelegramDelivery } from '@/lib/telegram-delivery'
+import { resolveNotificationImageUrl } from '@/lib/server/notification-image'
 import { logger } from '@/lib/logger'
 import { recordOpsEvent } from '@/lib/server/ops-events'
 
@@ -112,6 +114,7 @@ export async function queueNotification(
 export interface NotificationRunSummary {
   attempted: number
   sent: number
+  sentWithImage: number
   failed: number
   cancelled: number
   durationMs: number
@@ -121,12 +124,14 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
   const startedAt = Date.now()
   let attempted = 0
   let sent = 0
+  let sentWithImage = 0
   let failed = 0
   let cancelled = 0
 
   const finalize = (): NotificationRunSummary => ({
     attempted,
     sent,
+    sentWithImage,
     failed,
     cancelled,
     durationMs: Date.now() - startedAt,
@@ -179,13 +184,26 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
         if (claim.count !== 1) continue
         attempted++
 
-        const result = await sendTelegramMessage(
-          notification.telegramId,
-          notification.message,
-        )
+        // Attach the related device photo (short-lived signed URL) when one
+        // exists; otherwise send the text. Never let image resolution throw.
+        const imageUrl = await resolveNotificationImageUrl(notification)
+        const plan = chooseTelegramDelivery({ imageUrl, caption: notification.message })
+
+        let result = await (plan.method === 'photo'
+          ? sendTelegramPhoto(notification.telegramId, plan.imageUrl, plan.caption)
+          : sendTelegramMessage(notification.telegramId, plan.text))
+
+        let deliveredWithImage = plan.method === 'photo' && result.ok
+        // If the photo send failed (e.g. Telegram couldn't fetch the image),
+        // fall back to a plain text message so the notification still lands.
+        if (plan.method === 'photo' && !result.ok) {
+          result = await sendTelegramMessage(notification.telegramId, notification.message)
+          deliveredWithImage = false
+        }
 
         if (result.ok) {
           sent++
+          if (deliveredWithImage) sentWithImage++
           await prisma.notification.update({
             where: { id: notification.id },
             data:  {
