@@ -11,16 +11,21 @@ export function isCurrencyCode(value: unknown): value is CurrencyCode {
   return value === 'UZS' || value === 'USD'
 }
 
-export function convertUsdToUzs(amountUsd: number, rate: number): number {
-  assertMoney(amountUsd, 'USD amount')
+// Amounts may arrive as strings — Prisma Decimal columns serialize to a string
+// over JSON (e.g. device.purchasePrice from /api/devices). Coerce like
+// formatMoneyByCurrency already does; the conversion math is unchanged.
+export function convertUsdToUzs(amountUsd: number | string, rate: number): number {
+  const usd = Number(amountUsd)
+  assertMoney(usd, 'USD amount')
   assertRate(rate)
-  return Math.round(amountUsd * rate)
+  return Math.round(usd * rate)
 }
 
-export function convertUzsToUsd(amountUzs: number, rate: number): number {
-  assertMoney(amountUzs, 'UZS amount')
+export function convertUzsToUsd(amountUzs: number | string, rate: number): number {
+  const uzs = Number(amountUzs)
+  assertMoney(uzs, 'UZS amount')
   assertRate(rate)
-  return amountUzs / rate
+  return uzs / rate
 }
 
 export function normalizeMoneyInput(

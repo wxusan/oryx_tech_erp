@@ -44,4 +44,18 @@ describe('currency helpers', () => {
   it('converts UZS to USD without mutating the base amount', () => {
     expect(convertUzsToUsd(1_250_000, 12_500)).toBe(100)
   })
+
+  // Regression: Prisma Decimal columns (e.g. device.purchasePrice) serialize to
+  // a STRING over JSON. Passing that string must convert, not throw — otherwise
+  // priceFor()/openEdit() crash the sale/nasiya/device-edit pages in USD mode.
+  it('accepts string amounts (serialized Decimal) without throwing', () => {
+    expect(convertUzsToUsd('1250000', 12_500)).toBe(100)
+    expect(convertUsdToUzs('100', 12_500)).toBe(1_250_000)
+    expect(convertUzsToUsd('11800000', 12_500)).toBeCloseTo(944, 0)
+  })
+
+  it('still rejects genuinely invalid amounts', () => {
+    expect(() => convertUzsToUsd('abc', 12_500)).toThrow()
+    expect(() => convertUzsToUsd(-5, 12_500)).toThrow()
+  })
 })
