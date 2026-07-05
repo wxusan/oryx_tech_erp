@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import {
   AlertTriangle,
+  ArrowRight,
   CalendarClock,
   ClipboardList,
   Package,
@@ -27,6 +28,7 @@ import { uzDate, uzMonthYear } from '@/lib/dates'
 
 interface UpcomingPayment {
   nasiya: {
+    id: string
     customer: { name: string }
     device: { model: string }
   }
@@ -42,6 +44,17 @@ function fmt(n: number, currency: CurrencyContext) {
 
 function fmtBase(n: number, currency: CurrencyContext) {
   return formatMoneyWithBase(n, currency.currency, currency.usdUzsRate)
+}
+
+function KoLink({ href, label = "Ko'rish" }: { href: string; label?: string }) {
+  return (
+    <Link
+      href={href}
+      className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900"
+    >
+      {label} <ArrowRight className="size-3" />
+    </Link>
+  )
 }
 
 function activityLabel(action: string) {
@@ -131,6 +144,7 @@ export default async function DashboardPage() {
                     <span>Brutto + kutilayotgan: {fmt(collectionBase, currency)}</span>
                   </div>
                 </div>
+                <KoLink href="/shop/hisobot" />
               </CardContent>
             </Card>
 
@@ -148,6 +162,7 @@ export default async function DashboardPage() {
                     Hisoblangan savdo summasi tannarxdan ayrilgan
                     {stats.nasiyaInterestThisMonth > 0 ? ` · Nasiya foizi: ${fmt(stats.nasiyaInterestThisMonth, currency)}` : ''}
                   </p>
+                  <KoLink href="/shop/hisobot" />
                 </CardContent>
               </Card>
 
@@ -161,6 +176,7 @@ export default async function DashboardPage() {
                     {fmt(stats.inventoryPurchaseCost, currency)}
                   </div>
                   <p className="mt-2 text-xs text-zinc-500">Sotilmagan va band qilingan qurilmalar</p>
+                  <KoLink href="/shop/qurilmalar?status=IN_STOCK" />
                 </CardContent>
               </Card>
 
@@ -185,39 +201,51 @@ export default async function DashboardPage() {
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
             <Card className="rounded-lg" size="sm">
-              <CardContent className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs text-zinc-500">Jami qurilmalar</div>
-                  <div className="mt-1 text-xl font-bold text-zinc-900">{stats.totalDevices}</div>
+              <CardContent>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs text-zinc-500">Jami qurilmalar</div>
+                    <div className="mt-1 text-xl font-bold text-zinc-900">{stats.totalDevices}</div>
+                  </div>
+                  <Package className="size-5 text-zinc-400" />
                 </div>
-                <Package className="size-5 text-zinc-400" />
+                <KoLink href="/shop/qurilmalar" />
               </CardContent>
             </Card>
             <Card className="rounded-lg" size="sm">
-              <CardContent className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs text-zinc-500">Naqd sotuvlar</div>
-                  <div className="mt-1 text-xl font-bold text-zinc-900">{stats.soldThisMonth}</div>
+              <CardContent>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs text-zinc-500">Naqd sotuvlar</div>
+                    <div className="mt-1 text-xl font-bold text-zinc-900">{stats.soldThisMonth}</div>
+                  </div>
+                  <ReceiptText className="size-5 text-zinc-400" />
                 </div>
-                <ReceiptText className="size-5 text-zinc-400" />
+                <KoLink href="/shop/qurilmalar?status=SOLD_CASH" />
               </CardContent>
             </Card>
             <Card className="rounded-lg" size="sm">
-              <CardContent className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs text-zinc-500">Faol nasiyalar</div>
-                  <div className="mt-1 text-xl font-bold text-zinc-900">{stats.activeNasiyalar}</div>
+              <CardContent>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs text-zinc-500">Faol nasiyalar</div>
+                    <div className="mt-1 text-xl font-bold text-zinc-900">{stats.activeNasiyalar}</div>
+                  </div>
+                  <ClipboardList className="size-5 text-zinc-400" />
                 </div>
-                <ClipboardList className="size-5 text-zinc-400" />
+                <KoLink href="/shop/nasiyalar?status=ACTIVE" />
               </CardContent>
             </Card>
             <Card className="rounded-lg" size="sm">
-              <CardContent className="flex items-center justify-between gap-3">
-                <div>
-                  <div className="text-xs text-zinc-500">Bu oy kutilmoqda</div>
-                  <div className="mt-1 text-xl font-bold text-zinc-900">{fmt(stats.expectedThisMonth, currency)}</div>
+              <CardContent>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs text-zinc-500">Bu oy kutilmoqda</div>
+                    <div className="mt-1 text-xl font-bold text-zinc-900">{fmt(stats.expectedThisMonth, currency)}</div>
+                  </div>
+                  <CalendarClock className="size-5 text-zinc-400" />
                 </div>
-                <CalendarClock className="size-5 text-zinc-400" />
+                <KoLink href="/shop/nasiyalar" />
               </CardContent>
             </Card>
       </div>
@@ -227,11 +255,24 @@ export default async function DashboardPage() {
               <CardHeader className="border-b border-zinc-100">
                 <CardTitle>Yaqin to'lov sanalari</CardTitle>
                 <CardDescription>Nasiya bo'yicha eng yaqin va kechikkan oyliklar</CardDescription>
+                <CardAction>
+                  <Link
+                    href="/shop/nasiyalar"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900"
+                  >
+                    Barchasini ko'rish <ArrowRight className="size-3" />
+                  </Link>
+                </CardAction>
               </CardHeader>
               <CardContent className="space-y-2">
                 {stats.upcomingPayments.length > 0 ? (
                   stats.upcomingPayments.map((p, i) => (
-                    <div key={i} className="flex items-center justify-between gap-3 py-3 border-b border-zinc-100 last:border-0">
+                    <Link
+                      key={i}
+                      href={`/shop/nasiyalar/${p.nasiya.id}`}
+                      prefetch={false}
+                      className="flex items-center justify-between gap-3 py-3 border-b border-zinc-100 last:border-0 hover:bg-zinc-50 -mx-2 px-2 rounded transition-colors"
+                    >
                       <div>
                         <div className="text-sm font-medium text-zinc-900">{p.nasiya.customer.name}</div>
                         <div className="mt-0.5 text-xs text-zinc-500">
@@ -245,7 +286,7 @@ export default async function DashboardPage() {
                         <div className="text-sm font-semibold text-zinc-900">{fmt(outstanding(p), currency)}</div>
                         <div className="mt-0.5 text-xs text-zinc-400">qolgan</div>
                       </div>
-                    </div>
+                    </Link>
                   ))
                 ) : (
                   <div className="text-sm text-zinc-400 py-4 text-center">To'lovlar yo'q</div>
@@ -257,6 +298,14 @@ export default async function DashboardPage() {
               <CardHeader className="border-b border-zinc-100">
                 <CardTitle>Oxirgi operatsiyalar</CardTitle>
                 <CardDescription>Do'kon ichidagi oxirgi harakatlar</CardDescription>
+                <CardAction>
+                  <Link
+                    href="/shop/logs"
+                    className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900"
+                  >
+                    Barchasini ko'rish <ArrowRight className="size-3" />
+                  </Link>
+                </CardAction>
               </CardHeader>
               <CardContent className="space-y-2">
                 {stats.recentActivity.length > 0 ? (

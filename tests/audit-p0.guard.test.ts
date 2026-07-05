@@ -39,7 +39,9 @@ describe('P0 nasiya deferral idempotency guard', () => {
   const route = read('src/app/api/nasiya/[id]/payment/route.ts')
   const schema = read('prisma/schema.prisma')
   const migration = read('prisma/migrations/202607030006_audit_hardening_idempotency/migration.sql')
-  const ui = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
+  // The receive-payment flow (incl. the idempotency key) lives in the shared
+  // modal used by both the detail page and the nasiyalar list.
+  const ui = read('src/components/shop/nasiya-payment-modal.tsx')
 
   it('records deferrals in a durable idempotency ledger without creating a payment row', () => {
     expect(route).toContain('(amount > 0 || deferredToNext) && !idempotencyKey')

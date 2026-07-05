@@ -5,7 +5,6 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
-import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Card,
@@ -14,7 +13,6 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import {
   Dialog,
@@ -24,18 +22,12 @@ import {
   DialogDescription,
   DialogFooter,
 } from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
 import { paymentMethodLabel } from '@/lib/labels'
 import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
-import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
-import { uzDate, uzDateTime, uzMonthYear } from '@/lib/dates'
+import { formatMoneyByCurrency } from '@/lib/currency'
+import { uzDate, uzDateTime } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
+import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 import { ArrowLeft, Pencil } from 'lucide-react'
 
 interface NasiyaSchedule {
@@ -144,10 +136,6 @@ function nasiyaLogLabel(action: string) {
   return action
 }
 
-function scheduleBalance(row: NasiyaSchedule) {
-  return Math.max(0, Number(row.expectedAmount) - Number(row.paidAmount))
-}
-
 /**
  * Effective status shown for a schedule row. An unpaid row past its effective
  * due date reads as OVERDUE even before cron flips the stored status, so the
@@ -155,11 +143,6 @@ function scheduleBalance(row: NasiyaSchedule) {
  */
 function rowDisplayStatus(row: NasiyaSchedule): RowStatus {
   return scheduleDisplayStatus(row) as RowStatus
-}
-
-/** Short, readable label for the selected-month trigger: "3-oy · Sentabr 2026". */
-function scheduleTriggerLabel(row: NasiyaSchedule) {
-  return `${row.monthNumber}-oy · ${uzMonthYear(row.dueDate)}`
 }
 
 export default function NasiyaDetailPage() {
@@ -176,14 +159,6 @@ export default function NasiyaDetailPage() {
   const [logs, setLogs] = useState<NasiyaLog[]>([])
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
-  const [payAmount, setPayAmount] = useState('')
-  const [payMethod, setPayMethod] = useState('')
-  const [payDate, setPayDate] = useState('')
-  const [carryOver, setCarryOver] = useState(false)
-  const [payNote, setPayNote] = useState('')
-  const [selectedScheduleId, setSelectedScheduleId] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [payError, setPayError] = useState('')
 
   const [editOpen, setEditOpen] = useState(false)
   const [editCustomerName, setEditCustomerName] = useState('')
@@ -201,11 +176,6 @@ export default function NasiyaDetailPage() {
       .then((json) => {
         if (json.success) {
           setNasiya(json.data)
-          // default selected schedule to first PENDING
-          const first = json.data.schedules
-            ?.filter((s: NasiyaSchedule) => ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(s.status))
-            .sort((a: NasiyaSchedule, b: NasiyaSchedule) => a.monthNumber - b.monthNumber)[0]
-          if (first) setSelectedScheduleId(first.id)
         } else {
           setError(json.error || 'Xatolik yuz berdi')
         }
@@ -323,61 +293,6 @@ export default function NasiyaDetailPage() {
     }
   }
 
-  const pendingSchedules = nasiya?.schedules
-    ?.filter((s) => ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(s.status))
-    .sort((a, b) => a.monthNumber - b.monthNumber) ?? []
-
-  const canSubmit = carryOver
-    ? payDate.trim() && selectedScheduleId && payNote.trim().length >= 5
-    : payAmount.trim() && payMethod && payDate.trim() && selectedScheduleId && payNote.trim().length >= 5
-
-  async function handlePaymentSubmit() {
-    if (!canSubmit || submitting) return
-    if (!carryOver && currency.currency === 'USD' && !currency.usdUzsRate) {
-      setPayError('USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko\'ring.')
-      return
-    }
-    setSubmitting(true)
-    setPayError('')
-    try {
-      const idempotencyKey = crypto.randomUUID()
-      const res = await fetch(`/api/nasiya/${id}/payment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Idempotency-Key': idempotencyKey,
-        },
-        body: JSON.stringify({
-          nasiyaScheduleId: selectedScheduleId,
-          amount: carryOver ? 0 : Number(payAmount),
-          inputCurrency: currency.currency,
-          paymentMethod: carryOver ? undefined : payMethod,
-          date: new Date(payDate).toISOString(),
-          delayedUntil: carryOver ? new Date(payDate).toISOString() : undefined,
-          deferredToNext: carryOver,
-          note: payNote || undefined,
-        }),
-      })
-      const json = await res.json()
-      if (json.success) {
-        setPaymentModalOpen(false)
-        setPayAmount('')
-        setPayMethod('')
-        setPayDate('')
-        setCarryOver(false)
-        setPayNote('')
-        setLoading(true)
-        fetchNasiya()
-      } else {
-        setPayError(json.error || "To'lovda xatolik")
-      }
-    } catch {
-      setPayError("To'lovda xatolik")
-    } finally {
-      setSubmitting(false)
-    }
-  }
-
   if (loading) {
     return <div className="p-6 text-sm text-zinc-400">Yuklanmoqda...</div>
   }
@@ -400,8 +315,6 @@ export default function NasiyaDetailPage() {
       : 0
 
   const sortedSchedules = [...(nasiya.schedules ?? [])].sort((a, b) => a.monthNumber - b.monthNumber)
-  const selectedSchedule = pendingSchedules.find((s) => s.id === selectedScheduleId)
-  const selectedScheduleOutstanding = selectedSchedule ? scheduleBalance(selectedSchedule) : 0
 
   return (
     <div className="p-6 space-y-5 max-w-4xl">
@@ -649,185 +562,15 @@ export default function NasiyaDetailPage() {
         )}
       </div>
 
-      {/* Payment Dialog */}
-      <Dialog open={paymentModalOpen} onOpenChange={setPaymentModalOpen}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-xl gap-0 overflow-hidden rounded-xl p-0 sm:w-full">
-          <DialogHeader className="border-b border-zinc-100 px-5 py-4">
-            <DialogTitle className="text-base font-semibold text-zinc-900">To'lov qabul qilish</DialogTitle>
-            <DialogDescription className="text-sm text-zinc-500">
-              {nasiya.customer.name} · {nasiya.device.model}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="max-h-[65vh] space-y-4 overflow-y-auto px-5 py-4">
-            {payError && (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-                {payError}
-              </div>
-            )}
-
-            {pendingSchedules.length > 0 && (
-              <div className="space-y-2">
-                <label className="block text-xs font-medium text-zinc-700">
-                  Qaysi oy to'lovi? <span className="text-red-500">*</span>
-                </label>
-                <Select value={selectedScheduleId} onValueChange={(v) => v && setSelectedScheduleId(v)}>
-                  <SelectTrigger className="h-11 w-full rounded-lg border-zinc-200 text-sm [&>span]:truncate">
-                    <SelectValue placeholder="To'lov oyini tanlang">
-                      {selectedSchedule ? scheduleTriggerLabel(selectedSchedule) : "To'lov oyini tanlang"}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectContent className="max-h-72">
-                    {pendingSchedules.map((s) => (
-                      <SelectItem key={s.id} value={s.id} className="py-2">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="font-medium text-zinc-900">
-                            {s.monthNumber}-oy · {uzMonthYear(s.dueDate)}
-                          </span>
-                          <span className="text-xs text-zinc-500">
-                            {uzDate(s.dueDate)} · qolgan {fmt(scheduleBalance(s), currency)}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedSchedule && (
-                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2.5">
-                    <div className="flex items-center gap-2">
-                      <Badge variant="outline" className="rounded-md border-zinc-200 bg-white text-zinc-600">
-                        {scheduleStatusLabels[rowDisplayStatus(selectedSchedule)]}
-                      </Badge>
-                      <span className="text-xs text-zinc-500">Shu oy uchun qolgan</span>
-                    </div>
-                    <span className="text-sm font-semibold text-zinc-900">
-                      {fmt(selectedScheduleOutstanding, currency)}
-                    </span>
-                  </div>
-                )}
-              </div>
-            )}
-
-            <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-zinc-200 px-3 py-2.5 hover:bg-zinc-50">
-              <input
-                type="checkbox"
-                id="carry-over"
-                checked={carryOver}
-                onChange={(e) => setCarryOver(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-zinc-300"
-              />
-              <span className="text-sm text-zinc-700">
-                Mijoz bu oy to'lamadi, muddatni uzaytirish
-                <span className="mt-0.5 block text-xs text-zinc-400">
-                  Belgilansa, to'lov emas — tanlangan oy keyingi sanaga suriladi.
-                </span>
-              </span>
-            </label>
-
-            {!carryOver && (
-              <div className="space-y-2">
-                <label className="block text-xs font-medium text-zinc-700">
-                  Miqdor ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
-                </label>
-                <div className="relative">
-                  <MoneyInput
-                    currency={currency.currency}
-                    value={payAmount}
-                    onChange={setPayAmount}
-                    placeholder={
-                      selectedScheduleOutstanding
-                        ? currency.currency === 'USD' && currency.usdUzsRate
-                          ? convertUzsToUsd(selectedScheduleOutstanding, currency.usdUzsRate).toFixed(2)
-                          : String(selectedScheduleOutstanding)
-                        : currency.currency === 'USD' ? '100.00' : '1000000'
-                    }
-                    className="h-12 rounded-lg border-zinc-200 pr-14 text-lg font-semibold"
-                  />
-                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-zinc-400">
-                    {currencyLabel(currency.currency)}
-                  </span>
-                </div>
-                {selectedScheduleOutstanding > 0 && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setPayAmount(
-                        currency.currency === 'USD' && currency.usdUzsRate
-                          ? convertUzsToUsd(selectedScheduleOutstanding, currency.usdUzsRate).toFixed(2)
-                          : String(selectedScheduleOutstanding),
-                      )
-                    }
-                    className="text-xs font-medium text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline"
-                  >
-                    Tavsiya: {fmt(selectedScheduleOutstanding, currency)}
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {!carryOver && (
-                <div className="space-y-2">
-                  <label className="block text-xs font-medium text-zinc-700">
-                    To'lov usuli <span className="text-red-500">*</span>
-                  </label>
-                  <Select value={payMethod} onValueChange={(v) => v && setPayMethod(v)}>
-                    <SelectTrigger className="h-11 w-full rounded-lg border-zinc-200 text-sm">
-                      <SelectValue placeholder="Usulni tanlang" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="CASH">Naqd</SelectItem>
-                      <SelectItem value="CARD">Karta</SelectItem>
-                      <SelectItem value="TRANSFER">Bank o'tkazmasi</SelectItem>
-                      <SelectItem value="OTHER">Boshqa</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              <div className={carryOver ? 'space-y-2 sm:col-span-2' : 'space-y-2'}>
-                <label className="block text-xs font-medium text-zinc-700">
-                  {carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"} <span className="text-red-500">*</span>
-                </label>
-                <Input
-                  type="date"
-                  value={payDate}
-                  onChange={(e) => setPayDate(e.target.value)}
-                  className="h-11 rounded-lg border-zinc-200 text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-xs font-medium text-zinc-700">
-                Izoh <span className="text-red-500">*</span>
-              </label>
-              <Textarea
-                value={payNote}
-                onChange={(e) => setPayNote(e.target.value)}
-                placeholder={carryOver ? "Masalan: mijoz 10 kunga kechiktirishni so'radi" : "Masalan: mijoz oylik to'lovni naqd berdi"}
-                className="min-h-[80px] rounded-lg border-zinc-200 text-sm"
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2 border-t border-zinc-100 px-5 py-4">
-            <Button
-              variant="outline"
-              onClick={() => { setPaymentModalOpen(false); setPayError('') }}
-              className="rounded-lg border-zinc-200 text-zinc-700"
-            >
-              Bekor qilish
-            </Button>
-            <Button
-              disabled={!canSubmit || submitting}
-              onClick={handlePaymentSubmit}
-              className="rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
-            >
-              {submitting ? 'Saqlanmoqda...' : carryOver ? 'Muddatni uzaytirish' : "To'lovni saqlash"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Payment modal — shared component, also used on the nasiyalar list */}
+      <NasiyaPaymentModal
+        nasiyaId={nasiya.id}
+        open={paymentModalOpen}
+        onOpenChange={setPaymentModalOpen}
+        customerName={nasiya.customer.name}
+        deviceName={nasiya.device.model}
+        onSuccess={() => { setLoading(true); fetchNasiya() }}
+      />
 
       {/* Edit (safe fields) Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

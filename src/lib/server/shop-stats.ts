@@ -193,6 +193,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
         status: true,
         nasiya: {
           select: {
+            id: true,
             customer: { select: { name: true } },
             device: { select: { model: true } },
           },

@@ -38,7 +38,6 @@ const filterTabs: { label: string; value: DeviceStatus | 'Barchasi' }[] = [
   { label: 'Omborda', value: 'IN_STOCK' },
   { label: 'Naqd sotildi', value: 'SOLD_CASH' },
   { label: 'Nasiyada', value: 'SOLD_NASIYA' },
-  { label: 'Band', value: 'RESERVED' },
   { label: 'Qaytarilgan', value: 'RETURNED' },
 ]
 
@@ -59,12 +58,20 @@ function StatusBadge({ status }: { status: DeviceStatus }) {
   )
 }
 
-export default function QurilmalarClient({ initialDevices, currency }: { initialDevices: Device[]; currency: CurrencyContext }) {
+export default function QurilmalarClient({
+  initialDevices,
+  currency,
+  initialStatus = 'Barchasi',
+}: {
+  initialDevices: Device[]
+  currency: CurrencyContext
+  initialStatus?: DeviceStatus | 'Barchasi'
+}) {
   const [devices] = useState<Device[]>(initialDevices)
   const loading = false
   const error = ''
   const [search, setSearch] = useState('')
-  const [activeStatus, setActiveStatus] = useState<DeviceStatus | 'Barchasi'>('Barchasi')
+  const [activeStatus, setActiveStatus] = useState<DeviceStatus | 'Barchasi'>(initialStatus)
 
   const filtered = devices.filter((d) => {
     const matchesStatus = activeStatus === 'Barchasi' || d.status === activeStatus

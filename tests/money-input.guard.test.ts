@@ -19,7 +19,7 @@ function escapeRe(s: string) {
 const moneyBindings: Record<string, string[]> = {
   'src/app/(shop)/shop/sotuv/new/page.tsx': ['salePrice', 'partialAmount'],
   'src/app/(shop)/shop/nasiyalar/new/page.tsx': ['totalPrice', 'downPayment'],
-  'src/app/(shop)/shop/nasiyalar/[id]/page.tsx': ['payAmount'],
+  'src/components/shop/nasiya-payment-modal.tsx': ['payAmount'],
   'src/app/(shop)/shop/qurilmalar/new/page.tsx': ['form.purchasePrice'],
   'src/app/(shop)/shop/qurilmalar/[id]/page.tsx': ['editForm.purchasePrice', 'salePayAmount', 'returnRefundAmount'],
   'src/app/(shop)/shop/nasiyalar/import/page.tsx': [

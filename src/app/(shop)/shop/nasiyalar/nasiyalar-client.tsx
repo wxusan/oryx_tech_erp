@@ -2,8 +2,10 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { uzDate } from '@/lib/dates'
 import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
+import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 
 type NasiyaStatus = 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
 type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan' | 'Bekor qilingan'
@@ -80,9 +82,13 @@ export default function NasiyalarClient({
   initialFilter?: NasiyaStatus | 'Barchasi'
   currency: CurrencyContext
 }) {
-  const [nasiyalar] = useState<Nasiya[]>(initialNasiyalar)
+  // Read straight from props (not useState) so router.refresh() after a payment
+  // re-renders the list with fresh server data.
+  const nasiyalar = initialNasiyalar
   const loading = false
   const error = ''
+  const router = useRouter()
+  const [payFor, setPayFor] = useState<Nasiya | null>(null)
   const [activeFilter, setActiveFilter] = useState<NasiyaStatus | 'Barchasi'>(initialFilter)
 
   // Filter on the derived display status so overdue contracts land under
@@ -158,14 +164,16 @@ export default function NasiyalarClient({
             const paidAmount = n.finalNasiyaAmount - n.remainingAmount
             const pct = n.finalNasiyaAmount > 0 ? Math.round((paidAmount / n.finalNasiyaAmount) * 100) : 0
             const isOverdue = n.isOverdue
+            const canPay = (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
             return (
-              <Link key={n.id} href={`/shop/nasiyalar/${n.id}`} prefetch={false} className="block">
-                <div
-                  className={`border border-zinc-200 rounded p-4 hover:bg-zinc-50 transition-colors ${
-                    isOverdue ? 'border-l-2 border-l-red-500 pl-4' : ''
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-4">
+              <div
+                key={n.id}
+                className={`border border-zinc-200 rounded p-4 hover:bg-zinc-50 transition-colors ${
+                  isOverdue ? 'border-l-2 border-l-red-500 pl-4' : ''
+                }`}
+              >
+                <div className="flex items-start justify-between gap-4">
+                  <Link href={`/shop/nasiyalar/${n.id}`} prefetch={false} className="flex-1 min-w-0 block">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium text-sm text-zinc-900">{n.customer.name}</span>
@@ -205,14 +213,25 @@ export default function NasiyalarClient({
                         )}
                       </div>
                     </div>
+                  </Link>
 
-                    <div className="text-right flex-shrink-0">
+                  <div className="text-right flex-shrink-0 space-y-2">
+                    <div>
                       <div className="text-sm font-bold text-zinc-900">{fmt(n.remainingAmount, currency)}</div>
                       <div className="text-xs text-zinc-400 mt-0.5">qolgan</div>
                     </div>
+                    {canPay && (
+                      <button
+                        type="button"
+                        onClick={() => setPayFor(n)}
+                        className="w-full rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 whitespace-nowrap"
+                      >
+                        To&apos;lov qabul qilish
+                      </button>
+                    )}
                   </div>
                 </div>
-              </Link>
+              </div>
             )
           })}
           {filtered.length === 0 && (
@@ -220,6 +239,15 @@ export default function NasiyalarClient({
           )}
         </div>
       )}
+
+      <NasiyaPaymentModal
+        nasiyaId={payFor?.id ?? ''}
+        open={payFor !== null}
+        onOpenChange={(o) => { if (!o) setPayFor(null) }}
+        customerName={payFor?.customer.name}
+        deviceName={payFor?.device.model}
+        onSuccess={() => router.refresh()}
+      />
     </div>
   )
 }

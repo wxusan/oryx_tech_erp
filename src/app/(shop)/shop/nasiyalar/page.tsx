@@ -14,7 +14,10 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
 
   const params = await searchParams
   const status = Array.isArray(params?.status) ? params?.status[0] : params?.status
-  const initialFilter = status === 'OVERDUE' ? 'OVERDUE' : 'Barchasi'
+  const validStatuses = ['ACTIVE', 'OVERDUE', 'COMPLETED', 'CANCELLED'] as const
+  const initialFilter = validStatuses.includes(status as (typeof validStatuses)[number])
+    ? (status as (typeof validStatuses)[number])
+    : 'Barchasi'
   const [nasiyalar, currency] = await Promise.all([
     getShopNasiyalarList(guarded.shopId),
     getShopCurrencyContext(guarded.shopId),
