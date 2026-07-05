@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -59,7 +59,9 @@ export default function NewSotuvPage() {
   // Step 2 form
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
-  const [salePrice, setSalePrice] = useState('')
+  // null = untouched (show the device's price as a live currency-aware
+  // suggestion); a string = the value the user typed.
+  const [salePriceInput, setSalePriceInput] = useState<string | null>(null)
   const [payMethod, setPayMethod] = useState<PaymentMethod | ''>('')
   const [fullyPaid, setFullyPaid] = useState<boolean | null>(null)
   const [partialAmount, setPartialAmount] = useState('')
@@ -69,26 +71,23 @@ export default function NewSotuvPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
-  // Latest currency, readable from callbacks (incl. the mount-only loader) so the
-  // price prefill uses the resolved rate without making the loader depend on it.
-  const currencyRef = useRef(currency)
-  useEffect(() => {
-    currencyRef.current = currency
-  }, [currency])
-
-  // The device's price as a prefill suggestion, in the shop's display currency.
+  // The device's price in the shop's display currency (UZS base → USD when set).
   function priceFor(d: Device) {
-    const c = currencyRef.current
-    return c.currency === 'USD' && c.usdUzsRate
-      ? convertUzsToUsd(d.purchasePrice, c.usdUzsRate).toFixed(2)
+    return currency.currency === 'USD' && currency.usdUzsRate
+      ? convertUzsToUsd(d.purchasePrice, currency.usdUzsRate).toFixed(2)
       : String(d.purchasePrice)
   }
+
+  // Displayed sale price: the user's edit if any, otherwise a live suggestion
+  // derived from the selected device + current currency. Because it's derived,
+  // it can never get stuck showing raw UZS after the currency resolves.
+  const salePrice = salePriceInput ?? (selectedDevice ? priceFor(selectedDevice) : '')
 
   // Select a device (does NOT auto-advance) — the user confirms with "Keyingi
   // bosqich". Kept as a plain function so it is never a hook dependency.
   function selectDevice(d: Device) {
     setSelectedDevice(d)
-    setSalePrice(priceFor(d))
+    setSalePriceInput(null)
   }
 
   // Load sellable stock once on mount. Must NOT depend on currency-bound values,
@@ -120,7 +119,6 @@ export default function NewSotuvPage() {
           const device = nextDevices.find((d) => d.id === deviceId)
           if (device) {
             setSelectedDevice(device)
-            setSalePrice(priceFor(device))
             setStep(2)
           } else {
             setLoadError('Tanlangan qurilma omborda topilmadi')
@@ -314,7 +312,7 @@ export default function NewSotuvPage() {
                 <span className="text-sm font-bold text-zinc-900">{fmt(selectedDevice.purchasePrice, currency)}</span>
                 <button
                   type="button"
-                  onClick={() => { setSelectedDevice(null); setStep(1) }}
+                  onClick={() => setStep(1)}
                   className="text-xs text-zinc-400 hover:text-zinc-700"
                 >
                   O&apos;zgartirish
@@ -358,7 +356,7 @@ export default function NewSotuvPage() {
                 <MoneyInput
                   currency={currency.currency}
                   value={salePrice}
-                  onChange={setSalePrice}
+                  onChange={setSalePriceInput}
                   placeholder={currency.currency === 'USD' ? '700.00' : '9500000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />

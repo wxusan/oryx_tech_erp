@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -68,7 +68,9 @@ export default function NewNasiyaPage() {
   const [passportFile, setPassportFile] = useState<File | null>(null)
 
   // Step 3
-  const [totalPrice, setTotalPrice] = useState('')
+  // null = untouched (show the device's price as a live currency-aware
+  // suggestion); a string = the value the user typed.
+  const [totalPriceInput, setTotalPriceInput] = useState<string | null>(null)
   const [downPayment, setDownPayment] = useState('')
   const [months, setMonths] = useState('12')
   const [interestPercent, setInterestPercent] = useState('0')
@@ -78,26 +80,23 @@ export default function NewNasiyaPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
-  // Latest currency, readable from callbacks (incl. the mount-only loader) so the
-  // price prefill uses the resolved rate without making the loader depend on it.
-  const currencyRef = useRef(currency)
-  useEffect(() => {
-    currencyRef.current = currency
-  }, [currency])
-
-  // The device's price as a prefill suggestion, in the shop's display currency.
+  // The device's price in the shop's display currency (UZS base → USD when set).
   function priceFor(d: Device) {
-    const c = currencyRef.current
-    return c.currency === 'USD' && c.usdUzsRate
-      ? convertUzsToUsd(d.purchasePrice, c.usdUzsRate).toFixed(2)
+    return currency.currency === 'USD' && currency.usdUzsRate
+      ? convertUzsToUsd(d.purchasePrice, currency.usdUzsRate).toFixed(2)
       : String(d.purchasePrice)
   }
+
+  // Displayed total price: the user's edit if any, otherwise a live suggestion
+  // derived from the selected device + current currency, so it can never get
+  // stuck showing raw UZS after the currency resolves.
+  const totalPrice = totalPriceInput ?? (selectedDevice ? priceFor(selectedDevice) : '')
 
   // Select a device (does NOT auto-advance) — the user confirms with "Keyingi
   // bosqich". Kept as a plain function so it is never a hook dependency.
   function selectDevice(d: Device) {
     setSelectedDevice(d)
-    setTotalPrice(priceFor(d))
+    setTotalPriceInput(null)
   }
 
   // Load sellable stock once on mount. Must NOT depend on currency-bound values,
@@ -129,7 +128,6 @@ export default function NewNasiyaPage() {
           const device = nextDevices.find((d) => d.id === deviceId)
           if (device) {
             setSelectedDevice(device)
-            setTotalPrice(priceFor(device))
             setStep(2)
           } else {
             setLoadError('Tanlangan qurilma omborda topilmadi')
@@ -383,7 +381,8 @@ export default function NewNasiyaPage() {
                 <div className="text-xs text-zinc-500">{deviceMeta(selectedDevice)}</div>
               </div>
               <button
-                onClick={() => { setSelectedDevice(null); setStep(1) }}
+                type="button"
+                onClick={() => setStep(1)}
                 className="text-xs text-zinc-400 hover:text-zinc-700"
               >
                 O&apos;zgartirish
@@ -490,7 +489,7 @@ export default function NewNasiyaPage() {
                 <MoneyInput
                   currency={currency.currency}
                   value={totalPrice}
-                  onChange={setTotalPrice}
+                  onChange={setTotalPriceInput}
                   placeholder={currency.currency === 'USD' ? '700.00' : '9500000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
