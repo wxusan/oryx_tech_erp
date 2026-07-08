@@ -25,6 +25,7 @@ import {
 import { paymentMethodLabel } from '@/lib/labels'
 import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
 import { formatMoneyByCurrency } from '@/lib/currency'
+import { formatContractMoney } from '@/lib/nasiya-contract'
 import { uzDate, uzDateTime } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
@@ -53,6 +54,10 @@ export interface NasiyaPayment {
   paymentInputAmount: number | null
   paymentInputCurrency: 'UZS' | 'USD' | null
   paymentExchangeRate: number | null
+  // The amount actually applied to this nasiya's contract-currency debt —
+  // see docs/currency-accounting-model.md. Differs from `amount` (UZS) only
+  // when contractCurrency is USD.
+  appliedAmountInContractCurrency: number | null
 }
 
 interface NasiyaLog {
@@ -75,6 +80,11 @@ interface Nasiya {
   interestAmount: number
   finalNasiyaAmount: number
   remainingAmount: number
+  // Native contract-currency ledger — the deal's own frozen currency, source
+  // of truth for debt/schedule math. See docs/currency-accounting-model.md.
+  contractCurrency: 'UZS' | 'USD'
+  contractFinalAmount: number
+  contractRemainingAmount: number
   status: string
   displayStatus?: 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
   reminderEnabled: boolean
@@ -151,22 +161,30 @@ function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency'
 /**
  * Payment history must show what actually happened at payment time, not a
  * live reconversion at today's rate/shop currency (see
- * docs/currency-accounting-model.md). `payment.amount` is always the UZS
- * ledger figure applied to the debt; `paymentInputAmount/Currency/ExchangeRate`
- * preserve what the customer actually entered, captured once at payment time
- * and never touched again.
+ * docs/currency-accounting-model.md). `paymentInputAmount/Currency/
+ * ExchangeRate` preserve what the customer actually entered; `appliedAmountIn
+ * ContractCurrency` is what was actually applied to THIS nasiya's own
+ * contract-currency debt (native — $200, not always so'm). `payment.amount`
+ * stays the UZS compatibility snapshot, used only as a fallback for payments
+ * recorded before this was tracked.
  */
-export function paymentAmountDisplay(payment: NasiyaPayment, currency: ReturnType<typeof useShopCurrency>['currency']): string {
-  if (payment.paymentInputCurrency === 'USD' && payment.paymentInputAmount != null) {
-    const paidText = `$${payment.paymentInputAmount.toFixed(2)}`
-    const appliedText = formatMoneyByCurrency(payment.amount, 'UZS')
+export function paymentAmountDisplay(
+  payment: NasiyaPayment,
+  contractCurrency: 'UZS' | 'USD',
+  currency: ReturnType<typeof useShopCurrency>['currency'],
+): string {
+  if (payment.paymentInputCurrency != null && payment.paymentInputAmount != null) {
+    const paidText = formatContractMoney(payment.paymentInputAmount, payment.paymentInputCurrency)
+    if (payment.paymentInputCurrency === contractCurrency) {
+      // Nothing was converted — a single native figure is unambiguous.
+      return paidText
+    }
+    const appliedAmount = payment.appliedAmountInContractCurrency ?? payment.amount
+    const appliedText = formatContractMoney(appliedAmount, contractCurrency)
     const rateText = payment.paymentExchangeRate
       ? ` · kurs: ${Math.round(payment.paymentExchangeRate).toLocaleString('ru-RU')}`
       : ''
     return `${paidText} → ${appliedText}${rateText}`
-  }
-  if (payment.paymentInputCurrency === 'UZS' && payment.paymentInputAmount != null) {
-    return formatMoneyByCurrency(payment.paymentInputAmount, 'UZS')
   }
   // Older payment recorded before payment-time currency was tracked — same
   // fallback behavior as before this fix (today's display currency).
@@ -488,6 +506,16 @@ export default function NasiyaDetailPage() {
         </div>
       )}
 
+      {/* Below figures are the shop's current display currency (live view —
+          see docs/currency-accounting-model.md). This deal's own contract
+          currency is frozen at creation and never changes, regardless of the
+          shop's display toggle — call it out when the two differ. */}
+      {nasiya.contractCurrency !== currency.currency && (
+        <div className="text-xs text-zinc-500">
+          Shartnoma: {formatContractMoney(nasiya.contractFinalAmount, nasiya.contractCurrency)}
+        </div>
+      )}
+
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
         {[
@@ -669,7 +697,7 @@ export default function NasiyaDetailPage() {
               {nasiya.payments.map((payment) => (
                 <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
                   <td className="px-4 py-3 text-zinc-700">{uzDate(payment.paidAt)}</td>
-                  <td className="px-4 py-3 font-medium text-zinc-900">{paymentAmountDisplay(payment, currency)}</td>
+                  <td className="px-4 py-3 font-medium text-zinc-900">{paymentAmountDisplay(payment, nasiya.contractCurrency, currency)}</td>
                   <td className="px-4 py-3 text-zinc-700">{paymentMethodLabel(payment.paymentMethod)}</td>
                   <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
                 </tr>

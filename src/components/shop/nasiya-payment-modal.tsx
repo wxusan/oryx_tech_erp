@@ -22,7 +22,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
-import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
+import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency, type CurrencyCode } from '@/lib/currency'
+import { convertPaymentToContractCurrency, formatContractMoney } from '@/lib/nasiya-contract'
 import { uzDate, uzMonthYear } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { tashkentTodayInputValue } from '@/lib/timezone'
@@ -92,6 +93,9 @@ export function NasiyaPaymentModal({
   const [loadingData, setLoadingData] = useState(false)
   const [fetched, setFetched] = useState<{ customerName: string; deviceName: string } | null>(null)
   const [nasiyaRemainingAmount, setNasiyaRemainingAmount] = useState(0)
+  // Frozen at creation, never changes with the shop's display toggle — see
+  // docs/currency-accounting-model.md.
+  const [contractCurrency, setContractCurrency] = useState<CurrencyCode>('UZS')
 
   const [payAmount, setPayAmount] = useState('')
   const [payMethod, setPayMethod] = useState('')
@@ -128,6 +132,7 @@ export function NasiyaPaymentModal({
         const rows: Schedule[] = json.data.schedules ?? []
         setSchedules(rows)
         setNasiyaRemainingAmount(Number(json.data.remainingAmount ?? 0))
+        setContractCurrency((json.data.contractCurrency as CurrencyCode) ?? 'UZS')
         setFetched({
           customerName: json.data.customer?.name ?? '',
           deviceName: json.data.device?.model ?? '',
@@ -165,6 +170,19 @@ export function NasiyaPaymentModal({
       : 0
   const overpayExtraUzs = Math.max(0, payAmountUzs - selectedScheduleOutstanding)
   const exceedsRemaining = !carryOver && payAmountUzs > nasiyaRemainingAmount
+
+  // Purely informational preview of what would be applied to THIS deal's own
+  // (frozen) contract currency, shown only when it differs from what's being
+  // typed — a best-effort client-side estimate using today's rate; the
+  // server always recomputes and stores the authoritative figure at submit
+  // time. Omitted when no rate is available client-side (e.g. a UZS-display
+  // shop paying toward a USD contract, since the shop's own rate is only
+  // fetched when its display currency is USD). See
+  // docs/currency-accounting-model.md.
+  const contractPreviewAmount =
+    !carryOver && payAmount.trim() && contractCurrency !== currency.currency && currency.usdUzsRate
+      ? convertPaymentToContractCurrency(Number(payAmount) || 0, currency.currency, contractCurrency, currency.usdUzsRate)
+      : null
 
   // "Izoh" is optional for a regular payment — only the carry-over/defer flow
   // ("Mijoz bu oy to'lamadi, muddatni uzaytirish") still requires a reason,
@@ -335,6 +353,12 @@ export function NasiyaPaymentModal({
                     <span>Jami qolgan qarz</span>
                     <span className="font-medium text-zinc-700">{fmt(nasiyaRemainingAmount)}</span>
                   </div>
+                  {contractPreviewAmount != null && (
+                    <p className="text-xs text-zinc-500">
+                      Shartnomaga qo&apos;llanadi: {formatContractMoney(contractPreviewAmount, contractCurrency)}
+                      {currency.usdUzsRate ? ` · kurs: ${Math.round(currency.usdUzsRate).toLocaleString('ru-RU')}` : ''}
+                    </p>
+                  )}
                   {exceedsRemaining ? (
                     <p className="text-xs text-red-600">
                       To&apos;lov summasi qolgan qarzdan oshmasligi kerak.

@@ -70,6 +70,11 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         interestAmount: true,
         finalNasiyaAmount: true,
         remainingAmount: true,
+        // Native contract-currency ledger — the actual source of truth for
+        // debt/schedule math. See docs/currency-accounting-model.md.
+        contractCurrency: true,
+        contractFinalAmount: true,
+        contractRemainingAmount: true,
         status: true,
         reminderEnabled: true,
         note: true,
@@ -109,6 +114,8 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             paidAmount: true,
             status: true,
             paidAt: true,
+            contractExpectedAmount: true,
+            contractPaidAmount: true,
           },
         },
         payments: {
@@ -124,6 +131,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             paymentInputAmount: true,
             paymentInputCurrency: true,
             paymentExchangeRate: true,
+            appliedAmountInContractCurrency: true,
           },
         },
       },

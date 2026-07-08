@@ -13,6 +13,7 @@ function payment(overrides: Partial<NasiyaPayment> = {}): NasiyaPayment {
     paymentInputAmount: null,
     paymentInputCurrency: null,
     paymentExchangeRate: null,
+    appliedAmountInContractCurrency: null,
     ...overrides,
   }
 }
@@ -21,11 +22,18 @@ const uzsDisplay = { currency: 'UZS' as const, usdUzsRate: null }
 const usdDisplay = { currency: 'USD' as const, usdUzsRate: 13_500 } // deliberately a DIFFERENT rate than payment time
 
 describe('paymentAmountDisplay — historical payment display never redisplays at today\'s rate', () => {
-  it('USD contract paid in UZS (ticket Example A): shows the exact so\'m paid, regardless of today\'s rate/display currency', () => {
-    const p = payment({ amount: 2_500_000, paymentInputAmount: 2_500_000, paymentInputCurrency: 'UZS' })
-    expect(paymentAmountDisplay(p, usdDisplay)).toMatch(/2.?500.?000 so'm/)
+  it('USD contract paid in UZS (ticket Example A): shows the exact so\'m paid and the $ applied to the contract, regardless of today\'s rate/display currency', () => {
+    const p = payment({
+      amount: 2_500_000,
+      paymentInputAmount: 2_500_000,
+      paymentInputCurrency: 'UZS',
+      paymentExchangeRate: 12_500,
+      appliedAmountInContractCurrency: 200,
+    })
+    expect(paymentAmountDisplay(p, 'USD', usdDisplay)).toMatch(/2.?500.?000 so'm/)
+    expect(paymentAmountDisplay(p, 'USD', usdDisplay)).toContain('$200.00')
     // Switching display to UZS or changing the rate must not change this at all.
-    expect(paymentAmountDisplay(p, uzsDisplay)).toBe(paymentAmountDisplay(p, usdDisplay))
+    expect(paymentAmountDisplay(p, 'USD', uzsDisplay)).toBe(paymentAmountDisplay(p, 'USD', usdDisplay))
   })
 
   it('UZS contract paid in USD (ticket Example B): shows $160.00 applied as 2,000,000 so\'m, at the rate used then (12,500) — never today\'s rate', () => {
@@ -34,8 +42,9 @@ describe('paymentAmountDisplay — historical payment display never redisplays a
       paymentInputAmount: 160,
       paymentInputCurrency: 'USD',
       paymentExchangeRate: 12_500,
+      appliedAmountInContractCurrency: 2_000_000,
     })
-    const text = paymentAmountDisplay(p, uzsDisplay)
+    const text = paymentAmountDisplay(p, 'UZS', uzsDisplay)
     expect(text).toContain('$160.00')
     expect(text).toMatch(/2.?000.?000 so'm/)
     expect(text).toMatch(/12.?500/)
@@ -45,24 +54,38 @@ describe('paymentAmountDisplay — historical payment display never redisplays a
   })
 
   it('is completely stable across repeated calls / display-currency switches (deterministic, no live reconversion)', () => {
-    const p = payment({ amount: 2_500_000, paymentInputAmount: 200, paymentInputCurrency: 'USD', paymentExchangeRate: 12_500 })
-    const a = paymentAmountDisplay(p, uzsDisplay)
-    const b = paymentAmountDisplay(p, usdDisplay)
+    const p = payment({
+      amount: 2_500_000,
+      paymentInputAmount: 200,
+      paymentInputCurrency: 'USD',
+      paymentExchangeRate: 12_500,
+      appliedAmountInContractCurrency: 2_500_000,
+    })
+    const a = paymentAmountDisplay(p, 'UZS', uzsDisplay)
+    const b = paymentAmountDisplay(p, 'UZS', usdDisplay)
     expect(a).toBe(b)
     expect(a).toContain('$200.00')
   })
 
   it('falls back to the live display currency only for legacy payments with no payment-time data (paymentInputCurrency null)', () => {
     const legacy = payment({ amount: 2_500_000 })
-    expect(paymentAmountDisplay(legacy, uzsDisplay)).toMatch(/2.?500.?000 so'm/)
-    expect(paymentAmountDisplay(legacy, usdDisplay)).toContain('$')
+    expect(paymentAmountDisplay(legacy, 'UZS', uzsDisplay)).toMatch(/2.?500.?000 so'm/)
+    expect(paymentAmountDisplay(legacy, 'UZS', usdDisplay)).toContain('$')
   })
 
-  it('a UZS-native payment (no conversion) never shows a dollar sign or a rate', () => {
-    const p = payment({ amount: 500_000, paymentInputAmount: 500_000, paymentInputCurrency: 'UZS' })
-    const text = paymentAmountDisplay(p, uzsDisplay)
+  it('a UZS-native payment on a UZS contract (no conversion) never shows a dollar sign or a rate', () => {
+    const p = payment({ amount: 500_000, paymentInputAmount: 500_000, paymentInputCurrency: 'UZS', appliedAmountInContractCurrency: 500_000 })
+    const text = paymentAmountDisplay(p, 'UZS', uzsDisplay)
     expect(text).not.toContain('$')
     expect(text).not.toContain('kurs')
+  })
+
+  it('a USD-native payment on a USD contract (no conversion) shows a single native $ figure, no arrow/kurs', () => {
+    const p = payment({ amount: 2_500_000, paymentInputAmount: 200, paymentInputCurrency: 'USD', appliedAmountInContractCurrency: 200 })
+    const text = paymentAmountDisplay(p, 'USD', usdDisplay)
+    expect(text).toBe('$200.00')
+    expect(text).not.toContain('kurs')
+    expect(text).not.toContain('→')
   })
 })
 
