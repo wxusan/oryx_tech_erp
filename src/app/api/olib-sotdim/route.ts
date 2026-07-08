@@ -26,6 +26,7 @@ import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
+import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
 
 // ---------------------------------------------------------------------------
@@ -150,6 +151,14 @@ export async function POST(req: NextRequest) {
     const salePriceUzs = saleInput.amountUzs
     const amountPaidUzs = amountPaidInput?.amountUzs
 
+    // Native contract-currency ledger — computed from the RAW inputs (not
+    // UZS-converted), in the currency this operation was actually made in.
+    // See docs/currency-accounting-model.md.
+    const contractCurrency = saleInput.inputCurrency
+    const contractSalePrice = roundContractMoney(d.salePrice, contractCurrency)
+    const contractPurchasePrice = roundContractMoney(d.purchasePrice, contractCurrency)
+    const contractAmountPaidInput = d.amountPaid !== undefined ? roundContractMoney(d.amountPaid, contractCurrency) : undefined
+
     // IMEI: reuse the existing active-only uniqueness rule. Missing IMEI gets a
     // NOIMEI- placeholder — same idea as the pre-existing IMPORT- convention,
     // hidden from every user-facing surface by displayImei()/telegramImei().
@@ -207,6 +216,8 @@ export async function POST(req: NextRequest) {
 
       const paid = d.paidFully ? salePriceUzs : (amountPaidUzs ?? 0)
       const remaining = salePriceUzs - paid
+      const contractPaid = d.paidFully ? contractSalePrice : (contractAmountPaidInput ?? 0)
+      const contractRemaining = contractSalePrice - contractPaid
 
       const sale = await tx.sale.create({
         data: {
@@ -222,6 +233,15 @@ export async function POST(req: NextRequest) {
           reminderEnabled: d.customerReminderEnabled ?? false,
           note: d.note,
           createdBy: session.user.id,
+          // Informational only — see docs/currency-accounting-model.md.
+          creationCurrency: saleInput.inputCurrency,
+          creationExchangeRate: saleInput.exchangeRateUsed,
+          // Native contract-currency ledger — source of truth going forward.
+          contractCurrency,
+          contractExchangeRateAtCreation: saleInput.exchangeRateUsed,
+          contractSalePrice,
+          contractAmountPaid: contractPaid,
+          contractRemainingAmount: contractRemaining,
         },
       })
 
@@ -236,6 +256,7 @@ export async function POST(req: NextRequest) {
             note: remaining > 0 ? "Boshlang'ich to'lov" : "To'liq to'lov",
             idempotencyKey: `olib-sotdim-initial:${sale.id}`,
             createdBy: session.user.id,
+            appliedAmountInContractCurrency: contractPaid,
           },
         })
       }
@@ -250,6 +271,10 @@ export async function POST(req: NextRequest) {
           supplierLocation: d.supplierLocation,
           supplierNote: d.supplierNote,
           amount: purchasePriceUzs,
+          // Native contract-currency ledger — see docs/currency-accounting-model.md.
+          contractCurrency,
+          contractExchangeRateAtCreation: purchaseInput.exchangeRateUsed,
+          contractAmount: contractPurchasePrice,
           status: supplierPaidNow ? 'PAID' : 'PENDING',
           dueDate: supplierPaidNow ? (d.supplierPaidDate ?? new Date()) : d.supplierDueDate!,
           reminderEnabled: supplierPaidNow ? false : (d.supplierReminderEnabled ?? true),

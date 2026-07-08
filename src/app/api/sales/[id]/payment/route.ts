@@ -9,7 +9,8 @@ import { salePaymentMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
-import { getShopCurrencyContext } from '@/lib/server/currency'
+import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
+import { convertPaymentToContractCurrency } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -46,6 +47,26 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
+
+    // Native contract-currency conversion — computed once, before the
+    // transaction (same reasoning as the nasiya payment route: no slow I/O
+    // held inside the serializable transaction). See docs/currency-accounting-model.md.
+    const contractLookup = await prisma.sale.findFirst({ where: { id: saleId, shopId }, select: { contractCurrency: true } })
+    const contractCurrency = contractLookup?.contractCurrency ?? 'UZS'
+    let contractRate: number | null = amountInput.exchangeRateUsed
+    if (amountInput.inputCurrency !== contractCurrency && contractRate == null) {
+      try {
+        contractRate = await getUsdUzsRate()
+      } catch (err) {
+        return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
+      }
+    }
+    const appliedAmountInContractCurrency = convertPaymentToContractCurrency(
+      parsed.data.amount,
+      amountInput.inputCurrency,
+      contractCurrency,
+      contractRate,
+    )
 
     const auditNote = parsed.data.reason?.trim() || parsed.data.note?.trim()
     const runPaymentTransaction = () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -91,6 +112,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const paidAt = parsed.data.paidAt ?? new Date()
       const nextRemaining = oldRemaining - amount
       const nextAmountPaid = Number(sale.amountPaid) + amount
+      // Native contract-currency mirror — dual-write alongside the legacy
+      // UZS fields, same reasoning as the nasiya payment route. See
+      // docs/currency-accounting-model.md.
+      const nextContractAmountPaid = Number(sale.contractAmountPaid) + appliedAmountInContractCurrency
+      const nextContractRemaining = Math.max(0, Number(sale.contractRemainingAmount) - appliedAmountInContractCurrency)
       const payment = await tx.salePayment.create({
         data: {
           saleId,
@@ -106,6 +132,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           paymentInputAmount: parsed.data.amount,
           paymentInputCurrency: amountInput.inputCurrency,
           paymentExchangeRate: amountInput.exchangeRateUsed,
+          appliedAmountInContractCurrency,
         },
       })
 
@@ -117,6 +144,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           paidFully: nextRemaining <= 0,
           dueDate: nextRemaining <= 0 ? null : parsed.data.nextDueDate ?? sale.dueDate,
           reminderEnabled: nextRemaining <= 0 ? false : sale.reminderEnabled,
+          contractAmountPaid: nextContractAmountPaid,
+          contractRemainingAmount: nextRemaining <= 0 ? 0 : nextContractRemaining,
         },
       })
 

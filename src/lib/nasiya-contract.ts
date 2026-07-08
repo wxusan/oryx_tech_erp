@@ -1,16 +1,16 @@
 /**
- * Native contract-currency accounting helpers for Nasiya.
+ * Native contract-currency accounting helpers for Nasiya, Sale, and
+ * SupplierPayable.
  *
- * A nasiya's debt/schedule ledger now has TWO parallel representations:
+ * Each of these now has TWO parallel representations:
  *   - `contract*` fields (this file's concern) — the deal's own currency
  *     (`contractCurrency`), decided once at creation, immutable forever.
- *     This is the SOURCE OF TRUTH for debt, schedule, allocation, and
- *     completion math.
+ *     This is the SOURCE OF TRUTH for debt (and, for Nasiya, schedule/
+ *     allocation/completion) math.
  *   - The pre-existing UZS fields (`totalAmount`, `finalNasiyaAmount`,
- *     `remainingAmount`, schedule `expectedAmount`/`paidAmount`, etc.) — kept
- *     exactly as before, as a compatibility snapshot every existing
- *     report/profit/Telegram-creation-message call site keeps reading
- *     unchanged.
+ *     `salePrice`, `amount`, etc.) — kept exactly as before, as a
+ *     compatibility snapshot every existing report/profit/Telegram-creation-
+ *     message call site keeps reading unchanged.
  *
  * Centralizing the currency math here (instead of scattering `if
  * (contractCurrency === 'USD')` checks across routes/UI) keeps the two
@@ -26,6 +26,11 @@ const USD_COMPLETION_TOLERANCE = 0.01
 
 export function getCompletionToleranceForCurrency(currency: CurrencyCode): number {
   return currency === 'USD' ? USD_COMPLETION_TOLERANCE : UZS_COMPLETION_TOLERANCE
+}
+
+/** Round a raw contract-currency amount to its smallest real unit — whole so'm for UZS, cents for USD. */
+export function roundContractMoney(value: number, currency: CurrencyCode): number {
+  return currency === 'USD' ? Math.round(value * 100) / 100 : Math.round(value)
 }
 
 /**

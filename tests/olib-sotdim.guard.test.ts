@@ -42,7 +42,7 @@ describe('supplier debt is tracked separately from customer debt', () => {
   it('SupplierPayable is its own model, not folded into Sale', () => {
     const supplierPayableBlock = schema.slice(
       schema.indexOf('model SupplierPayable'),
-      schema.indexOf('model SupplierPayable') + 1200,
+      schema.indexOf('model SupplierPayable') + 1900,
     )
     expect(supplierPayableBlock).toContain('amount')
     expect(supplierPayableBlock).toContain('SupplierPayableStatus')

@@ -18,6 +18,7 @@ import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
+import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -62,6 +63,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const salePriceUzs = salePriceInput.amountUzs
     const amountPaidUzs = amountPaidInput?.amountUzs
 
+    // Native contract-currency ledger — computed from the RAW input (not
+    // UZS-converted), in the currency the sale was actually made in. See
+    // docs/currency-accounting-model.md.
+    const contractCurrency = salePriceInput.inputCurrency
+    const contractSalePrice = roundContractMoney(salePrice, contractCurrency)
+    const contractAmountPaidInput = amountPaid !== undefined ? roundContractMoney(amountPaid, contractCurrency) : undefined
+
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
@@ -98,6 +106,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       const paid = paidFully ? salePriceUzs : amountPaidUzs ?? 0
       const remaining = salePriceUzs - paid
+      const contractPaid = paidFully ? contractSalePrice : contractAmountPaidInput ?? 0
+      const contractRemaining = contractSalePrice - contractPaid
 
       const sale = await tx.sale.create({
         data: {
@@ -118,6 +128,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           // Informational only — see docs/currency-accounting-model.md.
           creationCurrency: salePriceInput.inputCurrency,
           creationExchangeRate: salePriceInput.exchangeRateUsed,
+          // Native contract-currency ledger — source of truth going forward.
+          contractCurrency,
+          contractExchangeRateAtCreation: salePriceInput.exchangeRateUsed,
+          contractSalePrice,
+          contractAmountPaid: contractPaid,
+          contractRemainingAmount: contractRemaining,
         },
       })
 
@@ -130,6 +146,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             paymentMethod,
             paidAt: new Date(),
             note: remaining > 0 ? "Boshlang'ich to'lov" : "To'liq to'lov",
+            appliedAmountInContractCurrency: contractPaid,
             idempotencyKey: `sale-initial:${sale.id}`,
             createdBy: session.user.id,
           },
