@@ -5,6 +5,7 @@
 import { addMonths } from 'date-fns'
 import type { PaymentScheduleItem, NasiyaSchedule } from '@/types'
 import { NasiyaScheduleStatus } from '@/types'
+import type { CurrencyCode } from '@/lib/currency'
 
 export const MAX_NASIYA_INTEREST_PERCENT = 300
 
@@ -18,24 +19,35 @@ export interface NasiyaAmountCalculation {
   monthlyPayment: number
 }
 
-function roundMoney(value: number): number {
-  return Math.round(value)
+/**
+ * Round a money value to the smallest unit its currency actually supports —
+ * whole so'm for UZS (unchanged default, matches every existing UZS caller),
+ * cents for USD. Threading `currency` through here (rather than always
+ * rounding to a whole number) is what makes `calculateNasiyaAmounts`/
+ * `generatePaymentSchedule` safe to reuse for a USD-native contract ledger.
+ */
+function roundMoney(value: number, currency: CurrencyCode = 'UZS'): number {
+  return currency === 'USD' ? Math.round(value * 100) / 100 : Math.round(value)
 }
 
 /**
  * Calculate the debt created by a nasiya sale.
  *
  * totalAmount remains the original device sale price. Interest is applied only
- * to the amount left after the down payment.
+ * to the amount left after the down payment. `currency` defaults to UZS
+ * (unchanged behavior for the legacy ledger); pass 'USD' to compute the same
+ * shape in native USD contract terms (cent-rounded instead of whole-number).
  */
 export function calculateNasiyaAmounts(params: {
   totalAmount: number
   downPayment: number
   months: number
   interestPercent?: number
+  currency?: CurrencyCode
 }): NasiyaAmountCalculation {
-  const totalAmount = roundMoney(params.totalAmount)
-  const downPayment = roundMoney(params.downPayment)
+  const currency = params.currency ?? 'UZS'
+  const totalAmount = roundMoney(params.totalAmount, currency)
+  const downPayment = roundMoney(params.downPayment, currency)
   const interestPercent = params.interestPercent ?? 0
 
   if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
@@ -55,8 +67,12 @@ export function calculateNasiyaAmounts(params: {
   }
 
   const baseRemainingAmount = totalAmount - downPayment
-  const interestAmount = roundMoney((baseRemainingAmount * interestPercent) / 100)
-  const finalNasiyaAmount = baseRemainingAmount + interestAmount
+  const interestAmount = roundMoney((baseRemainingAmount * interestPercent) / 100, currency)
+  // Re-round after adding two already-rounded values — for USD (cent
+  // precision), plain float addition can leave sub-cent binary representation
+  // dust (e.g. 849.5 + 127.43 = 976.9300000000001), which whole-number UZS
+  // rounding always happened to absorb but 2-decimal rounding does not.
+  const finalNasiyaAmount = roundMoney(baseRemainingAmount + interestAmount, currency)
 
   if (finalNasiyaAmount <= 0) {
     throw new Error("Nasiya uchun qarz summasi 0 dan katta bo'lishi kerak")
@@ -69,7 +85,7 @@ export function calculateNasiyaAmounts(params: {
     interestPercent,
     interestAmount,
     finalNasiyaAmount,
-    monthlyPayment: roundMoney(finalNasiyaAmount / params.months),
+    monthlyPayment: roundMoney(finalNasiyaAmount / params.months, currency),
   }
 }
 
@@ -79,23 +95,31 @@ export function calculateNasiyaAmounts(params: {
  * @param startDate     - The first payment's start date (payments due from month 1 onward)
  * @param months        - Total number of monthly instalments
  * @param remainingAmount - Total amount to distribute across all instalments
+ * @param currency      - Defaults to UZS (unchanged whole-so'm behavior); pass
+ *   'USD' to split in cent-precise units instead of whole numbers.
  * @returns Array of PaymentScheduleItem, one per month
  */
 export function generatePaymentSchedule(
   startDate: Date,
   months: number,
   remainingAmount: number,
+  currency: CurrencyCode = 'UZS',
 ): PaymentScheduleItem[] {
   const schedule: PaymentScheduleItem[] = []
-  const roundedTotal = Math.round(remainingAmount)
-  const baseAmount = Math.floor(roundedTotal / months)
-  const remainder = roundedTotal - baseAmount * months
+  // UZS has no fractional subunit in practice (whole so'm); USD needs cents —
+  // do the floor/remainder split in the currency's smallest unit so the split
+  // is exact either way, then convert back.
+  const unitsPerAmount = currency === 'USD' ? 100 : 1
+  const roundedTotalUnits = Math.round(remainingAmount * unitsPerAmount)
+  const baseAmountUnits = Math.floor(roundedTotalUnits / months)
+  const remainderUnits = roundedTotalUnits - baseAmountUnits * months
 
   for (let i = 1; i <= months; i++) {
+    const amountUnits = i === months ? baseAmountUnits + remainderUnits : baseAmountUnits
     schedule.push({
       monthNumber: i,
       dueDate: addMonths(startDate, i),
-      expectedAmount: i === months ? baseAmount + remainder : baseAmount,
+      expectedAmount: amountUnits / unitsPerAmount,
     })
   }
 

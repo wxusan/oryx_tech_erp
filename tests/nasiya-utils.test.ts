@@ -59,6 +59,31 @@ describe('calculateNasiyaAmounts — interest applies only after down payment', 
     expect(schedule.every((row) => row.expectedAmount === 740_000)).toBe(true)
   })
 
+  it('USD contract: rounds to cents, not whole dollars ($1000 total, $150.50 down, 15% interest)', () => {
+    const calc = calculateNasiyaAmounts({
+      totalAmount: 1000,
+      downPayment: 150.5,
+      interestPercent: 15,
+      months: 4,
+      currency: 'USD',
+    })
+    expect(calc.totalAmount).toBe(1000)
+    expect(calc.downPayment).toBe(150.5)
+    expect(calc.baseRemainingAmount).toBe(849.5)
+    expect(calc.interestAmount).toBe(127.43) // 849.5 * 0.15 = 127.425 -> rounds to 127.43
+    expect(calc.finalNasiyaAmount).toBe(976.93)
+  })
+
+  it('defaults to UZS rounding (whole numbers) when no currency is passed', () => {
+    const calc = calculateNasiyaAmounts({
+      totalAmount: 5_200_000.7,
+      downPayment: 1_500_000,
+      interestPercent: 0,
+      months: 6,
+    })
+    expect(Number.isInteger(calc.totalAmount)).toBe(true)
+  })
+
   it('rejects down payment above total price', () => {
     expect(() =>
       calculateNasiyaAmounts({
@@ -154,6 +179,20 @@ describe('generatePaymentSchedule — schedule sums exactly to remaining (req 1)
   it('rounds a fractional remaining and still sums to the rounded total', () => {
     const s = generatePaymentSchedule(start, 3, 10_000_000.4)
     expect(sum(s.map((x) => x.expectedAmount))).toBe(10_000_000)
+  })
+
+  it('USD currency splits in cents, not whole dollars — $1000 over 6 months', () => {
+    const s = generatePaymentSchedule(start, 6, 1000, 'USD')
+    expect(s).toHaveLength(6)
+    expect(sum(s.map((x) => x.expectedAmount))).toBe(1000)
+    // base = floor(100000 cents / 6) = 16666 cents = $166.66; remainder 4 cents -> last month
+    expect(s.slice(0, 5).every((x) => x.expectedAmount === 166.66)).toBe(true)
+    expect(s[5].expectedAmount).toBe(166.7)
+  })
+
+  it('defaults to UZS (whole-number split) when no currency is passed — unchanged legacy behavior', () => {
+    const s = generatePaymentSchedule(start, 6, 10_000_000)
+    expect(s.every((x) => Number.isInteger(x.expectedAmount))).toBe(true)
   })
 })
 

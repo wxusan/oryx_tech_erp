@@ -64,12 +64,24 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
 
     let amounts: ReturnType<typeof calculateNasiyaAmounts>
+    let contractAmounts: ReturnType<typeof calculateNasiyaAmounts>
     try {
       amounts = calculateNasiyaAmounts({
         totalAmount: totalInput.amountUzs,
         downPayment: downPaymentInput.amountUzs,
         months,
         interestPercent,
+      })
+      // Native contract-currency ledger (source of truth going forward) — the
+      // same shape, computed from the RAW input amounts (not UZS-converted),
+      // in the currency the deal was actually made in. See
+      // docs/currency-accounting-model.md.
+      contractAmounts = calculateNasiyaAmounts({
+        totalAmount,
+        downPayment,
+        months,
+        interestPercent,
+        currency: totalInput.inputCurrency,
       })
     } catch (error) {
       return badRequest(error instanceof Error ? error.message : "Nasiya summasi noto'g'ri")
@@ -81,6 +93,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (scheduleTotal !== amounts.finalNasiyaAmount) {
       return badRequest("To'lov jadvali nasiya jami bilan mos emas")
     }
+    const contractScheduleItems = generatePaymentSchedule(
+      startDate,
+      months,
+      contractAmounts.finalNasiyaAmount,
+      totalInput.inputCurrency,
+    )
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
@@ -148,17 +166,32 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           // Informational only — see docs/currency-accounting-model.md.
           creationCurrency: totalInput.inputCurrency,
           creationExchangeRate: totalInput.exchangeRateUsed,
+          // Native contract-currency ledger — source of truth for debt/
+          // schedule/allocation math from here on. Frozen forever: switching
+          // the shop's preferredCurrency later never touches these.
+          contractCurrency: totalInput.inputCurrency,
+          contractExchangeRateAtCreation: totalInput.exchangeRateUsed,
+          contractTotalAmount: contractAmounts.totalAmount,
+          contractDownPayment: contractAmounts.downPayment,
+          contractBaseRemainingAmount: contractAmounts.baseRemainingAmount,
+          contractInterestAmount: contractAmounts.interestAmount,
+          contractFinalAmount: contractAmounts.finalNasiyaAmount,
+          contractMonthlyPayment: contractAmounts.monthlyPayment,
+          contractRemainingAmount: contractAmounts.finalNasiyaAmount,
+          contractPaidAmount: 0,
         },
       })
 
-      // Create one NasiyaSchedule row per month
+      // Create one NasiyaSchedule row per month (UZS legacy + native contract mirror).
       await tx.nasiyaSchedule.createMany({
-        data: scheduleItems.map((item) => ({
+        data: scheduleItems.map((item, index) => ({
           nasiyaId: nasiya.id,
           shopId,
           monthNumber: item.monthNumber,
           dueDate: item.dueDate,
           expectedAmount: item.expectedAmount,
+          contractCurrency: totalInput.inputCurrency,
+          contractExpectedAmount: contractScheduleItems[index].expectedAmount,
         })),
       })
 
@@ -173,6 +206,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             paidAt: new Date(),
             note: "Boshlang'ich to'lov",
             createdBy: session.user.id,
+            appliedAmountInContractCurrency: contractAmounts.downPayment,
           },
         })
       }
