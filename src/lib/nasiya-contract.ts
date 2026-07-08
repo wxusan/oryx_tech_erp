@@ -27,6 +27,18 @@ export function getCompletionToleranceForCurrency(currency: CurrencyCode): numbe
   return currency === 'USD' ? USD_COMPLETION_TOLERANCE : UZS_COMPLETION_TOLERANCE
 }
 
+/**
+ * Outstanding (unpaid) balance of a schedule in its OWN contract currency,
+ * never negative, snapped to 0 within that currency's tolerance. Mirrors
+ * `scheduleOutstanding` in nasiya-utils.ts (which stays UZS-only, untouched,
+ * for the legacy ledger) — this is the contract-currency-aware counterpart
+ * used by the payment route's new native allocation loop.
+ */
+export function contractScheduleOutstanding(expectedAmount: number, paidAmount: number, currency: CurrencyCode): number {
+  const raw = Math.max(0, expectedAmount - paidAmount)
+  return raw <= getCompletionToleranceForCurrency(currency) ? 0 : raw
+}
+
 interface ContractNasiyaLike {
   contractCurrency: CurrencyCode
   contractFinalAmount: number | string

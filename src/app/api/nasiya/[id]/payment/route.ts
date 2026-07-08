@@ -13,13 +13,14 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
 import { calculateRemaining, scheduleOutstanding, isScheduleOverdue, isNasiyaEffectivelyComplete } from '@/lib/nasiya-utils'
+import { convertPaymentToContractCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaPaymentMessage, nasiyaCompletedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
-import { getShopCurrencyContext } from '@/lib/server/currency'
+import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -67,6 +68,35 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
     const amountUzs = amountInput.amountUzs
+
+    // Native contract-currency conversion — computed once, before the
+    // transaction, same reasoning as amountInput above (no slow I/O held
+    // inside the serializable transaction). A cheap pre-read of just the
+    // nasiya's (immutable) contractCurrency is enough; the transaction below
+    // still loads the authoritative nasiya row for everything else.
+    let contractCurrency: 'UZS' | 'USD' = 'UZS'
+    let contractRate: number | null = amountInput.exchangeRateUsed
+    let appliedAmountInContractCurrency = 0
+    if (amountUzs > 0) {
+      const contractLookup = await prisma.nasiya.findFirst({
+        where: { id: nasiyaId, shopId },
+        select: { contractCurrency: true },
+      })
+      contractCurrency = contractLookup?.contractCurrency ?? 'UZS'
+      if (amountInput.inputCurrency !== contractCurrency && contractRate == null) {
+        try {
+          contractRate = await getUsdUzsRate()
+        } catch (err) {
+          return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
+        }
+      }
+      appliedAmountInContractCurrency = convertPaymentToContractCurrency(
+        amount,
+        amountInput.inputCurrency,
+        contractCurrency,
+        contractRate,
+      )
+    }
 
     const runPaymentTransaction = () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       // Verify nasiya exists and belongs to this shop
@@ -150,7 +180,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         }),
       ]
 
-      const allocations: { scheduleId: string; amount: number; paidAfter: number; monthNumber: number }[] = []
+      const allocations: { scheduleId: string; amount: number; paidAfter: number; monthNumber: number; contractAmount: number }[] = []
 
       if (deferredToNext) {
         const updatedSchedule = await tx.nasiyaSchedule.updateMany({
@@ -194,8 +224,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         }
 
         let remainingPayment = amountUzs
+        let remainingContractPayment = appliedAmountInContractCurrency
         for (const schedule of allocationRows) {
-          if (remainingPayment <= 0) break
+          if (remainingPayment <= 0 && remainingContractPayment <= 0) break
           const outstanding = scheduleOutstanding(Number(schedule.expectedAmount), Number(schedule.paidAmount))
           const applied = Math.min(remainingPayment, outstanding)
           const newPaidAmountRaw = Number(schedule.paidAmount) + applied
@@ -208,6 +239,22 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           const effectiveDueDate = schedule.delayedUntil ?? schedule.dueDate
           const isPastDue = effectiveDueDate < new Date()
           const nextStatus = isFullyPaid ? 'PAID' : isPastDue ? 'OVERDUE' : isPartial ? 'PARTIAL' : 'PENDING'
+
+          // Native contract-currency mirror of the same allocation — see
+          // docs/currency-accounting-model.md. Proportional to the legacy
+          // allocation above (same payment, same schedule), just denominated
+          // in contractCurrency and tolerance-checked in that currency.
+          const contractOutstanding = contractScheduleOutstanding(
+            Number(schedule.contractExpectedAmount),
+            Number(schedule.contractPaidAmount),
+            contractCurrency,
+          )
+          const contractApplied = Math.min(remainingContractPayment, contractOutstanding)
+          const newContractPaidAmountRaw = Number(schedule.contractPaidAmount) + contractApplied
+          const isContractFullyPaid =
+            contractScheduleOutstanding(Number(schedule.contractExpectedAmount), newContractPaidAmountRaw, contractCurrency) <= 0
+          const newContractPaidAmount = isContractFullyPaid ? Number(schedule.contractExpectedAmount) : newContractPaidAmountRaw
+          const newContractRemainingAmount = Math.max(0, Number(schedule.contractExpectedAmount) - newContractPaidAmount)
 
           const updatedSchedule = await tx.nasiyaSchedule.updateMany({
             where: {
@@ -222,14 +269,23 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               paidAt: isFullyPaid ? date : null,
               paymentMethod,
               note: auditNote,
+              contractPaidAmount: newContractPaidAmount,
+              contractRemainingAmount: newContractRemainingAmount,
             },
           })
           if (updatedSchedule.count !== 1) {
             throw { status: 409, message: "To'lov bir vaqtda yangilangan, qayta urinib ko'ring" }
           }
 
-          allocations.push({ scheduleId: schedule.id, amount: applied, paidAfter: newPaidAmount, monthNumber: schedule.monthNumber })
+          allocations.push({
+            scheduleId: schedule.id,
+            amount: applied,
+            paidAfter: newPaidAmount,
+            monthNumber: schedule.monthNumber,
+            contractAmount: contractApplied,
+          })
           remainingPayment -= applied
+          remainingContractPayment -= contractApplied
         }
 
         await tx.nasiyaPayment.create({
@@ -247,6 +303,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             // display — see docs/currency-accounting-model.md.
             paymentInputAmount: amount,
             paymentInputCurrency: amountInput.inputCurrency,
+            appliedAmountInContractCurrency,
             paymentExchangeRate: amountInput.exchangeRateUsed,
           },
         })
@@ -282,11 +339,22 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       // visible in UZS mode (USD mode already rounds it away at display time).
       const remainingToStore = allFullyPaid ? 0 : remaining
 
+      // Native contract-currency mirror of the same recalculation — dual-write
+      // only in this phase (the COMPLETED decision above still comes from the
+      // legacy ledger; see docs/currency-accounting-model.md for why the two
+      // ledgers stay in lockstep by construction, both derived here from the
+      // same freshly-refetched schedule rows).
+      const contractTotalPaid = allSchedules.reduce((sum, s) => sum + Number(s.contractPaidAmount), 0)
+      const contractRemaining = Math.max(0, Number(nasiya.contractFinalAmount) - contractTotalPaid)
+      const contractRemainingToStore = allFullyPaid ? 0 : contractRemaining
+
       await tx.nasiya.update({
         where: { id: nasiyaId },
         data: {
           remainingAmount: remainingToStore,
           status: newStatus,
+          contractPaidAmount: contractTotalPaid,
+          contractRemainingAmount: contractRemainingToStore,
         },
       })
 
@@ -383,6 +451,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 deferredToNext,
                 allocations,
                 auditReason: auditNote,
+                contractCurrency,
+                appliedAmountInContractCurrency,
                 ...moneyInputMeta(amountInput),
               },
           note: auditNote,
