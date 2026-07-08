@@ -14,8 +14,13 @@ describe('P1 money/report clarity guard', () => {
 
     expect(salePaymentAgg).not.toContain('sale: { deletedAt: null }')
     expect(nasiyaPaymentAgg).not.toContain("nasiya: { deletedAt: null, status: { not: 'CANCELLED' } }")
-    expect(src).toContain('grossCashInThisMonth')
-    expect(src).toContain('netCashFlowThisMonth')
+    // The gross/net field NAMES live in the pure formula layer (extracted to
+    // src/lib/shop-stats-formulas.ts so the arithmetic is unit-testable —
+    // see tests/shop-stats-formulas.test.ts); shop-stats.ts itself is now
+    // just the Prisma query + thin pass-through wrapper.
+    const formulas = read('src/lib/shop-stats-formulas.ts')
+    expect(formulas).toContain('grossCashInThisMonth')
+    expect(formulas).toContain('netCashFlowThisMonth')
   })
 
   it('dashboard/report labels distinguish gross turnover, net cash, refunds and sales profit', () => {

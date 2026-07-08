@@ -6,8 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { shopCacheTag } from '@/lib/server/cache-tags'
 import { tashkentMonthRange } from '@/lib/timezone'
 import { getUsdUzsRate } from '@/lib/server/currency'
-import { convertUsdToUzs } from '@/lib/currency'
-import { contractOutstandingAsUzs, convertContractAmountToUzs } from '@/lib/nasiya-contract'
+import { computeShopStatsFromRows } from '@/lib/shop-stats-formulas'
 
 type StatsRole = Session['user']['role']
 
@@ -216,98 +215,23 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
     }),
   ])
 
-  const cashReceived = Number(saleReceivedAgg._sum.amount ?? 0)
-  const soldDeviceCost = cashSalesThisMonth.reduce(
-    (sum, sale) => sum + Number(sale.device.purchasePrice),
-    0,
-  )
-  const nasiyaDeviceCost = nasiyaSoldThisMonth.reduce(
-    (sum, nasiya) => sum + Number(nasiya.device.purchasePrice),
-    0,
-  )
-  const nasiyaReceived = Number(nasiyaReceivedAgg._sum.amount ?? 0)
-  const cashReceivedThisMonth = cashReceived + nasiyaReceived
-  const accrualRevenueThisMonth =
-    cashSalesThisMonth.reduce((sum, sale) => sum + Number(sale.salePrice), 0) +
-    nasiyaSoldThisMonth.reduce((sum, nasiya) => sum + Number(nasiya.totalAmount), 0)
-  const nasiyaInterestThisMonth = nasiyaSoldThisMonth.reduce(
-    (sum, nasiya) => sum + Number(nasiya.interestAmount),
-    0,
-  )
-  const accrualGrossProfitThisMonth = accrualRevenueThisMonth - soldDeviceCost - nasiyaDeviceCost
-  const cashBasisProfitThisMonth = cashReceivedThisMonth - soldDeviceCost - nasiyaDeviceCost
-  // Both Nasiya schedules and Sale must read their own contract-currency
-  // balance, converted to UZS via TODAY's rate exactly once (see
-  // contractOutstandingAsUzs / convertContractAmountToUzs above) — never the
-  // legacy UZS remainingAmount, which for a USD-native sale is the SUM of
-  // several payments each converted at whatever rate was live on that
-  // payment's own day, and can drift internally from the true contract-
-  // currency balance once the rate has moved between payments.
-  const scheduleOutstandingUzs = (schedule: {
-    contractExpectedAmount: unknown
-    contractPaidAmount: unknown
-    nasiya: { contractCurrency: 'UZS' | 'USD' }
-  }) => contractOutstandingAsUzs(schedule.contractExpectedAmount, schedule.contractPaidAmount, schedule.nasiya.contractCurrency, usdUzsRate)
-  const saleRemainingUzs = (sale: { contractCurrency: 'UZS' | 'USD'; contractRemainingAmount: unknown }) =>
-    convertContractAmountToUzs(Number(sale.contractRemainingAmount), sale.contractCurrency, usdUzsRate)
-  const effectiveDue = (row: { delayedUntil: Date | null; dueDate: Date }) => row.delayedUntil ?? row.dueDate
-  const expectedThisMonth =
-    nasiyaSchedulesForStats.reduce((sum, schedule) => {
-      const due = effectiveDue(schedule)
-      if (due < monthStart || due >= monthEnd) return sum
-      return sum + scheduleOutstandingUzs(schedule)
-    }, 0) +
-    unpaidSales.reduce((sum, sale) => {
-      if (!sale.dueDate || sale.dueDate < monthStart || sale.dueDate >= monthEnd) return sum
-      return sum + saleRemainingUzs(sale)
-    }, 0)
-  const overdueSchedules = nasiyaSchedulesForStats.filter((schedule) => {
-    if (scheduleOutstandingUzs(schedule) <= 0) return false
-    return effectiveDue(schedule) < now
-  })
-  const overdueSales = unpaidSales.filter((sale) => sale.dueDate && sale.dueDate < now)
-  const overdueMoney =
-    overdueSchedules.reduce((sum, schedule) => sum + scheduleOutstandingUzs(schedule), 0) +
-    overdueSales.reduce((sum, sale) => sum + saleRemainingUzs(sale), 0)
-  const inventoryPurchaseCost = Number(inventoryAgg._sum.purchasePrice ?? 0)
-  const returnRefundsThisMonth = Number(returnRefundAgg._sum.refundAmount ?? 0)
-  const overdueCount = overdueSchedules.length + overdueSales.length
-
-  return {
+  return computeShopStatsFromRows({
+    now,
+    monthStart,
+    monthEnd,
+    usdUzsRate,
     totalDevices,
-    cashReceivedThisMonth,
-    soldThisMonth: cashSalesThisMonth.length,
+    cashSalesThisMonth,
+    saleReceivedSum: saleReceivedAgg._sum.amount,
+    nasiyaSoldThisMonth,
+    nasiyaReceivedSum: nasiyaReceivedAgg._sum.amount,
     activeNasiyalar,
-    expectedThisMonth,
-    overdueMoney,
-    inventoryPurchaseCost,
-    realProfitThisMonth: cashBasisProfitThisMonth,
-    accrualGrossProfitThisMonth,
-    nasiyaInterestThisMonth,
-    expectedProfitWithInterestThisMonth: accrualGrossProfitThisMonth + nasiyaInterestThisMonth,
-    grossCashInThisMonth: cashReceivedThisMonth,
-    cashCollectedThisMonth: cashReceivedThisMonth,
-    returnRefundsThisMonth,
+    nasiyaSchedulesForStats,
+    unpaidSales,
+    inventoryPurchaseCostSum: inventoryAgg._sum.purchasePrice,
+    returnRefundSum: returnRefundAgg._sum.refundAmount,
     returnsThisMonth,
-    netCashFlowThisMonth: cashReceivedThisMonth - returnRefundsThisMonth,
-    netCashAfterReturnsThisMonth: cashReceivedThisMonth - returnRefundsThisMonth,
-    overdueCount,
     recentActivity,
-    upcomingPayments: upcomingPayments
-      .sort((left, right) => effectiveDue(left).getTime() - effectiveDue(right).getTime())
-      .slice(0, 5)
-      .map((payment) => {
-        // Both sides convert from the nasiya's own contract currency via
-        // today's rate, so the client's expectedAmount - paidAmount still
-        // gives the correct current outstanding balance — see
-        // contractOutstandingAsUzs above.
-        const toUzs = (amount: unknown) =>
-          payment.nasiya.contractCurrency === 'USD' && usdUzsRate ? convertUsdToUzs(Number(amount), usdUzsRate) : Number(amount)
-        return {
-          ...payment,
-          expectedAmount: toUzs(payment.contractExpectedAmount),
-          paidAmount: toUzs(payment.contractPaidAmount),
-        }
-      }),
-  }
+    upcomingPayments,
+  })
 }

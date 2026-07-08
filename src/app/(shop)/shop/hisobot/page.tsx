@@ -123,7 +123,9 @@ export default async function ShopReportPage() {
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <Card className="rounded-lg">
               <CardHeader>
-                <CardDescription>Bu oy tushgan pul</CardDescription>
+                <CardDescription title="Faqat haqiqatda qabul qilingan to'lovlar (naqd sotuv va nasiya to'lovlari) — hali to'lanmagan sotuvlar bu yerga kirmaydi">
+                  Bu oy tushgan pul
+                </CardDescription>
                 <CardAction><CircleDollarSign className="size-4 text-blue-600" /></CardAction>
               </CardHeader>
               <CardContent>
@@ -204,7 +206,9 @@ export default async function ShopReportPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-zinc-900">{fmt(grossProfit, currency)}</div>
-                <p className="mt-3 text-xs text-zinc-500">Sotilgan qurilmalar narxidan tannarx ayirilgandagi foyda</p>
+                <p className="mt-3 text-xs text-zinc-500">
+                  Sotilgan qurilmalar narxidan tannarx ayirilgandagi foyda · sotuv amalga oshirilgan zahoti hisoblanadi, to'lov holatidan qat'iy nazar
+                </p>
               </CardContent>
             </Card>
 

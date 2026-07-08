@@ -125,12 +125,17 @@ export default async function DashboardPage() {
               </CardHeader>
               <CardContent className="space-y-5">
                 <div>
-                  <div className="text-xs font-medium uppercase text-zinc-500">Umumiy aylanma</div>
+                  <div
+                    className="text-xs font-medium uppercase text-zinc-500"
+                    title="Faqat haqiqatda qabul qilingan to'lovlar (naqd sotuv va nasiya to'lovlari) — hali to'lanmagan sotuvlar bu yerga kirmaydi"
+                  >
+                    Umumiy aylanma
+                  </div>
                   <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-900">
                     {fmt(grossCashIn, currency)}
                   </div>
                   <div className="mt-1 text-xs text-zinc-500">
-                    Sof tushum: {fmtBase(netCashFlow, currency)}
+                    Sof tushum: {fmtBase(netCashFlow, currency)} · qaytarishlar ayirilgan, qabul qilingan pul
                   </div>
                 </div>
                 <div className="space-y-2">
@@ -159,7 +164,7 @@ export default async function DashboardPage() {
                     {fmt(stats.accrualGrossProfitThisMonth, currency)}
                   </div>
                   <p className="mt-2 text-xs text-zinc-500">
-                    Sotilgan qurilmalar narxidan tannarx ayirilgan
+                    Sotilgan qurilmalar narxidan tannarx ayirilgan · sotuv amalga oshirilgan zahoti hisoblanadi, to'lov holatidan qat'iy nazar
                     {stats.nasiyaInterestThisMonth > 0 ? ` · Nasiya foizi: ${fmt(stats.nasiyaInterestThisMonth, currency)}` : ''}
                   </p>
                   <KoLink href="/shop/hisobot" />
