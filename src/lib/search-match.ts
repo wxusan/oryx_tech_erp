@@ -23,6 +23,9 @@ export interface DeviceSearchable {
   note?: string | null
   supplierName?: string | null
   supplierPhone?: string | null
+  // The sold-to/nasiya customer's name, if this device has been sold —
+  // lets "devices" search find e.g. "which device did Aziz buy". See item 14.
+  customerName?: string | null
 }
 
 export function matchesDeviceSearch(device: DeviceSearchable, query: string): boolean {
@@ -38,6 +41,7 @@ export function matchesDeviceSearch(device: DeviceSearchable, query: string): bo
     norm(device.note).includes(q) ||
     norm(device.supplierName).includes(q) ||
     norm(device.supplierPhone).includes(q) ||
+    norm(device.customerName).includes(q) ||
     (qDigits.length > 0 && (normalizePhone(device.supplierPhone ?? '') ?? '').includes(qDigits))
   )
 }

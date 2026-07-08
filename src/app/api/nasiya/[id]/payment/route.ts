@@ -22,6 +22,7 @@ import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
+import { validatePaymentBreakdown, representativePaymentMethod } from '@/lib/payment-breakdown'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -45,6 +46,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       nasiyaScheduleId,
       amount,
       paymentMethod,
+      paymentBreakdown,
       date,
       delayedUntil,
       note,
@@ -54,6 +56,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if ((amount > 0 || deferredToNext) && !idempotencyKey) {
       return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
     }
+
+    // Item 12 — split payment (e.g. half cash, half card). Parts must sum
+    // to the payment amount; the existing paymentMethod field stays
+    // populated with a representative value so no existing reader breaks.
+    if (paymentBreakdown) {
+      const breakdownError = validatePaymentBreakdown(paymentBreakdown, amount)
+      if (breakdownError) return badRequest(breakdownError)
+    }
+    const effectivePaymentMethod = paymentBreakdown ? representativePaymentMethod(paymentBreakdown) : paymentMethod
 
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
@@ -273,7 +284,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               paidAmount: newPaidAmount,
               status: nextStatus,
               paidAt: isFullyPaid ? date : null,
-              paymentMethod,
+              paymentMethod: effectivePaymentMethod,
               note: auditNote,
               contractPaidAmount: newContractPaidAmount,
               contractRemainingAmount: newContractRemainingAmount,
@@ -300,7 +311,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             nasiyaScheduleId: allocations.length === 1 ? allocations[0].scheduleId : null,
             shopId,
             amount: amountUzs,
-            paymentMethod,
+            paymentMethod: effectivePaymentMethod,
+            paymentBreakdown: paymentBreakdown ?? undefined,
             paidAt: date,
             note: auditNote,
             idempotencyKey,
@@ -385,7 +397,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           month: allocations.length === 1 ? selectedSchedule.monthNumber : 'MULTIPLE',
           paidAmount: appliedAmountInContractCurrency,
           contractCurrency,
-          paymentMethod,
+          paymentMethod: effectivePaymentMethod,
+          paymentBreakdown,
           remaining: contractRemainingToStore,
           note: auditNote,
           paymentInput: { amount, currency: amountInput.inputCurrency },
@@ -458,7 +471,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             : {
                 amount: amountUzs,
                 inputAmount: amount,
-                paymentMethod,
+                paymentMethod: effectivePaymentMethod,
+                paymentBreakdown,
                 deferredToNext,
                 allocations,
                 auditReason: auditNote,

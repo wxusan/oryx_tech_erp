@@ -110,6 +110,7 @@ export default function QurilmalarClient({
         note: d.note,
         supplierName: d.supplierName,
         supplierPhone: d.supplierPhone,
+        customerName: d.saleInfo?.customerName,
       },
       search,
     )

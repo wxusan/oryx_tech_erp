@@ -10,32 +10,33 @@ const SOTUV = 'src/app/(shop)/shop/sotuv/new/page.tsx'
 const NASIYA = 'src/app/(shop)/shop/nasiyalar/new/page.tsx'
 const YANGI = 'src/app/(shop)/shop/yangi-operatsiya/page.tsx'
 
-// The price shown in the sale/nasiya form is DERIVED from the selected device +
-// current currency (never a stale prefilled string), so a USD-labeled input can
-// never get stuck showing the raw UZS amount after the currency resolves.
-const priceState: Record<string, { input: string; derived: string; setter: string }> = {
+// Item 5: the selling-price field always STARTS EMPTY (never prefilled from
+// the device's own purchase price, in any currency) — the shop must
+// explicitly decide the selling price for every deal. Selecting a
+// (different) device still resets the field to null/empty so a price meant
+// for one device can never accidentally carry over to another.
+const priceState: Record<string, { input: string; emptyDefault: string; setter: string }> = {
   [SOTUV]: {
     input: 'salePriceInput',
-    derived: "const salePrice = salePriceInput ?? (selectedDevice ? priceFor(selectedDevice) : '')",
+    emptyDefault: "const salePrice = salePriceInput ?? ''",
     setter: 'onChange={setSalePriceInput}',
   },
   [NASIYA]: {
     input: 'totalPriceInput',
-    derived: "const totalPrice = totalPriceInput ?? (selectedDevice ? priceFor(selectedDevice) : '')",
+    emptyDefault: "const totalPrice = totalPriceInput ?? ''",
     setter: 'onChange={setTotalPriceInput}',
   },
 }
 
-for (const [file, { input, derived, setter }] of Object.entries(priceState)) {
-  describe(`USD/UZS price display — ${file}`, () => {
+for (const [file, { input, emptyDefault, setter }] of Object.entries(priceState)) {
+  describe(`selling price starts empty — ${file}`, () => {
     const src = read(file)
 
-    it('derives the displayed price from the device + currency (no stale prefill)', () => {
-      expect(src).toContain(derived)
-      // priceFor converts UZS→USD when the shop is in USD mode.
-      expect(src).toContain('convertUzsToUsd(d.purchasePrice, currency.usdUzsRate).toFixed(2)')
-      // Selecting a device resets the field to the live suggestion (null), never
-      // to a raw UZS string.
+    it('never derives the selling price from the device\'s own purchase price', () => {
+      expect(src).toContain(emptyDefault)
+      expect(src).not.toMatch(/selectedDevice \? priceFor\(selectedDevice\)/)
+      // Selecting a device resets the field to empty, never to a stale value
+      // left over from a previously selected device.
       expect(src).toContain(`set${input.charAt(0).toUpperCase()}${input.slice(1)}(null)`)
     })
 
@@ -48,6 +49,16 @@ for (const [file, { input, derived, setter }] of Object.entries(priceState)) {
     })
   })
 }
+
+describe('read-only purchase-price reference converts safely (string-safe Decimal handling)', () => {
+  it(`${NASIYA}: priceFor still exists for the read-only "Kelish narxi" reference and uses the safe convert helper`, () => {
+    expect(read(NASIYA)).toContain('convertUzsToUsd(d.purchasePrice, currency.usdUzsRate).toFixed(2)')
+  })
+
+  it(`${SOTUV}: the read-only purchase-price reference uses the shared money formatter (also string-safe)`, () => {
+    expect(read(SOTUV)).toContain('fmt(selectedDevice.purchasePrice, currency)')
+  })
+})
 
 describe('no auto-selection of a device', () => {
   for (const file of [SOTUV, NASIYA]) {

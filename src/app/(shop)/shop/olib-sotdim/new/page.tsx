@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -309,10 +310,9 @@ export default function NewOlibSotdimPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Tel raqami <span className="text-red-500">*</span>
                 </label>
-                <Input
+                <PhoneInput
                   value={supplierPhone}
-                  onChange={(e) => { setSupplierPhone(e.target.value); if (supplierPhoneError) setSupplierPhoneError('') }}
-                  placeholder="+998 90 000 00 00"
+                  onChange={(value) => { setSupplierPhone(value); if (supplierPhoneError) setSupplierPhoneError('') }}
                   aria-invalid={!!supplierPhoneError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
@@ -436,11 +436,10 @@ export default function NewOlibSotdimPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Mijoz tel raqami <span className="text-red-500">*</span>
                 </label>
-                <Input
+                <PhoneInput
                   ref={customerPhoneRef}
                   value={customerPhone}
-                  onChange={(e) => { setCustomerPhone(e.target.value); if (customerPhoneError) setCustomerPhoneError('') }}
-                  placeholder="+998 90 000 00 00"
+                  onChange={(value) => { setCustomerPhone(value); if (customerPhoneError) setCustomerPhoneError('') }}
                   aria-invalid={!!customerPhoneError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />

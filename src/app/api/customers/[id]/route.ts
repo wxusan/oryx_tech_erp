@@ -5,7 +5,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { invalidateShopCustomerMutation } from '@/lib/server/cache-tags'
-import { normalizePhone } from '@/lib/phone'
+import { normalizePhone, normalizeAdditionalPhones } from '@/lib/phone'
 import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -13,6 +13,7 @@ type RouteContext = { params: Promise<{ id: string }> }
 const updateCustomerSchema = z.object({
   name: z.string().min(2).optional(),
   phone: z.string().min(9).optional(),
+  additionalPhones: z.array(z.string()).optional(),
   note: z.string().optional(),
   reason: z.string().optional(),
   shopId: z.string().optional(),
@@ -55,10 +56,14 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       identityChangeReason = auditNote
     }
 
+    const nextPrimaryPhone = parsed.data.phone !== undefined ? parsed.data.phone : existing.phone
     const customerUpdate = {
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...(parsed.data.phone !== undefined
         ? { phone: parsed.data.phone, normalizedPhone: normalizePhone(parsed.data.phone) }
+        : {}),
+      ...(parsed.data.additionalPhones !== undefined
+        ? { additionalPhones: normalizeAdditionalPhones(parsed.data.additionalPhones, nextPrimaryPhone) }
         : {}),
       ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
     }
@@ -71,6 +76,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         shopId: true,
         name: true,
         phone: true,
+        additionalPhones: true,
         note: true,
         createdAt: true,
       },

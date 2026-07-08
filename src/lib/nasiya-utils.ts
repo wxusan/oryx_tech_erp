@@ -90,6 +90,77 @@ export function calculateNasiyaAmounts(params: {
 }
 
 /**
+ * The reverse of `calculateNasiyaAmounts` — item 6: when the shop admin
+ * manually types a monthly payment instead of an interest percent, the
+ * interest must adapt to match, not silently stay at whatever the last
+ * interestPercent-driven calculation produced.
+ *
+ *   finalNasiyaAmount = monthlyPayment * months
+ *   interestAmount    = finalNasiyaAmount - baseRemainingAmount
+ *   interestPercent   = interestAmount / baseRemainingAmount * 100 (rounded
+ *                       to a whole percent for display only — the exact
+ *                       finalNasiyaAmount/monthlyPayment above are what
+ *                       actually gets stored, never re-derived from the
+ *                       rounded percent)
+ *
+ * Negative interest (monthlyPayment too low to cover the base debt) is
+ * rejected, same as calculateNasiyaAmounts rejects an interest percent
+ * outside [0, MAX_NASIYA_INTEREST_PERCENT].
+ */
+export function calculateNasiyaAmountsFromMonthlyPayment(params: {
+  totalAmount: number
+  downPayment: number
+  months: number
+  monthlyPayment: number
+  currency?: CurrencyCode
+}): NasiyaAmountCalculation {
+  const currency = params.currency ?? 'UZS'
+  const totalAmount = roundMoney(params.totalAmount, currency)
+  const downPayment = roundMoney(params.downPayment, currency)
+  const monthlyPayment = roundMoney(params.monthlyPayment, currency)
+
+  if (!Number.isFinite(totalAmount) || totalAmount <= 0) {
+    throw new Error("Jami narx musbat son bo'lishi kerak")
+  }
+  if (!Number.isFinite(downPayment) || downPayment < 0) {
+    throw new Error("Boshlang'ich to'lov manfiy bo'lmasligi kerak")
+  }
+  if (downPayment > totalAmount) {
+    throw new Error("Boshlang'ich to'lov jami narxdan oshmasligi kerak")
+  }
+  if (!Number.isInteger(params.months) || params.months < 1 || params.months > 24) {
+    throw new Error("Oy soni 1 dan 24 gacha bo'lishi kerak")
+  }
+  if (!Number.isFinite(monthlyPayment) || monthlyPayment <= 0) {
+    throw new Error("Oylik to'lov musbat son bo'lishi kerak")
+  }
+
+  const baseRemainingAmount = totalAmount - downPayment
+  const finalNasiyaAmount = roundMoney(monthlyPayment * params.months, currency)
+
+  if (finalNasiyaAmount < baseRemainingAmount) {
+    throw new Error("Oylik to'lov asosiy qarzni to'liq qoplashi kerak (foiz manfiy bo'lishi mumkin emas)")
+  }
+
+  const interestAmount = roundMoney(finalNasiyaAmount - baseRemainingAmount, currency)
+  const interestPercent = baseRemainingAmount > 0 ? Math.round((interestAmount / baseRemainingAmount) * 100) : 0
+
+  if (interestPercent > MAX_NASIYA_INTEREST_PERCENT) {
+    throw new Error(`Nasiya foizi 0 dan ${MAX_NASIYA_INTEREST_PERCENT} gacha bo'lishi kerak`)
+  }
+
+  return {
+    totalAmount,
+    downPayment,
+    baseRemainingAmount,
+    interestPercent,
+    interestAmount,
+    finalNasiyaAmount,
+    monthlyPayment,
+  }
+}
+
+/**
  * Generate a monthly payment schedule for a nasiya plan.
  *
  * @param startDate     - The first payment's start date (payments due from month 1 onward)

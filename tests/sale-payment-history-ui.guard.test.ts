@@ -46,7 +46,11 @@ describe('Device detail page: "To\'lov tarixi" section for Sale payments', () =>
 
   it('shows the payment date, method, and note (falling back to a dash for an empty note, never blank/undefined text)', () => {
     expect(page).toContain('{uzDateTime(payment.paidAt)}')
-    expect(page).toContain('{paymentMethodLabel(payment.paymentMethod)}')
+    // Item 12 — a split-payment row shows each method joined ("Naqd + Karta")
+    // instead of the single paymentMethodLabel call; a normal payment still
+    // falls back to paymentMethodLabel(payment.paymentMethod).
+    expect(page).toContain('paymentMethodLabel(payment.paymentMethod)')
+    expect(page).toContain('payment.paymentBreakdown?.length')
     expect(page).toContain("{payment.note ?? '—'}")
   })
 

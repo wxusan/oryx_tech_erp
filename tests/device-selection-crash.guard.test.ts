@@ -29,10 +29,25 @@ describe('device selection is crash-safe', () => {
       expect(fn).not.toContain('push(')
     })
 
-    it(`${file}: the price prefill goes through the (string-safe) convert helper`, () => {
-      expect(src).toContain('convertUzsToUsd(d.purchasePrice, currency.usdUzsRate)')
-    })
   }
+
+  // Nasiya still shows a read-only "Kelish narxi" (purchase price) reference
+  // via the same string-safe convert helper — item 5 removed the
+  // auto-*prefill* of the selling-price field, not the read-only display.
+  it(`${NASIYA}: the read-only purchase-price reference goes through the (string-safe) convert helper`, () => {
+    expect(read(NASIYA)).toContain('convertUzsToUsd(d.purchasePrice, currency.usdUzsRate)')
+  })
+
+  // Sotuv's read-only purchase-price reference (in the selected-device
+  // summary card) uses the shared `fmt`/formatMoneyByCurrency helper instead
+  // — also string-safe (formatMoneyByCurrency Number()-coerces internally),
+  // just via the already-audited shared formatter rather than a bespoke
+  // local prefill helper (which no longer exists in this file — item 5).
+  it(`${SOTUV}: the read-only purchase-price reference uses the shared money formatter`, () => {
+    const src = read(SOTUV)
+    expect(src).toContain('fmt(selectedDevice.purchasePrice, currency)')
+    expect(src).not.toContain('salePriceInput ?? (selectedDevice')
+  })
 })
 
 describe('device edit modal opens via the string-safe convert helper', () => {

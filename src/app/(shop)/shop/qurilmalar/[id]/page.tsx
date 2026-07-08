@@ -30,6 +30,7 @@ import {
 } from '@/lib/nasiya-contract'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { getDeviceImageSrc } from '@/lib/device-image'
+import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 
 interface Supplier {
@@ -42,6 +43,9 @@ interface SalePaymentRow extends SalePaymentLike {
   paidAt: string
   paymentMethod: string | null
   note: string | null
+  // Item 12 — split-payment breakdown (e.g. half cash, half card). Null for
+  // a normal single-method payment.
+  paymentBreakdown?: { method: string; amount: number }[] | null
 }
 
 interface Sale {
@@ -85,11 +89,21 @@ interface NasiyaSchedule {
 
 interface Nasiya {
   id: string
+  status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
   totalAmount: number
   interestPercent: number
   interestAmount: number
   finalNasiyaAmount: number
   remainingAmount: number
+  // Native contract-currency ledger — source of truth for display; the
+  // legacy fields above stay for back-compat only. See
+  // docs/currency-accounting-model.md and item 15's fix.
+  contractCurrency: 'UZS' | 'USD'
+  contractTotalAmount: number
+  contractInterestAmount: number
+  contractFinalAmount: number
+  contractRemainingAmount: number
+  contractExchangeRateAtCreation: number | string | null
   customer: { name: string; phone: string }
   schedules: NasiyaSchedule[]
 }
@@ -174,6 +188,7 @@ export default function QurilmaDetailPage() {
   const [deleting, setDeleting] = useState(false)
   const [deleteError, setDeleteError] = useState('')
   const [salePaymentOpen, setSalePaymentOpen] = useState(false)
+  const [nasiyaPaymentOpen, setNasiyaPaymentOpen] = useState(false)
   const [salePayAmount, setSalePayAmount] = useState('')
   const [salePayMethod, setSalePayMethod] = useState('')
   const [salePayNote, setSalePayNote] = useState('')
@@ -543,11 +558,32 @@ export default function QurilmaDetailPage() {
   const dfmtSale = (amount: number) =>
     latestSale ? formatDisplayMoneyFromContract(amount, latestSale.contractCurrency, currency.currency, currency.usdUzsRate) : fmt(amount, currency)
   const latestNasiya = device.nasiya?.[0]
-  const nasiyaProfit = latestNasiya ? latestNasiya.totalAmount - device.purchasePrice : null
+  // Money TEXT for this nasiya must convert from its own contract currency
+  // via today's rate — never reconvert the legacy UZS snapshot (frozen at
+  // creation rate), which would stay stuck showing so'm for a USD-native
+  // nasiya. See docs/currency-accounting-model.md and item 15's fix.
+  const dfmtNasiya = (amount: number) =>
+    latestNasiya ? formatDisplayMoneyFromContract(amount, latestNasiya.contractCurrency, currency.currency, currency.usdUzsRate) : fmt(amount, currency)
+  // Native contract-currency margin — same reasoning as saleContractProfit
+  // below: a plain native subtraction when the nasiya and the device's own
+  // purchase share a currency (no FX conversion, no double-counting a
+  // purchase-time vs. nasiya-time rate difference).
+  const nasiyaContractProfit = latestNasiya
+    ? computeSaleContractMargin(
+        latestNasiya.contractTotalAmount,
+        latestNasiya.contractCurrency,
+        latestNasiya.contractExchangeRateAtCreation,
+        {
+          purchaseCurrency: device.purchaseCurrency,
+          purchaseInputAmount: device.purchaseInputAmount,
+          purchaseAmountUzsSnapshot: device.purchaseAmountUzsSnapshot,
+        },
+      )
+    : null
   const latestReturn = device.returns?.[0]
-  const nasiyaPct = latestNasiya && latestNasiya.finalNasiyaAmount > 0
+  const nasiyaPct = latestNasiya && latestNasiya.contractFinalAmount > 0
     ? Math.round(
-        ((latestNasiya.finalNasiyaAmount - latestNasiya.remainingAmount) / latestNasiya.finalNasiyaAmount) * 100
+        ((latestNasiya.contractFinalAmount - latestNasiya.contractRemainingAmount) / latestNasiya.contractFinalAmount) * 100
       )
     : 0
 
@@ -818,7 +854,15 @@ export default function QurilmaDetailPage() {
                       <td className="px-4 py-3 font-medium text-zinc-900">
                         {salePaymentAmountDisplay(payment, latestSale.contractCurrency, currency)}
                       </td>
-                      <td className="px-4 py-3 text-zinc-700">{paymentMethodLabel(payment.paymentMethod)}</td>
+                      <td className="px-4 py-3 text-zinc-700">
+                        {payment.paymentBreakdown?.length ? (
+                          <span title={payment.paymentBreakdown.map((p) => `${paymentMethodLabel(p.method)}: ${p.amount}`).join(', ')}>
+                            {payment.paymentBreakdown.map((p) => paymentMethodLabel(p.method)).join(' + ')}
+                          </span>
+                        ) : (
+                          paymentMethodLabel(payment.paymentMethod)
+                        )}
+                      </td>
                       <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
                     </tr>
                   ))}
@@ -848,30 +892,30 @@ export default function QurilmaDetailPage() {
                 <span className="text-zinc-900 font-medium">{latestNasiya.customer.phone}</span>
               </div>
               <div className="flex gap-4 text-sm">
-                <span className="text-zinc-500 w-32">Sotuv narxi</span>
-                <span className="text-zinc-900 font-medium">{fmt(latestNasiya.totalAmount, currency)}</span>
+                <span className="text-zinc-500 w-32">Sotilish narxi</span>
+                <span className="text-zinc-900 font-medium">{dfmtNasiya(latestNasiya.contractTotalAmount)}</span>
               </div>
-              {latestNasiya.interestAmount > 0 && (
+              {latestNasiya.contractInterestAmount > 0 && (
                 <div className="flex gap-4 text-sm">
                   <span className="text-zinc-500 w-32">Foiz daromadi</span>
                   <span className="text-zinc-900 font-medium">
-                    {latestNasiya.interestPercent}% · {fmt(latestNasiya.interestAmount, currency)}
+                    {latestNasiya.interestPercent}% · {dfmtNasiya(latestNasiya.contractInterestAmount)}
                   </span>
                 </div>
               )}
               <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Sotuv farqi</span>
-                <span className={nasiyaProfit != null && nasiyaProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
-                  {fmt(nasiyaProfit ?? 0, currency)}
+                <span className={nasiyaContractProfit != null && nasiyaContractProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
+                  {nasiyaContractProfit != null ? formatContractMoney(nasiyaContractProfit, latestNasiya.contractCurrency) : '—'}
                 </span>
               </div>
               <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Nasiya jami</span>
-                <span className="text-zinc-900 font-medium">{fmt(latestNasiya.finalNasiyaAmount, currency)}</span>
+                <span className="text-zinc-900 font-medium">{dfmtNasiya(latestNasiya.contractFinalAmount)}</span>
               </div>
               <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Qolgan summa</span>
-                <span className="text-zinc-900 font-medium">{fmt(latestNasiya.remainingAmount, currency)}</span>
+                <span className="text-zinc-900 font-medium">{dfmtNasiya(latestNasiya.contractRemainingAmount)}</span>
               </div>
             </div>
             <div>
@@ -886,13 +930,37 @@ export default function QurilmaDetailPage() {
                 />
               </div>
             </div>
-            <Link href={`/shop/nasiyalar/${latestNasiya.id}`} prefetch={false}>
-              <Button variant="outline" className="text-sm border-zinc-200 text-zinc-700 rounded mt-2">
-                Nasiyani ko'rish
-              </Button>
-            </Link>
+            <div className="flex flex-wrap items-center gap-2 mt-2">
+              {(latestNasiya.status === 'ACTIVE' || latestNasiya.status === 'OVERDUE') && (
+                <Button
+                  onClick={() => setNasiyaPaymentOpen(true)}
+                  className="text-sm font-semibold bg-zinc-900 text-white hover:bg-zinc-800 rounded shadow-sm"
+                >
+                  To'lov qabul qilish
+                </Button>
+              )}
+              <Link href={`/shop/nasiyalar/${latestNasiya.id}`} prefetch={false}>
+                <Button variant="outline" className="text-sm border-zinc-200 text-zinc-700 rounded">
+                  Nasiyani ko'rish
+                </Button>
+              </Link>
+            </div>
           </div>
         </div>
+      )}
+
+      {latestNasiya && (
+        <NasiyaPaymentModal
+          nasiyaId={latestNasiya.id}
+          open={nasiyaPaymentOpen}
+          onOpenChange={setNasiyaPaymentOpen}
+          onSuccess={() => {
+            setNasiyaPaymentOpen(false)
+            fetchDevice()
+          }}
+          customerName={latestNasiya.customer.name}
+          deviceName={device.model}
+        />
       )}
 
       {/* Return info section — no profit shown here, the sale was reversed */}

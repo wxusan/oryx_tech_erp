@@ -11,7 +11,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { createNasiyaSchema } from '@/lib/validations'
-import { calculateNasiyaAmounts, generatePaymentSchedule } from '@/lib/nasiya-utils'
+import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaCreatedMessage } from '@/lib/telegram-templates'
@@ -43,6 +43,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const {
       customerName, customerPhone, passportPhotoUrl,
       totalAmount, downPayment, months, interestPercent,
+      monthlyPayment: monthlyPaymentOverrideInput, useMonthlyPaymentOverride,
       startDate, paymentMethod, note,
       earlyReminderEnabled, earlyReminderDays,
     } = parsed.data
@@ -62,9 +63,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const normalizedPhone = normalizePhone(customerPhone)
     let totalInput: Awaited<ReturnType<typeof moneyInputToUzs>>
     let downPaymentInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    let monthlyPaymentOverrideUzs: number | undefined
     try {
       totalInput = await moneyInputToUzs(totalAmount, parsed.data.inputCurrency)
       downPaymentInput = await moneyInputToUzs(downPayment, parsed.data.inputCurrency)
+      if (useMonthlyPaymentOverride && monthlyPaymentOverrideInput !== undefined) {
+        monthlyPaymentOverrideUzs = (await moneyInputToUzs(monthlyPaymentOverrideInput, parsed.data.inputCurrency)).amountUzs
+      }
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
@@ -72,23 +77,44 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     let amounts: ReturnType<typeof calculateNasiyaAmounts>
     let contractAmounts: ReturnType<typeof calculateNasiyaAmounts>
     try {
-      amounts = calculateNasiyaAmounts({
-        totalAmount: totalInput.amountUzs,
-        downPayment: downPaymentInput.amountUzs,
-        months,
-        interestPercent,
-      })
-      // Native contract-currency ledger (source of truth going forward) — the
-      // same shape, computed from the RAW input amounts (not UZS-converted),
-      // in the currency the deal was actually made in. See
-      // docs/currency-accounting-model.md.
-      contractAmounts = calculateNasiyaAmounts({
-        totalAmount,
-        downPayment,
-        months,
-        interestPercent,
-        currency: totalInput.inputCurrency,
-      })
+      // Item 6: when the shop admin manually set a monthly payment (instead
+      // of an interest percent), that monthly payment — not interestPercent
+      // — is the source of truth. Uses the exact reverse-of-forward formula
+      // already unit-tested in nasiya-utils.ts, so this always matches what
+      // the create-nasiya form previewed (no separate rounding path).
+      if (useMonthlyPaymentOverride && monthlyPaymentOverrideUzs !== undefined) {
+        amounts = calculateNasiyaAmountsFromMonthlyPayment({
+          totalAmount: totalInput.amountUzs,
+          downPayment: downPaymentInput.amountUzs,
+          months,
+          monthlyPayment: monthlyPaymentOverrideUzs,
+        })
+        contractAmounts = calculateNasiyaAmountsFromMonthlyPayment({
+          totalAmount,
+          downPayment,
+          months,
+          monthlyPayment: monthlyPaymentOverrideInput as number,
+          currency: totalInput.inputCurrency,
+        })
+      } else {
+        amounts = calculateNasiyaAmounts({
+          totalAmount: totalInput.amountUzs,
+          downPayment: downPaymentInput.amountUzs,
+          months,
+          interestPercent,
+        })
+        // Native contract-currency ledger (source of truth going forward) — the
+        // same shape, computed from the RAW input amounts (not UZS-converted),
+        // in the currency the deal was actually made in. See
+        // docs/currency-accounting-model.md.
+        contractAmounts = calculateNasiyaAmounts({
+          totalAmount,
+          downPayment,
+          months,
+          interestPercent,
+          currency: totalInput.inputCurrency,
+        })
+      }
     } catch (error) {
       return badRequest(error instanceof Error ? error.message : "Nasiya summasi noto'g'ri")
     }

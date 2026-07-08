@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -12,11 +13,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { uzDate } from '@/lib/dates'
+import { X } from 'lucide-react'
 
 interface Customer {
   id: string
   name: string
   phone: string
+  additionalPhones?: string[]
   note: string | null
   createdAt: string
   _count?: { sales: number; nasiya: number }
@@ -30,6 +33,7 @@ export default function CustomersPage() {
   const [editing, setEditing] = useState<Customer | null>(null)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
+  const [additionalPhones, setAdditionalPhones] = useState<string[]>([])
   const [note, setNote] = useState('')
   const [reason, setReason] = useState('')
   const [saving, setSaving] = useState(false)
@@ -71,6 +75,7 @@ export default function CustomersPage() {
     setEditing(customer)
     setName(customer.name)
     setPhone(customer.phone)
+    setAdditionalPhones(customer.additionalPhones ?? [])
     setNote(customer.note ?? '')
     setReason('')
     setSaveError('')
@@ -88,6 +93,7 @@ export default function CustomersPage() {
         body: JSON.stringify({
           name,
           phone,
+          additionalPhones,
           note,
           reason: identityChanged ? reason : undefined,
         }),
@@ -183,7 +189,39 @@ export default function CustomersPage() {
             </div>
             <div>
               <label htmlFor="customer-phone" className="block text-xs font-medium text-zinc-700 mb-1.5">Telefon</label>
-              <Input id="customer-phone" value={phone} onChange={(e) => setPhone(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
+              <PhoneInput id="customer-phone" value={phone} onChange={setPhone} className="h-9 text-sm border-zinc-200 rounded" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Qo&apos;shimcha raqamlar</label>
+              <div className="space-y-2">
+                {additionalPhones.map((extra, i) => (
+                  <div key={i} className="flex items-center gap-2">
+                    <PhoneInput
+                      value={extra}
+                      onChange={(value) => {
+                        setAdditionalPhones((prev) => prev.map((p, idx) => (idx === i ? value : p)))
+                      }}
+                      className="h-9 text-sm border-zinc-200 rounded"
+                    />
+                    <button
+                      type="button"
+                      aria-label="Raqamni o'chirish"
+                      onClick={() => setAdditionalPhones((prev) => prev.filter((_, idx) => idx !== i))}
+                      className="inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded border border-zinc-200 text-zinc-500 hover:bg-zinc-50 hover:text-red-600"
+                    >
+                      <X size={14} />
+                    </button>
+                  </div>
+                ))}
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setAdditionalPhones((prev) => [...prev, ''])}
+                  className="h-8 rounded border-zinc-200 px-3 text-xs"
+                >
+                  + Raqam qo&apos;shish
+                </Button>
+              </div>
             </div>
             {editing && (name !== editing.name || phone !== editing.phone) && (
               <div>

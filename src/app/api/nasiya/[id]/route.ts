@@ -130,6 +130,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             id: true,
             amount: true,
             paymentMethod: true,
+            paymentBreakdown: true,
             paidAt: true,
             note: true,
             nasiyaScheduleId: true,

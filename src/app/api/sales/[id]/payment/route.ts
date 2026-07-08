@@ -12,6 +12,7 @@ import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
 import { convertPaymentToContractCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'
+import { validatePaymentBreakdown, representativePaymentMethod } from '@/lib/payment-breakdown'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -37,6 +38,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!idempotencyKey) {
       return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
     }
+
+    // Item 12 — split payment (e.g. half cash, half card). Parts must sum
+    // to the payment amount; the existing paymentMethod field stays
+    // populated with a representative value so no existing reader breaks.
+    if (parsed.data.paymentBreakdown) {
+      const breakdownError = validatePaymentBreakdown(parsed.data.paymentBreakdown, parsed.data.amount)
+      if (breakdownError) return badRequest(breakdownError)
+    }
+    const effectivePaymentMethod = parsed.data.paymentBreakdown
+      ? representativePaymentMethod(parsed.data.paymentBreakdown)
+      : parsed.data.paymentMethod
 
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
@@ -147,7 +159,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           saleId,
           shopId,
           amount,
-          paymentMethod: parsed.data.paymentMethod,
+          paymentMethod: effectivePaymentMethod,
+          paymentBreakdown: parsed.data.paymentBreakdown ?? undefined,
           paidAt,
           note: auditNote,
           idempotencyKey,
@@ -191,7 +204,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           newValue: {
             paymentId: payment.id,
             amount,
-            paymentMethod: parsed.data.paymentMethod,
+            paymentMethod: effectivePaymentMethod,
+            paymentBreakdown: parsed.data.paymentBreakdown,
             amountPaid: updatedSale.amountPaid,
             remainingAmount: updatedSale.remainingAmount,
             paidFully: updatedSale.paidFully,
@@ -219,7 +233,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           imei: sale.device.imei,
         },
         paidAmount: appliedAmountInContractCurrency,
-        paymentMethod: parsed.data.paymentMethod,
+        paymentMethod: effectivePaymentMethod,
+        paymentBreakdown: parsed.data.paymentBreakdown,
         remaining: nextContractRemaining,
         contractCurrency,
         note: auditNote,

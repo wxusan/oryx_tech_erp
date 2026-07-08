@@ -38,6 +38,16 @@ describe('matchesDeviceSearch', () => {
   it('no match for unrelated text', () => {
     expect(matchesDeviceSearch(device, 'Samsung')).toBe(false)
   })
+
+  it('matches the sold-to customer name (item 14 — search by name)', () => {
+    const sold = { ...device, customerName: 'Diyorbek Yusupov' }
+    expect(matchesDeviceSearch(sold, 'diyorbek')).toBe(true)
+    expect(matchesDeviceSearch(sold, 'yusupov')).toBe(true)
+  })
+
+  it('does not crash when customerName is absent (unsold device)', () => {
+    expect(matchesDeviceSearch(device, 'anything')).toBe(false)
+  })
 })
 
 describe('matchesNasiyaSearch', () => {

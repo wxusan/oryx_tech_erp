@@ -34,7 +34,9 @@ export async function GET(req: NextRequest) {
               OR: [
                 { name: { contains: search, mode: 'insensitive' } },
                 { phone: { contains: search, mode: 'insensitive' } },
+                { note: { contains: search, mode: 'insensitive' } },
                 ...(searchDigits ? [{ normalizedPhone: { contains: searchDigits } }] : []),
+                ...(searchDigits ? [{ additionalPhones: { has: searchDigits } }] : []),
               ],
             }
           : {}),
@@ -47,6 +49,7 @@ export async function GET(req: NextRequest) {
         shopId: true,
         name: true,
         phone: true,
+        additionalPhones: true,
         note: true,
         createdAt: true,
         _count: {

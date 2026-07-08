@@ -60,6 +60,9 @@ export interface NasiyaPayment {
   // see docs/currency-accounting-model.md. Differs from `amount` (UZS) only
   // when contractCurrency is USD.
   appliedAmountInContractCurrency: number | null
+  // Item 12 — split-payment breakdown (e.g. half cash, half card). Null for
+  // a normal single-method payment.
+  paymentBreakdown?: { method: string; amount: number }[] | null
 }
 
 interface NasiyaLog {
@@ -532,9 +535,9 @@ export default function NasiyaDetailPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
         {[
-          // Jami narx -> Boshlang'ich to'lov -> Nasiya jami (original financed
-          // amount) -> To'langan -> Qarz qoldig'i (CURRENT remaining debt).
-          // These are deliberately two different numbers — no separate
+          // Sotilish narxi -> Boshlang'ich to'lov -> Nasiya jami (original
+          // financed amount) -> To'langan -> Qarz qoldig'i (CURRENT remaining
+          // debt). These are deliberately two different numbers — no separate
           // "Qolgan summa" card, which duplicated one or the other and read
           // as a confusing third figure (see docs/nasiya-payment-allocation.md).
           // All values below convert from the deal's OWN contract currency
@@ -542,7 +545,7 @@ export default function NasiyaDetailPage() {
           // rate legacy UZS snapshot, which would drift from the true
           // contract value as the rate moves (see
           // docs/currency-accounting-model.md).
-          { label: 'Jami narx', value: dfmt(nasiya.contractTotalAmount) },
+          { label: 'Sotilish narxi', value: dfmt(nasiya.contractTotalAmount) },
           { label: "Boshlang'ich to'lov", value: dfmt(nasiya.contractDownPayment) },
           ...(nasiya.contractInterestAmount > 0
             ? [
@@ -716,7 +719,15 @@ export default function NasiyaDetailPage() {
                 <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
                   <td className="px-4 py-3 text-zinc-700">{uzDate(payment.paidAt)}</td>
                   <td className="px-4 py-3 font-medium text-zinc-900">{paymentAmountDisplay(payment, nasiya.contractCurrency, currency)}</td>
-                  <td className="px-4 py-3 text-zinc-700">{paymentMethodLabel(payment.paymentMethod)}</td>
+                  <td className="px-4 py-3 text-zinc-700">
+                    {payment.paymentBreakdown?.length ? (
+                      <span title={payment.paymentBreakdown.map((p) => `${paymentMethodLabel(p.method)}: ${p.amount}`).join(', ')}>
+                        {payment.paymentBreakdown.map((p) => paymentMethodLabel(p.method)).join(' + ')}
+                      </span>
+                    ) : (
+                      paymentMethodLabel(payment.paymentMethod)
+                    )}
+                  </td>
                   <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
                 </tr>
               ))}

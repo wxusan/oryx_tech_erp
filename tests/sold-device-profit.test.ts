@@ -61,8 +61,14 @@ describe('device detail page shows purchase/sold/profit for cash and nasiya sale
     expect(detail).toContain('Farq / Foyda')
   })
 
-  it('nasiya sale shows sotuv narxi, interest (when present), and sotuv farqi separately', () => {
-    expect(detail).toContain('latestNasiya.totalAmount - device.purchasePrice')
+  it('nasiya sale shows sotilish narxi, interest (when present), and sotuv farqi separately', () => {
+    // Item 15 fix: profit is computed via computeSaleContractMargin from the
+    // nasiya's own contract-currency total, not a legacy-UZS subtraction —
+    // see the guard tests in tests/sold-device-detail-rate-crash-fix.test.ts
+    // and the nasiya-currency-specific assertions below for the full fix.
+    expect(detail).toContain('nasiyaContractProfit')
+    expect(detail).toContain('computeSaleContractMargin(')
+    expect(detail).toContain('latestNasiya.contractTotalAmount')
     expect(detail).toContain('Foiz daromadi')
     expect(detail).toContain('Sotuv farqi')
   })

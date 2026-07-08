@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -13,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
+import { currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { displayImei, deviceMatchesSearch } from '@/lib/device-display'
 import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { useShopCurrency } from '@/lib/use-shop-currency'
@@ -75,17 +76,10 @@ export default function NewSotuvPage() {
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
 
-  // The device's price in the shop's display currency (UZS base → USD when set).
-  function priceFor(d: Device) {
-    return currency.currency === 'USD' && currency.usdUzsRate
-      ? convertUzsToUsd(d.purchasePrice, currency.usdUzsRate).toFixed(2)
-      : String(d.purchasePrice)
-  }
-
-  // Displayed sale price: the user's edit if any, otherwise a live suggestion
-  // derived from the selected device + current currency. Because it's derived,
-  // it can never get stuck showing raw UZS after the currency resolves.
-  const salePrice = salePriceInput ?? (selectedDevice ? priceFor(selectedDevice) : '')
+  // Sotuv narxi (selling price) starts empty — it must never silently default
+  // to the device's own kelish narxi (purchase price), shown separately,
+  // read-only, in the selected-device card above.
+  const salePrice = salePriceInput ?? ''
 
   // Select a device (does NOT auto-advance) — the user confirms with "Keyingi
   // bosqich". Kept as a plain function so it is never a hook dependency.
@@ -348,7 +342,10 @@ export default function NewSotuvPage() {
                 <div className="text-xs text-zinc-500 mt-0.5">{deviceMeta(selectedDevice)}</div>
               </div>
               <div className="flex items-center gap-3">
-                <span className="text-sm font-bold text-zinc-900">{fmt(selectedDevice.purchasePrice, currency)}</span>
+                <div className="text-right">
+                  <div className="text-[10px] uppercase tracking-wide text-zinc-400">Kelish narxi</div>
+                  <span className="text-sm font-bold text-zinc-900">{fmt(selectedDevice.purchasePrice, currency)}</span>
+                </div>
                 <button
                   type="button"
                   onClick={() => setStep(1)}
@@ -381,14 +378,13 @@ export default function NewSotuvPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Mijoz tel <span className="text-red-500">*</span>
                 </label>
-                <Input
+                <PhoneInput
                   ref={phoneRef}
                   value={customerPhone}
-                  onChange={(e) => {
-                    setCustomerPhone(e.target.value)
+                  onChange={(value) => {
+                    setCustomerPhone(value)
                     if (phoneError) setPhoneError('')
                   }}
-                  placeholder="+998 90 000 00 00"
                   aria-invalid={!!phoneError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
@@ -403,7 +399,7 @@ export default function NewSotuvPage() {
                   value={salePrice}
                   onChange={setSalePriceInput}
                   placeholder={currency.currency === 'USD' ? '700.00' : '9500000'}
-                  className="h-9 text-sm border-zinc-200 rounded"
+                  className="h-9 text-sm font-bold border-zinc-200 rounded"
                 />
               </div>
               <div>

@@ -38,6 +38,21 @@ const currencyCodeSchema = z.enum(['UZS', 'USD'], {
   error: "Valyuta noto'g'ri",
 })
 
+// Item 12 — split payment (e.g. half cash, half card). Optional; a normal
+// single-method payment omits this entirely. Sum-matches-total and
+// part-count validation happens in the route handler via
+// validatePaymentBreakdown (needs the payment's own `amount`, not available
+// to a field-level Zod schema alone).
+const paymentBreakdownSchema = z
+  .array(
+    z.object({
+      method: paymentMethodSchema,
+      amount: z.number().positive("Har bir qism musbat summa bo'lishi kerak"),
+    }),
+  )
+  .min(2, "Aralash to'lov kamida 2 ta usulni o'z ichiga olishi kerak")
+  .optional()
+
 // "Ertaroq eslatilsinmi?" — shared by nasiya creation and later-payment sale.
 const earlyReminderEnabledSchema = z.boolean().optional().default(false)
 const earlyReminderDaysSchema = z
@@ -206,6 +221,7 @@ export const addSalePaymentSchema = z.object({
     .number({ error: "To'lov summasi kiritilishi shart" })
     .positive("To'lov summasi musbat bo'lishi kerak"),
   paymentMethod: paymentMethodSchema,
+  paymentBreakdown: paymentBreakdownSchema,
   paidAt: z.coerce.date().optional(),
   nextDueDate: z.coerce.date().optional(),
   note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
@@ -248,6 +264,12 @@ export const createNasiyaSchema = z
       .optional()
       .default(0),
     monthlyPayment: z.number().positive("Oylik to'lov musbat son bo'lishi kerak").optional(),
+    // Item 6: when true, `monthlyPayment` (not `interestPercent`) is the
+    // source of truth — the server derives interest FROM the monthly
+    // payment (calculateNasiyaAmountsFromMonthlyPayment), mirroring exactly
+    // what the create-nasiya form previewed. `interestPercent` is still
+    // required by the schema above but is ignored in this mode.
+    useMonthlyPaymentOverride: z.boolean().optional(),
     startDate: z.coerce.date({ error: "Boshlanish sanasi kiritilishi shart" }),
     paymentMethod: paymentMethodSchema,
     earlyReminderEnabled: earlyReminderEnabledSchema,
@@ -262,6 +284,10 @@ export const createNasiyaSchema = z
   .refine((data) => !data.earlyReminderEnabled || data.earlyReminderDays !== undefined, {
     message: "Necha kun oldin ekanligi kiritilishi shart",
     path: ['earlyReminderDays'],
+  })
+  .refine((data) => !data.useMonthlyPaymentOverride || data.monthlyPayment !== undefined, {
+    message: "Oylik to'lov kiritilishi shart",
+    path: ['monthlyPayment'],
   })
 
 export type CreateNasiyaInput = z.infer<typeof createNasiyaSchema>
@@ -325,6 +351,7 @@ export const addNasiyaPaymentSchema = z
       .number({ error: "To'lov summasi kiritilishi shart" })
       .min(0, "Summa manfiy bo'lmasligi kerak"),
     paymentMethod: paymentMethodSchema.optional(),
+    paymentBreakdown: paymentBreakdownSchema,
     date: z.coerce.date({ error: "To'lov sanasi kiritilishi shart" }),
     delayedUntil: z.coerce.date().optional(),
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),

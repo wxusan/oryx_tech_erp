@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
   calculateNasiyaAmounts,
+  calculateNasiyaAmountsFromMonthlyPayment,
   generatePaymentSchedule,
   calculateRemaining,
   getNextPayment,
@@ -16,7 +17,7 @@ function sum(nums: number[]) {
   return nums.reduce((a, b) => a + b, 0)
 }
 
-describe('calculateNasiyaAmounts — interest applies only after down payment', () => {
+describe('calculateNasiyaAmounts / calculateNasiyaAmountsFromMonthlyPayment (item 6)', () => {
   it('keeps percent 0 compatible with the old remaining-amount logic', () => {
     const calc = calculateNasiyaAmounts({
       totalAmount: 5_200_000,
@@ -43,6 +44,125 @@ describe('calculateNasiyaAmounts — interest applies only after down payment', 
     expect(calc.interestAmount).toBe(740_000)
     expect(calc.finalNasiyaAmount).toBe(4_440_000)
     expect(calc.monthlyPayment).toBe(740_000)
+  })
+
+  it('round-trips exactly against the forward calculation (same inputs, same outputs)', () => {
+    const forward = calculateNasiyaAmounts({
+      totalAmount: 5_200_000,
+      downPayment: 1_500_000,
+      interestPercent: 20,
+      months: 6,
+    })
+    const reverse = calculateNasiyaAmountsFromMonthlyPayment({
+      totalAmount: 5_200_000,
+      downPayment: 1_500_000,
+      months: 6,
+      monthlyPayment: forward.monthlyPayment,
+    })
+
+    expect(reverse.interestAmount).toBe(forward.interestAmount)
+    expect(reverse.interestPercent).toBe(forward.interestPercent)
+    expect(reverse.finalNasiyaAmount).toBe(forward.finalNasiyaAmount)
+  })
+
+  it('a higher manually-entered monthly payment increases both interestAmount and interestPercent', () => {
+    // baseRemainingAmount = 3,700,000. Paying 800,000/mo * 6mo = 4,800,000 total
+    // -> interest = 1,100,000 -> ~29.7% -> rounds to 30%.
+    const reverse = calculateNasiyaAmountsFromMonthlyPayment({
+      totalAmount: 5_200_000,
+      downPayment: 1_500_000,
+      months: 6,
+      monthlyPayment: 800_000,
+    })
+
+    expect(reverse.finalNasiyaAmount).toBe(4_800_000)
+    expect(reverse.interestAmount).toBe(1_100_000)
+    expect(reverse.interestPercent).toBe(30)
+  })
+
+  it('a monthly payment that exactly covers the base debt with no interest yields 0%', () => {
+    // base = 5,200,000 - 1,600,000 = 3,600,000, which divides evenly by 6
+    // months (600,000/mo) — an evenly-divisible fixture so there's no
+    // rounding-boundary drift to account for in this assertion.
+    const reverse = calculateNasiyaAmountsFromMonthlyPayment({
+      totalAmount: 5_200_000,
+      downPayment: 1_600_000,
+      months: 6,
+      monthlyPayment: 600_000,
+    })
+
+    expect(reverse.interestPercent).toBe(0)
+    expect(reverse.interestAmount).toBe(0)
+  })
+
+  it('rejects a monthly payment too low to cover the base debt (negative interest)', () => {
+    expect(() =>
+      calculateNasiyaAmountsFromMonthlyPayment({
+        totalAmount: 5_200_000,
+        downPayment: 1_500_000,
+        months: 6,
+        monthlyPayment: 100_000, // 100,000 * 6 = 600,000 < 3,700,000 base debt
+      }),
+    ).toThrow(/foiz manfiy/)
+  })
+
+  it('rejects a zero or negative monthly payment', () => {
+    expect(() =>
+      calculateNasiyaAmountsFromMonthlyPayment({
+        totalAmount: 5_200_000,
+        downPayment: 1_500_000,
+        months: 6,
+        monthlyPayment: 0,
+      }),
+    ).toThrow(/Oylik to'lov musbat/)
+
+    expect(() =>
+      calculateNasiyaAmountsFromMonthlyPayment({
+        totalAmount: 5_200_000,
+        downPayment: 1_500_000,
+        months: 6,
+        monthlyPayment: -50_000,
+      }),
+    ).toThrow(/Oylik to'lov musbat/)
+  })
+
+  it('rejects a monthly payment implying an interest percent above the max', () => {
+    expect(() =>
+      calculateNasiyaAmountsFromMonthlyPayment({
+        totalAmount: 5_200_000,
+        downPayment: 1_600_000,
+        months: 6,
+        // base = 3,600,000; 2,700,000/mo * 6 = 16,200,000 total => interest
+        // = 12,600,000 => 350% > 300% max.
+        monthlyPayment: 2_700_000,
+      }),
+    ).toThrow(/Nasiya foizi/)
+  })
+
+  it('USD contract: rounds to cents, matches the forward calculation exactly (evenly-divisible fixture)', () => {
+    // Chosen so monthlyPayment (1200/6 = 200.00) divides evenly — an
+    // unevenly-divisible monthly payment can lose a cent on the round trip
+    // (monthlyPayment itself is already rounded before being multiplied back
+    // by months), which is an accepted, pre-existing rounding characteristic
+    // of any whole-installment schedule, not something this reverse
+    // calculation needs to compensate for.
+    const forward = calculateNasiyaAmounts({
+      totalAmount: 1200,
+      downPayment: 200,
+      interestPercent: 20,
+      months: 6,
+      currency: 'USD',
+    })
+    const reverse = calculateNasiyaAmountsFromMonthlyPayment({
+      totalAmount: 1200,
+      downPayment: 200,
+      months: 6,
+      monthlyPayment: forward.monthlyPayment,
+      currency: 'USD',
+    })
+
+    expect(reverse.finalNasiyaAmount).toBe(forward.finalNasiyaAmount)
+    expect(reverse.interestPercent).toBe(forward.interestPercent)
   })
 
   it('generates schedules from final nasiya amount after interest', () => {

@@ -316,6 +316,11 @@ model Customer {
   name             String
   phone            String
   normalizedPhone  String?
+  // Additional contact numbers beyond the primary `phone` — e.g. a relative's
+  // or second personal number. Stored normalized (digits-only, `phone.ts`
+  // convention) so search can match them the same way as the primary phone.
+  // Additive, optional; existing customers default to an empty array.
+  additionalPhones String[] @default([])
   passportPhotoUrl String?
   note             String?
   createdAt        DateTime  @default(now())
@@ -431,6 +436,15 @@ model SalePayment {
   // — frozen forever, never recomputed. `amount` above already serves as the
   // UZS-applied snapshot (unchanged role). See docs/currency-accounting-model.md.
   appliedAmountInContractCurrency Decimal?      @db.Decimal(12, 2)
+  // Split-payment breakdown — e.g. half cash, half card. `[{ method:
+  // PaymentMethod, amount: number }]`, amounts in the same currency as
+  // `paymentInputAmount`/`amount` above, summing to the payment total.
+  // `paymentMethod` above stays populated (a representative single value —
+  // "CASH" for an all-cash payment, "OTHER" when genuinely mixed) so every
+  // existing single-method reader keeps working unchanged; this field is
+  // purely additive display/audit detail. Null for a normal single-method
+  // payment (the common case).
+  paymentBreakdown                Json?
   createdBy                       String
   createdAt                       DateTime      @default(now())
   deletedAt                       DateTime?
@@ -486,6 +500,9 @@ model SupplierPayable {
   earlyReminderDays              Int?
   paidAt                         DateTime?
   paymentMethod                  PaymentMethod?
+  // Split-payment breakdown — see the identical field on SalePayment for the
+  // full rationale. Null for a normal single-method payment.
+  paymentBreakdown               Json?
   note                           String?
   createdBy                      String
   createdAt                      DateTime              @default(now())
@@ -694,6 +711,9 @@ model NasiyaPayment {
   // UZS-applied snapshot (unchanged role). Null for payments recorded before
   // this field existed. See docs/currency-accounting-model.md.
   appliedAmountInContractCurrency Decimal?       @db.Decimal(12, 2)
+  // Split-payment breakdown — see the identical field on SalePayment for the
+  // full rationale. Null for a normal single-method payment.
+  paymentBreakdown                Json?
   createdBy                       String
   createdAt                       DateTime       @default(now())
   deletedAt                       DateTime?

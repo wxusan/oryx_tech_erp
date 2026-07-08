@@ -326,6 +326,8 @@ export function nasiyaPaymentMessage(data: {
    * currency matches contract currency (nothing was converted).
    */
   paymentInput?: { amount: number; currency: CurrencyCode } | null
+  /** Item 12 — split payment breakdown (e.g. half cash, half card). */
+  paymentBreakdown?: { method: string; amount: number }[] | null
 }): string {
   const monthLine =
     data.month === 'MULTIPLE'
@@ -350,6 +352,9 @@ export function nasiyaPaymentMessage(data: {
           `Shartnomaga qo'llandi: ${contractMoney(data.paidAmount)}`,
         ]
       : [`To'langan: ${contractMoney(data.paidAmount)}`]
+  const paymentMethodLine = data.paymentBreakdown?.length
+    ? `To'lov usuli: ${formatPaymentBreakdown(data.paymentBreakdown, data.paymentInput?.currency ?? displayCurrency)}`
+    : optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod))
   return compose(
     "💰 Nasiya to'lovi qabul qilindi",
     optionalLine("Do'kon", data.shopName),
@@ -358,7 +363,7 @@ export function nasiyaPaymentMessage(data: {
     block(
       monthLine,
       ...paidLines,
-      optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
+      paymentMethodLine,
       `Qolgan qarz: ${data.remaining <= 0 ? "To'liq yopildi" : contractMoney(data.remaining)}`,
     ),
     allocationBlock,
@@ -477,6 +482,8 @@ export function salePaymentMessage(data: {
    * (nothing was converted).
    */
   paymentInput?: { amount: number; currency: CurrencyCode } | null
+  /** Item 12 — split payment breakdown (e.g. half cash, half card). */
+  paymentBreakdown?: { method: string; amount: number }[] | null
 }): string {
   const displayCurrency = data.currency?.currency ?? 'UZS'
   const contractMoney = (amount: number) => formatContractMoneyWithDisplay(amount, data.contractCurrency, displayCurrency, data.currency?.usdUzsRate)
@@ -487,6 +494,9 @@ export function salePaymentMessage(data: {
           `Shartnomaga qo'llandi: ${contractMoney(data.paidAmount)}`,
         ]
       : [`To'langan: ${contractMoney(data.paidAmount)}`]
+  const paymentMethodLine = data.paymentBreakdown?.length
+    ? `To'lov usuli: ${formatPaymentBreakdown(data.paymentBreakdown, data.paymentInput?.currency ?? displayCurrency)}`
+    : optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod))
   return compose(
     "💰 Qarz to'lovi qabul qilindi",
     optionalLine("Do'kon", data.shopName),
@@ -494,11 +504,16 @@ export function salePaymentMessage(data: {
     formatDeviceSpecs(data.device, { battery: false }),
     block(
       ...paidLines,
-      optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
+      paymentMethodLine,
       `Qolgan qarz: ${data.remaining <= 0 ? "To'liq yopildi" : contractMoney(data.remaining)}`,
     ),
     block(optionalLine('Izoh', cleanNote(data.note)), optionalLine('Admin', data.adminName)),
   )
+}
+
+/** Item 12 — renders a split-payment breakdown for a Telegram message, e.g. "Naqd: 500 000 so'm, Karta: 500 000 so'm". */
+function formatPaymentBreakdown(parts: { method: string; amount: number }[], currency: CurrencyCode): string {
+  return parts.map((part) => `${formatPaymentMethod(part.method)}: ${formatNativeAmount(part.amount, currency)}`).join(', ')
 }
 
 export function saleDueTodayMessage(data: {

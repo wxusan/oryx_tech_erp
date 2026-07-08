@@ -17,6 +17,7 @@ import { logger } from '@/lib/logger'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
+import { normalizePhone } from '@/lib/phone'
 import type { ZodError } from 'zod'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_NASIYA', 'RESERVED', 'RETURNED', 'DELETED'] as const
@@ -43,7 +44,8 @@ export async function GET(req: NextRequest) {
       return badRequest("Qurilma statusi noto'g'ri")
     }
     const status = statusParam as (typeof deviceStatuses)[number] | undefined
-    const search = searchParams.get('search') ?? undefined // IMEI / model / color
+    const search = searchParams.get('search') ?? undefined // IMEI / model / color / note / customer name/phone
+    const searchDigits = search ? normalizePhone(search) : null
     const requestedTake = Number(searchParams.get('take') ?? 200)
     const requestedSkip = Number(searchParams.get('skip') ?? 0)
     const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 500)) : 200
@@ -61,10 +63,19 @@ export async function GET(req: NextRequest) {
                 { model: { contains: search, mode: 'insensitive' } },
                 { color: { contains: search, mode: 'insensitive' } },
                 { storage: { contains: search, mode: 'insensitive' } },
+                { note: { contains: search, mode: 'insensitive' } },
                 { supplierPhone: { contains: search, mode: 'insensitive' } },
                 { supplier: { phone: { contains: search, mode: 'insensitive' } } },
                 { sales: { some: { customer: { phone: { contains: search, mode: 'insensitive' } } } } },
+                { sales: { some: { customer: { name: { contains: search, mode: 'insensitive' } } } } },
                 { nasiya: { some: { customer: { phone: { contains: search, mode: 'insensitive' } } } } },
+                { nasiya: { some: { customer: { name: { contains: search, mode: 'insensitive' } } } } },
+                ...(searchDigits
+                  ? [
+                      { sales: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
+                      { nasiya: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
+                    ]
+                  : []),
               ],
             }
           : {}),
@@ -82,6 +93,7 @@ export async function GET(req: NextRequest) {
         imei: true,
         status: true,
         imageUrls: true,
+        note: true,
         createdAt: true,
       },
     })

@@ -9,6 +9,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, serverError } from '@/lib/api-helpers'
+import { normalizePhone } from '@/lib/phone'
 import { logger } from '@/lib/logger'
 
 const nasiyaStatuses = ['ACTIVE', 'COMPLETED', 'OVERDUE', 'CANCELLED'] as const
@@ -31,6 +32,7 @@ export async function GET(req: NextRequest) {
     }
     const status = statusParam as (typeof nasiyaStatuses)[number] | undefined
     const search = searchParams.get('search')?.trim()
+    const searchDigits = search ? normalizePhone(search) : null
     const requestedTake = Number(searchParams.get('take') ?? 200)
     const requestedSkip = Number(searchParams.get('skip') ?? 0)
     const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 500)) : 200
@@ -48,6 +50,8 @@ export async function GET(req: NextRequest) {
                 { customer: { phone: { contains: search, mode: 'insensitive' } } },
                 { device: { model: { contains: search, mode: 'insensitive' } } },
                 { device: { imei: { contains: search, mode: 'insensitive' } } },
+                { note: { contains: search, mode: 'insensitive' } },
+                ...(searchDigits ? [{ customer: { additionalPhones: { has: searchDigits } } }] : []),
               ],
             }
           : {}),

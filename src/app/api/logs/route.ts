@@ -47,6 +47,9 @@ export async function GET(req: NextRequest) {
       .map((value) => value.trim())
       .filter(Boolean)
     const targetType = searchParams.get('targetType')?.trim()
+    // Item 1 — filter by the admin who performed the action. Real
+    // attribution: Log.actorId is set on every row already (never faked).
+    const actorId = searchParams.get('actorId')?.trim()
     const requestedTake = Number(searchParams.get('take') ?? 50)
     const requestedSkip = Number(searchParams.get('skip') ?? 0)
     const take = Number.isFinite(requestedTake)
@@ -80,6 +83,7 @@ export async function GET(req: NextRequest) {
     const where: Prisma.LogWhereInput = {
       ...(shopId && shopId !== 'all' ? { shopId } : {}),
       ...(actorType && actorType !== 'barchasi' ? { actorType: actorType as 'SUPER_ADMIN' | 'SHOP_ADMIN' } : {}),
+      ...(actorId ? { actorId } : {}),
       ...(targetType ? { targetType } : {}),
       ...(targetIds.length > 0 ? { targetId: { in: targetIds } } : {}),
       ...(from || to

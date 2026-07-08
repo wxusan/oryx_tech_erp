@@ -97,6 +97,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
                   id: true,
                   amount: true,
                   paymentMethod: true,
+                  paymentBreakdown: true,
                   paidAt: true,
                   note: true,
                   paymentInputAmount: true,
@@ -124,11 +125,22 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
           where: { deletedAt: null, status: { not: 'CANCELLED' } },
           select: {
             id: true,
+            status: true,
             totalAmount: true,
             interestPercent: true,
             interestAmount: true,
             finalNasiyaAmount: true,
             remainingAmount: true,
+            // Native contract-currency ledger — see docs/currency-accounting-model.md.
+            // Item 15 fix: the device detail page's nasiya card used to read
+            // only the legacy UZS fields above, so a USD-native nasiya's
+            // price/remaining/interest showed stuck in so'm.
+            contractCurrency: true,
+            contractTotalAmount: true,
+            contractInterestAmount: true,
+            contractFinalAmount: true,
+            contractRemainingAmount: true,
+            contractExchangeRateAtCreation: true,
             customer: {
               select: { name: true, phone: true },
             },

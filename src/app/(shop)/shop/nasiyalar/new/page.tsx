@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -17,7 +18,7 @@ import { ArrowLeft, Check } from 'lucide-react'
 import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { displayImei, deviceMatchesSearch } from '@/lib/device-display'
 import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
-import { calculateNasiyaAmounts, generatePaymentSchedule } from '@/lib/nasiya-utils'
+import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 
 interface Device {
@@ -77,6 +78,12 @@ export default function NewNasiyaPage() {
   const [downPayment, setDownPayment] = useState('')
   const [months, setMonths] = useState('12')
   const [interestPercent, setInterestPercent] = useState('0')
+  // Item 6: null = derive monthlyPayment from interestPercent (the default,
+  // forward calculation); a string = the shop admin manually typed a monthly
+  // payment instead, so interestPercent/interestAmount/finalNasiyaAmount are
+  // now DERIVED from it (the reverse calculation) rather than the other way
+  // around. Editing interestPercent again clears this back to null.
+  const [monthlyPaymentInput, setMonthlyPaymentInput] = useState<string | null>(null)
   const [startDate, setStartDate] = useState(today)
   const [payMethod, setPayMethod] = useState<PaymentMethod | ''>('')
   const [earlyReminder, setEarlyReminder] = useState(false)
@@ -92,16 +99,19 @@ export default function NewNasiyaPage() {
       : String(d.purchasePrice)
   }
 
-  // Displayed total price: the user's edit if any, otherwise a live suggestion
-  // derived from the selected device + current currency, so it can never get
-  // stuck showing raw UZS after the currency resolves.
-  const totalPrice = totalPriceInput ?? (selectedDevice ? priceFor(selectedDevice) : '')
+  // Sotilish narxi (selling price) starts empty — the shop decides this price
+  // per deal; it must never silently default to the device's own purchase
+  // (kelish narxi) price, which is shown separately as a read-only reference.
+  const totalPrice = totalPriceInput ?? ''
 
   // Select a device (does NOT auto-advance) — the user confirms with "Keyingi
   // bosqich". Kept as a plain function so it is never a hook dependency.
   function selectDevice(d: Device) {
     setSelectedDevice(d)
     setTotalPriceInput(null)
+    // A monthly-payment override made against a different device's price is
+    // no longer meaningful once the device (and its price) changes.
+    setMonthlyPaymentInput(null)
   }
 
   // Stepper: only previous (completed) steps are clickable. Going back never
@@ -194,9 +204,22 @@ export default function NewNasiyaPage() {
   const downPaymentUzs = currency.currency === 'USD' && currency.usdUzsRate
     ? convertUsdToUzs(Number(downPayment) || 0, currency.usdUzsRate)
     : Number(downPayment) || 0
+  const monthlyPaymentUzs = currency.currency === 'USD' && currency.usdUzsRate
+    ? convertUsdToUzs(Number(monthlyPaymentInput) || 0, currency.usdUzsRate)
+    : Number(monthlyPaymentInput) || 0
 
   const calculation = useMemo(() => {
     try {
+      // Item 6: a manually-entered monthly payment drives interest
+      // (reverse calculation) instead of the other way around.
+      if (monthlyPaymentInput !== null && monthlyPaymentInput.trim() !== '') {
+        return calculateNasiyaAmountsFromMonthlyPayment({
+          totalAmount: totalPriceUzs,
+          downPayment: downPaymentUzs,
+          months: Number(months),
+          monthlyPayment: monthlyPaymentUzs,
+        })
+      }
       return calculateNasiyaAmounts({
         totalAmount: totalPriceUzs,
         downPayment: downPaymentUzs,
@@ -214,7 +237,7 @@ export default function NewNasiyaPage() {
         monthlyPayment: 0,
       }
     }
-  }, [totalPriceUzs, downPaymentUzs, months, interestPercent])
+  }, [totalPriceUzs, downPaymentUzs, months, interestPercent, monthlyPaymentInput, monthlyPaymentUzs])
 
   const remaining = calculation.baseRemainingAmount
   const interestAmount = calculation.interestAmount
@@ -281,7 +304,9 @@ export default function NewNasiyaPage() {
           inputCurrency: currency.currency,
           months: Number(months),
           interestPercent: Number(interestPercent || 0),
-          monthlyPayment: Math.round(monthlyPayment),
+          ...(monthlyPaymentInput !== null && monthlyPaymentInput.trim() !== ''
+            ? { monthlyPayment: Number(monthlyPaymentInput), useMonthlyPaymentOverride: true }
+            : {}),
           startDate,
           paymentMethod: payMethod,
           earlyReminderEnabled: earlyReminder,
@@ -470,14 +495,13 @@ export default function NewNasiyaPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Mijoz tel raqami <span className="text-red-500">*</span>
                 </label>
-                <Input
+                <PhoneInput
                   ref={phoneRef}
                   value={customerPhone}
-                  onChange={(e) => {
-                    setCustomerPhone(e.target.value)
+                  onChange={(value) => {
+                    setCustomerPhone(value)
                     if (phoneError) setPhoneError('')
                   }}
-                  placeholder="+998 90 000 00 00"
                   aria-invalid={!!phoneError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
@@ -549,16 +573,26 @@ export default function NewNasiyaPage() {
               <span className="text-sm font-semibold text-zinc-900">Nasiya shartlari</span>
             </div>
             <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {selectedDevice && (
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                    Kelish narxi (qurilma tannarxi)
+                  </label>
+                  <div className="flex h-9 items-center rounded border border-zinc-200 bg-zinc-50 px-2.5 text-sm text-zinc-500">
+                    {currencyLabel(currency.currency)} {priceFor(selectedDevice)}
+                  </div>
+                </div>
+              )}
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Jami narx ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
+                  Sotilish narxi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
                 <MoneyInput
                   currency={currency.currency}
                   value={totalPrice}
                   onChange={setTotalPriceInput}
                   placeholder={currency.currency === 'USD' ? '700.00' : '9500000'}
-                  className="h-9 text-sm border-zinc-200 rounded"
+                  className="h-9 text-sm font-bold border-zinc-200 rounded"
                 />
               </div>
               <div>
@@ -592,11 +626,20 @@ export default function NewNasiyaPage() {
                   min={0}
                   max={300}
                   step={1}
-                  value={interestPercent}
-                  onChange={(e) => setInterestPercent(e.target.value)}
+                  value={monthlyPaymentInput !== null ? String(calculation.interestPercent) : interestPercent}
+                  onChange={(e) => {
+                    setInterestPercent(e.target.value)
+                    // Editing the percent directly hands control back to the
+                    // forward calculation — any manual monthly-payment
+                    // override is cleared (item 6).
+                    setMonthlyPaymentInput(null)
+                  }}
                   placeholder="0"
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
+                {monthlyPaymentInput !== null && (
+                  <p className="mt-1 text-xs text-zinc-400">Qo&apos;lda kiritilgan oylik to&apos;lovdan hisoblandi</p>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
@@ -639,11 +682,21 @@ export default function NewNasiyaPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Oylik to&apos;lov
                 </label>
-                <Input
-                  readOnly
-                  value={monthlyPayment > 0 ? fmt(monthlyPayment, currency) : '0'}
-                  className="h-9 text-sm border-zinc-200 rounded bg-zinc-50 text-zinc-500"
+                <MoneyInput
+                  currency={currency.currency}
+                  value={
+                    monthlyPaymentInput ??
+                    (monthlyPayment > 0
+                      ? currency.currency === 'USD' && currency.usdUzsRate
+                        ? convertUzsToUsd(monthlyPayment, currency.usdUzsRate).toFixed(2)
+                        : String(monthlyPayment)
+                      : '')
+                  }
+                  onChange={setMonthlyPaymentInput}
+                  placeholder={currency.currency === 'USD' ? '150.00' : '2000000'}
+                  className="h-9 text-sm border-zinc-200 rounded"
                 />
+                <p className="mt-1 text-xs text-zinc-400">O&apos;zgartirsangiz, foiz avtomatik moslashadi</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">

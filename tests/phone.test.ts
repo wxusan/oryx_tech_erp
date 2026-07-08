@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { normalizePhone, isValidPhone } from '@/lib/phone'
+import { normalizePhone, isValidPhone, applyPhonePrefix, normalizeAdditionalPhones } from '@/lib/phone'
 
 // normalizePhone underpins active-per-shop customer phone uniqueness (req 10).
 describe('normalizePhone (req 10)', () => {
@@ -47,5 +47,78 @@ describe('isValidPhone (client customer-step gate)', () => {
         expect(len).toBeLessThanOrEqual(20)
       }
     }
+  })
+})
+
+// applyPhonePrefix drives the shared PhoneInput component (item 3): typing a
+// local number should auto-prefix "998" without the user entering it, and
+// pasting an already-prefixed number should never duplicate it.
+describe('applyPhonePrefix (auto 998 prefix)', () => {
+  it('typing a local number auto-prefixes 998, live as the user types', () => {
+    expect(applyPhonePrefix('9')).toBe('+9989')
+    expect(applyPhonePrefix('90')).toBe('+99890')
+    expect(applyPhonePrefix('901234567')).toBe('+998901234567')
+  })
+
+  it('pasting +998... works and is not duplicated', () => {
+    expect(applyPhonePrefix('+998901234567')).toBe('+998901234567')
+  })
+
+  it('pasting 998... (no plus) works and is not duplicated', () => {
+    expect(applyPhonePrefix('998901234567')).toBe('+998901234567')
+  })
+
+  it('never produces a duplicated 998998 prefix', () => {
+    expect(applyPhonePrefix('998998901234567')).toBe('+998901234567')
+    expect(applyPhonePrefix('+998 998 90 123 45 67')).toBe('+998901234567')
+  })
+
+  it('normalizes spaces/dashes/parens the same as a plain digit string', () => {
+    expect(applyPhonePrefix('90 123 45 67')).toBe('+998901234567')
+    expect(applyPhonePrefix('90-123-45-67')).toBe('+998901234567')
+    expect(applyPhonePrefix('(90) 123 45 67')).toBe('+998901234567')
+  })
+
+  it('returns an empty string for an empty field (does not force a prefix on nothing)', () => {
+    expect(applyPhonePrefix('')).toBe('')
+  })
+
+  it('caps the local number at 9 digits (12 total with the country code)', () => {
+    expect(applyPhonePrefix('9012345671234')).toBe('+998901234567')
+  })
+
+  it('every output stays a valid phone by the existing isValidPhone gate', () => {
+    for (const raw of ['901234567', '+998901234567', '998901234567', '90 123 45 67']) {
+      expect(isValidPhone(applyPhonePrefix(raw))).toBe(true)
+    }
+  })
+})
+
+// normalizeAdditionalPhones drives item 4 (extra customer phone numbers) —
+// storage-side normalization so search can match an extra number the same
+// way it matches the primary phone.
+describe('normalizeAdditionalPhones (item 4 — additional customer phones)', () => {
+  it('normalizes each valid entry to digits-only', () => {
+    expect(normalizeAdditionalPhones(['+998 91 234 56 78'])).toEqual(['998912345678'])
+  })
+
+  it('drops invalid/garbage entries safely instead of throwing', () => {
+    expect(normalizeAdditionalPhones(['abc', '', '   ', '123'])).toEqual([])
+  })
+
+  it('de-duplicates equivalent numbers written in different formats', () => {
+    expect(normalizeAdditionalPhones(['+998912345678', '998 91 234 56 78'])).toEqual(['998912345678'])
+  })
+
+  it('excludes an extra number that is actually the same as the primary phone', () => {
+    expect(normalizeAdditionalPhones(['+998901234567'], '998901234567')).toEqual([])
+  })
+
+  it('keeps a genuinely different extra number alongside the primary', () => {
+    expect(normalizeAdditionalPhones(['+998912345678'], '998901234567')).toEqual(['998912345678'])
+  })
+
+  it('returns an empty array for an empty input list', () => {
+    expect(normalizeAdditionalPhones([])).toEqual([])
   })
 })

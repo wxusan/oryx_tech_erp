@@ -19,3 +19,58 @@ export function isValidPhone(phone: string): boolean {
   const digits = normalizePhone(trimmed)
   return !!digits && digits.length >= 9 && digits.length <= 15
 }
+
+const UZ_COUNTRY_CODE = '998'
+// A local Uzbek mobile number is 9 digits (e.g. "90 123 45 67"); with the
+// country code prepended that's 12 digits total.
+const MAX_PHONE_DIGITS = 12
+
+/**
+ * Auto-prefixes a phone input with the Uzbekistan country code as the user
+ * types or pastes, so "90 123 45 67", "998901234567", and "+998901234567"
+ * all converge on the same digit string instead of requiring the user to
+ * type "998" themselves. Returns a `+`-prefixed display string (or `''` for
+ * an empty field) — never mutates a value that already starts with the
+ * country code, and collapses an accidental double "998998..." prefix
+ * (e.g. pasting "+998..." into a field that already had "998..." typed).
+ */
+export function applyPhonePrefix(raw: string): string {
+  let digits = raw.replace(/\D/g, '')
+  if (!digits) return ''
+
+  while (digits.startsWith(UZ_COUNTRY_CODE + UZ_COUNTRY_CODE)) {
+    digits = digits.slice(UZ_COUNTRY_CODE.length)
+  }
+
+  if (!digits.startsWith(UZ_COUNTRY_CODE)) {
+    digits = UZ_COUNTRY_CODE + digits
+  }
+
+  digits = digits.slice(0, MAX_PHONE_DIGITS)
+  return `+${digits}`
+}
+
+/**
+ * Normalizes a customer's additional-phone-numbers list for storage: drops
+ * blanks and invalid entries, normalizes to digits-only (matching
+ * `normalizePhone`'s convention so search can match them the same way as the
+ * primary phone), de-duplicates, and excludes any entry that's actually the
+ * same number as the primary phone (no point storing it twice).
+ */
+export function normalizeAdditionalPhones(phones: string[], primaryPhone?: string | null): string[] {
+  const primaryDigits = primaryPhone ? normalizePhone(primaryPhone) : null
+  const seen = new Set<string>()
+  const result: string[] = []
+
+  for (const raw of phones) {
+    if (!isValidPhone(raw)) continue
+    const digits = normalizePhone(raw)
+    if (!digits) continue
+    if (digits === primaryDigits) continue
+    if (seen.has(digits)) continue
+    seen.add(digits)
+    result.push(digits)
+  }
+
+  return result
+}

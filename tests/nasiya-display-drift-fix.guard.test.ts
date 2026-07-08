@@ -26,7 +26,7 @@ describe('nasiya detail page: no double-conversion drift for USD contracts', () 
   })
 
   it('every summary card money value uses dfmt() + a contract* field, not fmt() + a legacy field', () => {
-    expect(page).toContain('{ label: \'Jami narx\', value: dfmt(nasiya.contractTotalAmount) }')
+    expect(page).toContain('{ label: \'Sotilish narxi\', value: dfmt(nasiya.contractTotalAmount) }')
     expect(page).toContain('{ label: "Boshlang\'ich to\'lov", value: dfmt(nasiya.contractDownPayment) }')
     expect(page).toContain('{ label: \'Nasiya jami\', value: dfmt(nasiya.contractFinalAmount) }')
     expect(page).toContain('{ label: "To\'langan", value: dfmt(nasiya.contractPaidAmount) }')

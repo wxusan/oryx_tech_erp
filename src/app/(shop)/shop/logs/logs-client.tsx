@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -42,15 +43,23 @@ interface LogsPayload {
   total: number
 }
 
+// Item 8 — target types that MIGHT resolve to a shop-facing detail page.
+// Customer/Shop/ShopAdmin/CurrencyRate/SuperAdmin/Database never do (no
+// detail page exists), so those rows never attempt the link lookup at all.
+const LINKABLE_TARGET_TYPES = new Set(['Device', 'Nasiya', 'NasiyaSchedule', 'Sale', 'SupplierPayable'])
+
 interface DisplayLog {
   id: string
   datetime: string
   actor: string
+  actorId: string
   actorType: ActorType
   category: LogCategory
   action: string
   target: string
   note: string
+  targetType: string
+  linkable: boolean
 }
 
 const PER_PAGE = 10
@@ -71,11 +80,14 @@ function displayLog(log: LogEntry, currency: CurrencyContext): DisplayLog {
     id: log.id,
     datetime: formatDateTime(log.createdAt),
     actor: log.actorName || log.actorLogin || actorLabel(log.actorType),
+    actorId: log.actorId,
     actorType: log.actorType,
     category: logCategoryFor(log.action, log.targetType),
     action: actionLabel(log.action, log.targetType),
     target: targetLabel(log.targetType, log.targetId, log.newValue),
     note: log.note || formatLogValue(log.newValue, currency),
+    targetType: log.targetType,
+    linkable: LINKABLE_TARGET_TYPES.has(log.targetType),
   }
 }
 
@@ -86,16 +98,51 @@ interface ShopLogsClientProps {
 }
 
 export default function ShopLogsClient({ initialPayload, initialRequestKey, currency }: ShopLogsClientProps) {
+  const router = useRouter()
   const [logs, setLogs] = useState<DisplayLog[]>(() => initialPayload.logs.map((log) => displayLog(log, currency)))
   const [loadedKey, setLoadedKey] = useState(initialRequestKey)
   const [error, setError] = useState<string | null>(null)
+  const [resolvingLogId, setResolvingLogId] = useState<string | null>(null)
+
+  // Item 8 — clicking a log row opens the related sale/nasiya/device profile.
+  // Resolved server-side (the log's targetId isn't always the URL id
+  // directly — e.g. a nasiya payment log's targetId is the SCHEDULE's id).
+  // A row with no possible link (Customer/Shop/account/etc.) never calls
+  // this at all; a row whose target was deleted resolves to `href: null`
+  // and simply does nothing rather than crashing or guessing a URL.
+  async function openLogTarget(log: DisplayLog) {
+    if (!log.linkable || resolvingLogId) return
+    setResolvingLogId(log.id)
+    try {
+      const res = await fetch(`/api/logs/${log.id}/link`)
+      const json: ApiResponse<{ href: string | null }> = await res.json()
+      if (json.success && json.data?.href) {
+        router.push(json.data.href)
+      }
+    } catch {
+      // Silently no-op — a failed lookup must never crash the logs page.
+    } finally {
+      setResolvingLogId(null)
+    }
+  }
   const [totalLogs, setTotalLogs] = useState(initialPayload.total)
   const [search, setSearch] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
   const [category, setCategory] = useState<LogCategory>('all')
+  const [actorId, setActorId] = useState('')
   const [page, setPage] = useState(1)
+  // Item 1 — admin filter. Built from real Log.actorId/actorName values seen
+  // across every page loaded so far (never invented) — a shop typically has
+  // only a handful of admins, so this fills in quickly as pages load.
+  const [knownActors, setKnownActors] = useState<Map<string, string>>(() => {
+    const map = new Map<string, string>()
+    for (const log of initialPayload.logs) {
+      map.set(log.actorId, log.actorName || log.actorLogin || actorLabel(log.actorType))
+    }
+    return map
+  })
 
   // Debounce the free-text search so typing doesn't fire a request per keystroke.
   useEffect(() => {
@@ -108,13 +155,14 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
 
     if (debouncedSearch.trim()) params.set('search', debouncedSearch.trim())
     if (category !== 'all') params.set('category', category)
+    if (actorId) params.set('actorId', actorId)
     if (dateFrom) params.set('from', dateFrom)
     if (dateTo) params.set('to', dateTo)
     params.set('skip', String((page - 1) * PER_PAGE))
     params.set('take', String(PER_PAGE))
 
     return params.toString()
-  }, [debouncedSearch, dateFrom, dateTo, category, page])
+  }, [debouncedSearch, dateFrom, dateTo, category, actorId, page])
 
   useEffect(() => {
     if (loadedKey === requestKey) return
@@ -136,6 +184,13 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
         setTotalLogs(json.data.total)
         setLogs(json.data.logs.map((log) => displayLog(log, currency)))
         setLoadedKey(requestKey)
+        setKnownActors((prev) => {
+          const next = new Map(prev)
+          for (const log of json.data!.logs) {
+            next.set(log.actorId, log.actorName || log.actorLogin || actorLabel(log.actorType))
+          }
+          return next
+        })
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === 'AbortError') return
@@ -187,6 +242,19 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
             className="h-8 w-36 rounded border-zinc-200 text-xs"
           />
         </div>
+
+        {/* Item 1 — filter by admin. Options are real actors seen in the
+            logs loaded so far (Log.actorId), never invented. */}
+        <select
+          value={actorId}
+          onChange={(e) => { setActorId(e.target.value); setPage(1) }}
+          className="h-8 rounded border border-zinc-200 bg-white px-2 text-xs text-zinc-700"
+        >
+          <option value="">Barcha adminlar</option>
+          {[...knownActors.entries()].map(([id, name]) => (
+            <option key={id} value={id}>{name}</option>
+          ))}
+        </select>
       </div>
 
       <div className="flex gap-1 overflow-x-auto border-b border-zinc-200 pb-px">
@@ -234,7 +302,16 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
               </TableRow>
             ) : (
               logs.map((log) => (
-                <TableRow key={log.id} className="border-zinc-100 hover:bg-zinc-50">
+                <TableRow
+                  key={log.id}
+                  onClick={() => openLogTarget(log)}
+                  aria-disabled={!log.linkable}
+                  className={[
+                    'border-zinc-100 hover:bg-zinc-50',
+                    log.linkable ? 'cursor-pointer' : '',
+                    resolvingLogId === log.id ? 'opacity-60' : '',
+                  ].join(' ')}
+                >
                   <TableCell className="pl-5">
                     <span className="font-mono text-xs text-zinc-500">{log.datetime}</span>
                   </TableCell>

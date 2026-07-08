@@ -21,8 +21,8 @@ describe('nasiya detail: no duplicate summary cards', () => {
     expect(count).toBe(1)
   })
 
-  it('renders the full preferred card set in order: Jami narx, Boshlang\'ich to\'lov, Nasiya jami, To\'langan, Qarz qoldig\'i, Oylik to\'lov', () => {
-    const order = ['Jami narx', "Boshlang'ich to'lov", 'Nasiya jami', "To'langan", "Qarz qoldig'i", "Oylik to'lov"]
+  it('renders the full preferred card set in order: Sotilish narxi, Boshlang\'ich to\'lov, Nasiya jami, To\'langan, Qarz qoldig\'i, Oylik to\'lov', () => {
+    const order = ['Sotilish narxi', "Boshlang'ich to'lov", 'Nasiya jami', "To'langan", "Qarz qoldig'i", "Oylik to'lov"]
     let cursor = 0
     for (const label of order) {
       const idx = source.indexOf(label, cursor)
