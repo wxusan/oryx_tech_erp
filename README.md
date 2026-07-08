@@ -258,9 +258,15 @@ Set the variables from `.env.example` in Vercel. Production must include
   host shown earlier was `ap-south-1`; that distance adds latency to every DB
   round trip. Co-locating them is a deployment setting, not a code change.
 
-**Migrations are NOT run during the Vercel build.** `vercel.json` builds only
-(`npm run build`) so that **preview deployments never mutate a shared/production
-database.** Run migrations deliberately as a controlled production step:
+**Migrations run automatically on `Production` builds only.** `vercel.json`'s
+`buildCommand` is `if [ "$VERCEL_ENV" = "production" ]; then npx prisma migrate
+deploy; fi && npm run build` — `VERCEL_ENV` is set by Vercel itself, so preview
+deployments (which may point at the same shared database) never run
+migrations, only the actual `Production` build does. This was previously a
+fully manual step (see history), which meant migrations could silently go
+un-applied for days if nobody remembered to run them — the schema and the
+deployed code then drift apart with no build failure to signal it. You can
+still run it manually against production out-of-band if needed:
 
 ```bash
 # From a trusted environment pointed at the PRODUCTION database:
@@ -268,7 +274,8 @@ npm run prisma:migrate:deploy
 ```
 
 Use `DIRECT_URL` (non-pooled) for migrations. Scope preview deployments to a
-separate database, or run migrations only against production out-of-band.
+separate database if you want an extra layer of isolation beyond the
+`VERCEL_ENV` gate above.
 
 ### Cron auth
 
@@ -277,5 +284,7 @@ Vercel Cron sends `Authorization: Bearer <CRON_SECRET>` automatically when the
 that bearer token and returns 401/503 otherwise. External schedulers can also
 trigger the route if they send the same header.
 
-`vercel.json` schedules `/api/cron/reminders` at `0 3 * * *` UTC, which is
-08:00 in Asia/Tashkent.
+`vercel.json` schedules `/api/cron/reminders` at `35 6 * * *` UTC (once daily —
+Vercel Hobby doesn't allow sub-daily cron), which is 11:35 in Asia/Tashkent,
+five minutes after the 11:00–11:30 jitter window closes. See
+`docs/cron-jobs.md`.
