@@ -187,3 +187,27 @@ describe('search: olib-sotdim list is searchable by supplier/customer/device/IME
     expect(route).toContain("device: { imei: { contains: search")
   })
 })
+
+/**
+ * P1 fix (production-readiness audit): mark-as-paid used to be a plain
+ * `update()` by id with a pre-transaction status check — two concurrent
+ * requests (e.g. a double-click) could both pass the check before either
+ * committed, then both succeed, firing two Telegram confirmations and two
+ * log rows for the same payable. Fixed to the same atomic
+ * updateMany-with-status-guard-plus-count-check pattern already used by the
+ * device sell/nasiya/restock/return routes.
+ */
+describe('mark supplier payable as paid is race-safe (atomic status-guarded update)', () => {
+  const payRoute = read('src/app/api/olib-sotdim/[id]/pay/route.ts')
+
+  it('flips PAID via updateMany with a status guard, not a plain update by id', () => {
+    expect(payRoute).toContain("const flipped = await tx.supplierPayable.updateMany({\n        where: { id, shopId, deletedAt: null, status: { not: 'PAID' } },")
+    expect(payRoute).not.toContain('await tx.supplierPayable.update({\n        where: { id },')
+  })
+
+  it('rejects with 409 if the atomic flip did not affect exactly one row (already paid by a concurrent request)', () => {
+    expect(payRoute).toContain('if (flipped.count !== 1) {')
+    expect(payRoute).toContain('throw { status: 409, message: "Bu to\'lov allaqachon qayd etilgan" }')
+    expect(payRoute).toContain("if (e.status === 409) return conflict(e.message)")
+  })
+})

@@ -10,7 +10,7 @@ import { logger } from '@/lib/logger'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
-import { convertPaymentToContractCurrency } from '@/lib/nasiya-contract'
+import { convertPaymentToContractCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -100,7 +100,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (!sale) throw { status: 404, message: 'Sotuv topilmadi' }
 
       const oldRemaining = Number(sale.remainingAmount)
-      if (oldRemaining <= 0 || sale.paidFully) {
+      // Both ledgers are checked — a sale should never be payable again once
+      // EITHER its legacy or contract-currency balance says it's closed (see
+      // the contract-currency completion fix below for why these two can, in
+      // principle, disagree for a USD-native sale after a payment).
+      if (oldRemaining <= 0 || sale.paidFully || contractScheduleOutstanding(Number(sale.contractSalePrice), Number(sale.contractAmountPaid), sale.contractCurrency) <= 0) {
         throw { status: 409, message: "Bu sotuv bo'yicha qarz yopilgan" }
       }
 
@@ -116,7 +120,22 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       // UZS fields, same reasoning as the nasiya payment route. See
       // docs/currency-accounting-model.md.
       const nextContractAmountPaid = Number(sale.contractAmountPaid) + appliedAmountInContractCurrency
-      const nextContractRemaining = Math.max(0, Number(sale.contractRemainingAmount) - appliedAmountInContractCurrency)
+      // Completion is decided from the CONTRACT ledger, with a currency-aware
+      // tolerance (500 so'm / $0.01) — never the legacy UZS remainder. A
+      // USD-native sale's legacy remainingAmount is converted at whatever
+      // rate was live on each individual payment's own day, so it can cross
+      // zero at a different moment than the contract-currency balance —
+      // deciding `paidFully` from the legacy side alone (the previous
+      // behavior) could silently forgive real USD debt, or the reverse: keep
+      // nagging a customer whose contract balance is genuinely settled. See
+      // docs/currency-accounting-model.md and the nasiya payment route,
+      // which already uses this exact pattern (`contractAllFullyPaid`).
+      const nextContractRemaining = contractScheduleOutstanding(Number(sale.contractSalePrice), nextContractAmountPaid, sale.contractCurrency)
+      const contractFullyPaid = nextContractRemaining <= 0
+      // Snap the legacy remainder to exactly 0 in lockstep once the contract
+      // side is done — clean bookkeeping instead of lingering rate-drift
+      // dust, mirroring the nasiya payment route's remainingToStore.
+      const remainingToStore = contractFullyPaid ? 0 : nextRemaining
       const payment = await tx.salePayment.create({
         data: {
           saleId,
@@ -140,12 +159,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         where: { id: saleId },
         data: {
           amountPaid: nextAmountPaid,
-          remainingAmount: nextRemaining,
-          paidFully: nextRemaining <= 0,
-          dueDate: nextRemaining <= 0 ? null : parsed.data.nextDueDate ?? sale.dueDate,
-          reminderEnabled: nextRemaining <= 0 ? false : sale.reminderEnabled,
+          remainingAmount: remainingToStore,
+          paidFully: contractFullyPaid,
+          dueDate: contractFullyPaid ? null : parsed.data.nextDueDate ?? sale.dueDate,
+          reminderEnabled: contractFullyPaid ? false : sale.reminderEnabled,
           contractAmountPaid: nextContractAmountPaid,
-          contractRemainingAmount: nextRemaining <= 0 ? 0 : nextContractRemaining,
+          contractRemainingAmount: nextContractRemaining,
         },
       })
 
@@ -195,7 +214,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
         paidAmount: appliedAmountInContractCurrency,
         paymentMethod: parsed.data.paymentMethod,
-        remaining: nextRemaining <= 0 ? 0 : nextContractRemaining,
+        remaining: nextContractRemaining,
         contractCurrency,
         note: auditNote,
         paymentInput: { amount: parsed.data.amount, currency: amountInput.inputCurrency },

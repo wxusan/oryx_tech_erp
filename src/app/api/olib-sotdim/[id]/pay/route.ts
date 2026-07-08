@@ -53,8 +53,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const paidAt = parsed.data.paidAt ?? new Date()
 
     const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      const u = await tx.supplierPayable.update({
-        where: { id },
+      // Atomic guard: only flip if it is still PENDING (prevents a double
+      // mark-as-paid race — e.g. a double-click — from sending two
+      // confirmation notifications and two log entries for the same payable).
+      const flipped = await tx.supplierPayable.updateMany({
+        where: { id, shopId, deletedAt: null, status: { not: 'PAID' } },
         data: {
           status: 'PAID',
           paidAt,
@@ -62,6 +65,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
           note: parsed.data.note ?? payable.note,
         },
       })
+      if (flipped.count !== 1) {
+        throw { status: 409, message: "Bu to'lov allaqachon qayd etilgan" }
+      }
+      const u = await tx.supplierPayable.findFirstOrThrow({ where: { id, shopId } })
 
       const shop = await tx.shop.findUnique({ where: { id: shopId }, select: { name: true } })
       const shopAdmins = await tx.shopAdmin.findMany({
@@ -130,7 +137,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       { ...updated, amount: Number(updated.amount) },
       "Yetkazib beruvchiga to'lov qayd etildi",
     )
-  } catch (err) {
+  } catch (err: unknown) {
+    if (typeof err === 'object' && err !== null && 'status' in err) {
+      const e = err as { status: number; message: string }
+      if (e.status === 409) return conflict(e.message)
+    }
     console.error('[PATCH /api/olib-sotdim/[id]/pay]', err)
     return serverError()
   }

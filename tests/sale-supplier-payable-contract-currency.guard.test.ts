@@ -83,7 +83,7 @@ describe('sale payment route dual-writes the contract-currency ledger', () => {
 
   it('updates contractAmountPaid/contractRemainingAmount on the sale, and stores appliedAmountInContractCurrency on the payment', () => {
     expect(route).toContain('contractAmountPaid: nextContractAmountPaid')
-    expect(route).toContain('contractRemainingAmount: nextRemaining <= 0 ? 0 : nextContractRemaining')
+    expect(route).toContain('contractRemainingAmount: nextContractRemaining')
     expect(route).toContain('appliedAmountInContractCurrency,')
   })
 

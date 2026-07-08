@@ -89,8 +89,6 @@ export default function QurilmalarClient({
   initialStatus?: DeviceStatus | 'Barchasi'
 }) {
   const [devices] = useState<Device[]>(initialDevices)
-  const loading = false
-  const error = ''
   const [search, setSearch] = useState('')
   const [activeStatus, setActiveStatus] = useState<DeviceStatus | 'Barchasi'>(initialStatus)
 
@@ -161,17 +159,9 @@ export default function QurilmalarClient({
         className="max-w-md h-9 text-sm border-zinc-200 rounded"
       />
 
-      {error && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">
-          {error}
-        </div>
-      )}
-
-      {loading ? (
-        <div className="text-sm text-zinc-400 py-8 text-center">Yuklanmoqda...</div>
-      ) : (
-        /* Table */
-        <div className="border border-zinc-200 rounded overflow-x-auto">
+      {/* Table — devices are server-fetched (initialDevices), so there is no
+          client-side loading/error state here. */}
+      <div className="border border-zinc-200 rounded overflow-x-auto">
           <table className="min-w-[1180px] w-full text-sm">
             <thead className="bg-zinc-50 border-b border-zinc-200">
               <tr>
@@ -245,8 +235,7 @@ export default function QurilmalarClient({
               )}
             </tbody>
           </table>
-        </div>
-      )}
+      </div>
     </div>
   )
 }

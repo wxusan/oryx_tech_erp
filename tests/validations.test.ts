@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addDeviceSchema,
   addSalePaymentSchema,
+  addNasiyaPaymentSchema,
   createShopSchema,
   importNasiyaSchema,
 } from '@/lib/validations'
@@ -32,6 +33,29 @@ describe('validation hardening', () => {
       paymentMethod: 'CASH',
       note: 'n'.repeat(1001),
     }).success).toBe(false)
+  })
+
+  it('rejects negative/zero payment amounts (sale and nasiya) — production-readiness audit gap', () => {
+    // Sale payments: strictly positive, no legitimate "$0 payment" use case.
+    expect(addSalePaymentSchema.safeParse({ amount: -1000, paymentMethod: 'CASH' }).success).toBe(false)
+    expect(addSalePaymentSchema.safeParse({ amount: 0, paymentMethod: 'CASH' }).success).toBe(false)
+    expect(addSalePaymentSchema.safeParse({ amount: 1000, paymentMethod: 'CASH' }).success).toBe(true)
+
+    // Nasiya payments: negative is always rejected; zero is only valid when
+    // deferring to next month (no money changes hands), never as a real payment.
+    const base = { nasiyaScheduleId: 'sched_1', date: '2026-08-01' }
+    expect(addNasiyaPaymentSchema.safeParse({ ...base, amount: -1000, paymentMethod: 'CASH' }).success).toBe(false)
+    expect(addNasiyaPaymentSchema.safeParse({ ...base, amount: 0, paymentMethod: 'CASH' }).success).toBe(false)
+    expect(
+      addNasiyaPaymentSchema.safeParse({
+        ...base,
+        amount: 0,
+        deferredToNext: true,
+        delayedUntil: '2026-09-01',
+        note: 'mijoz so\'radi',
+      }).success,
+    ).toBe(true)
+    expect(addNasiyaPaymentSchema.safeParse({ ...base, amount: 1000, paymentMethod: 'CASH' }).success).toBe(true)
   })
 
   it('caps imported old nasiya text fields', () => {
