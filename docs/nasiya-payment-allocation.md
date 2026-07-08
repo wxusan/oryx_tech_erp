@@ -128,3 +128,63 @@ overpayment explanation, the payment score reason, and the Telegram
 breakdown — uses the shop's selected display currency via the shared
 `formatMoneyByCurrency` (`src/lib/currency.ts`), never a hardcoded "so'm".
 See the "Currency consistency" section below.
+
+## 10. "Izoh" is optional
+
+The payment modal's note field is **optional** for a regular payment — there
+is no minimum length and no required-field star. Only the carry-over/defer
+flow ("Mijoz bu oy to'lamadi, muddatni uzaytirish") still requires a short
+reason, since that changes the debt schedule itself rather than just
+recording a routine payment. `addNasiyaPaymentSchema` (`src/lib/validations.ts`)
+enforces this: the blanket "note must be ≥5 chars" refine was removed; only
+the defer-specific refine (`!deferredToNext || note.length >= 5`) remains.
+An empty note is stored as `null`/omitted everywhere — the payment history
+table, "Amallar tarixi", and Telegram all render the event cleanly without a
+note line rather than a broken empty one (`optionalLine()` /
+conditional-render, not a fallback placeholder string).
+
+## 11. Rounding tolerance and completion detection
+
+**Root cause of a fully-paid nasiya staying "Faol":** the payment modal's
+"Tavsiya" (pay-the-full-remaining-amount) button converts the true UZS
+balance to USD (rounded to cents) for display, and that USD amount is
+converted back to UZS on submit — a round trip that can undershoot the true
+remaining balance by up to roughly a cent's worth of UZS. The nasiya then sits
+with a few-hundred-so'm balance forever, even though every card on screen
+already rounds to $0.00 / reads as fully paid.
+
+**Fix:** `COMPLETION_ROUNDING_TOLERANCE_UZS = 500` (`src/lib/nasiya-utils.ts`)
+— a schedule's outstanding balance (`scheduleOutstanding()`) snaps to 0 once
+it's this close to fully paid. 500 so'm is a few US cents at typical rates,
+far below any real amount a customer would still owe. This one helper is the
+single source of truth consumed by:
+- `isScheduleOverdue()` / `deriveNasiyaOverdue()` — so overdue detection,
+  the nasiyalar list's displayStatus, and the payment score's
+  "currently overdue" signal never treat rounding dust as real debt.
+- `isNasiyaEffectivelyComplete()` — a nasiya whose every schedule is within
+  tolerance is treated as COMPLETED for **display** purposes even before its
+  stored `status` column is updated (self-heals a nasiya stuck showing
+  "Faol" purely from past rounding dust, immediately, with no data
+  migration — the moment its list row or detail page is next rendered).
+- The payment route's own completion check (`allFullyPaid`), which also
+  **snaps** a schedule's stored `paidAmount` up to its exact `expectedAmount`
+  when a new payment brings it within tolerance, so the ledger doesn't
+  dangle a few-hundred-so'm remainder forever, and snaps the nasiya's stored
+  `remainingAmount` to exactly 0 once effectively complete (clean in UZS-mode
+  display too, not just USD's rounding-away-the-dust).
+- `scheduleDisplayStatus()` — a schedule row within tolerance displays "To'landi"
+  even if its stored `status` is still a stale `PARTIAL` from before this fix.
+
+**Self-heal on read:** `GET /api/nasiya/[id]` computes the same derivation
+server-side and, if it finds a nasiya that's effectively complete but whose
+stored `status` isn't `COMPLETED` yet, opportunistically persists the
+correction in the background (`after()`, never blocks the response) — so
+simply opening the affected nasiya's detail page repairs its `status` column
+for good (which matters beyond display: `shop-stats.ts`'s active-nasiya count
+reads the raw column directly).
+
+**Blocking further payment:** once a nasiya's stored status is `COMPLETED`,
+`POST /api/nasiya/[id]/payment` rejects any further attempt immediately with
+`"Bu nasiya yakunlangan"` (409) — checked before any allocation logic runs.
+A nasiya that's effectively-but-not-yet-formally complete is still caught by
+the existing per-schedule "already fully paid" check for the same effect.

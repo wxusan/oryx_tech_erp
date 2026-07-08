@@ -250,9 +250,34 @@ export interface NasiyaOverdueDerivation {
   displayStatus: NasiyaDisplayStatus
 }
 
-/** Outstanding (unpaid) balance of a schedule, never negative. */
+/**
+ * Below this UZS amount, a schedule's remaining balance is treated as fully
+ * paid. Absorbs cross-currency round-trip rounding dust — e.g. a USD shop's
+ * payment modal converts UZS -> USD (rounded to cents) for the "pay full
+ * remaining" suggestion, then converts that USD amount back to UZS on
+ * submit, which can undershoot the true remaining balance by up to ~1 cent's
+ * worth of UZS. 500 so'm is a few US cents at typical exchange rates — far
+ * below the smallest unit anyone would realistically still owe — so a
+ * nasiya can never get stuck showing "Faol" forever over rounding dust while
+ * every card on screen already reads $0.00 / 0 so'm. Never real debt.
+ */
+export const COMPLETION_ROUNDING_TOLERANCE_UZS = 500
+
+/** Outstanding (unpaid) balance of a schedule, never negative, snapped to 0 within tolerance. */
 export function scheduleOutstanding(expectedAmount: number, paidAmount: number): number {
-  return Math.max(0, Number(expectedAmount) - Number(paidAmount))
+  const raw = Math.max(0, Number(expectedAmount) - Number(paidAmount))
+  return raw <= COMPLETION_ROUNDING_TOLERANCE_UZS ? 0 : raw
+}
+
+/**
+ * Whether a nasiya's schedules are all effectively paid off (every row's
+ * outstanding balance is within COMPLETION_ROUNDING_TOLERANCE_UZS of 0),
+ * independent of the nasiya's stored `status`. Used to self-heal display
+ * (badge/tab/buttons/score) for a nasiya whose status hasn't been persisted
+ * as COMPLETED yet, and to decide whether a new payment should complete it.
+ */
+export function isNasiyaEffectivelyComplete(schedules: OverdueScheduleInput[]): boolean {
+  return schedules.length > 0 && schedules.every((s) => scheduleOutstanding(s.expectedAmount, s.paidAmount) <= 0)
 }
 
 /** Effective due instant of a schedule: an active defer (delayedUntil) wins. */
@@ -277,9 +302,14 @@ export function isScheduleOverdue(schedule: OverdueScheduleInput, now: Date = ne
 /**
  * The status a single schedule row should DISPLAY. An unpaid row past its
  * effective due date reads as OVERDUE even if cron hasn't flipped the stored
- * status yet; otherwise the stored status stands.
+ * status yet. A row within COMPLETION_ROUNDING_TOLERANCE_UZS of fully paid
+ * reads as PAID even if a past payment left a stray rounding-dust remainder
+ * in the stored status/paidAmount — otherwise the stored status stands.
  */
 export function scheduleDisplayStatus(schedule: OverdueScheduleInput, now: Date = new Date()): string {
+  if (schedule.status !== 'PAID' && scheduleOutstanding(schedule.expectedAmount, schedule.paidAmount) <= 0) {
+    return 'PAID'
+  }
   return isScheduleOverdue(schedule, now) ? 'OVERDUE' : schedule.status
 }
 
@@ -308,10 +338,15 @@ export function deriveNasiyaOverdue(
     .sort((left, right) => scheduleEffectiveDueTime(left) - scheduleEffectiveDueTime(right))[0]
 
   let displayStatus: NasiyaDisplayStatus
-  if (nasiya.status === 'COMPLETED') {
-    displayStatus = 'COMPLETED'
-  } else if (nasiya.status === 'CANCELLED') {
+  if (nasiya.status === 'CANCELLED') {
     displayStatus = 'CANCELLED'
+    // Effectively-complete check runs even when the stored status hasn't been
+    // persisted as COMPLETED yet (see isNasiyaEffectivelyComplete) — this is
+    // what self-heals a nasiya stuck showing "Faol" purely from UZS<->USD
+    // rounding dust, immediately, everywhere this derivation is used (list,
+    // dashboard-adjacent stats, detail page), without a data migration.
+  } else if (nasiya.status === 'COMPLETED' || isNasiyaEffectivelyComplete(nasiya.schedules)) {
+    displayStatus = 'COMPLETED'
   } else if (nasiya.status === 'OVERDUE' || overdueSchedules.length > 0) {
     displayStatus = 'OVERDUE'
   } else {

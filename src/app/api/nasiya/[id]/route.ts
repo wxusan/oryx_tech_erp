@@ -10,7 +10,7 @@
  * Auth: SHOP_ADMIN (scoped to their own shop) or SUPER_ADMIN
  */
 
-import { NextRequest } from 'next/server'
+import { NextRequest, after } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession } from '@/lib/api-auth'
@@ -18,7 +18,9 @@ import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { computeNasiyaPaymentScore } from '@/lib/nasiya-payment-score'
+import { deriveNasiyaOverdue } from '@/lib/nasiya-utils'
 import { getShopCurrencyContext } from '@/lib/server/currency'
+import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -126,6 +128,20 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     if (!nasiya) return notFound('Nasiya topilmadi')
 
+    const scheduleInputs = nasiya.schedules.map((s) => ({
+      status: s.status,
+      dueDate: s.dueDate,
+      delayedUntil: s.delayedUntil,
+      expectedAmount: Number(s.expectedAmount),
+      paidAmount: Number(s.paidAmount),
+    }))
+    // Same derivation the nasiyalar list uses (src/lib/server/shop-lists.ts) —
+    // a single source of truth so the detail page's badge/buttons/score can
+    // never disagree with the list. This also self-heals a nasiya whose
+    // schedules are effectively fully paid (within COMPLETION_ROUNDING_TOLERANCE_UZS)
+    // but whose stored `status` hasn't been flipped to COMPLETED yet.
+    const derived = deriveNasiyaOverdue({ status: nasiya.status, schedules: scheduleInputs })
+
     // Reason text must respect the shop's selected display currency, not
     // hardcode UZS — see docs/nasiya-payment-scoring.md.
     const currency = await getShopCurrencyContext(nasiya.shopId)
@@ -144,7 +160,32 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       currency,
     )
 
-    return ok({ ...nasiya, paymentScore }, "Nasiya ma'lumotlari")
+    // Best-effort self-heal: persist the COMPLETED status now that we know
+    // it's true, so the raw DB column stops disagreeing with the derived
+    // display (dashboard active-nasiya counts read the raw column directly).
+    // Never blocks the response; a failure here just means the next payment
+    // attempt (which re-derives the same way) tries again.
+    if (derived.displayStatus === 'COMPLETED' && nasiya.status !== 'COMPLETED') {
+      after(() =>
+        prisma.nasiya
+          .updateMany({
+            where: { id: nasiya.id, status: { in: ['ACTIVE', 'OVERDUE'] } },
+            data: { remainingAmount: 0, status: 'COMPLETED' },
+          })
+          .catch((e) => logger.warn('nasiya completion self-heal failed', { event: 'nasiya.self_heal_failed', error: e }))
+      )
+    }
+
+    return ok(
+      {
+        ...nasiya,
+        displayStatus: derived.displayStatus,
+        isOverdue: derived.isOverdue,
+        overdueAmount: derived.overdueAmount,
+        paymentScore,
+      },
+      "Nasiya ma'lumotlari",
+    )
   } catch (err) {
     console.error('[GET /api/nasiya/[id]]', err)
     return serverError()

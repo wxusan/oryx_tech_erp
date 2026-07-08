@@ -316,12 +316,56 @@ describe('deriveNasiyaOverdue (contract display status)', () => {
   })
 
   it('paid past schedules are not overdue (req 4)', () => {
+    // A second, still-open future schedule keeps this nasiya genuinely ACTIVE
+    // (not effectively complete) so the test isolates what it's actually
+    // checking: a paid past schedule doesn't itself count as overdue.
     const d = deriveNasiyaOverdue(
-      { status: 'ACTIVE', schedules: [sch({ status: 'PAID', paidAmount: 1_000_000, dueDate: new Date('2026-01-15') })] },
+      {
+        status: 'ACTIVE',
+        schedules: [
+          sch({ status: 'PAID', paidAmount: 1_000_000, dueDate: new Date('2026-01-15') }),
+          sch({ dueDate: new Date('2026-09-15') }),
+        ],
+      },
       NOW,
     )
     expect(d.displayStatus).toBe('ACTIVE')
     expect(d.isOverdue).toBe(false)
+  })
+
+  it('a nasiya whose only schedule is fully paid is effectively COMPLETED even if status is still ACTIVE', () => {
+    // This is the self-heal case: rounding dust from a USD round-trip payment
+    // can leave the stored nasiya.status as ACTIVE even though every schedule
+    // is settled — displayStatus must still read COMPLETED everywhere.
+    const d = deriveNasiyaOverdue(
+      { status: 'ACTIVE', schedules: [sch({ status: 'PAID', paidAmount: 1_000_000, dueDate: new Date('2026-01-15') })] },
+      NOW,
+    )
+    expect(d.displayStatus).toBe('COMPLETED')
+    expect(d.isOverdue).toBe(false)
+  })
+
+  it('a nasiya within the rounding tolerance (but not exactly 0) is effectively COMPLETED', () => {
+    const d = deriveNasiyaOverdue(
+      {
+        status: 'ACTIVE',
+        schedules: [sch({ status: 'PARTIAL', expectedAmount: 1_000_000, paidAmount: 999_600, dueDate: new Date('2026-01-15') })],
+      },
+      NOW,
+    )
+    expect(d.displayStatus).toBe('COMPLETED')
+  })
+
+  it('a nasiya with a real outstanding balance beyond tolerance stays ACTIVE/OVERDUE, never falsely COMPLETED', () => {
+    const d = deriveNasiyaOverdue(
+      {
+        status: 'ACTIVE',
+        schedules: [sch({ status: 'PARTIAL', expectedAmount: 1_000_000, paidAmount: 990_000, dueDate: new Date('2026-01-15') })],
+      },
+      NOW,
+    )
+    expect(d.displayStatus).toBe('OVERDUE')
+    expect(d.overdueAmount).toBe(10_000)
   })
 
   it('COMPLETED / CANCELLED parents keep their terminal status (req 5)', () => {

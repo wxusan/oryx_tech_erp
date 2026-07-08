@@ -166,16 +166,12 @@ export function NasiyaPaymentModal({
   const overpayExtraUzs = Math.max(0, payAmountUzs - selectedScheduleOutstanding)
   const exceedsRemaining = !carryOver && payAmountUzs > nasiyaRemainingAmount
 
+  // "Izoh" is optional for a regular payment — only the carry-over/defer flow
+  // ("Mijoz bu oy to'lamadi, muddatni uzaytirish") still requires a reason,
+  // since that's a debt-schedule change, not a routine payment note.
   const canSubmit = carryOver
     ? Boolean(payDate.trim() && selectedScheduleId && payNote.trim().length >= 5)
-    : Boolean(
-        payAmount.trim() &&
-          payMethod &&
-          payDate.trim() &&
-          selectedScheduleId &&
-          payNote.trim().length >= 5 &&
-          !exceedsRemaining,
-      )
+    : Boolean(payAmount.trim() && payMethod && payDate.trim() && selectedScheduleId && !exceedsRemaining)
 
   async function handleSubmit() {
     if (!canSubmit || submitting) return
@@ -386,7 +382,7 @@ export function NasiyaPaymentModal({
 
               <div className="space-y-2">
                 <label className="block text-xs font-medium text-zinc-700">
-                  Izoh <span className="text-red-500">*</span>
+                  Izoh {carryOver && <span className="text-red-500">*</span>}
                 </label>
                 <Textarea
                   value={payNote}

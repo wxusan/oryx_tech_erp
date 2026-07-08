@@ -12,7 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
-import { calculateRemaining } from '@/lib/nasiya-utils'
+import { calculateRemaining, scheduleOutstanding, isScheduleOverdue, isNasiyaEffectivelyComplete } from '@/lib/nasiya-utils'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaPaymentMessage, nasiyaCompletedMessage } from '@/lib/telegram-templates'
@@ -80,6 +80,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       })
       if (!nasiya) throw { status: 404, message: "Nasiya topilmadi" }
+      if (nasiya.status === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }
 
       if (deferredToNext && idempotencyKey) {
         const existingDeferral = await tx.nasiyaDeferral.findUnique({
@@ -132,11 +133,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const unpaidSchedules = [...nasiya.schedules]
         .filter((schedule) => {
           if (schedule.status === 'PAID') return false
-          return Number(schedule.paidAmount) < Number(schedule.expectedAmount)
+          return scheduleOutstanding(Number(schedule.expectedAmount), Number(schedule.paidAmount)) > 0
         })
-      const selectedOutstanding = Math.max(
-        0,
-        Number(selectedSchedule.expectedAmount) - Number(selectedSchedule.paidAmount),
+      const selectedOutstanding = scheduleOutstanding(
+        Number(selectedSchedule.expectedAmount),
+        Number(selectedSchedule.paidAmount),
       )
       const allocationRows = [
         ...unpaidSchedules.filter((schedule) => schedule.id === selectedSchedule.id),
@@ -185,7 +186,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           throw { status: 409, message: "Tanlangan oy to'lovi allaqachon yopilgan" }
         }
         const totalOutstanding = allocationRows.reduce(
-          (sum, schedule) => sum + Math.max(0, Number(schedule.expectedAmount) - Number(schedule.paidAmount)),
+          (sum, schedule) => sum + scheduleOutstanding(Number(schedule.expectedAmount), Number(schedule.paidAmount)),
           0,
         )
         if (amountUzs > totalOutstanding) {
@@ -195,10 +196,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         let remainingPayment = amountUzs
         for (const schedule of allocationRows) {
           if (remainingPayment <= 0) break
-          const outstanding = Math.max(0, Number(schedule.expectedAmount) - Number(schedule.paidAmount))
+          const outstanding = scheduleOutstanding(Number(schedule.expectedAmount), Number(schedule.paidAmount))
           const applied = Math.min(remainingPayment, outstanding)
-          const newPaidAmount = Number(schedule.paidAmount) + applied
-          const isFullyPaid = newPaidAmount >= Number(schedule.expectedAmount)
+          const newPaidAmountRaw = Number(schedule.paidAmount) + applied
+          const isFullyPaid = scheduleOutstanding(Number(schedule.expectedAmount), newPaidAmountRaw) <= 0
+          // Within the rounding tolerance, snap the stored paidAmount up to the
+          // exact expectedAmount so the ledger never dangles a few hundred so'm
+          // short forever — see COMPLETION_ROUNDING_TOLERANCE_UZS.
+          const newPaidAmount = isFullyPaid ? Number(schedule.expectedAmount) : newPaidAmountRaw
           const isPartial = !isFullyPaid && newPaidAmount > 0
           const effectiveDueDate = schedule.delayedUntil ?? schedule.dueDate
           const isPastDue = effectiveDueDate < new Date()
@@ -244,29 +249,38 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       // Recalculate nasiya totals
       const allSchedules = await tx.nasiyaSchedule.findMany({ where: { nasiyaId } })
+      const scheduleInputs = allSchedules.map((s) => ({
+        status: s.status,
+        dueDate: s.dueDate,
+        delayedUntil: s.delayedUntil,
+        expectedAmount: Number(s.expectedAmount),
+        paidAmount: Number(s.paidAmount),
+      }))
       const totalPaid = allSchedules.reduce((sum: number, s: { paidAmount: unknown }) => sum + Number(s.paidAmount), 0)
       const remaining = calculateRemaining(Number(nasiya.finalNasiyaAmount), totalPaid)
 
-      const allFullyPaid = allSchedules.every(
-        (s: { status: string }) => s.status === 'PAID',
-      )
-      const hasOverdue = allSchedules.some((s) => {
-        if (s.status === 'PAID') return false
-        if (Number(s.paidAmount) >= Number(s.expectedAmount)) return false
-        const due = s.delayedUntil ?? s.dueDate
-        return due < new Date()
-      })
+      // Tolerance-aware: a schedule within COMPLETION_ROUNDING_TOLERANCE_UZS of
+      // fully paid counts as settled here too, so a nasiya can never get stuck
+      // "Faol" forever purely from UZS<->USD round-trip rounding dust while
+      // every card on screen already reads $0.00 / 0 so'm.
+      const allFullyPaid = isNasiyaEffectivelyComplete(scheduleInputs)
+      const hasOverdue = scheduleInputs.some((s) => isScheduleOverdue(s))
 
       const newStatus = allFullyPaid || remaining <= 0 ? 'COMPLETED' : hasOverdue ? 'OVERDUE' : 'ACTIVE'
-      // Only true the instant a nasiya crosses into COMPLETED — a further call
-      // against an already-completed nasiya fails earlier (no outstanding
-      // schedule to allocate to), so this can never fire twice.
-      const justCompleted = newStatus === 'COMPLETED' && nasiya.status !== 'COMPLETED'
+      // Only true the instant a nasiya crosses into COMPLETED — the guard at
+      // the top of this transaction already rejects a request against a
+      // nasiya whose stored status is COMPLETED, so reaching this line always
+      // means the nasiya started as ACTIVE/OVERDUE; this can never fire twice.
+      const justCompleted = newStatus === 'COMPLETED'
+      // Snap the stored remaining debt to exactly 0 once effectively complete —
+      // clean bookkeeping instead of a lingering rounding-dust remainder
+      // visible in UZS mode (USD mode already rounds it away at display time).
+      const remainingToStore = allFullyPaid ? 0 : remaining
 
       await tx.nasiya.update({
         where: { id: nasiyaId },
         data: {
-          remainingAmount: remaining,
+          remainingAmount: remainingToStore,
           status: newStatus,
         },
       })
@@ -289,7 +303,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           month: allocations.length === 1 ? selectedSchedule.monthNumber : 'MULTIPLE',
           paidAmount: amountUzs,
           paymentMethod,
-          remaining,
+          remaining: remainingToStore,
           note: auditNote,
           adminName: session.user.name,
           currency,
@@ -344,18 +358,27 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           shopId,
           actorId: session.user.id,
           actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
-          action: 'PAYMENT',
+          // Deferring a schedule ("Mijoz bu oy to'lamadi, muddatni uzaytirish")
+          // is not a payment — a distinct action keeps Amallar tarixi from
+          // mislabeling it as "To'lov qabul qilindi".
+          action: deferredToNext ? 'NASIYA_DEFER' : 'PAYMENT',
           targetType: 'NasiyaSchedule',
           targetId: nasiyaScheduleId,
-          newValue: {
-            amount: amountUzs,
-            inputAmount: amount,
-            paymentMethod,
-            deferredToNext,
-            allocations,
-            auditReason: auditNote,
-            ...moneyInputMeta(amountInput),
-          },
+          newValue: deferredToNext
+            ? {
+                oldDueDate: (selectedSchedule.delayedUntil ?? selectedSchedule.dueDate).toISOString(),
+                newDueDate: delayedUntil!.toISOString(),
+                auditReason: auditNote,
+              }
+            : {
+                amount: amountUzs,
+                inputAmount: amount,
+                paymentMethod,
+                deferredToNext,
+                allocations,
+                auditReason: auditNote,
+                ...moneyInputMeta(amountInput),
+              },
           note: auditNote,
         },
       })
@@ -375,7 +398,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         })
       }
 
-      return { nasiyaId, nasiyaScheduleId, amount: amountUzs, remaining, allocations, duplicate: false }
+      return { nasiyaId, nasiyaScheduleId, amount: amountUzs, remaining: remainingToStore, allocations, duplicate: false }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
     let result: Awaited<ReturnType<typeof runPaymentTransaction>> | undefined

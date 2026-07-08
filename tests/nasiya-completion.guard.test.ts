@@ -14,7 +14,17 @@ describe('nasiya completion: status transition, log, and Telegram message', () =
   })
 
   it('only treats it as a fresh completion on the actual ACTIVE/OVERDUE -> COMPLETED transition', () => {
-    expect(route).toContain("newStatus === 'COMPLETED' && nasiya.status !== 'COMPLETED'")
+    // A request against an already-COMPLETED nasiya is rejected before this
+    // point (see the "blocks payment" test below), so reaching the
+    // newStatus/justCompleted computation always means the nasiya started
+    // ACTIVE/OVERDUE — no separate "!== COMPLETED" re-check is needed (and
+    // TypeScript flags it as redundant once narrowed by the early guard).
+    expect(route).toContain("if (nasiya.status === 'COMPLETED') throw { status: 409")
+    expect(route).toContain('const justCompleted = newStatus === \'COMPLETED\'')
+  })
+
+  it('blocks a payment attempt against an already-completed nasiya with a clear message', () => {
+    expect(route).toContain("message: 'Bu nasiya yakunlangan'")
   })
 
   it('queues a NASIYA_COMPLETED Telegram notification only when justCompleted', () => {

@@ -105,8 +105,8 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
     expect(source).toContain('remainingPayment -= applied')
   })
 
-  it('marks a schedule PAID (with paidAt) only when fully covered, otherwise PARTIAL', () => {
-    expect(source).toContain('const isFullyPaid = newPaidAmount >= Number(schedule.expectedAmount)')
+  it('marks a schedule PAID (with paidAt) only when fully covered (tolerance-aware), otherwise PARTIAL', () => {
+    expect(source).toContain('const isFullyPaid = scheduleOutstanding(Number(schedule.expectedAmount), newPaidAmountRaw) <= 0')
     expect(source).toContain('paidAt: isFullyPaid ? date : null')
     expect(source).toContain("isPartial ? 'PARTIAL'")
   })
@@ -116,8 +116,14 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
     expect(source).toContain('duplicate: true')
   })
 
-  it('marks the nasiya COMPLETED only on the real transition, in the same transaction as the allocation', () => {
-    expect(source).toContain("newStatus === 'COMPLETED' && nasiya.status !== 'COMPLETED'")
+  it('marks the nasiya COMPLETED only on the real transition, guarded by an early block on already-completed nasiyas', () => {
+    expect(source).toContain("if (nasiya.status === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }")
+    expect(source).toContain("const justCompleted = newStatus === 'COMPLETED'")
+  })
+
+  it('uses the shared, tolerance-aware scheduleOutstanding/isNasiyaEffectivelyComplete helpers instead of duplicated inline math', () => {
+    expect(source).toContain("import { calculateRemaining, scheduleOutstanding, isScheduleOverdue, isNasiyaEffectivelyComplete } from '@/lib/nasiya-utils'")
+    expect(source).toContain('const allFullyPaid = isNasiyaEffectivelyComplete(scheduleInputs)')
   })
 
   it('passes the per-schedule allocation breakdown into the Telegram message', () => {

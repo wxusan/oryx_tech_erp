@@ -56,6 +56,7 @@ interface NasiyaLog {
   targetType: string
   targetId: string
   createdAt: string
+  newValue?: { oldDueDate?: string; newDueDate?: string; reminderEnabled?: boolean } | null
 }
 
 interface Nasiya {
@@ -69,6 +70,7 @@ interface Nasiya {
   finalNasiyaAmount: number
   remainingAmount: number
   status: string
+  displayStatus?: 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
   reminderEnabled: boolean
   note?: string | null
   isImported?: boolean
@@ -149,15 +151,31 @@ function ImportField({ label, value }: { label: string; value: string }) {
   )
 }
 
-function nasiyaLogLabel(action: string) {
+function nasiyaLogLabel(log: NasiyaLog): string {
+  const { action, newValue } = log
   if (action === 'CREATE_NASIYA') return 'Nasiya yaratildi'
   if (action === 'IMPORT_NASIYA') return 'Eski nasiya import qilindi'
   if (action === 'PAYMENT') return "To'lov qabul qilindi"
-  if (action === 'UPDATE_REMINDER') return "Eslatma o'zgartirildi"
-  if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
+  if (action === 'NASIYA_DEFER') return 'Muddat uzaytirildi'
+  if (action === 'NASIYA_COMPLETED') return 'Nasiya yakunlandi'
+  if (action === 'UPDATE_REMINDER') {
+    const enabled = (newValue as { reminderEnabled?: boolean } | null | undefined)?.reminderEnabled
+    if (enabled === true) return 'Eslatma yoqildi'
+    if (enabled === false) return "Eslatma o'chirildi"
+    return "Eslatma o'zgartirildi"
+  }
+  if (action === 'UPDATE') return "Nasiya tahrirlandi"
   if (action === 'DELETE') return "O'chirildi"
   if (action === 'RETURN') return 'Qaytarildi'
   return action
+}
+
+/** Extra detail line under a log's title — currently only the defer old/new due dates. */
+function nasiyaLogDetail(log: NasiyaLog): string | null {
+  if (log.action === 'NASIYA_DEFER' && log.newValue?.oldDueDate && log.newValue?.newDueDate) {
+    return `${uzDate(log.newValue.oldDueDate)} → ${uzDate(log.newValue.newDueDate)}`
+  }
+  return null
 }
 
 /**
@@ -340,6 +358,25 @@ export default function NasiyaDetailPage() {
 
   const sortedSchedules = [...(nasiya.schedules ?? [])].sort((a, b) => a.monthNumber - b.monthNumber)
 
+  // Server-derived (src/lib/nasiya-utils.ts deriveNasiyaOverdue) so this page
+  // can never disagree with the nasiyalar list about completed/overdue state
+  // — falls back to the raw stored status only if an older API response
+  // didn't include it yet.
+  const displayStatus = nasiya.displayStatus ?? (nasiya.status as 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED')
+  const isCompleted = displayStatus === 'COMPLETED'
+  const statusBadgeStyles: Record<string, string> = {
+    ACTIVE: 'bg-zinc-100 text-zinc-700',
+    OVERDUE: 'bg-red-100 text-red-700',
+    COMPLETED: 'bg-emerald-100 text-emerald-700',
+    CANCELLED: 'bg-zinc-200 text-zinc-500',
+  }
+  const statusBadgeLabels: Record<string, string> = {
+    ACTIVE: 'Faol',
+    OVERDUE: "Muddati o'tgan",
+    COMPLETED: 'Yakunlangan',
+    CANCELLED: 'Bekor qilingan',
+  }
+
   return (
     <div className="p-6 space-y-5 max-w-4xl">
       <Link href="/shop/nasiyalar" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
@@ -349,7 +386,12 @@ export default function NasiyaDetailPage() {
 
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-zinc-900">{nasiya.customer.name}</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-zinc-900">{nasiya.customer.name}</h1>
+            <span className={`inline-block px-2.5 py-1 rounded text-xs font-medium ${statusBadgeStyles[displayStatus]}`}>
+              {statusBadgeLabels[displayStatus]}
+            </span>
+          </div>
           <p className="text-sm text-zinc-500 mt-0.5">{nasiya.device.model} · {nasiya.customer.phone}</p>
         </div>
         <div className="flex items-center gap-2">
@@ -361,14 +403,25 @@ export default function NasiyaDetailPage() {
             <Pencil size={14} />
             Tahrirlash
           </Button>
-          <Button
-            onClick={() => setPaymentModalOpen(true)}
-            className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded"
-          >
-            To'lov qabul qilish
-          </Button>
+          {!isCompleted && displayStatus !== 'CANCELLED' && (
+            <Button
+              onClick={() => setPaymentModalOpen(true)}
+              className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded"
+            >
+              To'lov qabul qilish
+            </Button>
+          )}
         </div>
       </div>
+
+      {isCompleted && (
+        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
+          <div className="text-sm font-semibold text-emerald-900">Bu nasiya to'liq yopilgan.</div>
+          <div className="text-xs text-emerald-800/80 mt-0.5">
+            Qurilma sotilgan/nasiyadagi holatida qoladi — omborga qaytarilmaydi.
+          </div>
+        </div>
+      )}
 
       {nasiya.note && (
         <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
@@ -407,9 +460,13 @@ export default function NasiyaDetailPage() {
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-5">
         {[
+          // Jami narx -> Boshlang'ich to'lov -> Nasiya jami (original financed
+          // amount) -> To'langan -> Qarz qoldig'i (CURRENT remaining debt).
+          // These are deliberately two different numbers — no separate
+          // "Qolgan summa" card, which duplicated one or the other and read
+          // as a confusing third figure (see docs/nasiya-payment-allocation.md).
           { label: 'Jami narx', value: fmt(nasiya.totalAmount, currency) },
           { label: "Boshlang'ich to'lov", value: fmt(nasiya.downPayment, currency) },
-          { label: 'Qolgan summa', value: fmt(nasiya.baseRemainingAmount, currency) },
           ...(nasiya.interestAmount > 0
             ? [
                 { label: 'Nasiya foizi', value: `${fmt(nasiya.interestPercent)}%` },
@@ -419,7 +476,7 @@ export default function NasiyaDetailPage() {
           { label: 'Nasiya jami', value: fmt(nasiya.finalNasiyaAmount, currency) },
           { label: "To'langan", value: fmt(paidAmount, currency) },
           { label: "Qarz qoldig'i", value: fmt(nasiya.remainingAmount, currency) },
-          { label: 'Oylik', value: fmt(monthlyPayment, currency) },
+          { label: "Oylik to'lov", value: fmt(monthlyPayment, currency) },
         ].map((c) => (
           <Card key={c.label} className="rounded-lg" size="sm">
             <CardContent>
@@ -434,7 +491,9 @@ export default function NasiyaDetailPage() {
       <Card className="rounded-lg">
         <CardHeader>
           <CardTitle>Umumiy progress</CardTitle>
-          <CardDescription>Nasiya bo'yicha jami to'langan summa</CardDescription>
+          <CardDescription>
+            {isCompleted ? "Nasiya to'liq yopilgan" : "Nasiya bo'yicha jami to'langan summa"}
+          </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex justify-between text-sm mb-2">
@@ -449,11 +508,16 @@ export default function NasiyaDetailPage() {
         </CardContent>
       </Card>
 
-      {/* Payment behavior score */}
+      {/* Payment behavior score — retitled "historical" once completed so it never
+          reads as an active/current risk signal for a nasiya with no debt left. */}
       <Card className="rounded-lg">
         <CardHeader>
-          <CardTitle>To'lov ishonchi</CardTitle>
-          <CardDescription>Mijozning to'lov tarixiga asoslangan baho</CardDescription>
+          <CardTitle>{isCompleted ? "To'lov tarixi bahosi" : "To'lov ishonchi"}</CardTitle>
+          <CardDescription>
+            {isCompleted
+              ? "Yakunlangan nasiya bo'yicha tarixiy to'lov xatti-harakati"
+              : "Mijozning to'lov tarixiga asoslangan baho"}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center gap-3">
@@ -597,7 +661,8 @@ export default function NasiyaDetailPage() {
             {logs.map((l) => (
               <li key={l.id} className="px-4 py-3 flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <div className="text-sm text-zinc-900">{nasiyaLogLabel(l.action)}</div>
+                  <div className="text-sm text-zinc-900">{nasiyaLogLabel(l)}</div>
+                  {nasiyaLogDetail(l) && <div className="text-xs text-zinc-500 mt-0.5">{nasiyaLogDetail(l)}</div>}
                   {l.note && <div className="text-xs text-zinc-500 mt-0.5">{l.note}</div>}
                 </div>
                 <div className="text-xs text-zinc-400 whitespace-nowrap flex-shrink-0">

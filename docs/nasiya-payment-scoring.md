@@ -58,7 +58,15 @@ Clamped to `0..100`.
 
 "Currently overdue" is computed from the exact same predicate the dashboard
 and nasiyalar list use (`isScheduleOverdue` / `deriveNasiyaOverdue`), so the
-score's red/overdue signal always agrees with the rest of the app.
+score's red/overdue signal always agrees with the rest of the app. That
+predicate is also rounding-tolerance-aware (`COMPLETION_ROUNDING_TOLERANCE_UZS`,
+500 so'm — see `docs/nasiya-payment-allocation.md` §11): a schedule left with
+only a few hundred so'm of cross-currency rounding dust is never treated as
+"currently overdue", so a fully-paid nasiya can never show
+"Hozir $X muddati o'tgan" once its real debt is gone. Once a nasiya is
+COMPLETED, its score card is retitled "To'lov tarixi bahosi" in the UI so a
+strong or weak historical score never reads as an active/current risk
+signal — the underlying score/reason computation is unchanged either way.
 
 ## Confidence gating
 
