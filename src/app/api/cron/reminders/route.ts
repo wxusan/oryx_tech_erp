@@ -42,6 +42,7 @@ import { invalidateShopOverdueCron } from '@/lib/server/cache-tags'
 import { tashkentDayRange } from '@/lib/timezone'
 import { recordOpsEvent } from '@/lib/server/ops-events'
 import { getUsdUzsRate } from '@/lib/server/currency'
+import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
 import {
   nasiyaDueTodayMessage,
@@ -56,10 +57,6 @@ import {
 } from '@/lib/telegram-templates'
 
 export const maxDuration = 60
-
-function outstandingAmount(expected: unknown, paid: unknown) {
-  return Math.max(0, Number(expected) - Number(paid ?? 0))
-}
 
 let usdUzsRateForRun: Promise<number | null> | null = null
 
@@ -137,7 +134,8 @@ export async function GET(request: NextRequest): Promise<Response> {
         imei: nasiya.device.imei,
       },
       month: schedule.monthNumber,
-      amountDue: outstandingAmount(schedule.expectedAmount, schedule.paidAmount),
+      amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency),
+      contractCurrency: nasiya.contractCurrency,
       dueDate: schedule.delayedUntil ?? schedule.dueDate,
       currency: await reminderCurrency(nasiya.shop),
     })
@@ -214,7 +212,8 @@ export async function GET(request: NextRequest): Promise<Response> {
         imei: schedule.nasiya.device.imei,
       },
       month: schedule.monthNumber,
-      amountDue: outstandingAmount(schedule.expectedAmount, schedule.paidAmount),
+      amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), schedule.nasiya.contractCurrency),
+      contractCurrency: schedule.nasiya.contractCurrency,
       dueDate: effectiveDue,
       daysLate,
       currency: await reminderCurrency(schedule.nasiya.shop),
@@ -320,7 +319,8 @@ export async function GET(request: NextRequest): Promise<Response> {
         imei: nasiya.device.imei,
       },
       month: schedule.monthNumber,
-      amountDue: outstandingAmount(schedule.expectedAmount, schedule.paidAmount),
+      amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency),
+      contractCurrency: nasiya.contractCurrency,
       dueDate: effectiveDue,
       daysLeft: daysUntil,
       currency: await reminderCurrency(nasiya.shop),

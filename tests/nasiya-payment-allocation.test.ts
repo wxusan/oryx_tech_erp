@@ -136,9 +136,9 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
 })
 
 describe('cron reminders use per-schedule remaining amount (respects prepayment), not the flat monthly amount', () => {
-  it('due-today and overdue reminders compute amountDue from outstandingAmount(schedule)', () => {
+  it('due-today and overdue reminders compute amountDue from the deal\'s own contract-currency balance (contractScheduleOutstanding), not the legacy UZS snapshot', () => {
     const cron = read('src/app/api/cron/reminders/route.ts')
-    expect(cron).toContain('amountDue: outstandingAmount(schedule.expectedAmount, schedule.paidAmount)')
+    expect(cron).toContain('contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency)')
     // A fully-prepaid schedule becomes PAID and is excluded from both queries below.
     expect(cron).toContain("status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] }")
   })

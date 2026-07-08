@@ -13,6 +13,7 @@
 import { uzDate } from '@/lib/dates'
 import { telegramImei } from '@/lib/device-display'
 import { formatMoneyWithBase, type CurrencyContext, type CurrencyCode } from '@/lib/currency'
+import { formatContractMoneyWithDisplay } from '@/lib/nasiya-contract'
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -360,7 +361,9 @@ export function nasiyaDueTodayMessage(data: {
   customerPhone?: string | null
   device: DeviceSpecs
   month?: number | null
+  /** The schedule's own contract-currency outstanding balance — see docs/currency-accounting-model.md. */
   amountDue: number
+  contractCurrency: CurrencyCode
   dueDate: Date | string
   currency?: CurrencyContext | null
 }): string {
@@ -370,7 +373,7 @@ export function nasiyaDueTodayMessage(data: {
     formatDeviceSpecs(data.device, { battery: false }),
     block(
       typeof data.month === 'number' ? `Oy: ${data.month}-oy` : null,
-      `To'lov summasi: ${telegramMoney(data.amountDue, data.currency)}`,
+      `To'lov summasi: ${formatContractMoneyWithDisplay(data.amountDue, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
       `Muddat: ${formatUzDate(data.dueDate)}`,
     ),
   )
@@ -381,7 +384,9 @@ export function nasiyaOverdueMessage(data: {
   customerPhone?: string | null
   device: DeviceSpecs
   month?: number | null
+  /** The schedule's own contract-currency outstanding balance — see docs/currency-accounting-model.md. */
   amountDue: number
+  contractCurrency: CurrencyCode
   dueDate: Date | string
   daysLate: number
   currency?: CurrencyContext | null
@@ -392,7 +397,7 @@ export function nasiyaOverdueMessage(data: {
     formatDeviceSpecs(data.device, { battery: false }),
     block(
       typeof data.month === 'number' ? `Oy: ${data.month}-oy` : null,
-      `Qolgan to'lov: ${telegramMoney(data.amountDue, data.currency)}`,
+      `Qolgan to'lov: ${formatContractMoneyWithDisplay(data.amountDue, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
       `Muddat: ${formatUzDate(data.dueDate)}`,
       `Kechikkan: ${data.daysLate} kun`,
     ),
@@ -521,7 +526,9 @@ export function nasiyaEarlyReminderMessage(data: {
   customerPhone?: string | null
   device: DeviceSpecs
   month?: number | null
+  /** The schedule's own contract-currency outstanding balance — see docs/currency-accounting-model.md. */
   amountDue: number
+  contractCurrency: CurrencyCode
   dueDate: Date | string
   daysLeft: number
   currency?: CurrencyContext | null
@@ -532,7 +539,7 @@ export function nasiyaEarlyReminderMessage(data: {
     formatDeviceSpecs(data.device, { battery: false }),
     block(
       typeof data.month === 'number' ? `Oy: ${data.month}-oy` : null,
-      `To'lov summasi: ${telegramMoney(data.amountDue, data.currency)}`,
+      `To'lov summasi: ${formatContractMoneyWithDisplay(data.amountDue, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
       `Muddat: ${formatUzDate(data.dueDate)}`,
       `Qoldi: ${data.daysLeft} kun`,
     ),

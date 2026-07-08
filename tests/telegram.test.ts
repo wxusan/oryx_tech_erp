@@ -304,7 +304,7 @@ describe('nasiya messages', () => {
   it('nasiya due reminder includes month, amount and due date', () => {
     const msg = nasiyaDueTodayMessage({
       customerName: 'Ali', customerPhone: '+998900000000', device: fullDevice,
-      month: 2, amountDue: 616_667, dueDate: new Date(2026, 7, 1),
+      month: 2, amountDue: 616_667, contractCurrency: 'UZS', dueDate: new Date(2026, 7, 1),
     })
     expect(msg).toContain('Oy: 2-oy')
     expect(msg).toMatch(/To'lov summasi: 616.?667 so'm/)
@@ -314,7 +314,7 @@ describe('nasiya messages', () => {
   it('nasiya overdue includes daysLate', () => {
     const msg = nasiyaOverdueMessage({
       customerName: 'Ali', customerPhone: '+998900000000', device: fullDevice,
-      month: 2, amountDue: 616_667, dueDate: new Date(2026, 6, 1), daysLate: 12,
+      month: 2, amountDue: 616_667, contractCurrency: 'UZS', dueDate: new Date(2026, 6, 1), daysLate: 12,
     })
     expect(msg).toContain('Kechikkan: 12 kun')
   })
@@ -383,8 +383,8 @@ describe('global safety across every template', () => {
     nasiyaCreatedMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, totalAmount: 1, downPayment: 1, baseRemainingAmount: 1, interestPercent: 20, interestAmount: 1, finalNasiyaAmount: 1, months: 6, monthlyPayment: 1, nextPaymentDate: new Date(), adminName: 'A' }),
     nasiyaImportedMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, originalTotalAmount: 1, alreadyPaidBeforeImport: 0, remainingDebt: 1, monthlyPayment: 1, nextPaymentDate: new Date(), adminName: 'A' }),
     nasiyaPaymentMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, paidAmount: 1, paymentMethod: 'CASH', remaining: 1, note: 'n', adminName: 'A' }),
-    nasiyaDueTodayMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, dueDate: new Date() }),
-    nasiyaOverdueMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, dueDate: new Date(), daysLate: 1 }),
+    nasiyaDueTodayMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, contractCurrency: 'UZS', dueDate: new Date() }),
+    nasiyaOverdueMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, contractCurrency: 'UZS', dueDate: new Date(), daysLate: 1 }),
     salePaymentMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, paidAmount: 1, paymentMethod: 'CASH', remaining: 1, note: 'n', adminName: 'A' }),
     saleDueTodayMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, remainingAmount: 1, dueDate: new Date() }),
     saleOverdueMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, remainingAmount: 1, dueDate: new Date(), daysLate: 1 }),

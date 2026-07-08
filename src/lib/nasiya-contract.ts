@@ -140,3 +140,22 @@ export function formatDisplayMoneyFromContract(
   if (amountCurrency === 'USD') return formatContractMoney(convertUsdToUzs(amount, rate), 'UZS')
   return formatContractMoney(Math.round(convertUzsToUsd(amount, rate) * 100) / 100, 'USD')
 }
+
+/**
+ * Native contract-currency amount, plus an optional "(~display equivalent)"
+ * when the shop's chosen display currency differs — for reminders/messages
+ * where the native figure must lead (it's the actual contract debt) but a
+ * display-currency hint is still useful context. Mirrors the two-part style
+ * of `formatMoneyWithBase` in currency.ts, generalized beyond a UZS base.
+ * Falls back to just the native figure when no rate is available.
+ */
+export function formatContractMoneyWithDisplay(
+  amount: number,
+  contractCurrency: CurrencyCode,
+  displayCurrency: CurrencyCode,
+  rate?: number | null,
+): string {
+  const native = formatContractMoney(amount, contractCurrency)
+  if (contractCurrency === displayCurrency || !rate || rate <= 0) return native
+  return `${native} (~${formatDisplayMoneyFromContract(amount, contractCurrency, displayCurrency, rate)})`
+}
