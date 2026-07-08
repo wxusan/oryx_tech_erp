@@ -25,6 +25,7 @@ import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
 import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { uzDate, uzMonthYear } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
+import { tashkentTodayInputValue } from '@/lib/timezone'
 
 /**
  * The single receive-payment modal used by BOTH the nasiya detail page and the
@@ -112,7 +113,7 @@ export function NasiyaPaymentModal({
       setPayError('')
       setPayAmount('')
       setPayMethod('')
-      setPayDate('')
+      setPayDate(tashkentTodayInputValue())
       setCarryOver(false)
       setPayNote('')
       try {

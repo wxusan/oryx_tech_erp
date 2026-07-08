@@ -465,3 +465,72 @@ export function saleOverdueMessage(data: {
     ),
   )
 }
+
+// ---------------------------------------------------------------------------
+// Early reminders — "Ertaroq eslatilsinmi?" (N days before the due-day
+// reminder above). The due-day message still fires separately on the day.
+// ---------------------------------------------------------------------------
+
+export function nasiyaEarlyReminderMessage(data: {
+  customerName: string
+  customerPhone?: string | null
+  device: DeviceSpecs
+  month?: number | null
+  amountDue: number
+  dueDate: Date | string
+  daysLeft: number
+  currency?: CurrencyContext | null
+}): string {
+  return compose(
+    "🔔 Nasiya to'lovi yaqinlashmoqda",
+    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    formatDeviceSpecs(data.device, { battery: false }),
+    block(
+      typeof data.month === 'number' ? `Oy: ${data.month}-oy` : null,
+      `To'lov summasi: ${telegramMoney(data.amountDue, data.currency)}`,
+      `Muddat: ${formatUzDate(data.dueDate)}`,
+      `Qoldi: ${data.daysLeft} kun`,
+    ),
+  )
+}
+
+export function saleEarlyReminderMessage(data: {
+  customerName: string
+  customerPhone?: string | null
+  device: DeviceSpecs
+  remainingAmount: number
+  dueDate: Date | string
+  daysLeft: number
+  currency?: CurrencyContext | null
+}): string {
+  return compose(
+    "🔔 Qarz to'lovi yaqinlashmoqda",
+    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    formatDeviceSpecs(data.device, { battery: false }),
+    block(
+      `To'lov summasi: ${telegramMoney(data.remainingAmount, data.currency)}`,
+      `Muddat: ${formatUzDate(data.dueDate)}`,
+      `Qoldi: ${data.daysLeft} kun`,
+    ),
+  )
+}
+
+/** Sent once, the moment a nasiya's status transitions to COMPLETED. */
+export function nasiyaCompletedMessage(data: {
+  shopName: string
+  customerName: string
+  customerPhone?: string | null
+  device: DeviceSpecs
+  finalNasiyaAmount: number
+  adminName?: string | null
+  currency?: CurrencyContext | null
+}): string {
+  return compose(
+    '✅ Nasiya yakunlandi',
+    optionalLine("Do'kon", data.shopName),
+    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    formatDeviceSpecs(data.device, { battery: false }),
+    `Jami to'langan: ${telegramMoney(data.finalNasiyaAmount, data.currency)}`,
+    optionalLine('Admin', data.adminName),
+  )
+}

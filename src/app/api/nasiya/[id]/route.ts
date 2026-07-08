@@ -17,6 +17,7 @@ import { requireApiSession } from '@/lib/api-auth'
 import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
+import { computeNasiyaPaymentScore } from '@/lib/nasiya-payment-score'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -104,6 +105,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             expectedAmount: true,
             paidAmount: true,
             status: true,
+            paidAt: true,
           },
         },
         payments: {
@@ -123,7 +125,18 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     if (!nasiya) return notFound('Nasiya topilmadi')
 
-    return ok(nasiya, "Nasiya ma'lumotlari")
+    const paymentScore = computeNasiyaPaymentScore({
+      schedules: nasiya.schedules.map((s) => ({
+        status: s.status,
+        dueDate: s.dueDate,
+        delayedUntil: s.delayedUntil,
+        expectedAmount: Number(s.expectedAmount),
+        paidAmount: Number(s.paidAmount),
+        paidAt: s.paidAt,
+      })),
+    })
+
+    return ok({ ...nasiya, paymentScore }, "Nasiya ma'lumotlari")
   } catch (err) {
     console.error('[GET /api/nasiya/[id]]', err)
     return serverError()

@@ -43,6 +43,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       customerName, customerPhone, passportPhotoUrl,
       totalAmount, downPayment, months, interestPercent,
       startDate, paymentMethod, note,
+      earlyReminderEnabled, earlyReminderDays,
     } = parsed.data
 
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
@@ -140,6 +141,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           months,
           monthlyPayment: amounts.monthlyPayment,
           startDate,
+          earlyReminderEnabled,
+          earlyReminderDays: earlyReminderEnabled ? earlyReminderDays : null,
           note,
           createdBy: session.user.id,
         },

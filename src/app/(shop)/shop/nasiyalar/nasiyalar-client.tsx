@@ -3,9 +3,12 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { Input } from '@/components/ui/input'
 import { uzDate } from '@/lib/dates'
 import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
+import { matchesNasiyaSearch } from '@/lib/search-match'
+import type { PaymentScoreColor, PaymentScoreLabel } from '@/lib/nasiya-payment-score'
 
 type NasiyaStatus = 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
 type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan' | 'Bekor qilingan'
@@ -15,6 +18,13 @@ interface NasiyaSchedule {
   dueDate: string
   delayedUntil: string | null
   status: string
+}
+
+interface PaymentScore {
+  score: number
+  label: PaymentScoreLabel
+  color: PaymentScoreColor
+  reason: string
 }
 
 interface Nasiya {
@@ -28,15 +38,17 @@ interface Nasiya {
   status: NasiyaStatus
   isImported: boolean
   createdAt: string
+  note: string | null
   /** Live display status derived server-side from schedules (matches dashboard). */
   displayStatus: NasiyaStatus
   isOverdue: boolean
   overdueAmount: number
   overdueCount: number
   nextPaymentDate: string | null
-  device: { model: string }
+  device: { model: string; imei: string }
   customer: { name: string; phone: string }
   schedules: NasiyaSchedule[]
+  paymentScore: PaymentScore
 }
 
 const statusMap: Record<NasiyaStatus, DisplayStatus> = {
@@ -73,6 +85,24 @@ function fmt(n: number, currency: CurrencyContext) {
   return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
 }
 
+const scoreBadgeStyles: Record<PaymentScoreColor, string> = {
+  green: 'bg-emerald-100 text-emerald-700',
+  yellow: 'bg-amber-100 text-amber-700',
+  red: 'bg-red-100 text-red-700',
+  gray: 'bg-zinc-100 text-zinc-500',
+}
+
+function PaymentScoreBadge({ score }: { score: PaymentScore }) {
+  return (
+    <span
+      title={score.reason}
+      className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${scoreBadgeStyles[score.color]}`}
+    >
+      {score.label}
+    </span>
+  )
+}
+
 export default function NasiyalarClient({
   initialNasiyalar,
   initialFilter = 'Barchasi',
@@ -90,11 +120,25 @@ export default function NasiyalarClient({
   const router = useRouter()
   const [payFor, setPayFor] = useState<Nasiya | null>(null)
   const [activeFilter, setActiveFilter] = useState<NasiyaStatus | 'Barchasi'>(initialFilter)
+  const [search, setSearch] = useState('')
 
   // Filter on the derived display status so overdue contracts land under
   // "Muddati o'tgan" (and out of "Faol"), matching the dashboard.
   const filtered = nasiyalar
     .filter((n) => activeFilter === 'Barchasi' || n.displayStatus === activeFilter)
+    .filter((n) =>
+      matchesNasiyaSearch(
+        {
+          customerName: n.customer.name,
+          customerPhone: n.customer.phone,
+          deviceModel: n.device.model,
+          imei: n.device.imei,
+          note: n.note,
+          statusLabel: statusMap[n.displayStatus],
+        },
+        search,
+      ),
+    )
     .sort((a, b) => {
       if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1
 
@@ -149,6 +193,14 @@ export default function NasiyalarClient({
         ))}
       </div>
 
+      {/* Search */}
+      <Input
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Mijoz, telefon, qurilma yoki IMEI bo'yicha qidirish..."
+        className="max-w-md h-9 text-sm border-zinc-200 rounded"
+      />
+
       {error && (
         <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">
           {error}
@@ -178,6 +230,7 @@ export default function NasiyalarClient({
                       <div className="flex items-center gap-2 mb-1">
                         <span className="font-medium text-sm text-zinc-900">{n.customer.name}</span>
                         <StatusBadge status={n.displayStatus} />
+                        <PaymentScoreBadge score={n.paymentScore} />
                         {n.isImported && (
                           <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
                             Eski nasiya

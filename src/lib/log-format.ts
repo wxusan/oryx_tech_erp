@@ -5,6 +5,7 @@ const actionLabels: Record<string, string> = {
   CREATE: "Qo'shildi",
   CREATE_NASIYA: 'Nasiya yaratildi',
   IMPORT_NASIYA: 'Eski nasiya import qilindi',
+  NASIYA_COMPLETED: 'Nasiya yakunlandi',
   PAYMENT: "To'lov qabul qilindi",
   SELL: 'Sotuv qilindi',
   RETURN: 'Qaytarildi',

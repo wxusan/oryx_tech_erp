@@ -79,6 +79,8 @@ export default function NewNasiyaPage() {
   const [interestPercent, setInterestPercent] = useState('0')
   const [startDate, setStartDate] = useState(today)
   const [payMethod, setPayMethod] = useState<PaymentMethod | ''>('')
+  const [earlyReminder, setEarlyReminder] = useState(false)
+  const [earlyReminderDays, setEarlyReminderDays] = useState('3')
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -237,7 +239,8 @@ export default function NewNasiyaPage() {
     downPayment.trim() &&
     months &&
     startDate.trim() &&
-    payMethod
+    payMethod &&
+    (!earlyReminder || (Number(earlyReminderDays) >= 1 && Number(earlyReminderDays) <= 60))
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -281,6 +284,8 @@ export default function NewNasiyaPage() {
           monthlyPayment: Math.round(monthlyPayment),
           startDate,
           paymentMethod: payMethod,
+          earlyReminderEnabled: earlyReminder,
+          earlyReminderDays: earlyReminder ? Number(earlyReminderDays) : undefined,
           note: note.trim() || undefined,
         }),
       })
@@ -667,6 +672,35 @@ export default function NewNasiyaPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="col-span-2 flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="nasiya-early-reminder"
+                  checked={earlyReminder}
+                  onChange={(e) => setEarlyReminder(e.target.checked)}
+                  className="w-4 h-4 rounded border-zinc-300"
+                />
+                <label htmlFor="nasiya-early-reminder" className="text-sm text-zinc-700 cursor-pointer">
+                  Ertaroq eslatilsinmi?
+                </label>
+              </div>
+              {earlyReminder && (
+                <div>
+                  <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                    Necha kun oldin? <span className="text-red-500">*</span>
+                  </label>
+                  <Input
+                    type="number"
+                    min={1}
+                    max={60}
+                    step={1}
+                    value={earlyReminderDays}
+                    onChange={(e) => setEarlyReminderDays(e.target.value)}
+                    placeholder="3"
+                    className="h-9 text-sm border-zinc-200 rounded"
+                  />
+                </div>
+              )}
               <div className="col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
                 <Textarea

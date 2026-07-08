@@ -44,8 +44,10 @@ import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
 import {
   nasiyaDueTodayMessage,
   nasiyaOverdueMessage,
+  nasiyaEarlyReminderMessage,
   saleDueTodayMessage,
   saleOverdueMessage,
+  saleEarlyReminderMessage,
 } from '@/lib/telegram-templates'
 
 export const maxDuration = 60
@@ -252,6 +254,91 @@ export async function GET(request: NextRequest): Promise<Response> {
     invalidateShopOverdueCron(overdueShopId)
   }
 
+  // -------------------------------------------------------------------------
+  // 2b. Nasiya early reminders — "Ertaroq eslatilsinmi?": an extra reminder
+  //    N days before a schedule's due date, IN ADDITION TO (not instead of)
+  //    the due-day reminder above. `earlyReminderDays` varies per nasiya, so
+  //    it can't be expressed as a single DB date range — the window below is
+  //    just a bound (tomorrow..+60d, the UI's max), refined with exact
+  //    day-math in JS. A schedule whose early date has already passed never
+  //    matches "today", so it's silently skipped (no backfill) while the
+  //    due-day reminder is untouched.
+  // -------------------------------------------------------------------------
+
+  const earlyWindowEnd = new Date(tomorrow)
+  earlyWindowEnd.setUTCDate(earlyWindowEnd.getUTCDate() + 61)
+
+  const earlyCandidates = await prisma.nasiyaSchedule.findMany({
+    where: {
+      OR: [
+        { delayedUntil: null, dueDate: { gte: tomorrow, lt: earlyWindowEnd } },
+        { delayedUntil: { gte: tomorrow, lt: earlyWindowEnd } },
+      ],
+      status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
+      nasiya: {
+        deletedAt: null,
+        reminderEnabled: true,
+        earlyReminderEnabled: true,
+        shop: { status: 'ACTIVE', deletedAt: null },
+      },
+    },
+    include: {
+      nasiya: {
+        include: {
+          customer: true,
+          device: true,
+          shop: {
+            include: {
+              admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
+            },
+          },
+        },
+      },
+    },
+  })
+
+  let earlyReminderCount = 0
+  for (const schedule of earlyCandidates) {
+    const { nasiya } = schedule
+    if (!nasiya.earlyReminderDays) continue
+    const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
+    const daysUntil = Math.round((tashkentDayRange(effectiveDue).start.getTime() - today.getTime()) / 86400000)
+    if (daysUntil !== nasiya.earlyReminderDays) continue
+    earlyReminderCount++
+    const msg = nasiyaEarlyReminderMessage({
+      customerName: nasiya.customer.name,
+      customerPhone: nasiya.customer.phone,
+      device: {
+        deviceModel: nasiya.device.model,
+        storage: nasiya.device.storage,
+        color: nasiya.device.color,
+        imei: nasiya.device.imei,
+      },
+      month: schedule.monthNumber,
+      amountDue: outstandingAmount(schedule.expectedAmount, schedule.paidAmount),
+      dueDate: effectiveDue,
+      daysLeft: daysUntil,
+      currency: await reminderCurrency(nasiya.shop),
+    })
+    for (const admin of nasiya.shop.admins) {
+      const dedupeKey = `EARLY_REMINDER:${dayKey}:${admin.telegramId}:${schedule.id}`
+      await prisma.notification.upsert({
+        where: { dedupeKey },
+        update: {},
+        create: {
+          dedupeKey,
+          shopId: nasiya.shopId,
+          type: 'EARLY_REMINDER',
+          message: msg,
+          telegramId: admin.telegramId!,
+          scheduledAt: scheduledReminderSendAt(dedupeKey),
+          relatedId: schedule.id,
+          relatedType: 'NasiyaSchedule',
+        },
+      })
+    }
+  }
+
   const salePaymentsDueToday = await prisma.sale.findMany({
     where: {
       deletedAt: null,
@@ -360,6 +447,71 @@ export async function GET(request: NextRequest): Promise<Response> {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // 3b. Sale early reminders — same mechanism as nasiya early reminders above,
+  //    for a later-payment cash sale's single dueDate.
+  // -------------------------------------------------------------------------
+
+  const saleEarlyCandidates = await prisma.sale.findMany({
+    where: {
+      deletedAt: null,
+      paidFully: false,
+      remainingAmount: { gt: 0 },
+      reminderEnabled: true,
+      earlyReminderEnabled: true,
+      dueDate: { gte: tomorrow, lt: earlyWindowEnd },
+      shop: { status: 'ACTIVE', deletedAt: null },
+    },
+    include: {
+      customer: true,
+      device: true,
+      shop: {
+        include: {
+          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
+        },
+      },
+    },
+  })
+
+  let saleEarlyReminderCount = 0
+  for (const sale of saleEarlyCandidates) {
+    if (!sale.earlyReminderDays || !sale.dueDate) continue
+    const daysUntil = Math.round((tashkentDayRange(sale.dueDate).start.getTime() - today.getTime()) / 86400000)
+    if (daysUntil !== sale.earlyReminderDays) continue
+    saleEarlyReminderCount++
+    const msg = saleEarlyReminderMessage({
+      customerName: sale.customer.name,
+      customerPhone: sale.customer.phone,
+      device: {
+        deviceModel: sale.device.model,
+        storage: sale.device.storage,
+        color: sale.device.color,
+        imei: sale.device.imei,
+      },
+      remainingAmount: Number(sale.remainingAmount),
+      dueDate: sale.dueDate,
+      daysLeft: daysUntil,
+      currency: await reminderCurrency(sale.shop),
+    })
+    for (const admin of sale.shop.admins) {
+      const dedupeKey = `SALE_EARLY_REMINDER:${dayKey}:${admin.telegramId}:${sale.id}`
+      await prisma.notification.upsert({
+        where: { dedupeKey },
+        update: {},
+        create: {
+          dedupeKey,
+          shopId: sale.shopId,
+          type: 'SALE_EARLY_REMINDER',
+          message: msg,
+          telegramId: admin.telegramId!,
+          scheduledAt: scheduledReminderSendAt(dedupeKey),
+          relatedId: sale.id,
+          relatedType: 'Sale',
+        },
+      })
+    }
+  }
+
   // Flush pending Telegram notifications before the cron response completes.
   const delivery = await processPendingNotifications()
 
@@ -368,6 +520,8 @@ export async function GET(request: NextRequest): Promise<Response> {
     overdue: overdue.length,
     saleReminders: salePaymentsDueToday.length,
     saleOverdue: overdueSales.length,
+    earlyReminders: earlyReminderCount,
+    saleEarlyReminders: saleEarlyReminderCount,
   }
 
   await recordOpsEvent({

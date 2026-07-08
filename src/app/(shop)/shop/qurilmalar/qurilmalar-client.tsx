@@ -8,9 +8,21 @@ import { exportUrl } from '@/lib/api-client'
 import { uzDate } from '@/lib/dates'
 import { displayImei } from '@/lib/device-display'
 import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
+import { matchesDeviceSearch } from '@/lib/search-match'
 
 type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
-type DisplayStatus = 'Omborda' | 'Naqd sotildi' | 'Nasiyada' | 'Band qilingan' | 'Qaytarilgan' | "O'chirilgan"
+type DisplayStatus = 'Omborda' | 'Sotilgan' | 'Nasiyada' | 'Band qilingan' | 'Qaytarilgan' | "O'chirilgan"
+
+interface DeviceSaleInfo {
+  saleType: 'CASH' | 'NASIYA'
+  soldPrice: number
+  interestAmount: number
+  profit: number | null
+  customerName: string | null
+  soldAt: string
+  returned: boolean
+  refundAmount: number | null
+}
 
 interface Device {
   id: string
@@ -22,11 +34,15 @@ interface Device {
   imei: string
   status: DeviceStatus
   createdAt: string
+  note: string | null
+  supplierName: string | null
+  supplierPhone: string | null
+  saleInfo: DeviceSaleInfo | null
 }
 
 const statusMap: Record<DeviceStatus, DisplayStatus> = {
   IN_STOCK: 'Omborda',
-  SOLD_CASH: 'Naqd sotildi',
+  SOLD_CASH: 'Sotilgan',
   SOLD_NASIYA: 'Nasiyada',
   RESERVED: 'Band qilingan',
   RETURNED: 'Qaytarilgan',
@@ -36,7 +52,7 @@ const statusMap: Record<DeviceStatus, DisplayStatus> = {
 const filterTabs: { label: string; value: DeviceStatus | 'Barchasi' }[] = [
   { label: 'Barchasi', value: 'Barchasi' },
   { label: 'Omborda', value: 'IN_STOCK' },
-  { label: 'Naqd sotildi', value: 'SOLD_CASH' },
+  { label: 'Sotilgan', value: 'SOLD_CASH' },
   { label: 'Nasiyada', value: 'SOLD_NASIYA' },
   { label: 'Qaytarilgan', value: 'RETURNED' },
 ]
@@ -45,7 +61,7 @@ function StatusBadge({ status }: { status: DeviceStatus }) {
   const label = statusMap[status]
   const styles: Record<DisplayStatus, string> = {
     'Omborda': 'bg-zinc-100 text-zinc-700',
-    'Naqd sotildi': 'bg-zinc-900 text-white',
+    'Sotilgan': 'bg-zinc-900 text-white',
     'Nasiyada': 'bg-zinc-800 text-zinc-100',
     'Band qilingan': 'bg-amber-100 text-amber-700',
     'Qaytarilgan': 'bg-blue-100 text-blue-700',
@@ -75,13 +91,18 @@ export default function QurilmalarClient({
 
   const filtered = devices.filter((d) => {
     const matchesStatus = activeStatus === 'Barchasi' || d.status === activeStatus
-    const q = search.toLowerCase()
-    const matchesSearch =
-      !q ||
-      d.model.toLowerCase().includes(q) ||
-      d.imei.includes(q) ||
-      (d.color ?? '').toLowerCase().includes(q) ||
-      (d.storage ?? '').toLowerCase().includes(q)
+    const matchesSearch = matchesDeviceSearch(
+      {
+        model: d.model,
+        imei: d.imei,
+        color: d.color,
+        storage: d.storage,
+        note: d.note,
+        supplierName: d.supplierName,
+        supplierPhone: d.supplierPhone,
+      },
+      search,
+    )
     return matchesStatus && matchesSearch
   })
 
@@ -131,7 +152,7 @@ export default function QurilmalarClient({
       <Input
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        placeholder="Model, IMEI, rang bo'yicha qidirish..."
+        placeholder="Model, IMEI, rang, xotira yoki yetkazib beruvchi bo'yicha qidirish..."
         className="max-w-md h-9 text-sm border-zinc-200 rounded"
       />
 
@@ -146,10 +167,10 @@ export default function QurilmalarClient({
       ) : (
         /* Table */
         <div className="border border-zinc-200 rounded overflow-x-auto">
-          <table className="min-w-[920px] w-full text-sm">
+          <table className="min-w-[1180px] w-full text-sm">
             <thead className="bg-zinc-50 border-b border-zinc-200">
               <tr>
-                {['Model', 'Rang', 'Xotira', 'Batareya', 'Kelish narxi', 'IMEI', 'Status', 'Sana', ''].map((h) => (
+                {['Model', 'Rang', 'Xotira', 'Batareya', 'Kelish narxi', 'IMEI', 'Status', 'Sotuv narxi', 'Farq', 'Mijoz', 'Sana', ''].map((h) => (
                   <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide">
                     {h}
                   </th>
@@ -170,6 +191,21 @@ export default function QurilmalarClient({
                   <td className="px-4 py-3">
                     <StatusBadge status={d.status} />
                   </td>
+                  <td className="px-4 py-3 text-zinc-900 font-medium">
+                    {d.saleInfo ? formatMoneyByCurrency(d.saleInfo.soldPrice, currency.currency, currency.usdUzsRate) : '—'}
+                  </td>
+                  <td className="px-4 py-3">
+                    {!d.saleInfo ? (
+                      '—'
+                    ) : d.saleInfo.returned ? (
+                      <span className="text-xs text-blue-700">Qaytarilgan</span>
+                    ) : (
+                      <span className={d.saleInfo.profit != null && d.saleInfo.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
+                        {formatMoneyByCurrency(d.saleInfo.profit ?? 0, currency.currency, currency.usdUzsRate)}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-zinc-600">{d.saleInfo?.customerName ?? '—'}</td>
                   <td className="px-4 py-3 text-zinc-500">
                     {uzDate(d.createdAt)}
                   </td>
@@ -184,7 +220,7 @@ export default function QurilmalarClient({
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-zinc-400 text-sm">
+                  <td colSpan={12} className="px-4 py-8 text-center text-zinc-400 text-sm">
                     Qurilma topilmadi
                   </td>
                 </tr>

@@ -108,22 +108,22 @@ model SuperAdmin {
 // ---------------------------------------------------------------------------
 
 model Shop {
-  id              String     @id @default(cuid())
-  name            String
-  ownerName       String
-  ownerPhone      String
-  shopNumber      String
-  address         String
-  note            String?
-  status          ShopStatus @default(ACTIVE)
-  subscriptionDue DateTime
-  telegramGroupId String?
+  id                String       @id @default(cuid())
+  name              String
+  ownerName         String
+  ownerPhone        String
+  shopNumber        String
+  address           String
+  note              String?
+  status            ShopStatus   @default(ACTIVE)
+  subscriptionDue   DateTime
+  telegramGroupId   String?
   preferredCurrency CurrencyCode @default(UZS)
-  createdAt       DateTime   @default(now())
-  updatedAt       DateTime   @updatedAt
-  deletedAt       DateTime?
-  deletedBy       String?
-  deleteNote      String?
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
+  deletedBy         String?
+  deleteNote        String?
 
   // FK
   createdById String
@@ -326,23 +326,27 @@ model Customer {
 // ---------------------------------------------------------------------------
 
 model Sale {
-  id              String        @id @default(cuid())
-  shopId          String
-  deviceId        String
-  customerId      String
-  salePrice       Decimal       @db.Decimal(12, 2)
-  paymentMethod   PaymentMethod
-  paidFully       Boolean       @default(true)
-  amountPaid      Decimal       @db.Decimal(12, 2)
-  remainingAmount Decimal       @default(0) @db.Decimal(12, 2)
-  dueDate         DateTime?
-  reminderEnabled Boolean       @default(false)
-  note            String?
-  createdAt       DateTime      @default(now())
-  createdBy       String
-  deletedAt       DateTime?
-  deletedBy       String?
-  deleteNote      String?
+  id                   String        @id @default(cuid())
+  shopId               String
+  deviceId             String
+  customerId           String
+  salePrice            Decimal       @db.Decimal(12, 2)
+  paymentMethod        PaymentMethod
+  paidFully            Boolean       @default(true)
+  amountPaid           Decimal       @db.Decimal(12, 2)
+  remainingAmount      Decimal       @default(0) @db.Decimal(12, 2)
+  dueDate              DateTime?
+  reminderEnabled      Boolean       @default(false)
+  // Same early-reminder mechanism as Nasiya, for a later-payment cash sale's
+  // single dueDate.
+  earlyReminderEnabled Boolean       @default(false)
+  earlyReminderDays    Int?
+  note                 String?
+  createdAt            DateTime      @default(now())
+  createdBy            String
+  deletedAt            DateTime?
+  deletedBy            String?
+  deleteNote           String?
 
   // Relations
   shop     Shop           @relation(fields: [shopId], references: [id])
@@ -393,31 +397,36 @@ model SalePayment {
 // ---------------------------------------------------------------------------
 
 model Nasiya {
-  id                  String       @id @default(cuid())
-  shopId              String
-  deviceId            String
-  customerId          String
+  id                   String       @id @default(cuid())
+  shopId               String
+  deviceId             String
+  customerId           String
   // Original agreed device sale price before down payment and nasiya interest.
-  totalAmount         Decimal      @db.Decimal(12, 2)
-  downPayment         Decimal      @db.Decimal(12, 2)
+  totalAmount          Decimal      @db.Decimal(12, 2)
+  downPayment          Decimal      @db.Decimal(12, 2)
   // Debt before interest: totalAmount - downPayment.
-  baseRemainingAmount Decimal      @default(0) @db.Decimal(12, 2)
-  interestPercent     Decimal      @default(0) @db.Decimal(6, 2)
-  interestAmount      Decimal      @default(0) @db.Decimal(12, 2)
-  finalNasiyaAmount   Decimal      @default(0) @db.Decimal(12, 2)
-  remainingAmount     Decimal      @db.Decimal(12, 2)
-  months              Int
-  monthlyPayment      Decimal      @db.Decimal(12, 2)
-  startDate           DateTime
-  status              NasiyaStatus @default(ACTIVE)
-  reminderEnabled     Boolean      @default(true)
-  note                String?
-  createdAt           DateTime     @default(now())
-  createdBy           String
-  updatedAt           DateTime     @updatedAt
-  deletedAt           DateTime?
-  deletedBy           String?
-  deleteNote          String?
+  baseRemainingAmount  Decimal      @default(0) @db.Decimal(12, 2)
+  interestPercent      Decimal      @default(0) @db.Decimal(6, 2)
+  interestAmount       Decimal      @default(0) @db.Decimal(12, 2)
+  finalNasiyaAmount    Decimal      @default(0) @db.Decimal(12, 2)
+  remainingAmount      Decimal      @db.Decimal(12, 2)
+  months               Int
+  monthlyPayment       Decimal      @db.Decimal(12, 2)
+  startDate            DateTime
+  status               NasiyaStatus @default(ACTIVE)
+  reminderEnabled      Boolean      @default(true)
+  // "Ertaroq eslatilsinmi?" — an extra reminder N days before each schedule's
+  // due date, in addition to the existing due-day reminder. Both respect
+  // reminderEnabled; earlyReminderDays is only meaningful when the flag is set.
+  earlyReminderEnabled Boolean      @default(false)
+  earlyReminderDays    Int?
+  note                 String?
+  createdAt            DateTime     @default(now())
+  createdBy            String
+  updatedAt            DateTime     @updatedAt
+  deletedAt            DateTime?
+  deletedBy            String?
+  deleteNote           String?
 
   // --- Imported (pre-Oryx) nasiya bookkeeping ---------------------------------
   // An imported nasiya is EXISTING debt carried over from before the shop used

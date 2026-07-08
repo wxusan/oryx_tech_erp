@@ -15,7 +15,7 @@ import { addNasiyaPaymentSchema } from '@/lib/validations'
 import { calculateRemaining } from '@/lib/nasiya-utils'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
-import { nasiyaPaymentMessage } from '@/lib/telegram-templates'
+import { nasiyaPaymentMessage, nasiyaCompletedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
@@ -257,11 +257,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         return due < new Date()
       })
 
+      const newStatus = allFullyPaid || remaining <= 0 ? 'COMPLETED' : hasOverdue ? 'OVERDUE' : 'ACTIVE'
+      // Only true the instant a nasiya crosses into COMPLETED — a further call
+      // against an already-completed nasiya fails earlier (no outstanding
+      // schedule to allocate to), so this can never fire twice.
+      const justCompleted = newStatus === 'COMPLETED' && nasiya.status !== 'COMPLETED'
+
       await tx.nasiya.update({
         where: { id: nasiyaId },
         data: {
           remainingAmount: remaining,
-          status: allFullyPaid || remaining <= 0 ? 'COMPLETED' : hasOverdue ? 'OVERDUE' : 'ACTIVE',
+          status: newStatus,
         },
       })
 
@@ -288,6 +294,22 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           adminName: session.user.name,
           currency,
         })
+        const completedMessage = justCompleted
+          ? nasiyaCompletedMessage({
+              shopName: nasiya.shop.name,
+              customerName: nasiya.customer.name,
+              customerPhone: nasiya.customer.phone,
+              device: {
+                deviceModel: nasiya.device.model,
+                storage: nasiya.device.storage,
+                color: nasiya.device.color,
+                imei: nasiya.device.imei,
+              },
+              finalNasiyaAmount: Number(nasiya.finalNasiyaAmount),
+              adminName: session.user.name,
+              currency,
+            })
+          : null
         for (const admin of shopAdmins) {
           await tx.notification.create({
             data: {
@@ -300,6 +322,19 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               relatedType: allocations.length === 1 ? 'NasiyaSchedule' : 'Nasiya',
             },
           })
+          if (completedMessage) {
+            await tx.notification.create({
+              data: {
+                shopId,
+                type: 'NASIYA_COMPLETED',
+                message: completedMessage,
+                telegramId: admin.telegramId!,
+                scheduledAt: new Date(),
+                relatedId: nasiyaId,
+                relatedType: 'Nasiya',
+              },
+            })
+          }
         }
       }
 
@@ -323,6 +358,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           note: auditNote,
         },
       })
+
+      if (justCompleted) {
+        await tx.log.create({
+          data: {
+            shopId,
+            actorId: session.user.id,
+            actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
+            action: 'NASIYA_COMPLETED',
+            targetType: 'Nasiya',
+            targetId: nasiyaId,
+            newValue: { finalNasiyaAmount: Number(nasiya.finalNasiyaAmount) },
+            note: 'Nasiya yakunlandi',
+          },
+        })
+      }
 
       return { nasiyaId, nasiyaScheduleId, amount: amountUzs, remaining, allocations, duplicate: false }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })

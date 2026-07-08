@@ -42,6 +42,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       salePrice, paymentMethod,
       paidFully, amountPaid,
       dueDate, reminderEnabled, note,
+      earlyReminderEnabled, earlyReminderDays,
     } = parsed.data
 
     // Derive shopId — shop admins are scoped to their shop.
@@ -110,6 +111,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           remainingAmount: remaining,
           dueDate,
           reminderEnabled: reminderEnabled ?? false,
+          earlyReminderEnabled: earlyReminderEnabled ?? false,
+          earlyReminderDays: earlyReminderEnabled ? earlyReminderDays : null,
           note,
           createdBy: session.user.id,
         },

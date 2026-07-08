@@ -38,6 +38,15 @@ const currencyCodeSchema = z.enum(['UZS', 'USD'], {
   error: "Valyuta noto'g'ri",
 })
 
+// "Ertaroq eslatilsinmi?" — shared by nasiya creation and later-payment sale.
+const earlyReminderEnabledSchema = z.boolean().optional().default(false)
+const earlyReminderDaysSchema = z
+  .number({ error: "Kunlar soni kiritilishi shart" })
+  .int("Kunlar soni butun son bo'lishi kerak")
+  .min(1, "Kamida 1 kun bo'lishi kerak")
+  .max(60, "Ko'pi bilan 60 kun bo'lishi mumkin")
+  .optional()
+
 const privateFileKeySchema = z
   .string()
   .trim()
@@ -140,6 +149,8 @@ export const createSaleSchema = z
     amountPaid: z.number().positive("To'langan summa musbat son bo'lishi kerak").optional(),
     dueDate: z.coerce.date().optional(),
     reminderEnabled: z.boolean().optional().default(false),
+    earlyReminderEnabled: earlyReminderEnabledSchema,
+    earlyReminderDays: earlyReminderDaysSchema,
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
     inputCurrency: currencyCodeSchema.optional(),
   })
@@ -155,6 +166,10 @@ export const createSaleSchema = z
       path: ['amountPaid'],
     },
   )
+  .refine((data) => !data.earlyReminderEnabled || data.earlyReminderDays !== undefined, {
+    message: "Necha kun oldin ekanligi kiritilishi shart",
+    path: ['earlyReminderDays'],
+  })
   .refine(
     (data) => data.amountPaid === undefined || data.amountPaid <= data.salePrice,
     {
@@ -235,12 +250,18 @@ export const createNasiyaSchema = z
     monthlyPayment: z.number().positive("Oylik to'lov musbat son bo'lishi kerak").optional(),
     startDate: z.coerce.date({ error: "Boshlanish sanasi kiritilishi shart" }),
     paymentMethod: paymentMethodSchema,
+    earlyReminderEnabled: earlyReminderEnabledSchema,
+    earlyReminderDays: earlyReminderDaysSchema,
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
     inputCurrency: currencyCodeSchema.optional(),
   })
   .refine((data) => data.downPayment <= data.totalAmount, {
     message: "Boshlang'ich to'lov umumiy summadan oshmasligi kerak",
     path: ['downPayment'],
+  })
+  .refine((data) => !data.earlyReminderEnabled || data.earlyReminderDays !== undefined, {
+    message: "Necha kun oldin ekanligi kiritilishi shart",
+    path: ['earlyReminderDays'],
   })
 
 export type CreateNasiyaInput = z.infer<typeof createNasiyaSchema>

@@ -69,6 +69,8 @@ export default function NewSotuvPage() {
   const [partialAmount, setPartialAmount] = useState('')
   const [partialDate, setPartialDate] = useState('')
   const [reminder, setReminder] = useState(false)
+  const [earlyReminder, setEarlyReminder] = useState(false)
+  const [earlyReminderDays, setEarlyReminderDays] = useState('3')
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
@@ -163,7 +165,8 @@ export default function NewSotuvPage() {
     salePrice.trim() &&
     payMethod &&
     fullyPaid !== null &&
-    (fullyPaid || (partialAmount.trim() && partialDate.trim()))
+    (fullyPaid || (partialAmount.trim() && partialDate.trim())) &&
+    (fullyPaid || !earlyReminder || (Number(earlyReminderDays) >= 1 && Number(earlyReminderDays) <= 60))
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -197,6 +200,8 @@ export default function NewSotuvPage() {
           amountPaid: fullyPaid ? undefined : Number(partialAmount),
           dueDate: fullyPaid ? undefined : partialDate,
           reminderEnabled: fullyPaid ? false : reminder,
+          earlyReminderEnabled: fullyPaid ? false : earlyReminder,
+          earlyReminderDays: !fullyPaid && earlyReminder ? Number(earlyReminderDays) : undefined,
           note: note.trim() || undefined,
         }),
       })
@@ -487,6 +492,37 @@ export default function NewSotuvPage() {
                     Eslatma yuborish
                   </label>
                 </div>
+                {reminder && (
+                  <div className="col-span-2 flex items-center gap-2">
+                    <input
+                      type="checkbox"
+                      id="early-reminder"
+                      checked={earlyReminder}
+                      onChange={(e) => setEarlyReminder(e.target.checked)}
+                      className="w-4 h-4 rounded border-zinc-300"
+                    />
+                    <label htmlFor="early-reminder" className="text-sm text-zinc-700 cursor-pointer">
+                      Ertaroq eslatilsinmi?
+                    </label>
+                  </div>
+                )}
+                {reminder && earlyReminder && (
+                  <div className="col-span-2">
+                    <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                      Necha kun oldin? <span className="text-red-500">*</span>
+                    </label>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={60}
+                      step={1}
+                      value={earlyReminderDays}
+                      onChange={(e) => setEarlyReminderDays(e.target.value)}
+                      placeholder="3"
+                      className="h-9 text-sm border-zinc-200 rounded"
+                    />
+                  </div>
+                )}
               </div>
             )}
           </div>

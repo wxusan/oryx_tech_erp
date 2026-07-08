@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, serverError } from '@/lib/api-helpers'
+import { normalizePhone } from '@/lib/phone'
 
 export async function GET(req: NextRequest) {
   try {
@@ -19,6 +20,10 @@ export async function GET(req: NextRequest) {
     const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 500)) : 200
     const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
 
+    // Phone search handles spaces/plus signs by also matching the normalized
+    // (digits-only) phone, so "90 123 45 67" finds "+998901234567".
+    const searchDigits = search ? normalizePhone(search) : null
+
     const customers = await prisma.customer.findMany({
       where: {
         shopId: resolved.shopId,
@@ -28,6 +33,7 @@ export async function GET(req: NextRequest) {
               OR: [
                 { name: { contains: search, mode: 'insensitive' } },
                 { phone: { contains: search, mode: 'insensitive' } },
+                ...(searchDigits ? [{ normalizedPhone: { contains: searchDigits } }] : []),
               ],
             }
           : {}),

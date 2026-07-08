@@ -37,6 +37,15 @@ export function tashkentDayRange(now = new Date()) {
   }
 }
 
+/**
+ * Today's calendar date in Asia/Tashkent as a `YYYY-MM-DD` string, suitable as
+ * the default value of an `<input type="date">`. Never derived from server
+ * local time or UTC directly (both can be off by a day from Tashkent).
+ */
+export function tashkentTodayInputValue(now = new Date()): string {
+  return tashkentDayRange(now).dayKey
+}
+
 export function tashkentMonthRange(now = new Date()) {
   const parts = tashkentParts(now)
   const start = utcFromTashkentDate(parts.year, parts.month, 1)

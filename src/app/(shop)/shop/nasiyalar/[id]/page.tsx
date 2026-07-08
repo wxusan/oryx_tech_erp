@@ -83,6 +83,30 @@ interface Nasiya {
   customer: { name: string; phone: string; passportPhotoUrl?: string | null }
   schedules: NasiyaSchedule[]
   payments: NasiyaPayment[]
+  paymentScore: {
+    score: number
+    label: string
+    color: 'green' | 'yellow' | 'red' | 'gray'
+    riskLevel: string
+    reason: string
+    factors: {
+      overdueScheduleCount: number
+      paidInstallmentCount: number
+      earlyPaymentCount: number
+      onTimePaymentCount: number
+      latePaymentCount: number
+      averageDaysEarlyLate: number
+      maxDaysLate: number
+      historyConfidence: string
+    }
+  }
+}
+
+const scoreCardStyles: Record<'green' | 'yellow' | 'red' | 'gray', string> = {
+  green: 'bg-emerald-100 text-emerald-700',
+  yellow: 'bg-amber-100 text-amber-700',
+  red: 'bg-red-100 text-red-700',
+  gray: 'bg-zinc-100 text-zinc-500',
 }
 
 type RowStatus = 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED'
@@ -421,6 +445,31 @@ export default function NasiyaDetailPage() {
           <div className="flex justify-between text-xs text-zinc-400 mt-1.5">
             <span>{fmt(0, currency)}</span>
             <span>{fmt(nasiya.finalNasiyaAmount, currency)}</span>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Payment behavior score */}
+      <Card className="rounded-lg">
+        <CardHeader>
+          <CardTitle>To'lov ishonchi</CardTitle>
+          <CardDescription>Mijozning to'lov tarixiga asoslangan baho</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <div className="flex items-center gap-3">
+            <span
+              className={`inline-block px-2.5 py-1 rounded text-sm font-medium ${scoreCardStyles[nasiya.paymentScore.color]}`}
+            >
+              {nasiya.paymentScore.label}
+            </span>
+            <span className="text-sm font-bold text-zinc-900">{nasiya.paymentScore.score}/100</span>
+          </div>
+          <p className="text-sm text-zinc-600">{nasiya.paymentScore.reason}</p>
+          <div className="grid grid-cols-2 gap-2 text-xs text-zinc-500 sm:grid-cols-4">
+            <div>Vaqtida: {nasiya.paymentScore.factors.earlyPaymentCount + nasiya.paymentScore.factors.onTimePaymentCount}</div>
+            <div>Kechikkan: {nasiya.paymentScore.factors.latePaymentCount}</div>
+            <div>Muddati o'tgan: {nasiya.paymentScore.factors.overdueScheduleCount}</div>
+            <div>Ishonch: {nasiya.paymentScore.factors.historyConfidence}</div>
           </div>
         </CardContent>
       </Card>

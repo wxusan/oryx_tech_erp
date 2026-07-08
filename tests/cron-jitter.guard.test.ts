@@ -9,12 +9,13 @@ function read(rel: string): string {
 describe('cron schedules planned reminders with jitter', () => {
   const cron = read('src/app/api/cron/reminders/route.ts')
 
-  it('all four planned reminder types use the deterministic 11:00 jitter', () => {
+  it('all six planned reminder types use the deterministic 11:00 jitter', () => {
     expect(cron).toContain("import { scheduledReminderSendAt } from '@/lib/notification-schedule'")
     // No planned reminder is scheduled at raw `new Date()` (would fire immediately).
     expect(cron).not.toContain('scheduledAt: new Date(),')
     const count = cron.split('scheduledAt: scheduledReminderSendAt(dedupeKey)').length - 1
-    expect(count).toBe(4) // REMINDER, OVERDUE, SALE_REMINDER, SALE_OVERDUE
+    // REMINDER, OVERDUE, EARLY_REMINDER, SALE_REMINDER, SALE_OVERDUE, SALE_EARLY_REMINDER
+    expect(count).toBe(6)
   })
 
   it('only busts caches for shops that actually transitioned to OVERDUE (no thrash)', () => {

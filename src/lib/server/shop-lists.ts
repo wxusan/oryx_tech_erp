@@ -6,6 +6,25 @@ import { prisma } from '@/lib/prisma'
 import { shopCacheTag } from '@/lib/server/cache-tags'
 import { enrichLogsWithActors } from '@/lib/server/log-actors'
 import { deriveNasiyaOverdue, type NasiyaDisplayStatus } from '@/lib/nasiya-utils'
+import { computeNasiyaPaymentScore, type NasiyaPaymentScore } from '@/lib/nasiya-payment-score'
+
+/**
+ * Sale/nasiya summary for a sold/returned device — purchase price vs. sold
+ * price, kept separate from any nasiya interest (accounting already splits
+ * `totalAmount` = original device price from `interestAmount`, so device
+ * profit never silently absorbs interest income). `profit` is `null` for a
+ * returned device rather than a misleading number.
+ */
+export interface ShopDeviceSaleInfo {
+  saleType: 'CASH' | 'NASIYA'
+  soldPrice: number
+  interestAmount: number
+  profit: number | null
+  customerName: string | null
+  soldAt: string
+  returned: boolean
+  refundAmount: number | null
+}
 
 export interface ShopDeviceListItem {
   id: string
@@ -17,6 +36,10 @@ export interface ShopDeviceListItem {
   imei: string
   status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
   createdAt: string
+  note: string | null
+  supplierName: string | null
+  supplierPhone: string | null
+  saleInfo: ShopDeviceSaleInfo | null
 }
 
 export interface ShopNasiyaListItem {
@@ -38,6 +61,7 @@ export interface ShopNasiyaListItem {
   overdueCount: number
   nextPaymentDate: string | null
   createdAt: string
+  note: string | null
   device: { id: string; model: string; imei: string }
   customer: { id: string; name: string; phone: string }
   schedules: {
@@ -46,6 +70,8 @@ export interface ShopNasiyaListItem {
     delayedUntil: string | null
     status: string
   }[]
+  /** Professional payment-behavior score (docs/nasiya-payment-scoring.md). */
+  paymentScore: NasiyaPaymentScore
 }
 
 export interface ShopLogListItem {
@@ -82,6 +108,52 @@ export async function getShopDevicesList(shopId: string): Promise<ShopDeviceList
   )()
 }
 
+/** Pick whichever of the device's latest sale/nasiya is more recent and build its profit summary. */
+function buildDeviceSaleInfo(device: {
+  status: string
+  purchasePrice: unknown
+  sales: { salePrice: unknown; createdAt: Date; customer: { name: string } }[]
+  nasiya: { totalAmount: unknown; interestAmount: unknown; createdAt: Date; customer: { name: string } }[]
+  returns: { refundAmount: unknown; createdAt: Date }[]
+}): ShopDeviceSaleInfo | null {
+  const latestSale = device.sales[0]
+  const latestNasiya = device.nasiya[0]
+  if (!latestSale && !latestNasiya) return null
+
+  const useNasiya = !!latestNasiya && (!latestSale || latestNasiya.createdAt > latestSale.createdAt)
+  const purchasePrice = Number(device.purchasePrice)
+  const returned = device.status === 'RETURNED'
+  const latestReturn = device.returns[0]
+  const refundAmount = latestReturn ? Number(latestReturn.refundAmount) : null
+
+  if (useNasiya && latestNasiya) {
+    // totalAmount = original device price BEFORE interest (see Nasiya model comment) —
+    // never fold interest into device profit.
+    const soldPrice = Number(latestNasiya.totalAmount)
+    return {
+      saleType: 'NASIYA',
+      soldPrice,
+      interestAmount: Number(latestNasiya.interestAmount),
+      profit: returned ? null : soldPrice - purchasePrice,
+      customerName: latestNasiya.customer.name,
+      soldAt: latestNasiya.createdAt.toISOString(),
+      returned,
+      refundAmount,
+    }
+  }
+  const soldPrice = Number(latestSale!.salePrice)
+  return {
+    saleType: 'CASH',
+    soldPrice,
+    interestAmount: 0,
+    profit: returned ? null : soldPrice - purchasePrice,
+    customerName: latestSale!.customer.name,
+    soldAt: latestSale!.createdAt.toISOString(),
+    returned,
+    refundAmount,
+  }
+}
+
 async function getShopDevicesListFresh(shopId: string): Promise<ShopDeviceListItem[]> {
   const devices = await prisma.device.findMany({
     where: { shopId, deletedAt: null },
@@ -97,13 +169,43 @@ async function getShopDevicesListFresh(shopId: string): Promise<ShopDeviceListIt
       imei: true,
       status: true,
       createdAt: true,
+      note: true,
+      supplierPhone: true,
+      supplier: { select: { name: true } },
+      sales: {
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { salePrice: true, createdAt: true, customer: { select: { name: true } } },
+      },
+      nasiya: {
+        where: { deletedAt: null },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { totalAmount: true, interestAmount: true, createdAt: true, customer: { select: { name: true } } },
+      },
+      returns: {
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        select: { refundAmount: true, createdAt: true },
+      },
     },
   })
 
   return devices.map((device) => ({
-    ...device,
+    id: device.id,
+    model: device.model,
+    color: device.color,
+    storage: device.storage,
+    batteryHealth: device.batteryHealth,
     purchasePrice: Number(device.purchasePrice),
+    imei: device.imei,
+    status: device.status,
     createdAt: device.createdAt.toISOString(),
+    note: device.note,
+    supplierName: device.supplier?.name ?? null,
+    supplierPhone: device.supplierPhone,
+    saleInfo: buildDeviceSaleInfo(device),
   }))
 }
 
@@ -137,6 +239,7 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
       status: true,
       isImported: true,
       createdAt: true,
+      note: true,
       customer: {
         select: {
           id: true,
@@ -160,6 +263,7 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
           status: true,
           expectedAmount: true,
           paidAmount: true,
+          paidAt: true,
         },
       },
     },
@@ -171,16 +275,17 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
 
   return nasiyalar
     .map((nasiya) => {
-      const derived = deriveNasiyaOverdue(
+      const scheduleInputs = nasiya.schedules.map((s) => ({
+        status: s.status,
+        dueDate: s.dueDate,
+        delayedUntil: s.delayedUntil,
+        expectedAmount: Number(s.expectedAmount),
+        paidAmount: Number(s.paidAmount),
+      }))
+      const derived = deriveNasiyaOverdue({ status: nasiya.status, schedules: scheduleInputs }, now)
+      const paymentScore = computeNasiyaPaymentScore(
         {
-          status: nasiya.status,
-          schedules: nasiya.schedules.map((s) => ({
-            status: s.status,
-            dueDate: s.dueDate,
-            delayedUntil: s.delayedUntil,
-            expectedAmount: Number(s.expectedAmount),
-            paidAmount: Number(s.paidAmount),
-          })),
+          schedules: nasiya.schedules.map((s, i) => ({ ...scheduleInputs[i], paidAt: s.paidAt })),
         },
         now,
       )
@@ -201,6 +306,7 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
         overdueCount: derived.overdueCount,
         nextPaymentDate: derived.nextPaymentDate?.toISOString() ?? null,
         createdAt: nasiya.createdAt.toISOString(),
+        note: nasiya.note,
         customer: nasiya.customer,
         device: nasiya.device,
         schedules: nasiya.schedules.map((schedule) => ({
@@ -209,6 +315,7 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
           delayedUntil: schedule.delayedUntil?.toISOString() ?? null,
           status: schedule.status,
         })),
+        paymentScore,
       }
     })
     .sort((left, right) => {

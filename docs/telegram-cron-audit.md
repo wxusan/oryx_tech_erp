@@ -28,7 +28,10 @@ Recipients are **always** filtered to active, non-deleted shop admins with a **v
 | 10 | `OVERDUE` | `nasiyaOverdueMessage` | Nasiya schedule overdue | **Scheduled 11:00–11:30** | Device photo → text | `NasiyaSchedule` |
 | 11 | `SALE_REMINDER` | `saleDueTodayMessage` | Sale debt due today | **Scheduled 11:00–11:30** | Device photo → text | `Sale` |
 | 12 | `SALE_OVERDUE` | `saleOverdueMessage` | Sale debt overdue | **Scheduled 11:00–11:30** | Device photo → text | `Sale` |
-| 13 | Bot `/start` replies | `startSuperAdminMessage` / `startShopAdminMessage` / `startUnknownMessage` / `unknownCommandMessage` | Telegram webhook | Immediate (direct reply) | None (no device context) | — |
+| 13 | `EARLY_REMINDER` | `nasiyaEarlyReminderMessage` | Nasiya schedule due in N days ("Ertaroq eslatilsinmi?") | **Scheduled 11:00–11:30** | Device photo → text | `NasiyaSchedule` |
+| 14 | `SALE_EARLY_REMINDER` | `saleEarlyReminderMessage` | Later-payment sale due in N days ("Ertaroq eslatilsinmi?") | **Scheduled 11:00–11:30** | Device photo → text | `Sale` |
+| 15 | `NASIYA_COMPLETED` | `nasiyaCompletedMessage` | Nasiya's last schedule fully paid (status → COMPLETED) | Immediate | Device photo → text | `Nasiya` |
+| 16 | Bot `/start` replies | `startSuperAdminMessage` / `startShopAdminMessage` / `startUnknownMessage` / `unknownCommandMessage` | Telegram webhook | Immediate (direct reply) | None (no device context) | — |
 
 "Device photo → text" = attaches the related device's first photo as a short-lived signed URL when one exists; otherwise sends the message as text.
 
@@ -54,6 +57,7 @@ Recipients are **always** filtered to active, non-deleted shop admins with a **v
 - **What it processes:** `NasiyaSchedule` (due today / overdue) and `Sale` (due today / overdue) for ACTIVE shops with `reminderEnabled = true`, then drains the whole notification queue.
 - **Idempotency:** each reminder row has a `dedupeKey` = `TYPE:<TashkentDay>:<telegramId>:<entityId>` with a unique constraint, so repeated runs never duplicate. OVERDUE status writes are idempotent, and cache busts fire only on real transitions.
 - **Scheduled send time:** planned reminders get `scheduledAt = 11:00 Asia/Tashkent + deterministic jitter (0–29 min)` (`scheduledReminderSendAt`). The drain only sends rows whose `scheduledAt` has arrived, so messages spread across 11:00–11:30 instead of bursting.
+- **Early reminders ("Ertaroq eslatilsinmi?"):** an opt-in extra reminder N days before a nasiya schedule's or later-payment sale's due date, IN ADDITION to (not instead of) the due-day reminder above. Set per-nasiya/per-sale via `earlyReminderEnabled` + `earlyReminderDays` (1–60). The cron fetches unpaid schedules/sales due in the next ~61 days (bounded), then in JS computes `daysUntil` (via `tashkentDayRange` on the due date) and only creates a notification when it exactly equals `earlyReminderDays` — so it fires once, on the correct day, per schedule. Dedupe keys `EARLY_REMINDER:<day>:<telegramId>:<scheduleId>` / `SALE_EARLY_REMINDER:<day>:<telegramId>:<saleId>` make re-runs idempotent. If the early date has already passed when the feature is turned on, it's silently skipped (no backfill) — the due-day reminder is unaffected.
 
 ## Ops visibility
 

@@ -88,11 +88,23 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
+        returns: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            refundAmount: true,
+            refundMethod: true,
+            note: true,
+            createdAt: true,
+          },
+        },
         nasiya: {
           where: { deletedAt: null, status: { not: 'CANCELLED' } },
           select: {
             id: true,
             totalAmount: true,
+            interestPercent: true,
+            interestAmount: true,
             finalNasiyaAmount: true,
             remainingAmount: true,
             customer: {

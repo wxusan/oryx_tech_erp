@@ -53,10 +53,19 @@ interface NasiyaSchedule {
 interface Nasiya {
   id: string
   totalAmount: number
+  interestPercent: number
+  interestAmount: number
   finalNasiyaAmount: number
   remainingAmount: number
   customer: { name: string; phone: string }
   schedules: NasiyaSchedule[]
+}
+
+interface DeviceReturnInfo {
+  refundAmount: number
+  refundMethod: string | null
+  note: string | null
+  createdAt: string
 }
 
 interface Device {
@@ -74,6 +83,7 @@ interface Device {
   createdAt: string
   sales?: Sale[]
   nasiya?: Nasiya[]
+  returns?: DeviceReturnInfo[]
 }
 
 const statusLabels: Record<string, string> = {
@@ -474,7 +484,10 @@ export default function QurilmaDetailPage() {
   const showSaleActions = device.status === 'IN_STOCK'
   const latestSale = device.sales?.[0]
   const saleHasDebt = latestSale ? Number(latestSale.remainingAmount) > 0 && !latestSale.paidFully : false
+  const saleProfit = latestSale ? latestSale.salePrice - device.purchasePrice : null
   const latestNasiya = device.nasiya?.[0]
+  const nasiyaProfit = latestNasiya ? latestNasiya.totalAmount - device.purchasePrice : null
+  const latestReturn = device.returns?.[0]
   const nasiyaPct = latestNasiya && latestNasiya.finalNasiyaAmount > 0
     ? Math.round(
         ((latestNasiya.finalNasiyaAmount - latestNasiya.remainingAmount) / latestNasiya.finalNasiyaAmount) * 100
@@ -629,6 +642,12 @@ export default function QurilmaDetailPage() {
               <span className="text-zinc-900 font-medium">{fmt(latestSale.salePrice, currency)}</span>
             </div>
             <div className="flex gap-4 text-sm">
+              <span className="text-zinc-500 w-32">Farq / Foyda</span>
+              <span className={saleProfit != null && saleProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
+                {fmt(saleProfit ?? 0, currency)}
+              </span>
+            </div>
+            <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">To'langan</span>
               <span className="text-zinc-900 font-medium">{fmt(latestSale.amountPaid, currency)}</span>
             </div>
@@ -690,6 +709,24 @@ export default function QurilmaDetailPage() {
                 <span className="text-zinc-900 font-medium">{latestNasiya.customer.phone}</span>
               </div>
               <div className="flex gap-4 text-sm">
+                <span className="text-zinc-500 w-32">Sotuv narxi</span>
+                <span className="text-zinc-900 font-medium">{fmt(latestNasiya.totalAmount, currency)}</span>
+              </div>
+              {latestNasiya.interestAmount > 0 && (
+                <div className="flex gap-4 text-sm">
+                  <span className="text-zinc-500 w-32">Foiz daromadi</span>
+                  <span className="text-zinc-900 font-medium">
+                    {latestNasiya.interestPercent}% · {fmt(latestNasiya.interestAmount, currency)}
+                  </span>
+                </div>
+              )}
+              <div className="flex gap-4 text-sm">
+                <span className="text-zinc-500 w-32">Sotuv farqi</span>
+                <span className={nasiyaProfit != null && nasiyaProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
+                  {fmt(nasiyaProfit ?? 0, currency)}
+                </span>
+              </div>
+              <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Nasiya jami</span>
                 <span className="text-zinc-900 font-medium">{fmt(latestNasiya.finalNasiyaAmount, currency)}</span>
               </div>
@@ -715,6 +752,43 @@ export default function QurilmaDetailPage() {
                 Nasiyani ko'rish
               </Button>
             </Link>
+          </div>
+        </div>
+      )}
+
+      {/* Return info section — no profit shown here, the sale was reversed */}
+      {device.status === 'RETURNED' && latestReturn && (
+        <div className="border border-zinc-200 rounded overflow-hidden">
+          <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
+            <span className="text-sm font-semibold text-zinc-900">Qaytarish ma&apos;lumotlari</span>
+          </div>
+          <div className="p-4 space-y-2">
+            <div className="flex gap-4 text-sm">
+              <span className="text-zinc-500 w-32">Holat</span>
+              <span className="text-blue-700 font-medium">Qaytarilgan</span>
+            </div>
+            {latestReturn.refundAmount > 0 && (
+              <div className="flex gap-4 text-sm">
+                <span className="text-zinc-500 w-32">Qaytarilgan summa</span>
+                <span className="text-zinc-900 font-medium">{fmt(latestReturn.refundAmount, currency)}</span>
+              </div>
+            )}
+            {latestReturn.refundMethod && (
+              <div className="flex gap-4 text-sm">
+                <span className="text-zinc-500 w-32">To&apos;lov usuli</span>
+                <span className="text-zinc-900 font-medium">{paymentMethodLabel(latestReturn.refundMethod)}</span>
+              </div>
+            )}
+            <div className="flex gap-4 text-sm">
+              <span className="text-zinc-500 w-32">Sana</span>
+              <span className="text-zinc-900 font-medium">{uzDate(latestReturn.createdAt)}</span>
+            </div>
+            {latestReturn.note && (
+              <div className="flex gap-4 text-sm">
+                <span className="text-zinc-500 w-32">Izoh</span>
+                <span className="text-zinc-900 font-medium">{latestReturn.note}</span>
+              </div>
+            )}
           </div>
         </div>
       )}

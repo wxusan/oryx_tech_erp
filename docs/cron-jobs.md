@@ -20,7 +20,8 @@ On every run (all steps are idempotent, so running every 10 min is safe):
 
 1. **Generate due-today reminders** — `NasiyaSchedule` and `Sale` whose due date is today (Tashkent), still unpaid, `reminderEnabled = true`, ACTIVE shop. Upserts a `REMINDER` / `SALE_REMINDER` notification per verified admin (deduped by Tashkent day).
 2. **Generate overdue alerts** — schedules/sales past due and still unpaid. Upserts `OVERDUE` / `SALE_OVERDUE` notifications, marks the schedule + parent nasiya `OVERDUE`, and busts that shop's caches **only when a real transition happened**.
-3. **Drain the queue** — `processPendingNotifications()` sends every notification whose `scheduledAt` has arrived (immediate events + any planned reminders now inside their window).
+3. **Generate early reminders ("Ertaroq eslatilsinmi?")** — `NasiyaSchedule` / `Sale` rows with `earlyReminderEnabled = true` and `reminderEnabled = true`, due in the next ~61 days. Upserts `EARLY_REMINDER` / `SALE_EARLY_REMINDER` only on the day that is exactly `earlyReminderDays` before the due date — the due-day reminder from step 1 still fires separately on the day itself.
+4. **Drain the queue** — `processPendingNotifications()` sends every notification whose `scheduledAt` has arrived (immediate events + any planned reminders now inside their window).
 
 ### When messages actually go out (11:00 jitter)
 
@@ -32,8 +33,8 @@ scheduledAt = 11:00 Asia/Tashkent (today) + deterministicJitter(dedupeKey)   // 
 
 so they spread across **11:00–11:30 Asia/Tashkent** instead of all firing at once. The jitter is deterministic (same reminder → same minute every run), so re-runs never move or duplicate a message. A cron run inside the window delivers them; with the 10-minute cadence, delivery lands in ~10-minute waves across 11:00–11:30.
 
-- **Immediate** (sent within ~seconds, on the next drain): sale, nasiya, payment, device added/returned/restocked, `/start` replies.
-- **Planned around 11:00 Tashkent**: nasiya due-today, nasiya overdue, sale due-today, sale overdue.
+- **Immediate** (sent within ~seconds, on the next drain): sale, nasiya, payment, nasiya completed, device added/returned/restocked, `/start` replies.
+- **Planned around 11:00 Tashkent**: nasiya due-today, nasiya overdue, nasiya early reminder, sale due-today, sale overdue, sale early reminder.
 
 Expected Tashkent send window for planned reminders: **11:00 → 11:29**.
 
