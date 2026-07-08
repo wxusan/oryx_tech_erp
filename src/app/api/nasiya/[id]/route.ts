@@ -18,6 +18,7 @@ import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { computeNasiyaPaymentScore } from '@/lib/nasiya-payment-score'
+import { getShopCurrencyContext } from '@/lib/server/currency'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -125,16 +126,23 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     if (!nasiya) return notFound('Nasiya topilmadi')
 
-    const paymentScore = computeNasiyaPaymentScore({
-      schedules: nasiya.schedules.map((s) => ({
-        status: s.status,
-        dueDate: s.dueDate,
-        delayedUntil: s.delayedUntil,
-        expectedAmount: Number(s.expectedAmount),
-        paidAmount: Number(s.paidAmount),
-        paidAt: s.paidAt,
-      })),
-    })
+    // Reason text must respect the shop's selected display currency, not
+    // hardcode UZS — see docs/nasiya-payment-scoring.md.
+    const currency = await getShopCurrencyContext(nasiya.shopId)
+    const paymentScore = computeNasiyaPaymentScore(
+      {
+        schedules: nasiya.schedules.map((s) => ({
+          status: s.status,
+          dueDate: s.dueDate,
+          delayedUntil: s.delayedUntil,
+          expectedAmount: Number(s.expectedAmount),
+          paidAmount: Number(s.paidAmount),
+          paidAt: s.paidAt,
+        })),
+      },
+      new Date(),
+      currency,
+    )
 
     return ok({ ...nasiya, paymentScore }, "Nasiya ma'lumotlari")
   } catch (err) {

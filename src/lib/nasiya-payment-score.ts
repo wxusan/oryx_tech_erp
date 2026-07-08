@@ -26,6 +26,7 @@ import {
   isScheduleOverdue,
   type OverdueScheduleInput,
 } from '@/lib/nasiya-utils'
+import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
 
 /** A grace day is added to the due date before a paid installment counts as late. */
 export const GRACE_DAYS = 1
@@ -65,9 +66,7 @@ function toTime(value: Date | string): number {
   return (value instanceof Date ? value : new Date(value)).getTime()
 }
 
-function formatSom(value: number): string {
-  return `${Math.round(value).toLocaleString('ru-RU')} so'm`
-}
+const DEFAULT_CURRENCY: CurrencyContext = { currency: 'UZS', usdUzsRate: null }
 
 function buildHistoryReason(
   paidInstallmentCount: number,
@@ -83,11 +82,16 @@ function buildHistoryReason(
 
 /**
  * Compute the payment-behavior score for one nasiya from its schedule rows.
- * Deterministic: same input + same `now` always yields the same output.
+ * Deterministic: same input + same `now`/`currency` always yields the same
+ * output. `currency` only affects the human-readable `reason` string — the
+ * score/label/color/factors are currency-independent, computed purely from
+ * UZS amounts (the DB's base currency). Scoring math must never depend on
+ * display currency; only text formatting does.
  */
 export function computeNasiyaPaymentScore(
   input: { schedules: NasiyaScoreScheduleInput[] },
   now: Date = new Date(),
+  currency: CurrencyContext = DEFAULT_CURRENCY,
 ): NasiyaPaymentScore {
   const schedules = input.schedules
 
@@ -190,7 +194,7 @@ export function computeNasiyaPaymentScore(
     color = 'red'
     label = 'Kechiktiradi'
     riskLevel = 'HIGH'
-    reason = `Hozir ${formatSom(currentOverdueAmount)} muddati o'tgan`
+    reason = `Hozir ${formatMoneyByCurrency(currentOverdueAmount, currency.currency, currency.usdUzsRate)} muddati o'tgan`
   } else if (paidInstallmentCount === 0) {
     color = 'gray'
     label = 'Yangi mijoz'

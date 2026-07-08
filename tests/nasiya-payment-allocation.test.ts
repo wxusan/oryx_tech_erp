@@ -1,0 +1,135 @@
+import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { nasiyaPaymentMessage } from '@/lib/telegram-templates'
+
+function read(rel: string): string {
+  return readFileSync(resolve(process.cwd(), rel), 'utf8')
+}
+
+const baseData = {
+  shopName: 'Test Shop',
+  customerName: 'Ali Valiyev',
+  customerPhone: '+998901234567',
+  device: { deviceModel: 'iPhone 13', imei: '123456789012345' },
+  paymentMethod: 'CASH',
+  adminName: 'Admin',
+  currency: { currency: 'UZS' as const, usdUzsRate: null },
+}
+
+describe('nasiyaPaymentMessage — overpayment allocation breakdown', () => {
+  it('shows no breakdown for a single-schedule payment (unchanged behavior)', () => {
+    const msg = nasiyaPaymentMessage({
+      ...baseData,
+      month: 1,
+      paidAmount: 500_000,
+      remaining: 2_000_000,
+      allocations: [{ monthNumber: 1, amount: 500_000 }],
+    })
+    expect(msg).not.toContain('joriy oy uchun yopildi')
+    expect(msg).not.toContain('oldindan')
+  })
+
+  it('breaks down current-month + prepaid-next-month amounts for an overpayment', () => {
+    const msg = nasiyaPaymentMessage({
+      ...baseData,
+      month: 'MULTIPLE',
+      paidAmount: 600_000,
+      remaining: 1_900_000,
+      allocations: [
+        { monthNumber: 1, amount: 500_000 },
+        { monthNumber: 2, amount: 100_000 },
+      ],
+    })
+    expect(msg).toMatch(/500.?000/)
+    expect(msg).toContain('joriy oy uchun yopildi')
+    expect(msg).toMatch(/100.?000/)
+    expect(msg).toContain("2-oyga oldindan qo'llandi")
+  })
+
+  it('breaks down a payment spanning three schedules in order', () => {
+    const msg = nasiyaPaymentMessage({
+      ...baseData,
+      month: 'MULTIPLE',
+      paidAmount: 1_300_000,
+      remaining: 700_000,
+      allocations: [
+        { monthNumber: 1, amount: 500_000 },
+        { monthNumber: 2, amount: 500_000 },
+        { monthNumber: 3, amount: 300_000 },
+      ],
+    })
+    const idx1 = msg.indexOf('joriy oy uchun yopildi')
+    const idx2 = msg.indexOf('2-oyga oldindan')
+    const idx3 = msg.indexOf('3-oyga oldindan')
+    expect(idx1).toBeGreaterThan(-1)
+    expect(idx2).toBeGreaterThan(idx1)
+    expect(idx3).toBeGreaterThan(idx2)
+  })
+
+  it('respects the shop currency for both the total and the breakdown lines', () => {
+    const msg = nasiyaPaymentMessage({
+      ...baseData,
+      month: 'MULTIPLE',
+      paidAmount: 600_000,
+      remaining: 1_900_000,
+      currency: { currency: 'USD', usdUzsRate: 12_500 },
+      allocations: [
+        { monthNumber: 1, amount: 500_000 },
+        { monthNumber: 2, amount: 100_000 },
+      ],
+    })
+    // Telegram messages show "$X (~Y so'm)" for USD shops by design (formatMoneyWithBase,
+    // pre-existing across every message type) — the breakdown must follow that same
+    // convention, not switch to a different format just because it's a new line.
+    expect(msg).toContain('$')
+    expect(msg).toMatch(/\$40\.00 \(~500.?000 so'm\) joriy oy uchun yopildi/)
+    expect(msg).toMatch(/\$8\.00 \(~100.?000 so'm\) 2-oyga oldindan qo'llandi/)
+  })
+})
+
+describe('nasiya payment route: chronological allocation, validation, idempotency (source guards)', () => {
+  const source = read('src/app/api/nasiya/[id]/payment/route.ts')
+
+  it('sorts overflow allocation by effective due date (oldest unpaid schedule first)', () => {
+    expect(source).toContain('leftDue.getTime() - rightDue.getTime() || left.monthNumber - right.monthNumber')
+  })
+
+  it('rejects a payment greater than the total outstanding balance', () => {
+    expect(source).toContain('if (amountUzs > totalOutstanding)')
+    expect(source).toContain("To'lov qolgan nasiya summasidan oshib ketdi")
+  })
+
+  it('allocates across multiple schedules in a single loop until the payment is exhausted', () => {
+    expect(source).toContain('for (const schedule of allocationRows)')
+    expect(source).toContain('remainingPayment -= applied')
+  })
+
+  it('marks a schedule PAID (with paidAt) only when fully covered, otherwise PARTIAL', () => {
+    expect(source).toContain('const isFullyPaid = newPaidAmount >= Number(schedule.expectedAmount)')
+    expect(source).toContain('paidAt: isFullyPaid ? date : null')
+    expect(source).toContain("isPartial ? 'PARTIAL'")
+  })
+
+  it('is idempotent: a repeated request with the same Idempotency-Key returns the existing payment, no double-allocation', () => {
+    expect(source).toContain('existingPayment')
+    expect(source).toContain('duplicate: true')
+  })
+
+  it('marks the nasiya COMPLETED only on the real transition, in the same transaction as the allocation', () => {
+    expect(source).toContain("newStatus === 'COMPLETED' && nasiya.status !== 'COMPLETED'")
+  })
+
+  it('passes the per-schedule allocation breakdown into the Telegram message', () => {
+    expect(source).toContain('allocations: allocations.map((a) => ({ monthNumber: a.monthNumber, amount: a.amount }))')
+  })
+})
+
+describe('cron reminders use per-schedule remaining amount (respects prepayment), not the flat monthly amount', () => {
+  it('due-today and overdue reminders compute amountDue from outstandingAmount(schedule)', () => {
+    const cron = read('src/app/api/cron/reminders/route.ts')
+    expect(cron).toContain('amountDue: outstandingAmount(schedule.expectedAmount, schedule.paidAmount)')
+    // A fully-prepaid schedule becomes PAID and is excluded from both queries below.
+    expect(cron).toContain("status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] }")
+  })
+})

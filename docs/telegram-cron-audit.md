@@ -12,6 +12,8 @@ Every business event writes a row to the `Notification` table (`type`, `message`
 
 Recipients are **always** filtered to active, non-deleted shop admins with a **verified** Telegram ID (`telegramVerifiedAt != null`). Unverified IDs never receive anything.
 
+**Currency in Telegram text (deliberate, pre-existing convention — not changed by the currency-consistency fix):** every money value in a Telegram message goes through `telegramMoney()` → `formatMoneyWithBase()`. For a UZS shop this is a plain `"2 450 000 so'm"`. For a USD shop it is **`"$196.00 (~2 450 000 so'm)"`** — both currencies together, on purpose, because Telegram is an internal admin channel where the UZS reference is useful even when the shop displays USD in its UI. This is different from shop UI pages (`/shop/*`), which show **only** the shop's selected currency with no UZS reference — see `docs/nasiya-payment-allocation.md` §9 and `docs/nasiya-payment-scoring.md` for the UI-side rule. Do not "fix" the `$X (~Y so'm)` pattern in Telegram text; it is intentional and covered by `tests/currency.test.ts`.
+
 ## Message inventory
 
 | # | Type | Template | Trigger | Immediate / Scheduled | Image now | relatedType |
@@ -20,7 +22,7 @@ Recipients are **always** filtered to active, non-deleted shop admins with a **v
 | 2 | `SALE` | `deviceSoldMessage` | Device sold (`.../sell`) | Immediate | Device photo → text | `Sale` |
 | 3 | `NASIYA` | `nasiyaCreatedMessage` | Nasiya created (`.../nasiya`) | Immediate | Device photo → text | `Nasiya` |
 | 4 | `NASIYA_IMPORTED` | `nasiyaImportedMessage` | Old nasiya import | Immediate | Device photo → text | `Nasiya` |
-| 5 | `PAYMENT_RECEIVED` (nasiya) | `nasiyaPaymentMessage` | Nasiya payment | Immediate | Device photo → text | `NasiyaSchedule` / `Nasiya` |
+| 5 | `PAYMENT_RECEIVED` (nasiya) | `nasiyaPaymentMessage` | Nasiya payment — includes a per-schedule allocation breakdown line ("X joriy oy uchun yopildi" / "Y N-oyga oldindan qo'llandi") when the payment spans more than one schedule (overpayment) | Immediate | Device photo → text | `NasiyaSchedule` / `Nasiya` |
 | 6 | `PAYMENT_RECEIVED` (sale) | `salePaymentMessage` | Sale debt payment | Immediate | Device photo → text | `Sale` |
 | 7 | `RETURN` | `deviceReturnedMessage` | Device returned | Immediate | Device photo → text | `DeviceReturn` |
 | 8 | `RESTOCK` | `deviceRestockedMessage` | Device restocked | Immediate | Device photo → text | `Device` |

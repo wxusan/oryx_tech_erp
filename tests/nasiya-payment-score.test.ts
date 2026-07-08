@@ -193,3 +193,44 @@ describe('computeNasiyaPaymentScore', () => {
     expect(result.color).not.toBe('green')
   })
 })
+
+describe('computeNasiyaPaymentScore — currency-aware reason text', () => {
+  const overdueSchedules = [schedule({ dueDate: new Date('2026-06-01'), expectedAmount: 2_450_000, paidAmount: 0 })]
+
+  it('defaults to UZS ("so\'m") when no currency is passed', () => {
+    const result = computeNasiyaPaymentScore({ schedules: overdueSchedules }, NOW)
+    expect(result.reason).toContain("so'm")
+    expect(result.reason).not.toContain('$')
+  })
+
+  it('UZS mode: shows so\'m, never a dollar sign', () => {
+    const result = computeNasiyaPaymentScore({ schedules: overdueSchedules }, NOW, { currency: 'UZS', usdUzsRate: null })
+    expect(result.reason).toContain("so'm")
+    expect(result.reason).not.toContain('$')
+  })
+
+  it('USD mode: shows a dollar amount, never raw UZS "so\'m" text', () => {
+    const result = computeNasiyaPaymentScore({ schedules: overdueSchedules }, NOW, { currency: 'USD', usdUzsRate: 12_500 })
+    expect(result.reason).toContain('$')
+    expect(result.reason).not.toContain("so'm")
+    // 2,450,000 / 12,500 = 196.00
+    expect(result.reason).toContain('$196.00')
+  })
+
+  it('the score/label/color/factors never change with currency — only reason text formatting does', () => {
+    const uzs = computeNasiyaPaymentScore({ schedules: overdueSchedules }, NOW, { currency: 'UZS', usdUzsRate: null })
+    const usd = computeNasiyaPaymentScore({ schedules: overdueSchedules }, NOW, { currency: 'USD', usdUzsRate: 12_500 })
+    expect(usd.score).toBe(uzs.score)
+    expect(usd.color).toBe(uzs.color)
+    expect(usd.label).toBe(uzs.label)
+    expect(usd.factors).toEqual(uzs.factors)
+  })
+
+  it('non-overdue reasons (history-based, no money amount) are unaffected by currency', () => {
+    const noHistory = computeNasiyaPaymentScore({ schedules: [schedule({ dueDate: new Date('2026-08-01') })] }, NOW, {
+      currency: 'USD',
+      usdUzsRate: 12_500,
+    })
+    expect(noHistory.reason).toBe("Hali to'lov tarixi yetarli emas")
+  })
+})

@@ -149,7 +149,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         }),
       ]
 
-      const allocations: { scheduleId: string; amount: number; paidAfter: number }[] = []
+      const allocations: { scheduleId: string; amount: number; paidAfter: number; monthNumber: number }[] = []
 
       if (deferredToNext) {
         const updatedSchedule = await tx.nasiyaSchedule.updateMany({
@@ -223,7 +223,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             throw { status: 409, message: "To'lov bir vaqtda yangilangan, qayta urinib ko'ring" }
           }
 
-          allocations.push({ scheduleId: schedule.id, amount: applied, paidAfter: newPaidAmount })
+          allocations.push({ scheduleId: schedule.id, amount: applied, paidAfter: newPaidAmount, monthNumber: schedule.monthNumber })
           remainingPayment -= applied
         }
 
@@ -293,6 +293,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           note: auditNote,
           adminName: session.user.name,
           currency,
+          allocations: allocations.map((a) => ({ monthNumber: a.monthNumber, amount: a.amount })),
         })
         const completedMessage = justCompleted
           ? nasiyaCompletedMessage({

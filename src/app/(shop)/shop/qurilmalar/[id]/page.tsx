@@ -115,9 +115,8 @@ function deviceActionLabel(action: string) {
   return action
 }
 
-function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
-  if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
-  return Number(n).toLocaleString('ru-RU') + " so'm"
+function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']) {
+  return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
 }
 
 function getDeviceImageSrc(imageUrl: string) {

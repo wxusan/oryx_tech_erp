@@ -94,14 +94,39 @@ payment can never earn "Ishonchli mijoz":
   though it's the only data point — "1 ta to'lovdan 1 tasi kechikkan (eng
   ko'pi 5 kun)".
 - **Currently has an overdue unpaid schedule of 2,400,000 so'm**, even with a
-  spotless history → red, "Hozir 2 400 000 so'm muddati o'tgan".
+  spotless history → red, "Hozir 2 400 000 so'm muddati o'tgan" in UZS mode,
+  or "Hozir $195.65 muddati o'tgan" in USD mode (same underlying amount — see
+  Currency below).
 - **Completed nasiya with all on-time payments** → still green (the score
   only looks at schedule history, not the parent nasiya's terminal status).
 - **Completed nasiya with several late payments** → yellow/red, not green.
+- **Overpayment prepaying a future schedule** — if an earlier month's
+  overpayment allocates enough to fully pay a later month before its own due
+  date (see `docs/nasiya-payment-allocation.md`), that later schedule's
+  `paidAt` (the payment date) is before its `dueDate`, so it counts as an
+  **early payment** for that schedule exactly like a dedicated on-time
+  payment would — it can improve the score, subject to the same confidence
+  gates above. A currently overdue schedule elsewhere still overrides
+  everything to red regardless of how well the prepaid schedule scores.
+
+## Currency
+
+`computeNasiyaPaymentScore` takes an optional third argument,
+`currency: CurrencyContext` (defaults to UZS if omitted). The score, label,
+color, and factors are always computed from raw UZS amounts and never change
+with currency — **only the human-readable `reason` string's money formatting
+does**, via the shared `formatMoneyByCurrency` (`src/lib/currency.ts`). The
+literal string `"so'm"` is never hardcoded inside `nasiya-payment-score.ts`
+itself. Both server call sites (`src/lib/server/shop-lists.ts` for the
+nasiyalar list badge, and `src/app/api/nasiya/[id]/route.ts` for the detail
+page's score card) fetch the shop's `CurrencyContext` and pass it through, so
+the badge tooltip and the score card reason always match every other money
+value on the same page.
 
 ## Notes
 
-- Deterministic: same schedules + same `now` always produce the same score
-  (no randomness, no wall-clock side effects beyond the `now` parameter).
+- Deterministic: same schedules + same `now`/`currency` always produce the
+  same score (no randomness, no wall-clock side effects beyond the `now`
+  parameter).
 - Wording is kept professional/neutral in the UI — no harsh or shaming
   language, even for the red label.

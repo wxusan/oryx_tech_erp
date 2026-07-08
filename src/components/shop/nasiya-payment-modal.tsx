@@ -22,7 +22,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
-import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
+import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { uzDate, uzMonthYear } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { tashkentTodayInputValue } from '@/lib/timezone'
@@ -91,6 +91,7 @@ export function NasiyaPaymentModal({
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [loadingData, setLoadingData] = useState(false)
   const [fetched, setFetched] = useState<{ customerName: string; deviceName: string } | null>(null)
+  const [nasiyaRemainingAmount, setNasiyaRemainingAmount] = useState(0)
 
   const [payAmount, setPayAmount] = useState('')
   const [payMethod, setPayMethod] = useState('')
@@ -126,6 +127,7 @@ export function NasiyaPaymentModal({
         }
         const rows: Schedule[] = json.data.schedules ?? []
         setSchedules(rows)
+        setNasiyaRemainingAmount(Number(json.data.remainingAmount ?? 0))
         setFetched({
           customerName: json.data.customer?.name ?? '',
           deviceName: json.data.device?.model ?? '',
@@ -152,9 +154,28 @@ export function NasiyaPaymentModal({
   const selectedSchedule = pendingSchedules.find((s) => s.id === selectedScheduleId)
   const selectedScheduleOutstanding = selectedSchedule ? scheduleBalance(selectedSchedule) : 0
 
+  // Convert the typed amount to UZS (the allocation/validation source of truth)
+  // so the overpayment explanation and the "exceeds remaining debt" guard work
+  // the same regardless of the shop's selected display currency.
+  const payAmountUzs =
+    !carryOver && payAmount.trim()
+      ? currency.currency === 'USD' && currency.usdUzsRate
+        ? convertUsdToUzs(Number(payAmount), currency.usdUzsRate)
+        : Number(payAmount)
+      : 0
+  const overpayExtraUzs = Math.max(0, payAmountUzs - selectedScheduleOutstanding)
+  const exceedsRemaining = !carryOver && payAmountUzs > nasiyaRemainingAmount
+
   const canSubmit = carryOver
     ? Boolean(payDate.trim() && selectedScheduleId && payNote.trim().length >= 5)
-    : Boolean(payAmount.trim() && payMethod && payDate.trim() && selectedScheduleId && payNote.trim().length >= 5)
+    : Boolean(
+        payAmount.trim() &&
+          payMethod &&
+          payDate.trim() &&
+          selectedScheduleId &&
+          payNote.trim().length >= 5 &&
+          !exceedsRemaining,
+      )
 
   async function handleSubmit() {
     if (!canSubmit || submitting) return
@@ -314,6 +335,20 @@ export function NasiyaPaymentModal({
                       Tavsiya: {fmt(selectedScheduleOutstanding)}
                     </button>
                   )}
+                  <div className="flex items-center justify-between text-xs text-zinc-500">
+                    <span>Jami qolgan qarz</span>
+                    <span className="font-medium text-zinc-700">{fmt(nasiyaRemainingAmount)}</span>
+                  </div>
+                  {exceedsRemaining ? (
+                    <p className="text-xs text-red-600">
+                      To&apos;lov summasi qolgan qarzdan oshmasligi kerak.
+                    </p>
+                  ) : overpayExtraUzs > 0 ? (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
+                      To&apos;lov joriy oydan oshdi. Ortiqcha {fmt(overpayExtraUzs)} keyingi oy to&apos;loviga
+                      qo&apos;llanadi.
+                    </p>
+                  ) : null}
                 </div>
               )}
 

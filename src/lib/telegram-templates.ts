@@ -297,6 +297,13 @@ export function nasiyaPaymentMessage(data: {
   note?: string | null
   adminName?: string | null
   currency?: CurrencyContext | null
+  /**
+   * Per-schedule breakdown when one payment spans more than one month (an
+   * overpayment prepaying the next installment). First entry is always the
+   * selected/current month; any further entries are future months paid ahead
+   * of their due date. Omitted (or single-entry) payments show no breakdown.
+   */
+  allocations?: { monthNumber: number; amount: number }[]
 }): string {
   const monthLine =
     data.month === 'MULTIPLE'
@@ -304,6 +311,14 @@ export function nasiyaPaymentMessage(data: {
       : typeof data.month === 'number'
         ? `Oy: ${data.month}-oy`
         : null
+  const allocationBlock =
+    data.allocations && data.allocations.length > 1
+      ? data.allocations.map((allocation, index) =>
+          index === 0
+            ? `${telegramMoney(allocation.amount, data.currency)} joriy oy uchun yopildi`
+            : `${telegramMoney(allocation.amount, data.currency)} ${allocation.monthNumber}-oyga oldindan qo'llandi`,
+        )
+      : null
   return compose(
     "💰 Nasiya to'lovi qabul qilindi",
     optionalLine("Do'kon", data.shopName),
@@ -315,6 +330,7 @@ export function nasiyaPaymentMessage(data: {
       optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
       `Qolgan qarz: ${remainingDebt(data.remaining, "To'liq yopildi", data.currency)}`,
     ),
+    allocationBlock,
     block(optionalLine('Izoh', cleanNote(data.note)), optionalLine('Admin', data.adminName)),
   )
 }

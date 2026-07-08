@@ -7,6 +7,7 @@ import { shopCacheTag } from '@/lib/server/cache-tags'
 import { enrichLogsWithActors } from '@/lib/server/log-actors'
 import { deriveNasiyaOverdue, type NasiyaDisplayStatus } from '@/lib/nasiya-utils'
 import { computeNasiyaPaymentScore, type NasiyaPaymentScore } from '@/lib/nasiya-payment-score'
+import { getShopCurrencyContext } from '@/lib/server/currency'
 
 /**
  * Sale/nasiya summary for a sold/returned device — purchase price vs. sold
@@ -225,6 +226,9 @@ export async function getShopNasiyalarList(shopId: string): Promise<ShopNasiyaLi
 }
 
 async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaListItem[]> {
+  // Payment-score reason text must reflect the shop's selected display
+  // currency (never hardcode UZS) — see docs/nasiya-payment-scoring.md.
+  const currency = await getShopCurrencyContext(shopId)
   const nasiyalar = await prisma.nasiya.findMany({
     where: { shopId, deletedAt: null },
     take: 500,
@@ -288,6 +292,7 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
           schedules: nasiya.schedules.map((s, i) => ({ ...scheduleInputs[i], paidAt: s.paidAt })),
         },
         now,
+        currency,
       )
 
       return {
