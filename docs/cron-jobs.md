@@ -8,15 +8,17 @@ Oryx ERP runs one cron route. This is the operator reference for when it runs, w
 |---|---|
 | **Path** | `/api/cron/reminders` |
 | **Source** | `src/app/api/cron/reminders/route.ts` |
-| **Schedule (UTC)** | `*/10 * * * *` — every 10 minutes (`vercel.json`) |
+| **Schedule (UTC)** | `35 6 * * *` — once daily, 06:35 UTC = **11:35 Asia/Tashkent** (`vercel.json`) |
 | **Timezone for logic** | **Asia/Tashkent** (UTC+5, no DST) via `src/lib/timezone.ts` |
 | **Auth** | `Authorization: Bearer <CRON_SECRET>` (required) |
 | **Required env** | `CRON_SECRET`, `DATABASE_URL`, `TELEGRAM_BOT_TOKEN`, Supabase vars (for device photos) |
 | **Max duration** | 60s |
 
+> **Why once daily, not every 10 minutes:** this project runs on the Vercel **Hobby** plan, which only allows cron jobs to run at most once per day — a `*/10 * * * *` schedule fails Vercel's deploy-time validation (every push since it was introduced showed a failed "Vercel" GitHub check, and production silently kept serving the previous build). The single daily run is deliberately scheduled at 11:35 Tashkent, five minutes after the 11:00–11:30 jitter window closes, so every reminder generated and jittered for that day has already reached its `scheduledAt` and gets delivered in this one run. If sub-daily delivery is ever needed, upgrade to Vercel Pro and switch back to `*/10 * * * *`, or point an external scheduler (e.g. cron-job.org) at this URL every 10 minutes with the `CRON_SECRET` bearer token — the endpoint is idempotent and safe to call as often as you like.
+
 ### What it does
 
-On every run (all steps are idempotent, so running every 10 min is safe):
+On every run (idempotent — safe to call more often than the schedule if needed):
 
 1. **Generate due-today reminders** — `NasiyaSchedule` and `Sale` whose due date is today (Tashkent), still unpaid, `reminderEnabled = true`, ACTIVE shop. Upserts a `REMINDER` / `SALE_REMINDER` notification per verified admin (deduped by Tashkent day).
 2. **Generate overdue alerts** — schedules/sales past due and still unpaid. Upserts `OVERDUE` / `SALE_OVERDUE` notifications, marks the schedule + parent nasiya `OVERDUE`, and busts that shop's caches **only when a real transition happened**.
@@ -31,14 +33,10 @@ Planned reminders are **not** sent the second they are generated. Each is schedu
 scheduledAt = 11:00 Asia/Tashkent (today) + deterministicJitter(dedupeKey)   // 0–29 min
 ```
 
-so they spread across **11:00–11:30 Asia/Tashkent** instead of all firing at once. The jitter is deterministic (same reminder → same minute every run), so re-runs never move or duplicate a message. A cron run inside the window delivers them; with the 10-minute cadence, delivery lands in ~10-minute waves across 11:00–11:30.
+so they spread across **11:00–11:30 Asia/Tashkent** in theory. In practice, with the single daily 11:35 run (see the plan note above), every jittered `scheduledAt` in that window has already passed by the time the run fires, so all of that day's reminders go out together at ~11:35 rather than in real 10-minute waves. The jitter computation itself is unchanged (still deterministic and still recorded per-notification) so re-enabling a finer cadence later requires no code change — only the `vercel.json` schedule.
 
-- **Immediate** (sent within ~seconds, on the next drain): sale, nasiya, payment, nasiya completed, device added/returned/restocked, `/start` replies.
-- **Planned around 11:00 Tashkent**: nasiya due-today, nasiya overdue, nasiya early reminder, sale due-today, sale overdue, sale early reminder.
-
-Expected Tashkent send window for planned reminders: **11:00 → 11:29**.
-
-> **Plan note:** finer-than-daily cron needs **Vercel Pro**. On a daily-only plan, point an external scheduler (e.g. cron-job.org) at this URL every 10 minutes with the `CRON_SECRET` bearer token; the endpoint is safe to call as often as you like.
+- **Immediate** (sent within ~seconds, via the `after()` hook on the mutating request itself — not dependent on cron): sale, nasiya, payment, nasiya completed, device added/returned/restocked, `/start` replies.
+- **Planned, generated and delivered by the once-daily 11:35 Tashkent cron run**: nasiya due-today, nasiya overdue, nasiya early reminder, sale due-today, sale overdue, sale early reminder.
 
 ### How to confirm it ran
 
@@ -62,6 +60,6 @@ Without the header you get `401 Unauthorized`; if `CRON_SECRET` is unset the rou
 ```json
 // vercel.json
 {
-  "crons": [{ "path": "/api/cron/reminders", "schedule": "*/10 * * * *" }]
+  "crons": [{ "path": "/api/cron/reminders", "schedule": "35 6 * * *" }]
 }
 ```

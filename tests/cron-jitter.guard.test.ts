@@ -42,9 +42,14 @@ describe('immediate notifications are NOT jittered', () => {
 
 describe('vercel cron cadence drains the jitter window', () => {
   const vercel = JSON.parse(read('vercel.json')) as { crons: Array<{ path: string; schedule: string }> }
-  it('runs the reminders cron every 10 minutes', () => {
+  it('runs the reminders cron once daily, after the 11:00-11:30 jitter window closes (Hobby plan: no sub-daily cron)', () => {
     const cron = vercel.crons.find((c) => c.path === '/api/cron/reminders')
     expect(cron).toBeTruthy()
-    expect(cron?.schedule).toBe('*/10 * * * *')
+    expect(cron?.schedule).toBe('35 6 * * *')
+    // 06:35 UTC = 11:35 Asia/Tashkent (UTC+5) — 5 minutes after the 11:00-11:30
+    // jitter window closes, so a single run catches every reminder for the day.
+    const [minute, hour] = (cron?.schedule ?? '').split(' ')
+    expect(Number(hour) + 5).toBe(11) // 6 UTC + 5h offset = 11 Tashkent
+    expect(minute).toBe('35')
   })
 })

@@ -11,7 +11,7 @@ describe('cron docs exist and state the schedule + timezone', () => {
 
   it('documents the reminders route, cadence and Tashkent window', () => {
     expect(doc).toContain('/api/cron/reminders')
-    expect(doc).toContain('*/10 * * * *')
+    expect(doc).toContain('35 6 * * *')
     expect(doc).toContain('Asia/Tashkent')
     expect(doc).toContain('11:00')
     expect(doc).toContain('CRON_SECRET')
