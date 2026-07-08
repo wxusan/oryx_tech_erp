@@ -1,0 +1,338 @@
+/**
+ * GET  /api/olib-sotdim — list this shop's olib-sotdim operations (via their SupplierPayable row)
+ * POST /api/olib-sotdim — create a new olib-sotdim operation
+ *
+ * "Olib-sotdim": we source a device from another shop/person and sell it to
+ * our customer in the same operation. Creates a Device (status SOLD_CASH
+ * directly — never IN_STOCK, never available for a later normal sale/nasiya),
+ * a Customer (lookup-or-create, same as the normal sale/nasiya flow), a Sale
+ * (so it counts in existing reports/profit exactly like a normal cash sale —
+ * see shop-stats.ts, unchanged), and a SupplierPayable tracking what WE owe
+ * the external supplier — entirely separate from Sale.remainingAmount (what
+ * the customer owes us).
+ */
+
+import { NextRequest, after } from 'next/server'
+import { randomBytes } from 'node:crypto'
+import { prisma } from '@/lib/prisma'
+import { Prisma } from '@/generated/prisma/client'
+import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { createOlibSotdimSchema } from '@/lib/validations'
+import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
+import { processPendingNotifications } from '@/lib/notification-service'
+import { olibSotdimCreatedMessage } from '@/lib/telegram-templates'
+import { logger } from '@/lib/logger'
+import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
+import { normalizePhone } from '@/lib/phone'
+import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { getShopCurrencyContext } from '@/lib/server/currency'
+import type { ZodError } from 'zod'
+
+// ---------------------------------------------------------------------------
+// GET /api/olib-sotdim
+// ---------------------------------------------------------------------------
+
+export async function GET(req: NextRequest) {
+  try {
+    const guarded = await requireApiSession()
+    if (!guarded.ok) return guarded.response
+    const { session } = guarded
+
+    const { searchParams } = req.nextUrl
+    const resolved = await resolveActiveShopId(session, searchParams.get('shopId'))
+    if (!resolved.ok) return resolved.response
+    const { shopId } = resolved
+
+    const search = searchParams.get('search')?.trim()
+    const searchDigits = search ? normalizePhone(search) : null
+    const requestedTake = Number(searchParams.get('take') ?? 100)
+    const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 200)) : 100
+
+    const payables = await prisma.supplierPayable.findMany({
+      where: {
+        shopId,
+        deletedAt: null,
+        ...(search
+          ? {
+              OR: [
+                { supplierName: { contains: search, mode: 'insensitive' } },
+                { supplierPhone: { contains: search, mode: 'insensitive' } },
+                { supplierNote: { contains: search, mode: 'insensitive' } },
+                ...(searchDigits ? [{ supplierPhone: { contains: searchDigits } }] : []),
+                { sale: { customer: { name: { contains: search, mode: 'insensitive' } } } },
+                { sale: { customer: { phone: { contains: search, mode: 'insensitive' } } } },
+                { device: { model: { contains: search, mode: 'insensitive' } } },
+                { device: { imei: { contains: search, mode: 'insensitive' } } },
+              ],
+            }
+          : {}),
+      },
+      orderBy: { createdAt: 'desc' },
+      take,
+      select: {
+        id: true,
+        amount: true,
+        status: true,
+        dueDate: true,
+        paidAt: true,
+        paymentMethod: true,
+        supplierName: true,
+        supplierPhone: true,
+        supplierLocation: true,
+        createdAt: true,
+        device: { select: { id: true, model: true, imei: true, color: true, storage: true, purchasePrice: true } },
+        sale: { select: { id: true, salePrice: true, customer: { select: { name: true, phone: true } } } },
+      },
+    })
+
+    return ok(
+      payables.map((p) => ({
+        id: p.id,
+        amount: Number(p.amount),
+        status: p.status,
+        dueDate: p.dueDate.toISOString(),
+        paidAt: p.paidAt?.toISOString() ?? null,
+        paymentMethod: p.paymentMethod,
+        supplierName: p.supplierName,
+        supplierPhone: p.supplierPhone,
+        supplierLocation: p.supplierLocation,
+        createdAt: p.createdAt.toISOString(),
+        device: { ...p.device, purchasePrice: Number(p.device.purchasePrice) },
+        sale: { ...p.sale, salePrice: Number(p.sale.salePrice) },
+        profit: Number(p.sale.salePrice) - Number(p.device.purchasePrice),
+      })),
+      "Olib-sotdim ro'yxati",
+    )
+  } catch (err) {
+    console.error('[GET /api/olib-sotdim]', err)
+    return serverError()
+  }
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/olib-sotdim
+// ---------------------------------------------------------------------------
+
+export async function POST(req: NextRequest) {
+  try {
+    const guarded = await requireApiSession()
+    if (!guarded.ok) return guarded.response
+    const { session } = guarded
+
+    const body: unknown = await req.json()
+    const parsed = createOlibSotdimSchema.safeParse(body)
+    if (!parsed.success) {
+      const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
+      return badRequest(firstError)
+    }
+    const d = parsed.data
+
+    const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
+    if (!resolved.ok) return resolved.response
+    const { shopId } = resolved
+    const currency = await getShopCurrencyContext(shopId)
+
+    if (d.imageUrls?.some((url) => !url.startsWith(`shops/${shopId}/devices/`))) {
+      return badRequest("Qurilma rasmi faqat shu do'kon private storage papkasidan bo'lishi kerak")
+    }
+
+    let purchaseInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    let saleInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    let amountPaidInput: Awaited<ReturnType<typeof moneyInputToUzs>> | null = null
+    try {
+      purchaseInput = await moneyInputToUzs(d.purchasePrice, d.inputCurrency)
+      saleInput = await moneyInputToUzs(d.salePrice, d.inputCurrency)
+      if (d.amountPaid !== undefined) amountPaidInput = await moneyInputToUzs(d.amountPaid, d.inputCurrency)
+    } catch (err) {
+      return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
+    }
+    const purchasePriceUzs = purchaseInput.amountUzs
+    const salePriceUzs = saleInput.amountUzs
+    const amountPaidUzs = amountPaidInput?.amountUzs
+
+    // IMEI: reuse the existing active-only uniqueness rule. Missing IMEI gets a
+    // NOIMEI- placeholder — same idea as the pre-existing IMPORT- convention,
+    // hidden from every user-facing surface by displayImei()/telegramImei().
+    const imei = d.imei?.trim() || ''
+    if (imei) {
+      const existingImei = await prisma.device.findFirst({ where: { shopId, imei, deletedAt: null } })
+      if (existingImei) return conflict('Bu IMEI raqami allaqachon mavjud')
+    }
+    const storedImei = imei || `NOIMEI-${randomBytes(4).toString('hex').toUpperCase()}`
+
+    const normalizedCustomerPhone = normalizePhone(d.customerPhone)
+    const supplierPaidNow = d.supplierPaidNow
+
+    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // Never IN_STOCK — this device skips inventory entirely and goes straight
+      // to a sold/history state, so it can never be picked up by the normal
+      // "Naqd sotish"/"Nasiyaga berish" device pickers or restocked implicitly.
+      const device = await tx.device.create({
+        data: {
+          shopId,
+          model: d.model,
+          color: d.color,
+          storage: d.storage,
+          batteryHealth: d.batteryHealth,
+          purchasePrice: purchasePriceUzs,
+          imei: storedImei,
+          supplierPhone: d.supplierPhone,
+          imageUrls: d.imageUrls ?? [],
+          status: 'SOLD_CASH',
+          addedBy: session.user.id,
+          note: d.deviceNote,
+          condition: d.condition,
+          isExternalSourced: true,
+        },
+      })
+
+      const existingCustomer = await tx.customer.findFirst({
+        where: {
+          shopId,
+          deletedAt: null,
+          OR: [
+            ...(normalizedCustomerPhone ? [{ normalizedPhone: normalizedCustomerPhone }] : []),
+            { phone: d.customerPhone },
+          ],
+        },
+      })
+      const customer = existingCustomer
+        ? await tx.customer.update({
+            where: { id: existingCustomer.id },
+            data: { name: d.customerName, normalizedPhone: normalizedCustomerPhone },
+          })
+        : await tx.customer.create({
+            data: { shopId, name: d.customerName, phone: d.customerPhone, normalizedPhone: normalizedCustomerPhone },
+          })
+
+      const paid = d.paidFully ? salePriceUzs : (amountPaidUzs ?? 0)
+      const remaining = salePriceUzs - paid
+
+      const sale = await tx.sale.create({
+        data: {
+          shopId,
+          deviceId: device.id,
+          customerId: customer.id,
+          salePrice: salePriceUzs,
+          paymentMethod: d.paymentMethod,
+          paidFully: remaining <= 0,
+          amountPaid: paid,
+          remainingAmount: remaining,
+          dueDate: d.dueDate,
+          reminderEnabled: d.customerReminderEnabled ?? false,
+          note: d.note,
+          createdBy: session.user.id,
+        },
+      })
+
+      if (paid > 0) {
+        await tx.salePayment.create({
+          data: {
+            saleId: sale.id,
+            shopId,
+            amount: paid,
+            paymentMethod: d.paymentMethod,
+            paidAt: new Date(),
+            note: remaining > 0 ? "Boshlang'ich to'lov" : "To'liq to'lov",
+            idempotencyKey: `olib-sotdim-initial:${sale.id}`,
+            createdBy: session.user.id,
+          },
+        })
+      }
+
+      const payable = await tx.supplierPayable.create({
+        data: {
+          shopId,
+          deviceId: device.id,
+          saleId: sale.id,
+          supplierName: d.supplierName,
+          supplierPhone: d.supplierPhone,
+          supplierLocation: d.supplierLocation,
+          supplierNote: d.supplierNote,
+          amount: purchasePriceUzs,
+          status: supplierPaidNow ? 'PAID' : 'PENDING',
+          dueDate: supplierPaidNow ? (d.supplierPaidDate ?? new Date()) : d.supplierDueDate!,
+          reminderEnabled: supplierPaidNow ? false : (d.supplierReminderEnabled ?? true),
+          earlyReminderEnabled: supplierPaidNow ? false : d.earlyReminderEnabled,
+          earlyReminderDays: supplierPaidNow ? null : (d.earlyReminderEnabled ? (d.earlyReminderDays ?? null) : null),
+          paidAt: supplierPaidNow ? (d.supplierPaidDate ?? new Date()) : null,
+          paymentMethod: supplierPaidNow ? d.supplierPaymentMethod : null,
+          createdBy: session.user.id,
+        },
+      })
+
+      const shop = await tx.shop.findUnique({ where: { id: shopId }, select: { name: true } })
+      const shopAdmins = await tx.shopAdmin.findMany({
+        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
+      })
+      const message = olibSotdimCreatedMessage({
+        shopName: shop?.name ?? '',
+        device: { deviceModel: d.model, storage: d.storage, color: d.color, batteryHealth: d.batteryHealth, imei: storedImei },
+        supplierName: d.supplierName,
+        supplierPhone: d.supplierPhone,
+        supplierLocation: d.supplierLocation,
+        purchasePrice: purchasePriceUzs,
+        salePrice: salePriceUzs,
+        profit: salePriceUzs - purchasePriceUzs,
+        supplierPaidNow,
+        customerName: d.customerName,
+        customerPhone: d.customerPhone,
+        adminName: session.user.name,
+        currency,
+      })
+      for (const admin of shopAdmins) {
+        await tx.notification.create({
+          data: {
+            shopId,
+            type: 'OLIB_SOTDIM_CREATED',
+            message,
+            telegramId: admin.telegramId!,
+            scheduledAt: new Date(),
+            relatedId: sale.id,
+            relatedType: 'Sale',
+          },
+        })
+      }
+
+      await tx.log.create({
+        data: {
+          shopId,
+          actorId: session.user.id,
+          actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
+          action: 'OLIB_SOTDIM_CREATE',
+          targetType: 'Sale',
+          targetId: sale.id,
+          newValue: {
+            model: d.model,
+            imei: storedImei,
+            purchasePrice: purchasePriceUzs,
+            salePrice: salePriceUzs,
+            profit: salePriceUzs - purchasePriceUzs,
+            supplierName: d.supplierName,
+            supplierPaidNow,
+            customerName: d.customerName,
+            ...moneyInputMeta(purchaseInput),
+          },
+        },
+      })
+
+      return { device, sale, payable }
+    })
+
+    invalidateShopSaleMutation(shopId)
+
+    after(() =>
+      processPendingNotifications().catch((e) =>
+        logger.warn('notification flush failed', { event: 'notification.flush_failed', route: '/api/olib-sotdim', error: e }),
+      ),
+    )
+
+    return created(result, "Olib-sotdim muvaffaqiyatli saqlandi")
+  } catch (err) {
+    if (err && typeof err === 'object' && 'code' in err && (err as { code?: string }).code === 'P2002') {
+      return conflict("Bu IMEI raqami allaqachon mavjud")
+    }
+    console.error('[POST /api/olib-sotdim]', err)
+    return serverError()
+  }
+}

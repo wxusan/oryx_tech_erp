@@ -31,15 +31,20 @@ Recipients are **always** filtered to active, non-deleted shop admins with a **v
 | 13 | `EARLY_REMINDER` | `nasiyaEarlyReminderMessage` | Nasiya schedule due in N days ("Ertaroq eslatilsinmi?") | **Scheduled 11:00–11:30** | Device photo → text | `NasiyaSchedule` |
 | 14 | `SALE_EARLY_REMINDER` | `saleEarlyReminderMessage` | Later-payment sale due in N days ("Ertaroq eslatilsinmi?") | **Scheduled 11:00–11:30** | Device photo → text | `Sale` |
 | 15 | `NASIYA_COMPLETED` | `nasiyaCompletedMessage` | Nasiya's last schedule fully paid (status → COMPLETED) | Immediate | Device photo → text | `Nasiya` |
-| 16 | Bot `/start` replies | `startSuperAdminMessage` / `startShopAdminMessage` / `startUnknownMessage` / `unknownCommandMessage` | Telegram webhook | Immediate (direct reply) | None (no device context) | — |
+| 16 | `OLIB_SOTDIM_CREATED` | `olibSotdimCreatedMessage` | Olib-sotdim operation saved (`POST /api/olib-sotdim`) | Immediate | Device photo → text | `Sale` |
+| 17 | `SUPPLIER_PAYABLE_REMINDER` | `supplierPayableDueTodayMessage` | Supplier payable due today | **Scheduled 11:00–11:30** | Device photo → text | `SupplierPayable` |
+| 18 | `SUPPLIER_PAYABLE_OVERDUE` | `supplierPayableOverdueMessage` | Supplier payable overdue | **Scheduled 11:00–11:30** | Device photo → text | `SupplierPayable` |
+| 19 | `SUPPLIER_PAYABLE_EARLY_REMINDER` | `supplierPayableEarlyReminderMessage` | Supplier payable due in N days ("Ertaroq eslatilsinmi?") | **Scheduled 11:00–11:30** | Device photo → text | `SupplierPayable` |
+| 20 | `SUPPLIER_PAYABLE_PAID` | `supplierPayablePaidMessage` | Supplier payable marked paid (`PATCH /api/olib-sotdim/[id]/pay`) | Immediate | Device photo → text | `SupplierPayable` |
+| 21 | Bot `/start` replies | `startSuperAdminMessage` / `startShopAdminMessage` / `startUnknownMessage` / `unknownCommandMessage` | Telegram webhook | Immediate (direct reply) | None (no device context) | — |
 
 "Device photo → text" = attaches the related device's first photo as a short-lived signed URL when one exists; otherwise sends the message as text.
 
 ## What image is attached
 
-- **Device-related messages (1–12):** the related **device's first photo** (`Device.imageUrls[0]`), signed at send time (10-min TTL). Resolved via the `relatedType`/`relatedId` on the notification.
+- **Device-related messages (1–20):** the related **device's first photo** (`Device.imageUrls[0]`), signed at send time (10-min TTL). Resolved via the `relatedType`/`relatedId` on the notification — `SupplierPayable` resolves through its linked `Device.imageUrls`, same as every other case.
 - **No device photo:** falls back to a plain text message. (No branded default raster assets are shipped — see _Limitations_.)
-- **Bot `/start` replies (13):** text only; there is no device/entity context and an image would add nothing.
+- **Bot `/start` replies (21):** text only; there is no device/entity context and an image would add nothing.
 
 ## Privacy
 
@@ -54,7 +59,7 @@ Recipients are **always** filtered to active, non-deleted shop admins with a **v
 - **Auth:** requires `Authorization: Bearer <CRON_SECRET>` (Vercel Cron sends it automatically). Returns 401 without it, 503 if the secret is unconfigured.
 - **Schedule:** `35 6 * * *` (once daily, 06:35 UTC = 11:35 Tashkent) — see `vercel.json`. This project is on the Vercel **Hobby** plan, which rejects sub-daily cron schedules at deploy time; a `*/10 * * * *` schedule caused every deployment to fail its "Vercel" GitHub check for 3 days before this was caught and fixed. See `docs/cron-jobs.md` for the full explanation and the Pro/external-scheduler alternative.
 - **Timezone:** all day/window math is **Asia/Tashkent** (`src/lib/timezone.ts`, UTC+5, no DST). Never uses server-local time.
-- **What it processes:** `NasiyaSchedule` (due today / overdue) and `Sale` (due today / overdue) for ACTIVE shops with `reminderEnabled = true`, then drains the whole notification queue.
+- **What it processes:** `NasiyaSchedule` (due today / overdue), `Sale` (due today / overdue), and `SupplierPayable` (due today / overdue — "Olib-sotdim" supplier debt) for ACTIVE shops with `reminderEnabled = true`, then drains the whole notification queue.
 - **Idempotency:** each reminder row has a `dedupeKey` = `TYPE:<TashkentDay>:<telegramId>:<entityId>` with a unique constraint, so repeated runs never duplicate. OVERDUE status writes are idempotent, and cache busts fire only on real transitions.
 - **Scheduled send time:** planned reminders get `scheduledAt = 11:00 Asia/Tashkent + deterministic jitter (0–29 min)` (`scheduledReminderSendAt`). The drain only sends rows whose `scheduledAt` has arrived. With the once-daily 11:35 cron run, the whole 11:00–11:30 window has already elapsed by run time, so all of a day's reminders deliver together at ~11:35 rather than in real-time waves — the per-notification jitter value is still computed and stored either way, so nothing needs to change if the cron cadence is later increased.
 - **Early reminders ("Ertaroq eslatilsinmi?"):** an opt-in extra reminder N days before a nasiya schedule's or later-payment sale's due date, IN ADDITION to (not instead of) the due-day reminder above. Set per-nasiya/per-sale via `earlyReminderEnabled` + `earlyReminderDays` (1–60). The cron fetches unpaid schedules/sales due in the next ~61 days (bounded), then in JS computes `daysUntil` (via `tashkentDayRange` on the due date) and only creates a notification when it exactly equals `earlyReminderDays` — so it fires once, on the correct day, per schedule. Dedupe keys `EARLY_REMINDER:<day>:<telegramId>:<scheduleId>` / `SALE_EARLY_REMINDER:<day>:<telegramId>:<saleId>` make re-runs idempotent. If the early date has already passed when the feature is turned on, it's silently skipped (no backfill) — the due-day reminder is unaffected.

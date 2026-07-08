@@ -2,15 +2,24 @@ export function isImportPlaceholderImei(imei?: string | null): boolean {
   return typeof imei === 'string' && imei.trim().startsWith('IMPORT-')
 }
 
+/** Olib-sotdim devices without a real IMEI get a "NOIMEI-<id>" placeholder — same idea as IMPORT-, also hidden everywhere. */
+export function isNoImeiPlaceholder(imei?: string | null): boolean {
+  return typeof imei === 'string' && imei.trim().startsWith('NOIMEI-')
+}
+
+export function isPlaceholderImei(imei?: string | null): boolean {
+  return isImportPlaceholderImei(imei) || isNoImeiPlaceholder(imei)
+}
+
 export function displayImei(imei?: string | null): string {
   const trimmed = imei?.trim()
-  if (!trimmed || isImportPlaceholderImei(trimmed)) return 'Kiritilmagan'
+  if (!trimmed || isPlaceholderImei(trimmed)) return 'Kiritilmagan'
   return trimmed
 }
 
 export function telegramImei(imei?: string | null): string | null {
   const trimmed = imei?.trim()
-  if (!trimmed || isImportPlaceholderImei(trimmed)) return null
+  if (!trimmed || isPlaceholderImei(trimmed)) return null
   return trimmed
 }
 

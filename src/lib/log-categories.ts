@@ -39,6 +39,7 @@ export function logCategoryFor(action: string, targetType: string): LogCategory 
   if (action === 'IMPORT_NASIYA') return 'import_nasiya'
   if (targetType === 'Nasiya' || targetType === 'NasiyaSchedule') return action === 'PAYMENT' ? 'payment' : 'nasiya'
   if (targetType === 'Sale') return action === 'PAYMENT' ? 'payment' : 'sale'
+  if (targetType === 'SupplierPayable') return 'payment'
   if (targetType === 'Device') {
     if (action === 'SELL') return 'sale'
     if (action === 'RETURN') return 'return'

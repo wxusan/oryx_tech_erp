@@ -1,0 +1,114 @@
+import { describe, expect, it } from 'vitest'
+import { createOlibSotdimSchema, markSupplierPayablePaidSchema } from '@/lib/validations'
+
+function baseInput(overrides: Partial<Record<string, unknown>> = {}) {
+  return {
+    model: 'iPhone 13 Pro',
+    supplierName: 'Ali aka',
+    supplierPhone: '+998901234567',
+    purchasePrice: 6_500_000,
+    supplierPaidNow: true,
+    supplierPaymentMethod: 'CASH',
+    customerName: 'Vali Valiyev',
+    customerPhone: '+998907654321',
+    salePrice: 7_500_000,
+    paymentMethod: 'CASH',
+    paidFully: true,
+    ...overrides,
+  }
+}
+
+describe('createOlibSotdimSchema', () => {
+  it('accepts a valid "paid now" operation', () => {
+    const result = createOlibSotdimSchema.safeParse(baseInput())
+    expect(result.success).toBe(true)
+  })
+
+  it('requires supplier payment method when supplierPaidNow is true', () => {
+    const result = createOlibSotdimSchema.safeParse(
+      baseInput({ supplierPaymentMethod: undefined }),
+    )
+    expect(result.success).toBe(false)
+  })
+
+  it('requires supplierDueDate when supplierPaidNow is false', () => {
+    const result = createOlibSotdimSchema.safeParse(
+      baseInput({ supplierPaidNow: false, supplierPaymentMethod: undefined }),
+    )
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts "pay later" with a due date', () => {
+    const result = createOlibSotdimSchema.safeParse(
+      baseInput({
+        supplierPaidNow: false,
+        supplierPaymentMethod: undefined,
+        supplierDueDate: new Date('2026-08-01'),
+      }),
+    )
+    expect(result.success).toBe(true)
+  })
+
+  it('IMEI is optional (bazaar reality — device may arrive without one)', () => {
+    const result = createOlibSotdimSchema.safeParse(baseInput({ imei: undefined }))
+    expect(result.success).toBe(true)
+  })
+
+  it('requires earlyReminderDays when earlyReminderEnabled is true', () => {
+    const result = createOlibSotdimSchema.safeParse(
+      baseInput({
+        supplierPaidNow: false,
+        supplierPaymentMethod: undefined,
+        supplierDueDate: new Date('2026-08-01'),
+        earlyReminderEnabled: true,
+      }),
+    )
+    expect(result.success).toBe(false)
+  })
+
+  it('rejects earlyReminderDays out of the 1-60 bound', () => {
+    const result = createOlibSotdimSchema.safeParse(
+      baseInput({
+        supplierPaidNow: false,
+        supplierPaymentMethod: undefined,
+        supplierDueDate: new Date('2026-08-01'),
+        earlyReminderEnabled: true,
+        earlyReminderDays: 90,
+      }),
+    )
+    expect(result.success).toBe(false)
+  })
+
+  it('requires amountPaid when paidFully is false', () => {
+    const result = createOlibSotdimSchema.safeParse(baseInput({ paidFully: false }))
+    expect(result.success).toBe(false)
+  })
+
+  it('allows sale price lower than purchase price (warning is UI-only, not a hard block)', () => {
+    const result = createOlibSotdimSchema.safeParse(baseInput({ salePrice: 5_000_000 }))
+    expect(result.success).toBe(true)
+  })
+
+  it('rejects an invalid supplier or customer phone', () => {
+    expect(createOlibSotdimSchema.safeParse(baseInput({ supplierPhone: '123' })).success).toBe(false)
+    expect(createOlibSotdimSchema.safeParse(baseInput({ customerPhone: '123' })).success).toBe(false)
+  })
+
+  it('requires model, supplierName, customerName', () => {
+    expect(createOlibSotdimSchema.safeParse(baseInput({ model: '' })).success).toBe(false)
+    expect(createOlibSotdimSchema.safeParse(baseInput({ supplierName: 'A' })).success).toBe(false)
+    expect(createOlibSotdimSchema.safeParse(baseInput({ customerName: 'A' })).success).toBe(false)
+  })
+
+  it('requires positive purchasePrice and salePrice', () => {
+    expect(createOlibSotdimSchema.safeParse(baseInput({ purchasePrice: 0 })).success).toBe(false)
+    expect(createOlibSotdimSchema.safeParse(baseInput({ salePrice: -1 })).success).toBe(false)
+  })
+})
+
+describe('markSupplierPayablePaidSchema', () => {
+  it('requires a payment method', () => {
+    expect(markSupplierPayablePaidSchema.safeParse({}).success).toBe(false)
+    expect(markSupplierPayablePaidSchema.safeParse({ paymentMethod: 'CASH' }).success).toBe(true)
+  })
+})

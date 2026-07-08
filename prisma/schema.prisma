@@ -130,16 +130,17 @@ model Shop {
   createdBy   SuperAdmin @relation("ShopCreatedBy", fields: [createdById], references: [id])
 
   // Relations
-  payments      ShopPayment[]
-  admins        ShopAdmin[]
-  devices       Device[]
-  deviceReturns DeviceReturn[]
-  suppliers     Supplier[]
-  sales         Sale[]
-  customers     Customer[]
-  nasiya        Nasiya[]
-  notifications Notification[]
-  logs          Log[]
+  payments         ShopPayment[]
+  admins           ShopAdmin[]
+  devices          Device[]
+  deviceReturns    DeviceReturn[]
+  suppliers        Supplier[]
+  sales            Sale[]
+  customers        Customer[]
+  nasiya           Nasiya[]
+  notifications    Notification[]
+  logs             Log[]
+  supplierPayables SupplierPayable[]
 
   @@index([status])
 }
@@ -246,36 +247,45 @@ model Supplier {
 // ---------------------------------------------------------------------------
 
 model Device {
-  id            String       @id @default(cuid())
-  shopId        String
-  model         String
-  color         String?
-  storage       String?
-  batteryHealth Int?
-  purchasePrice Decimal      @db.Decimal(12, 2)
-  imei          String
-  supplierId    String?
-  supplierPhone String?
-  imageUrls     String[]
-  status        DeviceStatus @default(IN_STOCK)
-  addedBy       String
-  note          String?
+  id                String       @id @default(cuid())
+  shopId            String
+  model             String
+  color             String?
+  storage           String?
+  batteryHealth     Int?
+  purchasePrice     Decimal      @db.Decimal(12, 2)
+  imei              String
+  supplierId        String?
+  supplierPhone     String?
+  imageUrls         String[]
+  status            DeviceStatus @default(IN_STOCK)
+  addedBy           String
+  note              String?
+  condition         String?
   // A device created only to carry an imported (pre-Oryx) nasiya. It is created
   // as SOLD_NASIYA (never IN_STOCK), so it never enters sellable inventory or
   // inventory-cost stats. Its purchasePrice is 0 (original cost unknown).
-  isImported    Boolean      @default(false)
-  createdAt     DateTime     @default(now())
-  updatedAt     DateTime     @updatedAt
-  deletedAt     DateTime?
-  deletedBy     String?
-  deleteNote    String?
+  isImported        Boolean      @default(false)
+  // "Olib-sotdim": sourced from another shop/person and sold to our customer in
+  // the same operation. Created directly as SOLD_CASH (never IN_STOCK), so it
+  // never becomes available for a later normal sale/nasiya and never enters
+  // inventoryPurchaseCost (that stat only sums IN_STOCK/RESERVED devices).
+  // purchasePrice IS real (what we paid the external supplier) — unlike
+  // isImported, this does count toward this month's cost/profit normally.
+  isExternalSourced Boolean      @default(false)
+  createdAt         DateTime     @default(now())
+  updatedAt         DateTime     @updatedAt
+  deletedAt         DateTime?
+  deletedBy         String?
+  deleteNote        String?
 
   // Relations
-  shop     Shop           @relation(fields: [shopId], references: [id])
-  supplier Supplier?      @relation(fields: [supplierId], references: [id])
-  sales    Sale[]
-  nasiya   Nasiya[]
-  returns  DeviceReturn[]
+  shop             Shop              @relation(fields: [shopId], references: [id])
+  supplier         Supplier?         @relation(fields: [supplierId], references: [id])
+  sales            Sale[]
+  nasiya           Nasiya[]
+  returns          DeviceReturn[]
+  supplierPayables SupplierPayable[]
 
   // ACTIVE-ONLY IMEI UNIQUENESS is enforced by a raw-SQL PARTIAL UNIQUE index
   // `Device_shopId_imei_active_key ... WHERE "deletedAt" IS NULL` created in
@@ -349,11 +359,12 @@ model Sale {
   deleteNote           String?
 
   // Relations
-  shop     Shop           @relation(fields: [shopId], references: [id])
-  device   Device         @relation(fields: [deviceId], references: [id])
-  customer Customer       @relation(fields: [customerId], references: [id])
-  payments SalePayment[]
-  returns  DeviceReturn[]
+  shop            Shop             @relation(fields: [shopId], references: [id])
+  device          Device           @relation(fields: [deviceId], references: [id])
+  customer        Customer         @relation(fields: [customerId], references: [id])
+  payments        SalePayment[]
+  returns         DeviceReturn[]
+  supplierPayable SupplierPayable?
 
   @@index([shopId])
   @@index([customerId])
@@ -390,6 +401,59 @@ model SalePayment {
   @@index([saleId])
   @@index([shopId])
   @@index([paidAt])
+}
+
+// ---------------------------------------------------------------------------
+// SupplierPayable — "Olib-sotdim": money WE owe an external supplier for a
+// device we sourced from them and sold straight to our customer. Tracked
+// separately from Sale.remainingAmount (customer owes us) — never mixed.
+// ---------------------------------------------------------------------------
+
+enum SupplierPayableStatus {
+  PENDING
+  PAID
+  CANCELLED
+  OVERDUE
+}
+
+model SupplierPayable {
+  id                   String                @id @default(cuid())
+  shopId               String
+  deviceId             String
+  saleId               String                @unique
+  // Free-text — an ad-hoc bazaar contact, not the formal Supplier model (which
+  // represents a registered long-term inventory supplier tied to Device.supplierId).
+  supplierName         String
+  supplierPhone        String
+  supplierLocation     String?
+  supplierNote         String?
+  amount               Decimal               @db.Decimal(12, 2)
+  status               SupplierPayableStatus @default(PENDING)
+  dueDate              DateTime
+  reminderEnabled      Boolean               @default(true)
+  earlyReminderEnabled Boolean               @default(false)
+  earlyReminderDays    Int?
+  paidAt               DateTime?
+  paymentMethod        PaymentMethod?
+  note                 String?
+  createdBy            String
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  deletedAt            DateTime?
+  deletedBy            String?
+  deleteNote           String?
+
+  // Relations
+  shop   Shop   @relation(fields: [shopId], references: [id])
+  device Device @relation(fields: [deviceId], references: [id])
+  sale   Sale   @relation(fields: [saleId], references: [id])
+
+  @@index([shopId])
+  @@index([status])
+  @@index([shopId, status, dueDate])
+  // Cross-shop cron scan (supplier payable reminders): filters by status + due
+  // date with no shopId, so a shopId-leading index cannot serve it.
+  @@index([status, dueDate])
 }
 
 // ---------------------------------------------------------------------------

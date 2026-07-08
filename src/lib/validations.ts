@@ -376,3 +376,107 @@ export const addShopPaymentSchema = z.object({
 })
 
 export type AddShopPaymentInput = z.infer<typeof addShopPaymentSchema>
+
+// ---------------------------------------------------------------------------
+// createOlibSotdimSchema — "Olib-sotdim": source a device from another
+// shop/person and sell it to our customer in the same operation.
+// ---------------------------------------------------------------------------
+
+export const createOlibSotdimSchema = z
+  .object({
+    // Section 1 — device
+    model: z.string({ error: "Model kiritilishi shart" }).min(1, "Model bo'sh bo'lmasligi kerak").max(120),
+    color: z.string().max(50, "Rang 50 ta belgidan oshmasligi kerak").optional(),
+    storage: z.string().max(50, "Xotira 50 ta belgidan oshmasligi kerak").optional(),
+    batteryHealth: z.number().int().min(0).max(100).optional(),
+    condition: z.string().max(100, "Holati 100 ta belgidan oshmasligi kerak").optional(),
+    // Unlike addDeviceSchema, IMEI is optional here — "Kiritilmagan" is a normal
+    // bazaar reality when the device changes hands quickly.
+    imei: z.string().trim().max(32, "IMEI 32 ta belgidan oshmasligi kerak").optional(),
+    deviceNote: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
+    imageUrls: z.array(deviceImageKeySchema).optional(),
+
+    // Section 2 — supplier ("kimdan olindi")
+    supplierName: z
+      .string({ error: "Yetkazib beruvchi ismi kiritilishi shart" })
+      .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      .max(150, "Ism 150 ta belgidan oshmasligi kerak"),
+    supplierPhone: phoneSchema,
+    supplierLocation: z.string().max(200, "Manzil 200 ta belgidan oshmasligi kerak").optional(),
+    supplierNote: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
+    purchasePrice: z
+      .number({ error: "Olingan narx kiritilishi shart" })
+      .positive("Narx musbat son bo'lishi kerak"),
+    supplierPaidNow: z.boolean({ error: "To'lov holati ko'rsatilishi shart" }),
+    supplierPaymentMethod: paymentMethodSchema.optional(),
+    supplierPaidDate: z.coerce.date().optional(),
+    supplierDueDate: z.coerce.date().optional(),
+    supplierReminderEnabled: z.boolean().optional().default(true),
+    earlyReminderEnabled: earlyReminderEnabledSchema,
+    earlyReminderDays: earlyReminderDaysSchema,
+
+    // Section 3 — customer ("kimga sotildi")
+    customerName: z
+      .string({ error: "Xaridor ismi kiritilishi shart" })
+      .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      .max(100, "Ism 100 ta belgidan oshmasligi kerak"),
+    customerPhone: phoneSchema,
+
+    // Section 4 — sale to the customer (mirrors createSaleSchema)
+    salePrice: z
+      .number({ error: "Sotish narxi kiritilishi shart" })
+      .positive("Narx musbat son bo'lishi kerak"),
+    paymentMethod: paymentMethodSchema,
+    paidFully: z.boolean({ error: "To'liq to'langan yoki yo'qligi ko'rsatilishi shart" }),
+    amountPaid: z.number().positive("To'langan summa musbat son bo'lishi kerak").optional(),
+    dueDate: z.coerce.date().optional(),
+    customerReminderEnabled: z.boolean().optional().default(false),
+    note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
+    inputCurrency: currencyCodeSchema.optional(),
+  })
+  .refine((data) => !data.supplierPaidNow || data.supplierPaymentMethod !== undefined, {
+    message: "Yetkazib beruvchiga to'lov usuli kiritilishi shart",
+    path: ['supplierPaymentMethod'],
+  })
+  .refine((data) => data.supplierPaidNow || data.supplierDueDate !== undefined, {
+    message: "Yetkazib beruvchiga to'lov muddati kiritilishi shart",
+    path: ['supplierDueDate'],
+  })
+  .refine((data) => !data.earlyReminderEnabled || data.earlyReminderDays !== undefined, {
+    message: "Necha kun oldin ekanligi kiritilishi shart",
+    path: ['earlyReminderDays'],
+  })
+  .refine(
+    (data) => {
+      if (!data.paidFully && data.amountPaid === undefined) return false
+      return true
+    },
+    { message: "To'lanmagan savdoda to'langan summa ko'rsatilishi shart", path: ['amountPaid'] },
+  )
+  .refine((data) => data.amountPaid === undefined || data.amountPaid <= data.salePrice, {
+    message: "To'langan summa sotuv narxidan oshmasligi kerak",
+    path: ['amountPaid'],
+  })
+  .refine((data) => data.paidFully || (data.amountPaid ?? 0) < data.salePrice, {
+    message: "Qisman savdoda to'langan summa sotuv narxidan kam bo'lishi kerak",
+    path: ['amountPaid'],
+  })
+  .refine((data) => data.paidFully || data.dueDate !== undefined, {
+    message: "Qolgan to'lov sanasi kiritilishi shart",
+    path: ['dueDate'],
+  })
+
+export type CreateOlibSotdimInput = z.infer<typeof createOlibSotdimSchema>
+
+// ---------------------------------------------------------------------------
+// markSupplierPayablePaidSchema
+// ---------------------------------------------------------------------------
+
+export const markSupplierPayablePaidSchema = z.object({
+  paymentMethod: paymentMethodSchema,
+  paidAt: z.coerce.date().optional(),
+  note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
+  inputCurrency: currencyCodeSchema.optional(),
+})
+
+export type MarkSupplierPayablePaidInput = z.infer<typeof markSupplierPayablePaidSchema>

@@ -23,7 +23,8 @@ On every run (idempotent — safe to call more often than the schedule if needed
 1. **Generate due-today reminders** — `NasiyaSchedule` and `Sale` whose due date is today (Tashkent), still unpaid, `reminderEnabled = true`, ACTIVE shop. Upserts a `REMINDER` / `SALE_REMINDER` notification per verified admin (deduped by Tashkent day).
 2. **Generate overdue alerts** — schedules/sales past due and still unpaid. Upserts `OVERDUE` / `SALE_OVERDUE` notifications, marks the schedule + parent nasiya `OVERDUE`, and busts that shop's caches **only when a real transition happened**.
 3. **Generate early reminders ("Ertaroq eslatilsinmi?")** — `NasiyaSchedule` / `Sale` rows with `earlyReminderEnabled = true` and `reminderEnabled = true`, due in the next ~61 days. Upserts `EARLY_REMINDER` / `SALE_EARLY_REMINDER` only on the day that is exactly `earlyReminderDays` before the due date — the due-day reminder from step 1 still fires separately on the day itself.
-4. **Drain the queue** — `processPendingNotifications()` sends every notification whose `scheduledAt` has arrived (immediate events + any planned reminders now inside their window).
+4. **Supplier payable reminders ("Olib-sotdim")** — same due-today / overdue / early-reminder pattern as steps 1–3, on the `SupplierPayable` table (money we owe an external supplier). Upserts `SUPPLIER_PAYABLE_REMINDER` / `SUPPLIER_PAYABLE_OVERDUE` / `SUPPLIER_PAYABLE_EARLY_REMINDER`; marking a payable paid (`status = PAID`) removes it from every one of these queries, so reminders stop immediately with no separate cleanup. See `docs/olib-sotdim.md`.
+5. **Drain the queue** — `processPendingNotifications()` sends every notification whose `scheduledAt` has arrived (immediate events + any planned reminders now inside their window).
 
 ### When messages actually go out (11:00 jitter)
 
@@ -35,8 +36,8 @@ scheduledAt = 11:00 Asia/Tashkent (today) + deterministicJitter(dedupeKey)   // 
 
 so they spread across **11:00–11:30 Asia/Tashkent** in theory. In practice, with the single daily 11:35 run (see the plan note above), every jittered `scheduledAt` in that window has already passed by the time the run fires, so all of that day's reminders go out together at ~11:35 rather than in real 10-minute waves. The jitter computation itself is unchanged (still deterministic and still recorded per-notification) so re-enabling a finer cadence later requires no code change — only the `vercel.json` schedule.
 
-- **Immediate** (sent within ~seconds, via the `after()` hook on the mutating request itself — not dependent on cron): sale, nasiya, payment, nasiya completed, device added/returned/restocked, `/start` replies.
-- **Planned, generated and delivered by the once-daily 11:35 Tashkent cron run**: nasiya due-today, nasiya overdue, nasiya early reminder, sale due-today, sale overdue, sale early reminder.
+- **Immediate** (sent within ~seconds, via the `after()` hook on the mutating request itself — not dependent on cron): sale, nasiya, payment, nasiya completed, olib-sotdim created, supplier payable paid, device added/returned/restocked, `/start` replies.
+- **Planned, generated and delivered by the once-daily 11:35 Tashkent cron run**: nasiya due-today, nasiya overdue, nasiya early reminder, sale due-today, sale overdue, sale early reminder, supplier payable due-today, supplier payable overdue, supplier payable early reminder.
 
 ### How to confirm it ran
 
@@ -50,7 +51,7 @@ so they spread across **11:00–11:30 Asia/Tashkent** in theory. In practice, wi
 # Local / against a deployment (must send the secret):
 curl -sS -H "Authorization: Bearer $CRON_SECRET" \
   "http://localhost:3000/api/cron/reminders"
-# → {"reminders":N,"overdue":N,"saleReminders":N,"saleOverdue":N}
+# → {"reminders":N,"overdue":N,"saleReminders":N,"saleOverdue":N,"earlyReminders":N,"saleEarlyReminders":N,"supplierPayableReminders":N,"supplierPayableOverdue":N,"supplierPayableEarlyReminders":N}
 ```
 
 Without the header you get `401 Unauthorized`; if `CRON_SECRET` is unset the route returns `503`.

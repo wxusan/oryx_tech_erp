@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Smartphone, ShoppingCart, CreditCard, HandCoins } from 'lucide-react'
+import { Smartphone, ShoppingCart, CreditCard, HandCoins, Repeat } from 'lucide-react'
 
 const operations = [
   {
@@ -27,6 +27,12 @@ const operations = [
     icon: HandCoins,
     title: "To'lov qabul qilish",
     description: "Mijoz nasiyasini tanlab, oylik to'lovni kiriting",
+  },
+  {
+    href: '/shop/olib-sotdim/new',
+    icon: Repeat,
+    title: 'Olib-sotdim',
+    description: "Omborda yo'q qurilmani boshqa do'kondan olib, mijozga sotish",
   },
 ]
 

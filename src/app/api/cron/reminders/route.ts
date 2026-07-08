@@ -16,12 +16,14 @@
  *
  * Vercel cron configuration (vercel.json):
  * {
- *   "crons": [{ "path": "/api/cron/reminders", "schedule": "*\/10 * * * *" }]
+ *   "crons": [{ "path": "/api/cron/reminders", "schedule": "35 6 * * *" }]
  * }
- * Runs every 10 minutes (UTC). Idempotent: dedupeKey guarantees one message per
- * (day, admin, schedule/sale); the drain only sends rows whose jittered
- * scheduledAt has arrived. Sub-daily cron needs Vercel Pro or an external
- * scheduler hitting this endpoint with the CRON_SECRET bearer token.
+ * Runs once daily at 06:35 UTC (11:35 Asia/Tashkent) — see docs/cron-jobs.md
+ * for why (Vercel Hobby plan rejects sub-daily cron at deploy time).
+ * Idempotent: dedupeKey guarantees one message per (day, admin, schedule/sale);
+ * the drain only sends rows whose jittered scheduledAt has arrived. Sub-daily
+ * cron needs Vercel Pro or an external scheduler hitting this endpoint with
+ * the CRON_SECRET bearer token.
  *
  * Vercel Cron sends Authorization: Bearer <CRON_SECRET> automatically when the
  * env var is configured. The same header can be used by external schedulers:
@@ -48,6 +50,9 @@ import {
   saleDueTodayMessage,
   saleOverdueMessage,
   saleEarlyReminderMessage,
+  supplierPayableDueTodayMessage,
+  supplierPayableOverdueMessage,
+  supplierPayableEarlyReminderMessage,
 } from '@/lib/telegram-templates'
 
 export const maxDuration = 60
@@ -512,6 +517,182 @@ export async function GET(request: NextRequest): Promise<Response> {
     }
   }
 
+  // -------------------------------------------------------------------------
+  // 4. Supplier payable reminders ("Olib-sotdim" — money WE owe an external
+  //    supplier). Mirrors the nasiya/sale due-today + overdue + early-reminder
+  //    pattern above exactly, on the SupplierPayable table. PAID/CANCELLED
+  //    payables are never selected (status filters below), so marking one
+  //    paid stops its reminders immediately with no separate cleanup step.
+  // -------------------------------------------------------------------------
+
+  const supplierPayableDueToday = await prisma.supplierPayable.findMany({
+    where: {
+      deletedAt: null,
+      status: 'PENDING',
+      reminderEnabled: true,
+      dueDate: { gte: today, lt: tomorrow },
+      shop: { status: 'ACTIVE', deletedAt: null },
+    },
+    include: {
+      device: true,
+      shop: {
+        include: {
+          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
+        },
+      },
+    },
+  })
+
+  for (const payable of supplierPayableDueToday) {
+    const msg = supplierPayableDueTodayMessage({
+      device: {
+        deviceModel: payable.device.model,
+        storage: payable.device.storage,
+        color: payable.device.color,
+        imei: payable.device.imei,
+      },
+      supplierName: payable.supplierName,
+      supplierPhone: payable.supplierPhone,
+      amount: Number(payable.amount),
+      dueDate: payable.dueDate,
+      currency: await reminderCurrency(payable.shop),
+    })
+    for (const admin of payable.shop.admins) {
+      const dedupeKey = `SUPPLIER_PAYABLE_REMINDER:${dayKey}:${admin.telegramId}:${payable.id}`
+      await prisma.notification.upsert({
+        where: { dedupeKey },
+        update: {},
+        create: {
+          dedupeKey,
+          shopId: payable.shopId,
+          type: 'SUPPLIER_PAYABLE_REMINDER',
+          message: msg,
+          telegramId: admin.telegramId!,
+          scheduledAt: scheduledReminderSendAt(dedupeKey),
+          relatedId: payable.id,
+          relatedType: 'SupplierPayable',
+        },
+      })
+    }
+  }
+
+  const supplierPayableOverdue = await prisma.supplierPayable.findMany({
+    where: {
+      deletedAt: null,
+      status: { in: ['PENDING', 'OVERDUE'] },
+      reminderEnabled: true,
+      dueDate: { lt: today },
+      shop: { status: 'ACTIVE', deletedAt: null },
+    },
+    include: {
+      device: true,
+      shop: {
+        include: {
+          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
+        },
+      },
+    },
+  })
+
+  for (const payable of supplierPayableOverdue) {
+    const daysLate = Math.floor((today.getTime() - payable.dueDate.getTime()) / 86400000)
+    const msg = supplierPayableOverdueMessage({
+      device: {
+        deviceModel: payable.device.model,
+        storage: payable.device.storage,
+        color: payable.device.color,
+        imei: payable.device.imei,
+      },
+      supplierName: payable.supplierName,
+      supplierPhone: payable.supplierPhone,
+      amount: Number(payable.amount),
+      dueDate: payable.dueDate,
+      daysLate,
+      currency: await reminderCurrency(payable.shop),
+    })
+    for (const admin of payable.shop.admins) {
+      const dedupeKey = `SUPPLIER_PAYABLE_OVERDUE:${dayKey}:${admin.telegramId}:${payable.id}`
+      await prisma.notification.upsert({
+        where: { dedupeKey },
+        update: {},
+        create: {
+          dedupeKey,
+          shopId: payable.shopId,
+          type: 'SUPPLIER_PAYABLE_OVERDUE',
+          message: msg,
+          telegramId: admin.telegramId!,
+          scheduledAt: scheduledReminderSendAt(dedupeKey),
+          relatedId: payable.id,
+          relatedType: 'SupplierPayable',
+        },
+      })
+    }
+    if (payable.status !== 'OVERDUE') {
+      await prisma.supplierPayable.updateMany({
+        where: { id: payable.id, status: 'PENDING' },
+        data: { status: 'OVERDUE' },
+      })
+    }
+  }
+
+  const supplierPayableEarlyCandidates = await prisma.supplierPayable.findMany({
+    where: {
+      deletedAt: null,
+      status: 'PENDING',
+      reminderEnabled: true,
+      earlyReminderEnabled: true,
+      dueDate: { gte: tomorrow, lt: earlyWindowEnd },
+      shop: { status: 'ACTIVE', deletedAt: null },
+    },
+    include: {
+      device: true,
+      shop: {
+        include: {
+          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
+        },
+      },
+    },
+  })
+
+  let supplierPayableEarlyReminderCount = 0
+  for (const payable of supplierPayableEarlyCandidates) {
+    if (!payable.earlyReminderDays) continue
+    const daysUntil = Math.round((tashkentDayRange(payable.dueDate).start.getTime() - today.getTime()) / 86400000)
+    if (daysUntil !== payable.earlyReminderDays) continue
+    supplierPayableEarlyReminderCount++
+    const msg = supplierPayableEarlyReminderMessage({
+      device: {
+        deviceModel: payable.device.model,
+        storage: payable.device.storage,
+        color: payable.device.color,
+        imei: payable.device.imei,
+      },
+      supplierName: payable.supplierName,
+      supplierPhone: payable.supplierPhone,
+      amount: Number(payable.amount),
+      dueDate: payable.dueDate,
+      daysLeft: daysUntil,
+      currency: await reminderCurrency(payable.shop),
+    })
+    for (const admin of payable.shop.admins) {
+      const dedupeKey = `SUPPLIER_PAYABLE_EARLY_REMINDER:${dayKey}:${admin.telegramId}:${payable.id}`
+      await prisma.notification.upsert({
+        where: { dedupeKey },
+        update: {},
+        create: {
+          dedupeKey,
+          shopId: payable.shopId,
+          type: 'SUPPLIER_PAYABLE_EARLY_REMINDER',
+          message: msg,
+          telegramId: admin.telegramId!,
+          scheduledAt: scheduledReminderSendAt(dedupeKey),
+          relatedId: payable.id,
+          relatedType: 'SupplierPayable',
+        },
+      })
+    }
+  }
+
   // Flush pending Telegram notifications before the cron response completes.
   const delivery = await processPendingNotifications()
 
@@ -522,6 +703,9 @@ export async function GET(request: NextRequest): Promise<Response> {
     saleOverdue: overdueSales.length,
     earlyReminders: earlyReminderCount,
     saleEarlyReminders: saleEarlyReminderCount,
+    supplierPayableReminders: supplierPayableDueToday.length,
+    supplierPayableOverdue: supplierPayableOverdue.length,
+    supplierPayableEarlyReminders: supplierPayableEarlyReminderCount,
   }
 
   await recordOpsEvent({

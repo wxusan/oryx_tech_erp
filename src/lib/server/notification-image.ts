@@ -71,6 +71,13 @@ async function deviceImageKeyFor(ref: NotificationRef): Promise<string | null> {
       })
       return schedule?.nasiya?.device?.imageUrls?.[0] ?? null
     }
+    case 'SupplierPayable': {
+      const payable = await prisma.supplierPayable.findUnique({
+        where: { id: relatedId },
+        select: { device: { select: { imageUrls: true } } },
+      })
+      return payable?.device?.imageUrls?.[0] ?? null
+    }
     default:
       return null
   }

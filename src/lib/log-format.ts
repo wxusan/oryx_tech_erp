@@ -6,6 +6,8 @@ const actionLabels: Record<string, string> = {
   CREATE_NASIYA: 'Nasiya yaratildi',
   IMPORT_NASIYA: 'Eski nasiya import qilindi',
   NASIYA_COMPLETED: 'Nasiya yakunlandi',
+  OLIB_SOTDIM_CREATE: 'Olib-sotdim amalga oshirildi',
+  SUPPLIER_PAYABLE_PAID: "Yetkazib beruvchiga to'lov qilindi",
   PAYMENT: "To'lov qabul qilindi",
   SELL: 'Sotuv qilindi',
   RETURN: 'Qaytarildi',
@@ -33,6 +35,7 @@ const targetLabels: Record<string, string> = {
   ShopAdmin: "Do'kon admini",
   SuperAdmin: 'Bosh admin',
   CurrencyRate: 'Valyuta kursi',
+  SupplierPayable: "Yetkazib beruvchi qarzi",
 }
 
 const paymentMethodLabels: Record<string, string> = {

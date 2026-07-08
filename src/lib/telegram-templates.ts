@@ -534,3 +534,134 @@ export function nasiyaCompletedMessage(data: {
     optionalLine('Admin', data.adminName),
   )
 }
+
+// ---------------------------------------------------------------------------
+// Olib-sotdim — source a device from another shop/person and sell it to our
+// customer in the same operation. Supplier debt (what WE owe) is always
+// worded distinctly from customer debt (what the customer owes US) so an
+// admin can never confuse the two in a Telegram message.
+// ---------------------------------------------------------------------------
+
+export function olibSotdimCreatedMessage(data: {
+  shopName: string
+  device: DeviceSpecs
+  supplierName: string
+  supplierPhone?: string | null
+  supplierLocation?: string | null
+  purchasePrice: number
+  salePrice: number
+  profit: number
+  supplierPaidNow: boolean
+  customerName: string
+  customerPhone?: string | null
+  adminName?: string | null
+  currency?: CurrencyContext | null
+}): string {
+  return compose(
+    '🔄 Olib-sotdim: yangi operatsiya',
+    optionalLine("Do'kon", data.shopName),
+    formatDeviceSpecs(data.device),
+    block(
+      optionalLine('Kimdan olindi', data.supplierName),
+      optionalLine('Yetkazib beruvchi tel', data.supplierPhone),
+      optionalLine('Manzil', data.supplierLocation),
+    ),
+    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    block(
+      `Olingan narx: ${telegramMoney(data.purchasePrice, data.currency)}`,
+      `Sotilgan narx: ${telegramMoney(data.salePrice, data.currency)}`,
+      data.supplierPaidNow
+        ? `Foyda: ${telegramMoney(data.profit, data.currency)}`
+        : `Kutilayotgan foyda: ${telegramMoney(data.profit, data.currency)} (yetkazib beruvchiga hali to'lanmagan)`,
+      `Yetkazib beruvchiga to'lov: ${data.supplierPaidNow ? 'hozir to\'landi' : "keyinroq to'lanadi"}`,
+    ),
+    optionalLine('Admin', data.adminName),
+  )
+}
+
+function supplierPayableIntro(data: { supplierName: string; supplierPhone?: string | null }): string[] {
+  return [optionalLine('Kimdan olindi', data.supplierName), optionalLine('Yetkazib beruvchi tel', data.supplierPhone)].filter(
+    (l): l is string => l !== null,
+  )
+}
+
+export function supplierPayableDueTodayMessage(data: {
+  device: DeviceSpecs
+  supplierName: string
+  supplierPhone?: string | null
+  amount: number
+  dueDate: Date | string
+  currency?: CurrencyContext | null
+}): string {
+  return compose(
+    "⏰ Eslatma: yetkazib beruvchiga to'lov",
+    formatDeviceSpecs(data.device, { battery: false }),
+    supplierPayableIntro(data),
+    block(`To'lanadigan summa: ${telegramMoney(data.amount, data.currency)}`, `Muddat: ${formatUzDate(data.dueDate)}`),
+  )
+}
+
+export function supplierPayableOverdueMessage(data: {
+  device: DeviceSpecs
+  supplierName: string
+  supplierPhone?: string | null
+  amount: number
+  dueDate: Date | string
+  daysLate: number
+  currency?: CurrencyContext | null
+}): string {
+  return compose(
+    "⚠️ Yetkazib beruvchiga to'lov muddati o'tdi",
+    formatDeviceSpecs(data.device, { battery: false }),
+    supplierPayableIntro(data),
+    block(
+      `To'lanadigan summa: ${telegramMoney(data.amount, data.currency)}`,
+      `Muddat: ${formatUzDate(data.dueDate)}`,
+      `Kechikkan: ${data.daysLate} kun`,
+    ),
+  )
+}
+
+export function supplierPayableEarlyReminderMessage(data: {
+  device: DeviceSpecs
+  supplierName: string
+  supplierPhone?: string | null
+  amount: number
+  dueDate: Date | string
+  daysLeft: number
+  currency?: CurrencyContext | null
+}): string {
+  return compose(
+    "🔔 Eslatma: yetkazib beruvchiga to'lov yaqinlashmoqda",
+    formatDeviceSpecs(data.device, { battery: false }),
+    supplierPayableIntro(data),
+    block(
+      `To'lanadigan summa: ${telegramMoney(data.amount, data.currency)}`,
+      `Muddat: ${formatUzDate(data.dueDate)}`,
+      `${data.daysLeft} kun oldin eslatma`,
+    ),
+  )
+}
+
+export function supplierPayablePaidMessage(data: {
+  shopName: string
+  device: DeviceSpecs
+  supplierName: string
+  supplierPhone?: string | null
+  amount: number
+  paymentMethod?: string | null
+  adminName?: string | null
+  currency?: CurrencyContext | null
+}): string {
+  return compose(
+    "✅ Yetkazib beruvchiga to'lov qilindi",
+    optionalLine("Do'kon", data.shopName),
+    formatDeviceSpecs(data.device, { battery: false }),
+    supplierPayableIntro(data),
+    block(
+      `To'langan summa: ${telegramMoney(data.amount, data.currency)}`,
+      optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
+    ),
+    optionalLine('Admin', data.adminName),
+  )
+}
