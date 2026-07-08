@@ -145,7 +145,9 @@ export default async function ShopReportPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-zinc-900">{fmt(expected, currency)}</div>
-                <p className="mt-3 text-xs text-zinc-500">Nasiya va qisman sotuvlardan qolgan oy ichidagi summa</p>
+                <p className="mt-3 text-xs text-zinc-500">
+                  Nasiya va qisman sotuvlardan qolgan oy ichidagi summa · joriy kurs bo'yicha
+                </p>
               </CardContent>
             </Card>
 
@@ -169,7 +171,9 @@ export default async function ShopReportPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-red-700">{fmt(overdue, currency)}</div>
-                <p className="mt-3 text-xs text-red-700/70">Bugun ko'rib chiqilishi kerak bo'lgan qarzdorlik</p>
+                <p className="mt-3 text-xs text-red-700/70">
+                  Bugun ko'rib chiqilishi kerak bo'lgan qarzdorlik · joriy kurs bo'yicha
+                </p>
               </CardContent>
             </Card>
 

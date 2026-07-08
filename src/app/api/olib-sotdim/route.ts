@@ -184,6 +184,11 @@ export async function POST(req: NextRequest) {
           storage: d.storage,
           batteryHealth: d.batteryHealth,
           purchasePrice: purchasePriceUzs,
+          // Native purchase-currency context — see docs/currency-accounting-model.md.
+          purchaseCurrency: purchaseInput.inputCurrency,
+          purchaseInputAmount: d.purchasePrice,
+          purchaseExchangeRateAtCreation: purchaseInput.exchangeRateUsed,
+          purchaseAmountUzsSnapshot: purchasePriceUzs,
           imei: storedImei,
           supplierPhone: d.supplierPhone,
           imageUrls: d.imageUrls ?? [],

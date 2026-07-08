@@ -247,37 +247,45 @@ model Supplier {
 // ---------------------------------------------------------------------------
 
 model Device {
-  id                String       @id @default(cuid())
-  shopId            String
-  model             String
-  color             String?
-  storage           String?
-  batteryHealth     Int?
-  purchasePrice     Decimal      @db.Decimal(12, 2)
-  imei              String
-  supplierId        String?
-  supplierPhone     String?
-  imageUrls         String[]
-  status            DeviceStatus @default(IN_STOCK)
-  addedBy           String
-  note              String?
-  condition         String?
+  id                             String       @id @default(cuid())
+  shopId                         String
+  model                          String
+  color                          String?
+  storage                        String?
+  batteryHealth                  Int?
+  purchasePrice                  Decimal      @db.Decimal(12, 2)
+  // Native purchase-currency context, additive — `purchasePrice` above stays
+  // exactly as-is (UZS compatibility snapshot, dual-written in lockstep).
+  // See docs/currency-accounting-model.md. Pre-existing rows are backfilled
+  // to UZS (never an invented historical currency/rate).
+  purchaseCurrency               CurrencyCode @default(UZS)
+  purchaseInputAmount            Decimal      @default(0) @db.Decimal(12, 2)
+  purchaseExchangeRateAtCreation Decimal?     @db.Decimal(12, 4)
+  purchaseAmountUzsSnapshot      Decimal      @default(0) @db.Decimal(12, 2)
+  imei                           String
+  supplierId                     String?
+  supplierPhone                  String?
+  imageUrls                      String[]
+  status                         DeviceStatus @default(IN_STOCK)
+  addedBy                        String
+  note                           String?
+  condition                      String?
   // A device created only to carry an imported (pre-Oryx) nasiya. It is created
   // as SOLD_NASIYA (never IN_STOCK), so it never enters sellable inventory or
   // inventory-cost stats. Its purchasePrice is 0 (original cost unknown).
-  isImported        Boolean      @default(false)
+  isImported                     Boolean      @default(false)
   // "Olib-sotdim": sourced from another shop/person and sold to our customer in
   // the same operation. Created directly as SOLD_CASH (never IN_STOCK), so it
   // never becomes available for a later normal sale/nasiya and never enters
   // inventoryPurchaseCost (that stat only sums IN_STOCK/RESERVED devices).
   // purchasePrice IS real (what we paid the external supplier) — unlike
   // isImported, this does count toward this month's cost/profit normally.
-  isExternalSourced Boolean      @default(false)
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  deletedAt         DateTime?
-  deletedBy         String?
-  deleteNote        String?
+  isExternalSourced              Boolean      @default(false)
+  createdAt                      DateTime     @default(now())
+  updatedAt                      DateTime     @updatedAt
+  deletedAt                      DateTime?
+  deletedBy                      String?
+  deleteNote                     String?
 
   // Relations
   shop             Shop              @relation(fields: [shopId], references: [id])

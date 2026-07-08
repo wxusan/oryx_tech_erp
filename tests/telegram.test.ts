@@ -115,6 +115,7 @@ describe('device messages', () => {
       shopName: 'Malika',
       device: fullDevice,
       purchasePrice: 6_000_000,
+      purchaseCurrency: 'UZS',
       supplierPhone: '+998901234567',
       adminName: 'Dilshod',
     })
@@ -133,6 +134,7 @@ describe('device messages', () => {
       shopName: 'Malika',
       device: { deviceModel: 'Redmi 12', storage: null, color: null, batteryHealth: null, imei: null },
       purchasePrice: 1_000_000,
+      purchaseCurrency: 'UZS',
       supplierPhone: null,
       adminName: null,
     })
@@ -149,6 +151,7 @@ describe('device messages', () => {
       shopName: 'Malika',
       device: { deviceModel: 'Redmi 12', storage: null, color: null, batteryHealth: null, imei: 'IMPORT-abc' },
       purchasePrice: 1_000_000,
+      purchaseCurrency: 'UZS',
       supplierPhone: null,
       adminName: null,
     })
@@ -379,7 +382,7 @@ describe('global safety across every template', () => {
     startShopAdminMessage('A', 'Shop'),
     startUnknownMessage('123456789'),
     unknownCommandMessage(),
-    deviceAddedMessage({ shopName: 'S', device: fullDevice, purchasePrice: 1, supplierPhone: '1', adminName: 'A' }),
+    deviceAddedMessage({ shopName: 'S', device: fullDevice, purchasePrice: 1, purchaseCurrency: 'UZS', supplierPhone: '1', adminName: 'A' }),
     deviceSoldMessage({ shopName: 'S', device: fullDevice, customerName: 'A', customerPhone: '1', salePrice: 1, paidAmount: 1, remaining: 0, contractCurrency: 'UZS', paymentMethod: 'CASH', adminName: 'A' }),
     deviceReturnedMessage({ shopName: 'S', device: fullDevice, refundAmount: 1, refundMethod: 'CASH', note: 'n', adminName: 'A' }),
     deviceRestockedMessage({ shopName: 'S', device: fullDevice, note: 'n', adminName: 'A' }),

@@ -90,6 +90,21 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
               contractAmountPaid: true,
               contractRemainingAmount: true,
               contractExchangeRateAtCreation: true,
+              payments: {
+                where: { deletedAt: null },
+                select: {
+                  id: true,
+                  amount: true,
+                  paymentMethod: true,
+                  paidAt: true,
+                  note: true,
+                  paymentInputAmount: true,
+                  paymentInputCurrency: true,
+                  paymentExchangeRate: true,
+                  appliedAmountInContractCurrency: true,
+                },
+                orderBy: { paidAt: 'asc' },
+              },
             },
           orderBy: { createdAt: 'desc' },
           take: 1,
@@ -194,6 +209,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     // Convert the entered purchase price to the UZS base. UZS passes through;
     // USD is converted with the current rate. UZS is what gets stored.
     let purchaseMeta: Awaited<ReturnType<typeof moneyInputToUzs>> | null = null
+    const rawPurchasePriceInput = updateData.purchasePrice
     if (updateData.purchasePrice !== undefined) {
       try {
         purchaseMeta = await moneyInputToUzs(updateData.purchasePrice, inputCurrency)
@@ -231,6 +247,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         where: { id: deviceId },
         data: {
           ...updateData,
+          // Native purchase-currency context, dual-written in lockstep with
+          // the legacy UZS purchasePrice above — see docs/currency-accounting-model.md.
+          ...(purchaseMeta
+            ? {
+                purchaseCurrency: purchaseMeta.inputCurrency,
+                purchaseInputAmount: rawPurchasePriceInput,
+                purchaseExchangeRateAtCreation: purchaseMeta.exchangeRateUsed,
+                purchaseAmountUzsSnapshot: purchaseMeta.amountUzs,
+              }
+            : {}),
           updatedAt: new Date(),
         },
       })

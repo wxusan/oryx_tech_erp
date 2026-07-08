@@ -20,13 +20,27 @@ import { paymentMethodLabel } from '@/lib/labels'
 import { uzDate, uzDateTime } from '@/lib/dates'
 import { displayImei } from '@/lib/device-display'
 import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
-import { formatDisplayMoneyFromContract, formatContractMoney, computeContractCurrencyMargin, convertPaymentToContractCurrency } from '@/lib/nasiya-contract'
+import {
+  formatDisplayMoneyFromContract,
+  formatContractMoney,
+  computeSaleContractMargin,
+  convertPaymentToContractCurrency,
+  salePaymentAmountDisplay,
+  type SalePaymentLike,
+} from '@/lib/nasiya-contract'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 
 interface Supplier {
   name: string
   phone: string
+}
+
+interface SalePaymentRow extends SalePaymentLike {
+  id: string
+  paidAt: string
+  paymentMethod: string | null
+  note: string | null
 }
 
 interface Sale {
@@ -48,6 +62,7 @@ interface Sale {
   contractAmountPaid: number
   contractRemainingAmount: number
   contractExchangeRateAtCreation: number | null
+  payments: SalePaymentRow[]
 }
 
 interface NasiyaSchedule {
@@ -83,6 +98,11 @@ interface Device {
   storage: string | null
   batteryHealth: number | null
   purchasePrice: number
+  // Native purchase-currency context — see docs/currency-accounting-model.md.
+  purchaseCurrency: 'UZS' | 'USD'
+  purchaseInputAmount: number
+  purchaseExchangeRateAtCreation: number | null
+  purchaseAmountUzsSnapshot: number
   imei: string
   supplierPhone: string | null
   supplier: Supplier | null
@@ -475,12 +495,23 @@ export default function QurilmaDetailPage() {
     )
   }
 
-  const infoRows = [
+  // Purchase price shows its own native currency, never a live reconversion
+  // via today's rate (this is a historical record, exactly like a sale's
+  // contract amount — see docs/currency-accounting-model.md). The UZS hint
+  // uses the rate frozen AT PURCHASE TIME, not today's.
+  const purchaseRateHint = device.purchaseExchangeRateAtCreation
+    ? ` · kurs: ${Math.round(device.purchaseExchangeRateAtCreation).toLocaleString('ru-RU')}`
+    : ''
+  const infoRows: { label: string; value: string; hint?: string | null }[] = [
     { label: 'Model', value: device.model },
     { label: 'Rang', value: device.color ?? '—' },
     { label: 'Xotira', value: device.storage ?? '—' },
     { label: 'Batareya', value: device.batteryHealth != null ? `${device.batteryHealth}%` : '—' },
-    { label: 'Kelish narxi', value: fmt(device.purchasePrice, currency) },
+    {
+      label: 'Kelish narxi',
+      value: formatContractMoney(device.purchaseInputAmount, device.purchaseCurrency),
+      hint: device.purchaseCurrency !== 'UZS' ? `${formatContractMoney(device.purchaseAmountUzsSnapshot, 'UZS')}${purchaseRateHint}` : null,
+    },
     { label: 'IMEI', value: displayImei(device.imei) },
     { label: 'Yetkazib beruvchi', value: device.supplier?.name ?? '—' },
     { label: 'Tel raqam', value: device.supplier?.phone ?? '—' },
@@ -493,15 +524,22 @@ export default function QurilmaDetailPage() {
   const saleHasDebt = latestSale ? Number(latestSale.remainingAmount) > 0 && !latestSale.paidFully : false
   const saleProfit = latestSale ? latestSale.salePrice - device.purchasePrice : null
   // Native contract-currency margin — stable, never re-derived from today's
-  // rate (see computeContractCurrencyMargin). Falls back to the legacy
-  // UZS-based saleProfit above when a USD contract has no creation rate on
-  // record (should not happen for a real USD sale).
+  // rate (see computeSaleContractMargin). When the sale and the device's own
+  // purchase were both entered in the same currency, this is a plain native
+  // subtraction (no FX conversion at all — avoids double-counting a
+  // difference between the purchase-time and sale-time rates). Falls back to
+  // the legacy UZS-based saleProfit above when a USD contract has no
+  // creation rate on record (should not happen for a real USD sale).
   const saleContractProfit = latestSale
-    ? computeContractCurrencyMargin(
+    ? computeSaleContractMargin(
         latestSale.contractSalePrice,
-        device.purchasePrice,
         latestSale.contractCurrency,
         latestSale.contractExchangeRateAtCreation,
+        {
+          purchaseCurrency: device.purchaseCurrency,
+          purchaseInputAmount: device.purchaseInputAmount,
+          purchaseAmountUzsSnapshot: device.purchaseAmountUzsSnapshot,
+        },
       )
     : null
   // Money TEXT for this sale must convert from its own contract currency via
@@ -632,7 +670,10 @@ export default function QurilmaDetailPage() {
               className={`px-4 py-3 flex gap-4 ${i < infoRows.length - 2 ? 'border-b border-zinc-100' : ''}`}
             >
               <span className="text-xs text-zinc-500 w-32 flex-shrink-0 pt-0.5">{row.label}</span>
-              <span className="text-sm text-zinc-900 font-medium">{row.value}</span>
+              <span className="text-sm text-zinc-900 font-medium">
+                {row.value}
+                {row.hint && <span className="block text-xs text-zinc-400 font-normal">{row.hint}</span>}
+              </span>
             </div>
           ))}
         </div>
@@ -742,6 +783,48 @@ export default function QurilmaDetailPage() {
               </Button>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Sale payment history — this device detail page is the canonical Sale
+          detail view (there is no separate /sales/[id] page), so the payment
+          history lives here. Mirrors the nasiya detail page's "To'lov tarixi"
+          table; uses salePaymentAmountDisplay so historical rows show
+          payment-time context, never a live reconversion at today's rate. */}
+      {device.status === 'SOLD_CASH' && latestSale && (
+        <div className="border border-zinc-200 rounded overflow-hidden">
+          <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">
+            To'lov tarixi
+          </div>
+          {latestSale.payments?.length ? (
+            <div className="overflow-x-auto">
+              <table className="min-w-[560px] w-full text-sm">
+                <thead className="border-b border-zinc-200">
+                  <tr>
+                    {['Sana', 'Miqdor', 'Usul', 'Izoh'].map((h) => (
+                      <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide bg-zinc-50">
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {latestSale.payments.map((payment) => (
+                    <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
+                      <td className="px-4 py-3 text-zinc-700">{uzDateTime(payment.paidAt)}</td>
+                      <td className="px-4 py-3 font-medium text-zinc-900">
+                        {salePaymentAmountDisplay(payment, latestSale.contractCurrency, currency)}
+                      </td>
+                      <td className="px-4 py-3 text-zinc-700">{paymentMethodLabel(payment.paymentMethod)}</td>
+                      <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="px-4 py-6 text-sm text-zinc-500">To'lov tarixi hali yo'q</div>
+          )}
         </div>
       )}
 

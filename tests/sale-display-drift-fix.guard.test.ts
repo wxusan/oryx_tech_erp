@@ -53,9 +53,9 @@ describe('device detail page: no double-conversion drift for USD sales', () => {
     expect(page).toContain('Shartnoma: {formatContractMoney(latestSale.contractSalePrice, latestSale.contractCurrency)}')
   })
 
-  it('profit uses computeContractCurrencyMargin via saleContractProfit, falling back to the legacy computation only when null', () => {
+  it('profit uses computeSaleContractMargin (purchase-currency aware) via saleContractProfit, falling back to the legacy computation only when null', () => {
     expect(page).toContain('const saleProfit = latestSale ? latestSale.salePrice - device.purchasePrice : null')
-    expect(page).toContain('computeContractCurrencyMargin(')
+    expect(page).toContain('computeSaleContractMargin(')
     expect(page).toContain('saleContractProfit != null')
   })
 
@@ -69,10 +69,10 @@ describe('device detail page: no double-conversion drift for USD sales', () => {
 describe('shop-lists.ts buildDeviceSaleInfo: contract-currency fields for both sale types', () => {
   const lists = read('src/lib/server/shop-lists.ts')
 
-  it('computes contractSoldPrice/contractProfit via computeContractCurrencyMargin for both cash sale and nasiya', () => {
+  it('computes contractSoldPrice/contractProfit via computeSaleContractMargin (purchase-currency aware) for both cash sale and nasiya', () => {
     expect(lists).toContain('const contractSoldPrice = Number(latestNasiya.contractTotalAmount)')
     expect(lists).toContain('const contractSoldPrice = Number(latestSale!.contractSalePrice)')
-    expect(lists.match(/computeContractCurrencyMargin\(contractSoldPrice, purchasePrice, contractCurrency, contractExchangeRateAtCreation\)/g)?.length).toBe(2)
+    expect(lists.match(/computeSaleContractMargin\(contractSoldPrice, contractCurrency, contractExchangeRateAtCreation, purchase\)/g)?.length).toBe(2)
   })
 
   it('never touches the legacy soldPrice/profit computation (kept byte-identical for existing tests)', () => {

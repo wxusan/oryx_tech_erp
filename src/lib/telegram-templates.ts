@@ -153,7 +153,9 @@ export function unknownCommandMessage(): string {
 export function deviceAddedMessage(data: {
   shopName: string
   device: DeviceSpecs
+  /** The device's own purchase-currency amount — see docs/currency-accounting-model.md. */
   purchasePrice: number
+  purchaseCurrency: CurrencyCode
   supplierPhone?: string | null
   adminName?: string | null
   currency?: CurrencyContext | null
@@ -162,7 +164,10 @@ export function deviceAddedMessage(data: {
     "📦 Yangi qurilma qo'shildi",
     optionalLine("Do'kon", data.shopName),
     formatDeviceSpecs(data.device),
-    block(`Kelish narxi: ${telegramMoney(data.purchasePrice, data.currency)}`, optionalLine('Yetkazib beruvchi', data.supplierPhone)),
+    block(
+      `Kelish narxi: ${formatContractMoneyWithDisplay(data.purchasePrice, data.purchaseCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
+      optionalLine('Yetkazib beruvchi', data.supplierPhone),
+    ),
     optionalLine('Admin', data.adminName),
   )
 }

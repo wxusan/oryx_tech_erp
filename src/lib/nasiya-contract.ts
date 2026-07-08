@@ -46,6 +46,21 @@ export function contractScheduleOutstanding(expectedAmount: number, paidAmount: 
 }
 
 /**
+ * Convert a single contract-currency amount into UZS using a given rate
+ * (typically TODAY's rate, for a "current state" report aggregate — never
+ * for a frozen historical record, which must keep its own creation/payment-
+ * time rate instead). UZS passes through unchanged. Returns the raw USD
+ * number un-converted if no rate is available, rather than throwing — a
+ * documented, honest degradation (see docs/currency-accounting-model.md)
+ * instead of a hard failure of the whole aggregate.
+ */
+export function convertContractAmountToUzs(amount: number, contractCurrency: CurrencyCode, usdUzsRate: number | null): number {
+  if (contractCurrency === 'UZS') return amount
+  if (!usdUzsRate) return amount
+  return convertUsdToUzs(amount, usdUzsRate)
+}
+
+/**
  * A "current outstanding balance" report aggregate (dashboard expectedThisMonth/
  * overdueMoney/upcomingPayments) must be computed from each nasiya's own
  * contract-currency remaining balance, converted to UZS using TODAY's rate —
@@ -63,9 +78,7 @@ export function contractOutstandingAsUzs(
   usdUzsRate: number | null,
 ): number {
   const raw = contractScheduleOutstanding(Number(contractExpectedAmount), Number(contractPaidAmount), contractCurrency)
-  if (contractCurrency === 'UZS') return raw
-  if (!usdUzsRate) return raw
-  return convertUsdToUzs(raw, usdUzsRate)
+  return convertContractAmountToUzs(raw, contractCurrency, usdUzsRate)
 }
 
 /**
@@ -193,6 +206,38 @@ export function computeContractCurrencyMargin(
   if (!contractExchangeRateAtCreation) return null
   const costInContractCurrency = Math.round(convertUzsToUsd(costUzs, contractExchangeRateAtCreation) * 100) / 100
   return Math.round((contractAmount - costInContractCurrency) * 100) / 100
+}
+
+/** Minimal shape of a device's own purchase-currency context (see the `purchase*` fields on Device). */
+export interface PurchaseCostLike {
+  purchaseCurrency: CurrencyCode
+  purchaseInputAmount: number
+  purchaseAmountUzsSnapshot: number
+}
+
+/**
+ * Sale-margin variant of `computeContractCurrencyMargin` that is aware of the
+ * DEVICE's own purchase currency (not just a UZS-only cost). When the sale's
+ * contractCurrency matches the device's purchaseCurrency, the margin is a
+ * plain native subtraction — no FX conversion at all, so it can never
+ * double-count an exchange difference between the (possibly different)
+ * purchase-time and sale-time rates. Only when the two currencies genuinely
+ * differ does this fall back to converting the purchase's frozen UZS
+ * snapshot into the sale's contract currency via the SALE's own frozen
+ * creation rate (identical behavior to `computeContractCurrencyMargin`,
+ * which remains in use wherever a purchase-currency context isn't
+ * available). See docs/currency-accounting-model.md.
+ */
+export function computeSaleContractMargin(
+  contractAmount: number,
+  contractCurrency: CurrencyCode,
+  contractExchangeRateAtCreation: number | null,
+  purchase: PurchaseCostLike,
+): number | null {
+  if (purchase.purchaseCurrency === contractCurrency) {
+    return Math.round((contractAmount - purchase.purchaseInputAmount) * 100) / 100
+  }
+  return computeContractCurrencyMargin(contractAmount, purchase.purchaseAmountUzsSnapshot, contractCurrency, contractExchangeRateAtCreation)
 }
 
 /**

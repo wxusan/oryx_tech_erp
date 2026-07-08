@@ -11,9 +11,12 @@ import {
   formatContractMoney,
   formatDisplayMoneyFromContract,
   contractOutstandingAsUzs,
+  convertContractAmountToUzs,
   computeContractCurrencyMargin,
+  computeSaleContractMargin,
   salePaymentAmountDisplay,
   type SalePaymentLike,
+  type PurchaseCostLike,
 } from '@/lib/nasiya-contract'
 
 describe('getCompletionToleranceForCurrency', () => {
@@ -224,5 +227,65 @@ describe('salePaymentAmountDisplay — Sale payment history never redisplays at 
     const legacy = payment({ amount: 6_250_000 })
     expect(salePaymentAmountDisplay(legacy, 'USD', uzsDisplay)).toMatch(/6.?250.?000 so'm/)
     expect(salePaymentAmountDisplay(legacy, 'USD', usdDisplay)).toContain('$')
+  })
+})
+
+describe('convertContractAmountToUzs', () => {
+  it('UZS passes through unchanged, regardless of rate', () => {
+    expect(convertContractAmountToUzs(500_000, 'UZS', 12_500)).toBe(500_000)
+    expect(convertContractAmountToUzs(500_000, 'UZS', null)).toBe(500_000)
+  })
+
+  it('USD converts via the given rate', () => {
+    expect(convertContractAmountToUzs(100, 'USD', 12_500)).toBe(1_250_000)
+  })
+
+  it('USD with no rate available returns the raw number rather than throwing', () => {
+    expect(convertContractAmountToUzs(100, 'USD', null)).toBe(100)
+  })
+})
+
+describe('computeSaleContractMargin — purchase-currency aware, never double-counts an FX difference', () => {
+  function purchase(overrides: Partial<PurchaseCostLike> = {}): PurchaseCostLike {
+    return {
+      purchaseCurrency: 'UZS',
+      purchaseInputAmount: 5_000_000,
+      purchaseAmountUzsSnapshot: 5_000_000,
+      ...overrides,
+    }
+  }
+
+  it('same currency (USD sale, USD purchase): plain native subtraction, no FX conversion at all', () => {
+    // Bought for $400, sold for $500 -> $100 margin, regardless of what the
+    // purchase-time and sale-time rates happened to be.
+    const p = purchase({ purchaseCurrency: 'USD', purchaseInputAmount: 400, purchaseAmountUzsSnapshot: 5_000_000 })
+    expect(computeSaleContractMargin(500, 'USD', 12_500, p)).toBe(100)
+  })
+
+  it('same currency margin is stable even when purchase-time and sale-time rates would have implied different UZS snapshots', () => {
+    // Purchase-time UZS snapshot used a different rate (13,000) than the
+    // sale's own creation rate (12,500) — the native-currency result must
+    // not depend on either rate at all, unlike a round-trip through UZS.
+    const p = purchase({ purchaseCurrency: 'USD', purchaseInputAmount: 400, purchaseAmountUzsSnapshot: 5_200_000 })
+    expect(computeSaleContractMargin(500, 'USD', 12_500, p)).toBe(100)
+  })
+
+  it('same currency (UZS sale, UZS purchase): plain native subtraction', () => {
+    const p = purchase({ purchaseCurrency: 'UZS', purchaseInputAmount: 5_000_000, purchaseAmountUzsSnapshot: 5_000_000 })
+    expect(computeSaleContractMargin(6_250_000, 'UZS', null, p)).toBe(1_250_000)
+  })
+
+  it('different currencies: falls back to converting the purchase UZS snapshot via the SALE\'s frozen creation rate', () => {
+    // Device bought in UZS (5,000,000 so'm), sold as a $500 USD contract
+    // created at rate 12,500 -> matches computeContractCurrencyMargin exactly.
+    const p = purchase({ purchaseCurrency: 'UZS', purchaseInputAmount: 5_000_000, purchaseAmountUzsSnapshot: 5_000_000 })
+    expect(computeSaleContractMargin(500, 'USD', 12_500, p)).toBe(
+      computeContractCurrencyMargin(500, 5_000_000, 'USD', 12_500),
+    )
+  })
+
+  it('different currencies, no creation rate on a USD sale: returns null rather than inventing one', () => {
+    const p = purchase({ purchaseCurrency: 'UZS', purchaseInputAmount: 5_000_000, purchaseAmountUzsSnapshot: 5_000_000 })
+    expect(computeSaleContractMargin(500, 'USD', null, p)).toBeNull()
   })
 })

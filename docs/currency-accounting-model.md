@@ -181,9 +181,11 @@ summing frozen snapshots and converting the total once).
 - **Live aggregates** (`expectedThisMonth`, `overdueMoney`,
   `upcomingPayments`) now convert each nasiya's own contract-currency
   balance through today's rate before summing — see §10.
-- Sale's aggregates are unaffected by this pass (Sale has no schedule and
-  its legacy `remainingAmount` stays accurate via its own dual-ledger — see
-  §13).
+- **Sale's live aggregates** (`expectedThisMonth`, `overdueMoney`, via
+  `unpaidSales`/`overdueSales`) were fixed in the same later pass that added
+  §21's `convertContractAmountToUzs` — see §21 for why the legacy
+  `remainingAmount` alone was not safe to keep summing for these two
+  figures.
 
 ## 12. Telegram
 
@@ -330,10 +332,8 @@ currency) "paid X → applied Y · kurs: Z", using `paymentInputAmount/
 Currency/paymentExchangeRate/appliedAmountInContractCurrency` — never
 reinventing a historical rate. Rows recorded before payment-time tracking
 existed fall back to `formatDisplayMoneyFromContract(payment.amount, 'UZS',
-...)`, same as before this fix. No dedicated Sale payment-history UI table
-exists yet (Nasiya has one; Sale doesn't) — this function is implemented and
-tested (`tests/nasiya-contract.test.ts`) so a future history view can use it
-directly, but building that table was out of scope for this pass.
+...)`, same as before this fix. A dedicated Sale payment-history table was
+added in a later pass — see §19.
 
 **Telegram.** `deviceSoldMessage`/`salePaymentMessage`/
 `olibSotdimCreatedMessage` all now take a `contractCurrency` param and
@@ -349,9 +349,9 @@ route call sites (`api/devices/[id]/sell`, `api/sales/[id]/payment`,
 `api/olib-sotdim`) were updated to pass their already-computed
 contract-native amounts instead of the legacy UZS ones.
 
-**Profit.** There is no `contractPurchasePrice`/`contractProfit` field on
-Sale — `Device.purchasePrice` stays UZS-only by design (see §18). A new
-helper, `computeContractCurrencyMargin`, gives a stable, non-inventing
+**Profit.** At the time of this pass there was no `contractPurchasePrice`/
+`contractProfit` field on Sale, and `Device.purchasePrice` was UZS-only — a
+new helper, `computeContractCurrencyMargin`, gave a stable, non-inventing
 profit figure: for a UZS contract it's a plain subtraction; for a USD
 contract, the UZS purchase price is converted using the **frozen creation
 rate** (never today's rate) — mathematically identical to dividing the
@@ -359,7 +359,9 @@ already-frozen legacy profit snapshot by that same rate, so it never drifts.
 It returns `null` only if a USD contract somehow has no creation rate on
 record, in which case every display falls back to the original
 `salePrice - purchasePrice` / legacy-UZS computation, preserving
-`tests/sold-device-profit.test.ts` exactly.
+`tests/sold-device-profit.test.ts` exactly. A later pass gave Device its own
+native purchase currency and generalized this into
+`computeSaleContractMargin` — see §20/§21.
 
 **Olib-sotdim.** Reused `buildDeviceSaleInfo` (shared with regular cash
 sales) for its sold-device profit display; its `olibSotdimCreatedMessage`
@@ -367,9 +369,10 @@ call now passes contract-native purchase/sale/profit amounts. No changes
 were made to supplier-payable partial-payment logic (there is none — see
 §13).
 
-**Reports.** Not touched in this pass — no report was found reading Sale's
-legacy fields in a way that would misrender a *future* USD sale (aggregates
-already documented in §11 as a live-view limitation, unchanged).
+**Reports.** Not touched in *this* pass — no report was found reading
+Sale's legacy fields in a way that would misrender a *future* USD sale. A
+later pass did fix the one live-aggregate case that mattered (Sale's
+`expectedThisMonth`/`overdueMoney`) — see §11 and §21.
 
 ## 18. What was deliberately deferred (not silently dropped)
 
@@ -381,5 +384,187 @@ already documented in §11 as a live-view limitation, unchanged).
   contract paid in UZS"). Adding a second selector was assessed as
   unnecessary risk to existing, tested UI wiring for a capability the app
   already has.
-- **Device.purchasePrice** stays UZS-only — out of scope per the original
-  spec (never listed as a field needing contract-currency treatment).
+- **Device.purchasePrice** stayed UZS-only at the time this section was
+  written — since fixed with a native `purchaseCurrency` context, see §20.
+  See §22 for what remains genuinely deferred as of the latest pass.
+
+## 19. Sale payment history UI (final cleanup pass)
+
+Sale has no dedicated `/sales/[id]` page — the device detail page
+(`src/app/(shop)/shop/qurilmalar/[id]/page.tsx`) is the canonical Sale
+detail view (it already renders the "Sotuv ma'lumotlari" card). This pass
+added a "To'lov tarixi" table there for `SOLD_CASH` devices, directly below
+that card, mirroring the nasiya detail page's own payment-history table:
+
+- `GET /api/devices/[id]` now selects `SalePayment` rows under the sale
+  (`where: { deletedAt: null }`, `orderBy: { paidAt: 'asc' }`) together with
+  `paymentInputAmount/paymentInputCurrency/paymentExchangeRate/
+  appliedAmountInContractCurrency`.
+- Each row renders via `salePaymentAmountDisplay(payment,
+  latestSale.contractCurrency, currency)` (already implemented and tested in
+  §17/`tests/nasiya-contract.test.ts`) — payment-time native amount, or
+  "paid X → applied Y · kurs: Z" when payment currency differs from
+  contract currency, never a live reconversion at today's rate. Example
+  rows: `"6 250 000 so'm → $500.00 · kurs: 12 500"` (USD sale paid in UZS),
+  `"$160.00 → 2 000 000 so'm · kurs: 12 500"` (UZS sale paid in USD), or a
+  single `"$500.00"` when nothing was converted.
+- Legacy `SalePayment` rows recorded before payment-time tracking existed
+  fall back to `formatDisplayMoneyFromContract(payment.amount, 'UZS', ...)`
+  — today's display currency, never an invented historical rate.
+- An empty note renders as `—`, never blank/`undefined` text; an empty
+  history shows `"To'lov tarixi hali yo'q"` instead of a broken/empty table.
+
+## 20. Device purchase-price currency context (final cleanup pass)
+
+`Device.purchasePrice` stays exactly as-is — the UZS compatibility
+snapshot, dual-written in lockstep on every write, never renamed or
+dropped. Four new additive columns carry the device's own native purchase
+currency:
+
+- `purchaseCurrency` (`UZS` | `USD`, default `UZS`)
+- `purchaseInputAmount` — the raw amount as entered, in `purchaseCurrency`
+- `purchaseExchangeRateAtCreation` — nullable, frozen at purchase time
+- `purchaseAmountUzsSnapshot` — the UZS-converted amount (identical to
+  `purchasePrice`, kept as a separate field for the same reason
+  `NasiyaPayment.amount` and `appliedAmountInContractCurrency` are both
+  kept — see §3)
+
+**Write paths.** `POST /api/devices` (new device), `PATCH /api/devices/[id]`
+(purchase price edit, only while the device is still `IN_STOCK` — money is
+locked once financially linked, see the route's existing
+`isFinanciallyLinked` guard, unchanged), and `POST /api/olib-sotdim` (the
+externally-sourced device) all populate these four fields from the same
+`inputCurrency`/`moneyInputToUzs` mechanism already used for every other
+money input in this codebase — `purchaseCurrency` defaults to the shop's
+current `preferredCurrency` (the existing "Yangi qurilma" form already
+sends `inputCurrency: currency.currency`, so no new currency-selector UI was
+needed). The restock route and the nasiya-import route intentionally do
+**not** touch these fields: restock is a pure `RETURNED -> IN_STOCK` status
+flip with no price input, and nasiya-import always creates a device with
+`purchasePrice: 0` (original cost genuinely unknown) — the schema defaults
+(`purchaseCurrency: 'UZS'`, `purchaseInputAmount: 0`,
+`purchaseAmountUzsSnapshot: 0`) already describe that correctly.
+
+**Legacy rows.** The migration
+(`prisma/migrations/202607080006_device_purchase_currency/migration.sql`) is
+additive-only (`ADD COLUMN`, no drops/renames) and backfills every existing
+row to `purchaseCurrency = 'UZS'`, `purchaseInputAmount = purchasePrice`,
+`purchaseAmountUzsSnapshot = purchasePrice` — never inventing a historical
+USD purchase for a device that was always UZS-only.
+
+**Device detail UI.** The "Kelish narxi" row now shows
+`formatContractMoney(device.purchaseInputAmount, device.purchaseCurrency)`
+— the device's own native purchase amount, e.g. `"Xarid narxi: $400"` for a
+USD purchase, unaffected by whatever the shop's current display currency
+happens to be (a historical record, exactly like a sale's contract amount —
+see §4). When `purchaseCurrency !== 'UZS'`, a small hint line shows the UZS
+snapshot plus the rate **frozen at purchase time** (never today's rate):
+`"5 000 000 so'm · kurs: 12 500"`. A UZS-only purchase shows only the plain
+UZS figure, with no hint line (nothing to add).
+
+## 21. Profit calculation rule + mixed-currency report aggregate rule (final cleanup pass)
+
+**Profit.** A new helper, `computeSaleContractMargin` (built on top of
+`computeContractCurrencyMargin` from §17), is now purchase-currency aware:
+
+- If the sale's `contractCurrency` equals the device's own
+  `purchaseCurrency`, the margin is a **plain native subtraction** — e.g.
+  bought for $400, sold for $500 → $100 margin, with **zero FX conversion**.
+  This is strictly more correct than round-tripping through the UZS
+  snapshot (the old behavior), because the purchase-time rate and the
+  sale's own creation rate can genuinely differ — converting UZS → USD
+  → UZS → USD across two different rates would silently double-count that
+  difference as phantom profit or loss.
+- If the two currencies differ, it falls back to exactly the §17 behavior:
+  convert the purchase's frozen UZS snapshot into the sale's contract
+  currency using the **sale's own frozen creation rate** — never today's
+  rate, never the purchase's own rate (there is no well-defined way to mix
+  two different frozen rates into one number, so the sale's rate is used
+  consistently everywhere this margin is computed).
+- Returns `null` only when a USD contract has no creation rate on record
+  (should not happen for a real USD sale); every caller falls back to the
+  original `salePrice - purchasePrice` / legacy-UZS computation in that
+  case, preserving `tests/sold-device-profit.test.ts` exactly.
+
+Wired into `shop-lists.ts` (`buildDeviceSaleInfo`, shared by the qurilmalar
+list and sold-devices views) and the device detail page's
+`saleContractProfit` — both now build a `PurchaseCostLike` object from the
+device's own `purchaseCurrency`/`purchaseInputAmount`/
+`purchaseAmountUzsSnapshot` instead of assuming a UZS-only cost.
+
+**Mixed-currency report aggregates.** `shop-stats.ts`'s two "current state"
+aggregates that sum across all contracts of a given kind —
+`expectedThisMonth` and `overdueMoney` — must never raw-sum a USD-native
+contract's remaining balance next to a UZS-native one (`$500 + 2,000,000
+so'm = 2,000,500` is meaningless). Nasiya's side of this was already fixed
+in §10/§11 via `contractOutstandingAsUzs`. This pass fixed the parallel gap
+on the Sale side: `unpaidSales`/`overdueSales` now select
+`contractCurrency`/`contractRemainingAmount` and convert each sale's own
+contract-currency remaining balance to UZS via **today's rate** (a new
+shared helper, `convertContractAmountToUzs`, that `contractOutstandingAsUzs`
+itself now calls) before summing — never by summing the legacy
+`remainingAmount` snapshot directly. This matters because, unlike a
+device's one-time purchase conversion, Sale's legacy `remainingAmount` is
+decremented by a *sequence* of payments, each converted at whatever rate was
+live on that payment's own day — so for a USD-native sale with several
+payments on different days, the legacy snapshot's implicit "rate" is not
+even well-defined, and summing it across many sales would silently mix
+however many different day-rates happened to apply. Converting from the
+single, always-correct `contractRemainingAmount` through one consistent
+current rate avoids that entirely. **Creation-time aggregates**
+(`accrualRevenueThisMonth`, sold-device profit, `inventoryPurchaseCost`)
+remain untouched — each device/sale/nasiya contributes a single,
+frozen-at-its-own-creation-rate UZS number, and summing many independently-
+frozen numbers is ordinary, correct accounting with no reconversion
+involved (see §11).
+
+The dashboard and hisobot pages now also carry a small "joriy kurs bo'yicha"
+(at today's rate) label/tooltip next to `expectedThisMonth`/`overdueMoney`,
+so a shop owner with mixed-currency contracts understands these are live,
+rate-dependent conversions rather than a stored ledger total.
+
+## 22. What is fully fixed now, and what (if anything) remains deferred
+
+**Fully fixed as of this pass:** Nasiya (schema, creation, payment/
+allocation, completion, schedules, payment score, reminders, Telegram,
+historical payment display); Sale (schema, creation, payment, display on
+list/detail, `deviceSoldMessage`/`salePaymentMessage`, payment-history UI);
+Olib-sotdim/SupplierPayable (schema, creation, reminders, paid-confirmation
+message); Device purchase-currency context (schema, creation/edit/
+olib-sotdim write paths, purchase-aware profit margin, detail-page display);
+import (nasiya import only — see below); the two Sale/Nasiya live report
+aggregates that could have raw-mixed currencies (`expectedThisMonth`,
+`overdueMoney`).
+
+**Deliberately deferred, not silently dropped:**
+- **No independent currency selector** in creation forms or the payment
+  modal, distinct from the shop's global `preferredCurrency` toggle (see
+  §18) — unchanged, still assessed as unnecessary risk for a capability the
+  app already has via the display-currency toggle.
+- **Generic audit-log formatter** (`src/lib/log-format.ts`'s
+  `formatLogValue`, used by the "Amallar tarixi" log viewers across Shop/
+  Device/Customer/Nasiya/Sale) reformats whatever legacy UZS number is
+  stored in a `Log.newValue`/`oldValue` JSON blob using the **current**
+  display currency/rate at view time — the same double-conversion-drift
+  bug class as §10, but for an audit trail rather than a balance. This is a
+  much broader, shared, generic utility touched by many unrelated log
+  target types; fixing it would require either storing contract-currency
+  context on every log row or teaching the formatter about each target
+  type's own contract fields, which is a materially larger refactor than
+  this pass's scope. Left as a known, documented limitation: log entries
+  for a USD-native contract may show a slightly different so'm-equivalent
+  figure than they did when first logged, if the rate has since moved. The
+  underlying data (the contract-currency ledger itself) is unaffected —
+  only this historical-audit display has the limitation.
+- **No separate device-level currency import/bulk-import path** beyond
+  nasiya import — there is no generic "device import" route in this
+  codebase to extend; the one bulk-import flow that exists
+  (`POST /api/nasiya/import`) already stores its own `contractCurrency` on
+  the created Nasiya (see §14), and creates its device with
+  `purchasePrice: 0` (cost genuinely unknown), which the new
+  `purchaseCurrency` defaults already describe correctly with no extra
+  code needed.
+- **Sold-device list/CSV exports** (`/api/export/[entity]`) show each row's
+  own legacy-UZS and display-currency amount side by side — this is a
+  per-row historical export, not a summed aggregate, so it was not touched
+  and carries no mixed-currency risk.

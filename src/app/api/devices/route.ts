@@ -154,6 +154,11 @@ export async function POST(req: NextRequest) {
           shopId: resolvedShopId,
           model, color, storage, batteryHealth,
           purchasePrice: purchaseInput.amountUzs,
+          // Native purchase-currency context — see docs/currency-accounting-model.md.
+          purchaseCurrency: purchaseInput.inputCurrency,
+          purchaseInputAmount: purchasePrice,
+          purchaseExchangeRateAtCreation: purchaseInput.exchangeRateUsed,
+          purchaseAmountUzsSnapshot: purchaseInput.amountUzs,
           imei,
           supplierId,
           supplierPhone,
@@ -194,7 +199,8 @@ export async function POST(req: NextRequest) {
           deviceAddedMessage({
             shopName: shop?.name ?? '',
             device: { deviceModel: model, storage, color, batteryHealth, imei },
-            purchasePrice: purchaseInput.amountUzs,
+            purchasePrice,
+            purchaseCurrency: purchaseInput.inputCurrency,
             supplierPhone,
             adminName: session.user.name,
             currency,

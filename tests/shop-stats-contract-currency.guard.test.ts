@@ -26,8 +26,12 @@ describe('shop-stats.ts dashboard aggregates use contractOutstandingAsUzs, not t
     expect(source).toContain('return sum + scheduleOutstandingUzs(schedule)')
   })
 
-  it('Sale remainingAmount is untouched (Sale has no contract currency yet — genuinely UZS)', () => {
-    expect(source).toContain('sum + Number(sale.remainingAmount)')
+  it('unpaidSales selects Sale contract fields and derives expectedThisMonth/overdueMoney from saleRemainingUzs (convertContractAmountToUzs), never the legacy remainingAmount directly', () => {
+    expect(source).toContain('contractCurrency: true,\n        contractRemainingAmount: true,')
+    expect(source).toContain('const saleRemainingUzs = (sale')
+    expect(source).toContain('convertContractAmountToUzs(Number(sale.contractRemainingAmount), sale.contractCurrency, usdUzsRate)')
+    expect(source).toContain('return sum + saleRemainingUzs(sale)')
+    expect(source).toContain('overdueSales.reduce((sum, sale) => sum + saleRemainingUzs(sale), 0)')
   })
 
   it('upcomingPayments converts both expectedAmount and paidAmount from the nasiya\'s own contract currency via today\'s rate', () => {

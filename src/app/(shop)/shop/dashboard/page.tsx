@@ -191,7 +191,7 @@ export default async function DashboardPage() {
                       {fmt(stats.overdueMoney, currency)}
                     </div>
                     <p className="mt-2 text-xs text-red-700/70">
-                      {stats.overdueCount} ta muddatdan o'tgan yozuv
+                      {stats.overdueCount} ta muddatdan o'tgan yozuv · joriy kurs bo'yicha
                     </p>
                   </CardContent>
                 </Card>
@@ -240,7 +240,9 @@ export default async function DashboardPage() {
               <CardContent>
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-xs text-zinc-500">Bu oy kutilmoqda</div>
+                    <div className="text-xs text-zinc-500" title="Har bir shartnoma o'z valyutasidan joriy kurs bo'yicha bir marta hisoblanadi">
+                      Bu oy kutilmoqda
+                    </div>
                     <div className="mt-1 text-xl font-bold text-zinc-900">{fmt(stats.expectedThisMonth, currency)}</div>
                   </div>
                   <CalendarClock className="size-5 text-zinc-400" />
