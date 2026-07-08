@@ -27,6 +27,7 @@ import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
+import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
 
 export async function POST(req: NextRequest) {
@@ -67,11 +68,33 @@ export async function POST(req: NextRequest) {
       return badRequest("Qolgan qarz eski nasiya umumiy summasidan oshmasligi kerak")
     }
 
+    // Native contract-currency ledger — computed from the RAW inputs (not
+    // UZS-converted), in whatever currency the import file/form specifies.
+    // Old (already-imported) rows stay UZS via the migration backfill; only
+    // NEW imports get a real contractCurrency here. See
+    // docs/currency-accounting-model.md.
+    const contractCurrency = originalTotalInput.inputCurrency
+    const contractTotalAmount = roundContractMoney(data.originalTotalAmount, contractCurrency)
+    const contractDownPayment = roundContractMoney(data.alreadyPaidBeforeImport, contractCurrency)
+    const contractRemainingDebt = roundContractMoney(data.remainingDebt, contractCurrency)
+    const contractMonthlyPayment = roundContractMoney(data.monthlyPayment, contractCurrency)
+
     // Build the future-only schedule up-front so we can reject bad money before
     // touching the DB, and reuse the exact rows inside the transaction.
     let schedule: ReturnType<typeof generateImportSchedule>
+    let contractSchedule: ReturnType<typeof generateImportSchedule>
     try {
       schedule = generateImportSchedule(data.nextPaymentDate, remainingDebtInput.amountUzs, monthlyPaymentInput.amountUzs)
+      // Force the same instalment count as the legacy schedule — their
+      // independently-rounded ratios could otherwise occasionally disagree
+      // by one row. See docs/currency-accounting-model.md.
+      contractSchedule = generateImportSchedule(
+        data.nextPaymentDate,
+        contractRemainingDebt,
+        contractMonthlyPayment,
+        contractCurrency,
+        schedule.length,
+      )
     } catch (error) {
       return badRequest(error instanceof Error ? error.message : "To'lov jadvali noto'g'ri")
     }
@@ -186,13 +209,27 @@ export async function POST(req: NextRequest) {
           alreadyPaidBeforeImport: alreadyPaidInput.amountUzs,
           remainingAtImport: remainingDebt,
           importNote: data.importNote,
+          // Native contract-currency ledger — source of truth going forward.
+          // See docs/currency-accounting-model.md.
+          contractCurrency,
+          contractExchangeRateAtCreation: originalTotalInput.exchangeRateUsed,
+          contractTotalAmount,
+          contractDownPayment,
+          contractBaseRemainingAmount: contractRemainingDebt,
+          contractInterestAmount: 0,
+          contractFinalAmount: contractRemainingDebt,
+          contractMonthlyPayment,
+          contractRemainingAmount: contractRemainingDebt,
+          contractPaidAmount: 0,
         },
       })
 
       await tx.nasiyaSchedule.createMany({
-        data: schedule.map((item) => ({
+        data: schedule.map((item, index) => ({
           nasiyaId: nasiya.id,
           shopId,
+          contractCurrency,
+          contractExpectedAmount: contractSchedule[index].expectedAmount,
           monthNumber: item.monthNumber,
           dueDate: item.dueDate,
           expectedAmount: item.expectedAmount,

@@ -51,6 +51,31 @@ describe('generateImportSchedule', () => {
     expect(() => generateImportSchedule(NEXT, -1, 740_000)).toThrow()
     expect(() => generateImportSchedule(NEXT, 100, 0)).toThrow()
   })
+
+  it('defaults to UZS (whole-number split) when no currency is passed — unchanged legacy behavior', () => {
+    const s = generateImportSchedule(NEXT, 3_800_000, 740_000)
+    expect(s.every((r) => Number.isInteger(r.expectedAmount))).toBe(true)
+  })
+
+  it('USD currency splits in cents, not whole dollars — $380 over 6 instalments of $74', () => {
+    const s = generateImportSchedule(NEXT, 380, 74, 'USD')
+    expect(s).toHaveLength(6)
+    expect(s.slice(0, 5).every((r) => r.expectedAmount === 74)).toBe(true)
+    expect(s[5].expectedAmount).toBe(10)
+    expect(s.reduce((sum, r) => sum + r.expectedAmount, 0)).toBe(380)
+  })
+
+  it('monthCountOverride forces the same instalment count regardless of the naturally-derived ratio, still summing exactly', () => {
+    // Without an override this would naturally split into 5 instalments.
+    const natural = generateImportSchedule(NEXT, 3_700_000, 740_000)
+    expect(natural).toHaveLength(5)
+    // Forcing 6 (e.g. to match a contract-currency mirror's own count) still
+    // sums exactly to the total — used so a nasiya's legacy-UZS and
+    // contract-currency schedules never disagree by one row.
+    const forced = generateImportSchedule(NEXT, 3_700_000, 740_000, 'UZS', 6)
+    expect(forced).toHaveLength(6)
+    expect(forced.reduce((sum, r) => sum + r.expectedAmount, 0)).toBe(3_700_000)
+  })
 })
 
 describe('nasiyaImportedMessage', () => {

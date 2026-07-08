@@ -141,14 +141,25 @@ export function generatePaymentSchedule(
  * @param nextPaymentDate - due date of the first future instalment
  * @param remainingDebt   - debt still owed at import (must be > 0)
  * @param monthlyPayment  - agreed monthly instalment (must be > 0)
+ * @param currency        - defaults to UZS (unchanged whole-so'm behavior);
+ *   pass 'USD' to round in cent-precise units instead of whole numbers.
+ * @param monthCountOverride - force this many instalments instead of deriving
+ *   count from ceil(remainingDebt / monthlyPayment). Used to keep a nasiya's
+ *   legacy-UZS schedule and native-contract-currency schedule mirrors at the
+ *   exact same length/due-dates when their independently-rounded ratios
+ *   would otherwise occasionally disagree by one row (see
+ *   docs/currency-accounting-model.md).
  */
 export function generateImportSchedule(
   nextPaymentDate: Date,
   remainingDebt: number,
   monthlyPayment: number,
+  currency: CurrencyCode = 'UZS',
+  monthCountOverride?: number,
 ): PaymentScheduleItem[] {
-  const total = Math.round(remainingDebt)
-  const monthly = Math.round(monthlyPayment)
+  const unitsPerAmount = currency === 'USD' ? 100 : 1
+  const total = Math.round(remainingDebt * unitsPerAmount)
+  const monthly = Math.round(monthlyPayment * unitsPerAmount)
   if (!Number.isFinite(total) || total <= 0) {
     throw new Error("Qolgan qarz 0 dan katta bo'lishi kerak")
   }
@@ -156,17 +167,17 @@ export function generateImportSchedule(
     throw new Error("Oylik to'lov 0 dan katta bo'lishi kerak")
   }
 
-  const count = Math.ceil(total / monthly)
+  const count = monthCountOverride ?? Math.ceil(total / monthly)
   const schedule: PaymentScheduleItem[] = []
   let allocated = 0
   for (let i = 1; i <= count; i++) {
     const isLast = i === count
-    const expectedAmount = isLast ? total - allocated : monthly
-    allocated += expectedAmount
+    const expectedAmountUnits = isLast ? total - allocated : monthly
+    allocated += expectedAmountUnits
     schedule.push({
       monthNumber: i,
       dueDate: addMonths(nextPaymentDate, i - 1),
-      expectedAmount,
+      expectedAmount: expectedAmountUnits / unitsPerAmount,
     })
   }
   return schedule
