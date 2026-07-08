@@ -22,8 +22,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
-import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency, type CurrencyCode } from '@/lib/currency'
-import { convertPaymentToContractCurrency, formatContractMoney } from '@/lib/nasiya-contract'
+import { convertUsdToUzs, convertUzsToUsd, currencyLabel, type CurrencyCode } from '@/lib/currency'
+import { convertPaymentToContractCurrency, contractScheduleOutstanding, formatContractMoney, formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { uzDate, uzMonthYear } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { tashkentTodayInputValue } from '@/lib/timezone'
@@ -44,6 +44,8 @@ interface Schedule {
   expectedAmount: number
   paidAmount: number
   status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED'
+  contractExpectedAmount: number
+  contractPaidAmount: number
 }
 
 type RowStatus = 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED'
@@ -58,6 +60,11 @@ const scheduleStatusLabels: Record<RowStatus, string> = {
 
 function scheduleBalance(row: Schedule) {
   return Math.max(0, Number(row.expectedAmount) - Number(row.paidAmount))
+}
+
+/** Contract-currency outstanding balance — used only for DISPLAY (see dfmt below); validation still uses the UZS legacy figures above, which stay accurate via the dual-ledger lockstep. */
+function contractScheduleBalance(row: Schedule, currency: CurrencyCode) {
+  return contractScheduleOutstanding(Number(row.contractExpectedAmount), Number(row.contractPaidAmount), currency)
 }
 
 function rowDisplayStatus(row: Schedule): RowStatus {
@@ -96,6 +103,7 @@ export function NasiyaPaymentModal({
   // Frozen at creation, never changes with the shop's display toggle — see
   // docs/currency-accounting-model.md.
   const [contractCurrency, setContractCurrency] = useState<CurrencyCode>('UZS')
+  const [nasiyaContractRemainingAmount, setNasiyaContractRemainingAmount] = useState(0)
 
   const [payAmount, setPayAmount] = useState('')
   const [payMethod, setPayMethod] = useState('')
@@ -106,7 +114,11 @@ export function NasiyaPaymentModal({
   const [submitting, setSubmitting] = useState(false)
   const [payError, setPayError] = useState('')
 
-  const fmt = (n: number) => formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
+  // Schedule/remaining-debt DISPLAY must convert from the deal's own contract
+  // currency using today's rate — never reconvert the frozen-creation-rate
+  // legacy UZS snapshot, which would drift from the true contract value as
+  // the rate moves. See docs/currency-accounting-model.md.
+  const dfmt = (n: number) => formatDisplayMoneyFromContract(n, contractCurrency, currency.currency, currency.usdUzsRate)
 
   // Load the nasiya's schedules whenever the modal opens. All setState lives
   // inside `load` (not the effect body) to keep it off the sync-in-effect path.
@@ -133,6 +145,7 @@ export function NasiyaPaymentModal({
         setSchedules(rows)
         setNasiyaRemainingAmount(Number(json.data.remainingAmount ?? 0))
         setContractCurrency((json.data.contractCurrency as CurrencyCode) ?? 'UZS')
+        setNasiyaContractRemainingAmount(Number(json.data.contractRemainingAmount ?? 0))
         setFetched({
           customerName: json.data.customer?.name ?? '',
           deviceName: json.data.device?.model ?? '',
@@ -158,6 +171,8 @@ export function NasiyaPaymentModal({
     .sort((a, b) => a.monthNumber - b.monthNumber)
   const selectedSchedule = pendingSchedules.find((s) => s.id === selectedScheduleId)
   const selectedScheduleOutstanding = selectedSchedule ? scheduleBalance(selectedSchedule) : 0
+  // Native contract-currency outstanding balance — DISPLAY only (see dfmt).
+  const selectedScheduleContractOutstanding = selectedSchedule ? contractScheduleBalance(selectedSchedule, contractCurrency) : 0
 
   // Convert the typed amount to UZS (the allocation/validation source of truth)
   // so the overpayment explanation and the "exceeds remaining debt" guard work
@@ -168,7 +183,6 @@ export function NasiyaPaymentModal({
         ? convertUsdToUzs(Number(payAmount), currency.usdUzsRate)
         : Number(payAmount)
       : 0
-  const overpayExtraUzs = Math.max(0, payAmountUzs - selectedScheduleOutstanding)
   const exceedsRemaining = !carryOver && payAmountUzs > nasiyaRemainingAmount
 
   // Purely informational preview of what would be applied to THIS deal's own
@@ -183,6 +197,16 @@ export function NasiyaPaymentModal({
     !carryOver && payAmount.trim() && contractCurrency !== currency.currency && currency.usdUzsRate
       ? convertPaymentToContractCurrency(Number(payAmount) || 0, currency.currency, contractCurrency, currency.usdUzsRate)
       : null
+
+  // Contract-currency view of the same typed amount, used for the overpay
+  // explanation below — same-currency case needs no rate at all.
+  const payAmountContract =
+    !carryOver && payAmount.trim()
+      ? contractCurrency === currency.currency
+        ? Number(payAmount) || 0
+        : (contractPreviewAmount ?? 0)
+      : 0
+  const overpayExtraContract = Math.max(0, payAmountContract - selectedScheduleContractOutstanding)
 
   // "Izoh" is optional for a regular payment — only the carry-over/defer flow
   // ("Mijoz bu oy to'lamadi, muddatni uzaytirish") still requires a reason,
@@ -275,7 +299,7 @@ export function NasiyaPaymentModal({
                               {s.monthNumber}-oy · {uzMonthYear(s.dueDate)}
                             </span>
                             <span className="text-xs text-zinc-500">
-                              {uzDate(s.dueDate)} · qolgan {fmt(scheduleBalance(s))}
+                              {uzDate(s.dueDate)} · qolgan {dfmt(contractScheduleBalance(s, contractCurrency))}
                             </span>
                           </div>
                         </SelectItem>
@@ -290,7 +314,7 @@ export function NasiyaPaymentModal({
                         </Badge>
                         <span className="text-xs text-zinc-500">Shu oy uchun qolgan</span>
                       </div>
-                      <span className="text-sm font-semibold text-zinc-900">{fmt(selectedScheduleOutstanding)}</span>
+                      <span className="text-sm font-semibold text-zinc-900">{dfmt(selectedScheduleContractOutstanding)}</span>
                     </div>
                   )}
                 </div>
@@ -337,21 +361,32 @@ export function NasiyaPaymentModal({
                   {selectedScheduleOutstanding > 0 && (
                     <button
                       type="button"
-                      onClick={() =>
-                        setPayAmount(
-                          currency.currency === 'USD' && currency.usdUzsRate
-                            ? convertUzsToUsd(selectedScheduleOutstanding, currency.usdUzsRate).toFixed(2)
-                            : String(selectedScheduleOutstanding),
+                      onClick={() => {
+                        // Suggest an amount that, once submitted, actually pays off
+                        // this schedule exactly — computed from the deal's own
+                        // contract-currency balance, not the legacy UZS snapshot.
+                        // Falls back to the legacy suggestion if no rate is
+                        // available client-side to convert across currencies.
+                        if (contractCurrency !== currency.currency && !currency.usdUzsRate) {
+                          setPayAmount(String(selectedScheduleOutstanding))
+                          return
+                        }
+                        const suggestion = convertPaymentToContractCurrency(
+                          selectedScheduleContractOutstanding,
+                          contractCurrency,
+                          currency.currency,
+                          currency.usdUzsRate,
                         )
-                      }
+                        setPayAmount(currency.currency === 'USD' ? suggestion.toFixed(2) : String(Math.round(suggestion)))
+                      }}
                       className="text-xs font-medium text-zinc-500 underline-offset-2 hover:text-zinc-900 hover:underline"
                     >
-                      Tavsiya: {fmt(selectedScheduleOutstanding)}
+                      Tavsiya: {dfmt(selectedScheduleContractOutstanding)}
                     </button>
                   )}
                   <div className="flex items-center justify-between text-xs text-zinc-500">
                     <span>Jami qolgan qarz</span>
-                    <span className="font-medium text-zinc-700">{fmt(nasiyaRemainingAmount)}</span>
+                    <span className="font-medium text-zinc-700">{dfmt(nasiyaContractRemainingAmount)}</span>
                   </div>
                   {contractPreviewAmount != null && (
                     <p className="text-xs text-zinc-500">
@@ -363,9 +398,9 @@ export function NasiyaPaymentModal({
                     <p className="text-xs text-red-600">
                       To&apos;lov summasi qolgan qarzdan oshmasligi kerak.
                     </p>
-                  ) : overpayExtraUzs > 0 ? (
+                  ) : overpayExtraContract > 0 ? (
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                      To&apos;lov joriy oydan oshdi. Ortiqcha {fmt(overpayExtraUzs)} keyingi oy to&apos;loviga
+                      To&apos;lov joriy oydan oshdi. Ortiqcha {dfmt(overpayExtraContract)} keyingi oy to&apos;loviga
                       qo&apos;llanadi.
                     </p>
                   ) : null}

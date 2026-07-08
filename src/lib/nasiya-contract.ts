@@ -18,6 +18,7 @@
  */
 
 import { convertUsdToUzs, convertUzsToUsd, type CurrencyCode } from '@/lib/currency'
+import { scheduleEffectiveDueTime, type OverdueScheduleInput } from '@/lib/nasiya-utils'
 
 /** UZS contracts tolerate 500 so'm of rounding dust; USD contracts (2 decimal places) tolerate 1 cent. */
 const UZS_COMPLETION_TOLERANCE = 500
@@ -37,6 +38,22 @@ export function getCompletionToleranceForCurrency(currency: CurrencyCode): numbe
 export function contractScheduleOutstanding(expectedAmount: number, paidAmount: number, currency: CurrencyCode): number {
   const raw = Math.max(0, expectedAmount - paidAmount)
   return raw <= getCompletionToleranceForCurrency(currency) ? 0 : raw
+}
+
+/**
+ * Currency-aware counterpart of `isScheduleOverdue` in nasiya-utils.ts (which
+ * stays UZS-only, untouched, for callers still reading the legacy ledger).
+ * Feeding contract-currency amounts (e.g. USD cents) through the UZS-only
+ * function would misjudge a schedule as settled purely because its balance
+ * is smaller than the 500 so'm tolerance — this uses the currency-aware
+ * tolerance instead. `schedule.expectedAmount/paidAmount` here are expected
+ * to already be the CALLER's contract-currency figures (not the legacy UZS
+ * ones) — see docs/currency-accounting-model.md.
+ */
+export function isContractScheduleOverdue(schedule: OverdueScheduleInput, currency: CurrencyCode, now: Date = new Date()): boolean {
+  if (schedule.status === 'PAID') return false
+  if (contractScheduleOutstanding(schedule.expectedAmount, schedule.paidAmount, currency) <= 0) return false
+  return scheduleEffectiveDueTime(schedule) < now.getTime()
 }
 
 interface ContractNasiyaLike {

@@ -240,6 +240,8 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
       interestPercent: true,
       interestAmount: true,
       finalNasiyaAmount: true,
+      // Native contract-currency ledger — see docs/currency-accounting-model.md.
+      contractCurrency: true,
       status: true,
       isImported: true,
       createdAt: true,
@@ -268,6 +270,8 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
           expectedAmount: true,
           paidAmount: true,
           paidAt: true,
+          contractExpectedAmount: true,
+          contractPaidAmount: true,
         },
       },
     },
@@ -287,12 +291,23 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
         paidAmount: Number(s.paidAmount),
       }))
       const derived = deriveNasiyaOverdue({ status: nasiya.status, schedules: scheduleInputs }, now)
+      // Payment score must read the deal's own contract-currency amounts —
+      // see docs/currency-accounting-model.md — never the legacy UZS
+      // snapshot, which would misjudge overdue tolerance for a USD contract.
       const paymentScore = computeNasiyaPaymentScore(
         {
-          schedules: nasiya.schedules.map((s, i) => ({ ...scheduleInputs[i], paidAt: s.paidAt })),
+          schedules: nasiya.schedules.map((s) => ({
+            status: s.status,
+            dueDate: s.dueDate,
+            delayedUntil: s.delayedUntil,
+            expectedAmount: Number(s.contractExpectedAmount),
+            paidAmount: Number(s.contractPaidAmount),
+            paidAt: s.paidAt,
+          })),
         },
         now,
         currency,
+        nasiya.contractCurrency,
       )
 
       return {

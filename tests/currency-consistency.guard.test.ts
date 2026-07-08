@@ -17,9 +17,9 @@ describe('nasiya-payment-score.ts never hardcodes UZS formatting', () => {
     expect(source).not.toContain('toLocaleString')
   })
 
-  it('formats the overdue reason through the shared currency formatter', () => {
-    expect(source).toContain("import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'")
-    expect(source).toContain('formatMoneyByCurrency(currentOverdueAmount, currency.currency, currency.usdUzsRate)')
+  it('formats the overdue reason through the contract-currency-aware formatter (never treats a native USD amount as UZS)', () => {
+    expect(source).toContain("import { isContractScheduleOverdue, formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'")
+    expect(source).toContain('formatDisplayMoneyFromContract(currentOverdueAmount, contractCurrency, currency.currency, currency.usdUzsRate)')
   })
 
   it('accepts an optional CurrencyContext defaulting to UZS (backward compatible signature)', () => {
@@ -33,7 +33,11 @@ describe('server call sites pass the shop\'s real currency into the scorer', () 
     expect(source).toContain("import { getShopCurrencyContext } from '@/lib/server/currency'")
     expect(source).toContain('const currency = await getShopCurrencyContext(shopId)')
     const scoreCallIndex = source.indexOf('computeNasiyaPaymentScore(')
-    expect(source.slice(scoreCallIndex, scoreCallIndex + 300)).toContain('currency,')
+    const scoreCallBlock = source.slice(scoreCallIndex, scoreCallIndex + 500)
+    expect(scoreCallBlock).toContain('currency,')
+    // Also forwards the deal's own contract currency — never the legacy UZS
+    // snapshot — see docs/currency-accounting-model.md.
+    expect(scoreCallBlock).toContain('nasiya.contractCurrency,')
   })
 
   it('/api/nasiya/[id] (detail page score card) fetches and forwards shop currency', () => {
@@ -76,8 +80,8 @@ describe('nasiya payment modal: overpayment explanation and validation use the s
     expect(source).toContain('convertUsdToUzs(Number(payAmount), currency.usdUzsRate)')
   })
 
-  it('shows the overpayment explanation and total-remaining line via fmt() (shared formatter)', () => {
-    expect(source).toContain('Ortiqcha {fmt(overpayExtraUzs)} keyingi oy')
+  it('shows the overpayment explanation and total-remaining line via dfmt() (contract-currency-aware formatter)', () => {
+    expect(source).toContain('Ortiqcha {dfmt(overpayExtraContract)} keyingi oy')
     expect(source).toContain('Jami qolgan qarz')
   })
 

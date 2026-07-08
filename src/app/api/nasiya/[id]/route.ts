@@ -73,8 +73,13 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         // Native contract-currency ledger — the actual source of truth for
         // debt/schedule math. See docs/currency-accounting-model.md.
         contractCurrency: true,
+        contractTotalAmount: true,
+        contractDownPayment: true,
+        contractInterestAmount: true,
         contractFinalAmount: true,
+        contractMonthlyPayment: true,
         contractRemainingAmount: true,
+        contractPaidAmount: true,
         status: true,
         reminderEnabled: true,
         note: true,
@@ -154,7 +159,9 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     const derived = deriveNasiyaOverdue({ status: nasiya.status, schedules: scheduleInputs })
 
     // Reason text must respect the shop's selected display currency, not
-    // hardcode UZS — see docs/nasiya-payment-scoring.md.
+    // hardcode UZS — see docs/nasiya-payment-scoring.md. The score itself
+    // must read the deal's own contract-currency amounts (never the legacy
+    // UZS snapshot) — see docs/currency-accounting-model.md.
     const currency = await getShopCurrencyContext(nasiya.shopId)
     const paymentScore = computeNasiyaPaymentScore(
       {
@@ -162,13 +169,14 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
           status: s.status,
           dueDate: s.dueDate,
           delayedUntil: s.delayedUntil,
-          expectedAmount: Number(s.expectedAmount),
-          paidAmount: Number(s.paidAmount),
+          expectedAmount: Number(s.contractExpectedAmount),
+          paidAmount: Number(s.contractPaidAmount),
           paidAt: s.paidAt,
         })),
       },
       new Date(),
       currency,
+      nasiya.contractCurrency,
     )
 
     // Best-effort self-heal: persist the COMPLETED status now that we know

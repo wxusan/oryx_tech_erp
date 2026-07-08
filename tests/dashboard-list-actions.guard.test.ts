@@ -84,7 +84,7 @@ describe('payment modal is the single shared implementation', () => {
 
   it('uses MoneyInput and currency formatting (USD/UZS preserved)', () => {
     expect(modal).toContain('MoneyInput')
-    expect(modal).toContain('formatMoneyByCurrency')
+    expect(modal).toContain('formatDisplayMoneyFromContract')
     expect(modal).toContain('currencyLabel')
   })
 

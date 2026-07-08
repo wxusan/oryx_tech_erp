@@ -7,11 +7,16 @@
  *
  * Design notes:
  *   - Pure function, no DB access — callers assemble `schedules` from
- *     NasiyaSchedule rows (dueDate, delayedUntil, expectedAmount, paidAmount,
- *     status, paidAt).
- *   - "Currently overdue" reuses the exact predicate from nasiya-utils.ts
- *     (isScheduleOverdue / scheduleEffectiveDueTime) so this always agrees
- *     with the dashboard, the list, and the payment route.
+ *     NasiyaSchedule rows. Amounts (expectedAmount/paidAmount) should be the
+ *     nasiya's own CONTRACT-currency figures (contractExpectedAmount/
+ *     contractPaidAmount), not the legacy UZS snapshot — see
+ *     docs/currency-accounting-model.md. `contractCurrency` defaults to UZS,
+ *     so any caller not yet updated keeps today's exact behavior.
+ *   - "Currently overdue" reuses the currency-aware predicate from
+ *     nasiya-contract.ts (isContractScheduleOverdue), which is byte-identical
+ *     to nasiya-utils.ts's isScheduleOverdue for UZS — so this still agrees
+ *     with the dashboard, the list, and the payment route for UZS contracts,
+ *     and correctly uses cent-level tolerance for USD ones.
  *   - GRACE_DAYS: a payment made up to this many days AFTER the due date still
  *     counts as on-time (not late). Chosen as 1 day — enough to absorb
  *     same/next-day bank clearing without rewarding real lateness.
@@ -21,12 +26,9 @@
  *     post-import payments do — so it's naturally excluded from history.
  */
 
-import {
-  scheduleEffectiveDueTime,
-  isScheduleOverdue,
-  type OverdueScheduleInput,
-} from '@/lib/nasiya-utils'
-import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
+import { scheduleEffectiveDueTime, type OverdueScheduleInput } from '@/lib/nasiya-utils'
+import { isContractScheduleOverdue, formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
+import { type CurrencyContext, type CurrencyCode } from '@/lib/currency'
 
 /** A grace day is added to the due date before a paid installment counts as late. */
 export const GRACE_DAYS = 1
@@ -82,21 +84,24 @@ function buildHistoryReason(
 
 /**
  * Compute the payment-behavior score for one nasiya from its schedule rows.
- * Deterministic: same input + same `now`/`currency` always yields the same
- * output. `currency` only affects the human-readable `reason` string — the
- * score/label/color/factors are currency-independent, computed purely from
- * UZS amounts (the DB's base currency). Scoring math must never depend on
- * display currency; only text formatting does.
+ * Deterministic: same input + same `now`/`currency`/`contractCurrency` always
+ * yields the same output. `currency` (display) and `contractCurrency` (the
+ * amounts' own currency) together only affect the human-readable `reason`
+ * string and the currency-aware overdue tolerance — the score/label/color
+ * ratios themselves are unit-independent (ratios and day-counts, not
+ * absolute-magnitude comparisons). Scoring math must never depend on display
+ * currency; only text formatting does.
  */
 export function computeNasiyaPaymentScore(
   input: { schedules: NasiyaScoreScheduleInput[] },
   now: Date = new Date(),
   currency: CurrencyContext = DEFAULT_CURRENCY,
+  contractCurrency: CurrencyCode = 'UZS',
 ): NasiyaPaymentScore {
   const schedules = input.schedules
 
   // --- 1. Current overdue status (strongest red signal, overrides everything) ---
-  const overdueSchedules = schedules.filter((s) => isScheduleOverdue(s, now))
+  const overdueSchedules = schedules.filter((s) => isContractScheduleOverdue(s, contractCurrency, now))
   const currentOverdueAmount = overdueSchedules.reduce(
     (sum, s) => sum + Math.max(0, Number(s.expectedAmount) - Number(s.paidAmount)),
     0,
@@ -194,7 +199,7 @@ export function computeNasiyaPaymentScore(
     color = 'red'
     label = 'Kechiktiradi'
     riskLevel = 'HIGH'
-    reason = `Hozir ${formatMoneyByCurrency(currentOverdueAmount, currency.currency, currency.usdUzsRate)} muddati o'tgan`
+    reason = `Hozir ${formatDisplayMoneyFromContract(currentOverdueAmount, contractCurrency, currency.currency, currency.usdUzsRate)} muddati o'tgan`
   } else if (paidInstallmentCount === 0) {
     color = 'gray'
     label = 'Yangi mijoz'

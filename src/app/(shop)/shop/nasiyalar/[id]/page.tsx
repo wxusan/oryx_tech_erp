@@ -25,7 +25,7 @@ import {
 import { paymentMethodLabel } from '@/lib/labels'
 import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
 import { formatMoneyByCurrency } from '@/lib/currency'
-import { formatContractMoney } from '@/lib/nasiya-contract'
+import { formatContractMoney, formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { uzDate, uzDateTime } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
@@ -39,6 +39,8 @@ interface NasiyaSchedule {
   expectedAmount: number
   paidAmount: number
   status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED'
+  contractExpectedAmount: number
+  contractPaidAmount: number
 }
 
 export interface NasiyaPayment {
@@ -83,8 +85,13 @@ interface Nasiya {
   // Native contract-currency ledger — the deal's own frozen currency, source
   // of truth for debt/schedule math. See docs/currency-accounting-model.md.
   contractCurrency: 'UZS' | 'USD'
+  contractTotalAmount: number
+  contractDownPayment: number
+  contractInterestAmount: number
   contractFinalAmount: number
+  contractMonthlyPayment: number
   contractRemainingAmount: number
+  contractPaidAmount: number
   status: string
   displayStatus?: 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
   reminderEnabled: boolean
@@ -400,10 +407,16 @@ export default function NasiyaDetailPage() {
 
   const paidAmount = nasiya.finalNasiyaAmount - nasiya.remainingAmount
   const pct = nasiya.finalNasiyaAmount > 0 ? Math.round((paidAmount / nasiya.finalNasiyaAmount) * 100) : 0
-  const monthlyPayment =
+  // Contract-currency figures for the summary cards below — a nasiya's
+  // "current state" (jami/qoldiq/to'langan/oylik) must convert from its OWN
+  // contract currency using TODAY's rate, never reconvert the frozen-rate
+  // legacy UZS snapshot a second time (that would silently drift from the
+  // true contract value as the rate moves). See docs/currency-accounting-model.md.
+  const contractMonthlyPayment =
     nasiya.schedules?.length > 0
-      ? nasiya.schedules[0].expectedAmount
-      : 0
+      ? nasiya.schedules[0].contractExpectedAmount
+      : nasiya.contractMonthlyPayment
+  const dfmt = (n: number) => formatDisplayMoneyFromContract(n, nasiya.contractCurrency, currency.currency, currency.usdUzsRate)
 
   const sortedSchedules = [...(nasiya.schedules ?? [])].sort((a, b) => a.monthNumber - b.monthNumber)
 
@@ -524,18 +537,23 @@ export default function NasiyaDetailPage() {
           // These are deliberately two different numbers — no separate
           // "Qolgan summa" card, which duplicated one or the other and read
           // as a confusing third figure (see docs/nasiya-payment-allocation.md).
-          { label: 'Jami narx', value: fmt(nasiya.totalAmount, currency) },
-          { label: "Boshlang'ich to'lov", value: fmt(nasiya.downPayment, currency) },
-          ...(nasiya.interestAmount > 0
+          // All values below convert from the deal's OWN contract currency
+          // using today's rate (dfmt) — never reconvert the frozen-creation-
+          // rate legacy UZS snapshot, which would drift from the true
+          // contract value as the rate moves (see
+          // docs/currency-accounting-model.md).
+          { label: 'Jami narx', value: dfmt(nasiya.contractTotalAmount) },
+          { label: "Boshlang'ich to'lov", value: dfmt(nasiya.contractDownPayment) },
+          ...(nasiya.contractInterestAmount > 0
             ? [
                 { label: 'Nasiya foizi', value: `${fmt(nasiya.interestPercent)}%` },
-                { label: 'Foiz summasi', value: fmt(nasiya.interestAmount, currency) },
+                { label: 'Foiz summasi', value: dfmt(nasiya.contractInterestAmount) },
               ]
             : []),
-          { label: 'Nasiya jami', value: fmt(nasiya.finalNasiyaAmount, currency) },
-          { label: "To'langan", value: fmt(paidAmount, currency) },
-          { label: "Qarz qoldig'i", value: fmt(nasiya.remainingAmount, currency) },
-          { label: "Oylik to'lov", value: fmt(monthlyPayment, currency) },
+          { label: 'Nasiya jami', value: dfmt(nasiya.contractFinalAmount) },
+          { label: "To'langan", value: dfmt(nasiya.contractPaidAmount) },
+          { label: "Qarz qoldig'i", value: dfmt(nasiya.contractRemainingAmount) },
+          { label: "Oylik to'lov", value: dfmt(contractMonthlyPayment) },
         ].map((c) => (
           <Card key={c.label} className="rounded-lg" size="sm">
             <CardContent>
@@ -556,13 +574,13 @@ export default function NasiyaDetailPage() {
         </CardHeader>
         <CardContent>
           <div className="flex justify-between text-sm mb-2">
-            <span className="text-zinc-600 font-medium">{fmt(paidAmount, currency)} to'landi</span>
+            <span className="text-zinc-600 font-medium">{dfmt(nasiya.contractPaidAmount)} to'landi</span>
             <span className="font-bold text-zinc-900">{pct}%</span>
           </div>
           <Progress value={pct} className="h-2.5 rounded-full" />
           <div className="flex justify-between text-xs text-zinc-400 mt-1.5">
-            <span>{fmt(0, currency)}</span>
-            <span>{fmt(nasiya.finalNasiyaAmount, currency)}</span>
+            <span>{dfmt(0)}</span>
+            <span>{dfmt(nasiya.contractFinalAmount)}</span>
           </div>
         </CardContent>
       </Card>
@@ -665,8 +683,8 @@ export default function NasiyaDetailPage() {
               <tr key={row.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                 <td className="px-4 py-3 text-zinc-500">{row.monthNumber}</td>
                 <td className="px-4 py-3 text-zinc-700">{uzDate(row.dueDate)}</td>
-                <td className="px-4 py-3 font-medium text-zinc-900">{fmt(row.expectedAmount, currency)}</td>
-                <td className="px-4 py-3 text-zinc-700">{fmt(row.paidAmount, currency)}</td>
+                <td className="px-4 py-3 font-medium text-zinc-900">{dfmt(row.contractExpectedAmount)}</td>
+                <td className="px-4 py-3 text-zinc-700">{dfmt(row.contractPaidAmount)}</td>
                 <td className="px-4 py-3">
                   <RowBadge status={rowDisplayStatus(row)} />
                 </td>
