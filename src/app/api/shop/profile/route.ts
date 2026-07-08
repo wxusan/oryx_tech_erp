@@ -17,6 +17,7 @@ import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-help
 import { requireApiSession } from '@/lib/api-auth'
 import { invalidateShopProfileMutation } from '@/lib/server/cache-tags'
 import { getShopCurrencyContext } from '@/lib/server/currency'
+import { logger } from '@/lib/logger'
 
 function shopProfileSelect() {
   return {
@@ -62,7 +63,7 @@ export async function GET() {
     const currency = await getShopCurrencyContext(shop.id)
     return ok({ ...shop, usdUzsRate: currency.usdUzsRate })
   } catch (err) {
-    console.error('[GET /api/shop/profile]', err)
+    logger.error('[GET /api/shop/profile]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -132,7 +133,7 @@ export async function PATCH(req: NextRequest) {
     const currency = await getShopCurrencyContext(shopId)
     return ok({ ...updated, usdUzsRate: currency.usdUzsRate }, "Do'kon ma'lumotlari yangilandi")
   } catch (err) {
-    console.error('[PATCH /api/shop/profile]', err)
+    logger.error('[PATCH /api/shop/profile]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

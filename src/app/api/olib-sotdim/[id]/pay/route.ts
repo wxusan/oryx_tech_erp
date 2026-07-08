@@ -12,10 +12,11 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { markSupplierPayablePaidSchema } from '@/lib/validations'
-import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { supplierPayablePaidMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
+import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
@@ -39,6 +40,11 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+
+    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    const rate = checkRateLimit(rateLimitKey('supplier-payable-pay', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
+
     const currency = await getShopCurrencyContext(shopId)
 
     const payable = await prisma.supplierPayable.findFirst({
@@ -142,7 +148,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       const e = err as { status: number; message: string }
       if (e.status === 409) return conflict(e.message)
     }
-    console.error('[PATCH /api/olib-sotdim/[id]/pay]', err)
+    logger.error('[PATCH /api/olib-sotdim/[id]/pay]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

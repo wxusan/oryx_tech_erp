@@ -3,6 +3,7 @@ import { prisma } from '@/lib/prisma'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, serverError } from '@/lib/api-helpers'
 import { normalizePhone } from '@/lib/phone'
+import { logger } from '@/lib/logger'
 
 export async function GET(req: NextRequest) {
   try {
@@ -59,7 +60,7 @@ export async function GET(req: NextRequest) {
 
     return ok(customers, "Mijozlar ro'yxati")
   } catch (err) {
-    console.error('[GET /api/customers]', err)
+    logger.error('[GET /api/customers]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

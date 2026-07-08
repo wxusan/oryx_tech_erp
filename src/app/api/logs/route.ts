@@ -13,6 +13,7 @@ import { badRequest, ok, serverError } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
 import { enrichLogsWithActors } from '@/lib/server/log-actors'
 import { isLogCategory, logCategoryWhere } from '@/lib/log-categories'
+import { logger } from '@/lib/logger'
 
 function parseDateParam(value: string | null | undefined, endOfDay = false) {
   if (!value) return null
@@ -120,7 +121,7 @@ export async function GET(req: NextRequest) {
 
     return ok({ logs: logsWithActors, total, skip, take }, "Loglar ro'yxati")
   } catch (err) {
-    console.error('[GET /api/logs]', err)
+    logger.error('[GET /api/logs]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

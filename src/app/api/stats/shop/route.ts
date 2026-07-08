@@ -10,6 +10,7 @@ import { NextRequest } from 'next/server'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, serverError } from '@/lib/api-helpers'
 import { getShopStats } from '@/lib/server/shop-stats'
+import { logger } from '@/lib/logger'
 
 export async function GET(req: NextRequest) {
   try {
@@ -25,7 +26,7 @@ export async function GET(req: NextRequest) {
 
     return ok(await getShopStats(session, shopId))
   } catch (err) {
-    console.error('[GET /api/stats/shop]', err)
+    logger.error('[GET /api/stats/shop]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

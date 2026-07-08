@@ -12,6 +12,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { ok, serverError } from '@/lib/api-helpers'
+import { logger } from '@/lib/logger'
 
 export const dynamic = 'force-dynamic'
 
@@ -118,7 +119,7 @@ export async function GET(req: NextRequest) {
       generatedAt: new Date().toISOString(),
     })
   } catch (err) {
-    console.error('[GET /api/admin/ops]', err)
+    logger.error('[GET /api/admin/ops]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

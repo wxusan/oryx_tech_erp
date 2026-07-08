@@ -6,6 +6,7 @@ import { badRequest, notFound, ok, serverError } from '@/lib/api-helpers'
 import { prisma } from '@/lib/prisma'
 import { normalizePhone } from '@/lib/phone'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
+import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -121,7 +122,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     invalidateShopSaleMutation(shopId)
     return ok(updated, "Sotuv ma'lumotlari yangilandi")
   } catch (err) {
-    console.error('[PATCH /api/sales/[id]]', err)
+    logger.error('[PATCH /api/sales/[id]]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

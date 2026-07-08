@@ -11,6 +11,10 @@ import { formatMoneyByCurrency, type CurrencyContext, type CurrencyCode } from '
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { matchesDeviceSearch } from '@/lib/search-match'
 
+// Mirrors SHOP_LIST_HARD_CAP in src/lib/server/shop-lists.ts (a client
+// component can't import that server-only module directly).
+const SHOP_LIST_DISPLAY_CAP = 500
+
 type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
 type DisplayStatus = 'Omborda' | 'Sotilgan' | 'Nasiyada' | 'Band qilingan' | 'Qaytarilgan' | "O'chirilgan"
 
@@ -83,10 +87,13 @@ export default function QurilmalarClient({
   initialDevices,
   currency,
   initialStatus = 'Barchasi',
+  truncated = false,
 }: {
   initialDevices: Device[]
   currency: CurrencyContext
   initialStatus?: DeviceStatus | 'Barchasi'
+  /** True when the shop has more than the server's per-page cap — only the newest are shown. */
+  truncated?: boolean
 }) {
   const [devices] = useState<Device[]>(initialDevices)
   const [search, setSearch] = useState('')
@@ -111,12 +118,12 @@ export default function QurilmalarClient({
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Qurilmalar</h1>
           <p className="text-sm text-zinc-500 mt-0.5">Omboringizdagi barcha qurilmalar</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           {/* Shop-scoped devices export (session cookie auth) — entity confirmed supported by /api/export/[entity] */}
           <button
             onClick={() => {
@@ -133,6 +140,12 @@ export default function QurilmalarClient({
           </Link>
         </div>
       </div>
+
+      {truncated && (
+        <div className="border border-amber-200 bg-amber-50 rounded px-4 py-3 text-sm text-amber-800">
+          Qurilmalar soni {SHOP_LIST_DISPLAY_CAP} tadan oshib ketdi — faqat eng so'nggi {SHOP_LIST_DISPLAY_CAP} tasi ko'rsatilmoqda. Eski qurilmani topish uchun qidiruvdan foydalaning.
+        </div>
+      )}
 
       {/* Filter tabs */}
       <div className="flex gap-1 border-b border-zinc-200">

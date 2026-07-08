@@ -548,7 +548,7 @@ export default function NewNasiyaPage() {
             <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
               <span className="text-sm font-semibold text-zinc-900">Nasiya shartlari</span>
             </div>
-            <div className="p-4 grid grid-cols-2 gap-4">
+            <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Jami narx ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
@@ -672,7 +672,7 @@ export default function NewNasiyaPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="col-span-2 flex items-center gap-2">
+              <div className="sm:col-span-2 flex items-center gap-2">
                 <input
                   type="checkbox"
                   id="nasiya-early-reminder"
@@ -701,7 +701,7 @@ export default function NewNasiyaPage() {
                   />
                 </div>
               )}
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
                 <Textarea
                   value={note}

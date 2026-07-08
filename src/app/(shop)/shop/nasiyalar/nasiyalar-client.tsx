@@ -105,14 +105,21 @@ function PaymentScoreBadge({ score }: { score: PaymentScore }) {
   )
 }
 
+// Mirrors SHOP_LIST_HARD_CAP in src/lib/server/shop-lists.ts (a client
+// component can't import that server-only module directly).
+const SHOP_LIST_DISPLAY_CAP = 500
+
 export default function NasiyalarClient({
   initialNasiyalar,
   initialFilter = 'Barchasi',
   currency,
+  truncated = false,
 }: {
   initialNasiyalar: Nasiya[]
   initialFilter?: NasiyaStatus | 'Barchasi'
   currency: CurrencyContext
+  /** True when the shop has more than the server's per-page cap — only the newest are shown. */
+  truncated?: boolean
 }) {
   // Read straight from props (not useState) so router.refresh() after a payment
   // re-renders the list with fresh server data.
@@ -153,12 +160,12 @@ export default function NasiyalarClient({
 
   return (
     <div className="p-6 space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Nasiyalar</h1>
           <p className="text-sm text-zinc-500 mt-0.5">Barcha nasiya shartnomalar</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => { window.location.href = '/api/export/nasiya?format=xlsx' }}
             className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors"
@@ -177,6 +184,12 @@ export default function NasiyalarClient({
           </Link>
         </div>
       </div>
+
+      {truncated && (
+        <div className="border border-amber-200 bg-amber-50 rounded px-4 py-3 text-sm text-amber-800">
+          Nasiyalar soni {SHOP_LIST_DISPLAY_CAP} tadan oshib ketdi — faqat eng so'nggi {SHOP_LIST_DISPLAY_CAP} tasi ko'rsatilmoqda. Eski nasiyani topish uchun qidiruvdan foydalaning.
+        </div>
+      )}
 
       {/* Filter tabs */}
       <div className="flex gap-1 border-b border-zinc-200">

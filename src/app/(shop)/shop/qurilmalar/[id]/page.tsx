@@ -29,6 +29,7 @@ import {
   type SalePaymentLike,
 } from '@/lib/nasiya-contract'
 import { useShopCurrency } from '@/lib/use-shop-currency'
+import { getDeviceImageSrc } from '@/lib/device-image'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 
 interface Supplier {
@@ -155,23 +156,6 @@ function deviceActionLabel(action: string) {
 
 function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']) {
   return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
-}
-
-function getDeviceImageSrc(imageUrl: string) {
-  if (imageUrl.startsWith('shops/')) {
-    return `/api/uploads/device?key=${encodeURIComponent(imageUrl)}`
-  }
-
-  try {
-    const url = new URL(imageUrl)
-    if (url.pathname === '/api/uploads/device') {
-      return `${url.pathname}${url.search}`
-    }
-  } catch {
-    // Non-URL values are returned as-is so broken data remains visible in QA.
-  }
-
-  return imageUrl
 }
 
 export default function QurilmaDetailPage() {
@@ -677,9 +661,9 @@ export default function QurilmaDetailPage() {
           {infoRows.map((row, i) => (
             <div
               key={row.label}
-              className={`px-4 py-3 flex gap-4 ${i < infoRows.length - 2 ? 'border-b border-zinc-100' : ''}`}
+              className={`px-4 py-3 flex flex-col gap-0.5 sm:flex-row sm:gap-4 ${i < infoRows.length - 2 ? 'border-b border-zinc-100' : ''}`}
             >
-              <span className="text-xs text-zinc-500 w-32 flex-shrink-0 pt-0.5">{row.label}</span>
+              <span className="text-xs text-zinc-500 sm:w-32 sm:flex-shrink-0 sm:pt-0.5">{row.label}</span>
               <span className="text-sm text-zinc-900 font-medium">
                 {row.value}
                 {row.hint && <span className="block text-xs text-zinc-400 font-normal">{row.hint}</span>}

@@ -18,10 +18,17 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
   const initialFilter = validStatuses.includes(status as (typeof validStatuses)[number])
     ? (status as (typeof validStatuses)[number])
     : 'Barchasi'
-  const [nasiyalar, currency] = await Promise.all([
+  const [{ items: nasiyalar, truncated }, currency] = await Promise.all([
     getShopNasiyalarList(guarded.shopId),
     getShopCurrencyContext(guarded.shopId),
   ])
 
-  return <NasiyalarClient initialNasiyalar={nasiyalar} initialFilter={initialFilter} currency={currency} />
+  return (
+    <NasiyalarClient
+      initialNasiyalar={nasiyalar}
+      initialFilter={initialFilter}
+      currency={currency}
+      truncated={truncated}
+    />
+  )
 }

@@ -14,10 +14,11 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
 import { calculateRemaining, scheduleOutstanding, isScheduleOverdue } from '@/lib/nasiya-utils'
 import { convertPaymentToContractCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'
-import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaPaymentMessage, nasiyaCompletedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
+import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
@@ -57,6 +58,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+
+    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    const rate = checkRateLimit(rateLimitKey('nasiya-payment', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
+
     const currency = await getShopCurrencyContext(shopId)
     const auditNote = note?.trim()
     let amountInput: Awaited<ReturnType<typeof moneyInputToUzs>>
@@ -515,7 +521,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict("Idempotency-Key bo'yicha to'lov allaqachon yozilgan")
     }
-    console.error('[POST /api/nasiya/[id]/payment]', err)
+    logger.error('[POST /api/nasiya/[id]/payment]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

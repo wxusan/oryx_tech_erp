@@ -5,6 +5,15 @@ This is the top-level summary; see the companion docs in this folder for
 per-area detail (security, business logic, UI/UX, performance, code quality,
 test coverage, production readiness).
 
+**Update (2026-07-09)**: a follow-up pass reviewed every P2/P3 item deferred
+below and fixed what was safe without rewriting Nasiya/Sale/Olib-sotdim/
+reports/Telegram/tenant isolation — see
+`docs/audits/production-readiness-followup.md` for the full deferred-issue
+review table and updated scores (rate limiting, structured logging
+everywhere, security headers, tenant-isolation guard tests, a pagination
+safety net, and practical mobile fixes). The scores in this document are the
+**2026-07-08 snapshot**; the follow-up doc has the current numbers.
+
 **Addendum (same day, post-audit)**: a real production crash was reported
 on `/shop/qurilmalar/[id]` after this audit concluded. Root cause: a
 type-coercion gap in `src/lib/nasiya-contract.ts` (money-formatting

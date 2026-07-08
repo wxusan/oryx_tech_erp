@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { deviceStatusLabel, nasiyaStatusLabel, paymentMethodLabel } from '@/lib/labels'
 import { deriveNasiyaOverdue } from '@/lib/nasiya-utils'
 import { getShopCurrencyContext } from '@/lib/server/currency'
+import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ entity: string }> }
 type ExportCell = string | number | boolean | Date | null | undefined
@@ -475,7 +476,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       )
     }
 
-    console.error('[GET /api/export/[entity]]', err)
+    logger.error('[GET /api/export/[entity]]', { event: 'api.route_error', error: err })
     return Response.json({ success: false, error: 'Eksportda xatolik yuz berdi' }, { status: 500 })
   }
 }

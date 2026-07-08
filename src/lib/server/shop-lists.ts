@@ -12,6 +12,23 @@ import { computeSaleContractMargin, type PurchaseCostLike } from '@/lib/nasiya-c
 import type { CurrencyCode } from '@/lib/currency'
 
 /**
+ * Hard per-shop cap on the server-rendered devices/nasiyalar list pages.
+ * These pages have no pagination UI (client-side search only searches
+ * whatever is loaded) — see docs/audits/full-production-audit.md's
+ * pagination follow-up. Rather than silently truncating with no signal,
+ * `getShopDevicesList`/`getShopNasiyalarList` fetch one extra row to detect
+ * an over-the-cap shop and surface `truncated: true` so the page can show a
+ * banner instead of quietly hiding data.
+ */
+export const SHOP_LIST_HARD_CAP = 500
+
+export interface ShopListResult<T> {
+  items: T[]
+  /** True when the shop has more rows than SHOP_LIST_HARD_CAP — only the newest are shown. */
+  truncated: boolean
+}
+
+/**
  * Sale/nasiya summary for a sold/returned device — purchase price vs. sold
  * price, kept separate from any nasiya interest (accounting already splits
  * `totalAmount` = original device price from `interestAmount`, so device
@@ -115,10 +132,10 @@ export function initialLogsRequestKey() {
   return new URLSearchParams({ skip: '0', take: '10' }).toString()
 }
 
-export async function getShopDevicesList(shopId: string): Promise<ShopDeviceListItem[]> {
+export async function getShopDevicesList(shopId: string): Promise<ShopListResult<ShopDeviceListItem>> {
   return unstable_cache(
     () => getShopDevicesListFresh(shopId),
-    ['shop-devices:list:v1', shopId],
+    ['shop-devices:list:v2', shopId],
     {
       revalidate: 30,
       tags: [shopCacheTag.devices(shopId)],
@@ -213,11 +230,11 @@ function buildDeviceSaleInfo(device: {
   }
 }
 
-async function getShopDevicesListFresh(shopId: string): Promise<ShopDeviceListItem[]> {
-  const devices = await prisma.device.findMany({
+async function getShopDevicesListFresh(shopId: string): Promise<ShopListResult<ShopDeviceListItem>> {
+  const rows = await prisma.device.findMany({
     where: { shopId, deletedAt: null },
     orderBy: { createdAt: 'desc' },
-    take: 500,
+    take: SHOP_LIST_HARD_CAP + 1,
     select: {
       id: true,
       model: true,
@@ -269,27 +286,33 @@ async function getShopDevicesListFresh(shopId: string): Promise<ShopDeviceListIt
     },
   })
 
-  return devices.map((device) => ({
-    id: device.id,
-    model: device.model,
-    color: device.color,
-    storage: device.storage,
-    batteryHealth: device.batteryHealth,
-    purchasePrice: Number(device.purchasePrice),
-    imei: device.imei,
-    status: device.status,
-    createdAt: device.createdAt.toISOString(),
-    note: device.note,
-    supplierName: device.supplier?.name ?? null,
-    supplierPhone: device.supplierPhone,
-    saleInfo: buildDeviceSaleInfo(device),
-  }))
+  const truncated = rows.length > SHOP_LIST_HARD_CAP
+  const devices = truncated ? rows.slice(0, SHOP_LIST_HARD_CAP) : rows
+
+  return {
+    items: devices.map((device) => ({
+      id: device.id,
+      model: device.model,
+      color: device.color,
+      storage: device.storage,
+      batteryHealth: device.batteryHealth,
+      purchasePrice: Number(device.purchasePrice),
+      imei: device.imei,
+      status: device.status,
+      createdAt: device.createdAt.toISOString(),
+      note: device.note,
+      supplierName: device.supplier?.name ?? null,
+      supplierPhone: device.supplierPhone,
+      saleInfo: buildDeviceSaleInfo(device),
+    })),
+    truncated,
+  }
 }
 
-export async function getShopNasiyalarList(shopId: string): Promise<ShopNasiyaListItem[]> {
+export async function getShopNasiyalarList(shopId: string): Promise<ShopListResult<ShopNasiyaListItem>> {
   return unstable_cache(
     () => getShopNasiyalarListFresh(shopId),
-    ['shop-nasiyalar:list:v1', shopId],
+    ['shop-nasiyalar:list:v2', shopId],
     {
       revalidate: 15,
       tags: [
@@ -301,13 +324,13 @@ export async function getShopNasiyalarList(shopId: string): Promise<ShopNasiyaLi
   )()
 }
 
-async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaListItem[]> {
+async function getShopNasiyalarListFresh(shopId: string): Promise<ShopListResult<ShopNasiyaListItem>> {
   // Payment-score reason text must reflect the shop's selected display
   // currency (never hardcode UZS) — see docs/nasiya-payment-scoring.md.
   const currency = await getShopCurrencyContext(shopId)
-  const nasiyalar = await prisma.nasiya.findMany({
+  const rows = await prisma.nasiya.findMany({
     where: { shopId, deletedAt: null },
-    take: 500,
+    take: SHOP_LIST_HARD_CAP + 1,
     select: {
       id: true,
       totalAmount: true,
@@ -360,7 +383,10 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
   // instant (and it stays stable for the cached snapshot's lifetime).
   const now = new Date()
 
-  return nasiyalar
+  const truncated = rows.length > SHOP_LIST_HARD_CAP
+  const nasiyalar = truncated ? rows.slice(0, SHOP_LIST_HARD_CAP) : rows
+
+  const items = nasiyalar
     .map((nasiya) => {
       const scheduleInputs = nasiya.schedules.map((s) => ({
         status: s.status,
@@ -434,6 +460,8 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
       if (nextRight == null) return -1
       return nextLeft - nextRight
     })
+
+  return { items, truncated }
 }
 
 export async function getShopLogsInitial(shopId: string): Promise<ShopLogsPayload> {

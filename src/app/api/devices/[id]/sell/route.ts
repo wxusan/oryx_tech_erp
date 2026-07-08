@@ -10,10 +10,11 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { createSaleSchema } from '@/lib/validations'
-import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { created, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { deviceSoldMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
+import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
@@ -50,6 +51,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+
+    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    const rate = checkRateLimit(rateLimitKey('device-sell', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
+
     const currency = await getShopCurrencyContext(shopId)
     const normalizedPhone = normalizePhone(customerPhone)
     let salePriceInput: Awaited<ReturnType<typeof moneyInputToUzs>>
@@ -229,7 +235,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict('Bu telefon raqam bilan faol mijoz allaqachon mavjud')
     }
-    console.error('[POST /api/devices/[id]/sell]', err)
+    logger.error('[POST /api/devices/[id]/sell]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

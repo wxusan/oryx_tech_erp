@@ -365,7 +365,7 @@ export default function NewSotuvPage() {
             <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
               <span className="text-sm font-semibold text-zinc-900">Mijoz ma&apos;lumotlari</span>
             </div>
-            <div className="p-4 grid grid-cols-2 gap-4">
+            <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Mijoz ismi <span className="text-red-500">*</span>
@@ -456,7 +456,7 @@ export default function NewSotuvPage() {
             </div>
 
             {fullyPaid === false && (
-              <div className="mt-4 grid grid-cols-2 gap-4 pt-4 border-t border-zinc-100">
+              <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 pt-4 border-t border-zinc-100">
                 <div>
                   <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                     Qancha to&apos;ladi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
@@ -480,7 +480,7 @@ export default function NewSotuvPage() {
                     className="h-9 text-sm border-zinc-200 rounded"
                   />
                 </div>
-                <div className="col-span-2 flex items-center gap-2">
+                <div className="sm:col-span-2 flex items-center gap-2">
                   <input
                     type="checkbox"
                     id="reminder"
@@ -493,7 +493,7 @@ export default function NewSotuvPage() {
                   </label>
                 </div>
                 {reminder && (
-                  <div className="col-span-2 flex items-center gap-2">
+                  <div className="sm:col-span-2 flex items-center gap-2">
                     <input
                       type="checkbox"
                       id="early-reminder"
@@ -507,7 +507,7 @@ export default function NewSotuvPage() {
                   </div>
                 )}
                 {reminder && earlyReminder && (
-                  <div className="col-span-2">
+                  <div className="sm:col-span-2">
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                       Necha kun oldin? <span className="text-red-500">*</span>
                     </label>

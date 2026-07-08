@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
-import { badRequest, forbidden, ok, serverError } from '@/lib/api-helpers'
+import { badRequest, forbidden, ok, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
 import { hasValidImageSignature } from '@/lib/server/image-signature'
 import { getSupabaseAdminClient, PRIVATE_STORAGE_BUCKET } from '@/lib/supabase-admin'
+import { logger } from '@/lib/logger'
+import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
 
 export const runtime = 'nodejs'
 
@@ -74,6 +76,11 @@ export async function POST(request: Request) {
           : null
 
     if (!shopId) return badRequest("shopId talab qilinadi")
+
+    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    const rate = checkRateLimit(rateLimitKey('upload-device', shopId, guarded.session.user.id), { windowMs: 60_000, max: 30 })
+    if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
+
     if (!(file instanceof File)) return badRequest('Qurilma rasmi tanlanmagan')
 
     const extension = ALLOWED_MIME_TYPES.get(file.type)
@@ -102,7 +109,7 @@ export async function POST(request: Request) {
 
     return ok({ key, url: getDeviceImageUrl(request.url, key) })
   } catch (error) {
-    console.error('[uploads/device] upload failed', error)
+    logger.error('[uploads/device] upload failed', { event: 'api.route_error', error })
     return serverError('Qurilma rasmini yuklashda xatolik')
   }
 }
@@ -134,7 +141,7 @@ export async function GET(request: Request) {
     response.headers.set('Cache-Control', 'private, no-store')
     return response
   } catch (error) {
-    console.error('[uploads/device] signed url failed', error)
+    logger.error('[uploads/device] signed url failed', { event: 'api.route_error', error })
     return serverError('Qurilma rasmini ochishda xatolik')
   }
 }

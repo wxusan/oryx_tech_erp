@@ -9,6 +9,7 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, serverError } from '@/lib/api-helpers'
+import { logger } from '@/lib/logger'
 
 const nasiyaStatuses = ['ACTIVE', 'COMPLETED', 'OVERDUE', 'CANCELLED'] as const
 
@@ -113,7 +114,7 @@ export async function GET(req: NextRequest) {
 
     return ok(sorted, "Nasiyalar ro'yxati")
   } catch (err) {
-    console.error('[GET /api/nasiya]', err)
+    logger.error('[GET /api/nasiya]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

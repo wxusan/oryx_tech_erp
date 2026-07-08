@@ -16,6 +16,7 @@ import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { Prisma } from '@/generated/prisma/client'
 import type { ZodError } from 'zod'
+import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -152,7 +153,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     return ok(device, "Qurilma ma'lumotlari")
   } catch (err) {
-    console.error('[GET /api/devices/[id]]', err)
+    logger.error('[GET /api/devices/[id]]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -299,7 +300,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict('Bu IMEI bilan faol qurilma allaqachon mavjud')
     }
-    console.error('[PATCH /api/devices/[id]]', err)
+    logger.error('[PATCH /api/devices/[id]]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -384,7 +385,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
 
     return ok(device, "Qurilma muvaffaqiyatli o'chirildi")
   } catch (err) {
-    console.error('[DELETE /api/devices/[id]]', err)
+    logger.error('[DELETE /api/devices/[id]]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

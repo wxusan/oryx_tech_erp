@@ -6,6 +6,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { invalidateShopCustomerMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
+import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -99,7 +100,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict('Bu telefon raqam bilan faol mijoz allaqachon mavjud')
     }
-    console.error('[PATCH /api/customers/[id]]', err)
+    logger.error('[PATCH /api/customers/[id]]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

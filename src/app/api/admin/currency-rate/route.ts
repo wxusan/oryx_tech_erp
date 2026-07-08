@@ -4,6 +4,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { badRequest, created, ok, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
+import { logger } from '@/lib/logger'
 
 const manualRateSchema = z.object({
   rate: z.number().positive("USD kursi 0 dan katta bo'lishi kerak"),
@@ -38,7 +39,7 @@ export async function GET() {
 
     return ok({ latest, latestCbu, latestManual })
   } catch (err) {
-    console.error('[GET /api/admin/currency-rate]', err)
+    logger.error('[GET /api/admin/currency-rate]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -91,7 +92,7 @@ export async function POST(req: NextRequest) {
 
     return created(rate, 'Manual USD kursi saqlandi.')
   } catch (err) {
-    console.error('[POST /api/admin/currency-rate]', err)
+    logger.error('[POST /api/admin/currency-rate]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

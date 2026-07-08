@@ -88,7 +88,7 @@ export async function GET(req: NextRequest) {
 
     return ok(devices, "Qurilmalar ro'yxati")
   } catch (err) {
-    console.error('[GET /api/devices]', err)
+    logger.error('[GET /api/devices]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -225,7 +225,7 @@ export async function POST(req: NextRequest) {
     if (err && typeof err === 'object' && 'code' in err && (err as { code?: string }).code === 'P2002') {
       return conflict("Bu IMEI raqami allaqachon mavjud")
     }
-    console.error('[POST /api/devices]', err)
+    logger.error('[POST /api/devices]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

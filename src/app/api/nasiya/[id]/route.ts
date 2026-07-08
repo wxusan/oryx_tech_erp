@@ -206,7 +206,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       "Nasiya ma'lumotlari",
     )
   } catch (err) {
-    console.error('[GET /api/nasiya/[id]]', err)
+    logger.error('[GET /api/nasiya/[id]]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -311,7 +311,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     return ok(updated, "Nasiya ma'lumotlari yangilandi")
   } catch (err) {
-    console.error('[PATCH /api/nasiya/[id]]', err)
+    logger.error('[PATCH /api/nasiya/[id]]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

@@ -18,10 +18,11 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { createOlibSotdimSchema } from '@/lib/validations'
-import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
+import { ok, created, badRequest, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { olibSotdimCreatedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
+import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
@@ -105,7 +106,7 @@ export async function GET(req: NextRequest) {
       "Olib-sotdim ro'yxati",
     )
   } catch (err) {
-    console.error('[GET /api/olib-sotdim]', err)
+    logger.error('[GET /api/olib-sotdim]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -131,6 +132,11 @@ export async function POST(req: NextRequest) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+
+    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    const rate = checkRateLimit(rateLimitKey('olib-sotdim-create', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
+
     const currency = await getShopCurrencyContext(shopId)
 
     if (d.imageUrls?.some((url) => !url.startsWith(`shops/${shopId}/devices/`))) {
@@ -363,7 +369,7 @@ export async function POST(req: NextRequest) {
     if (err && typeof err === 'object' && 'code' in err && (err as { code?: string }).code === 'P2002') {
       return conflict("Bu IMEI raqami allaqachon mavjud")
     }
-    console.error('[POST /api/olib-sotdim]', err)
+    logger.error('[POST /api/olib-sotdim]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

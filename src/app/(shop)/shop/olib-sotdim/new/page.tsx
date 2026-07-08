@@ -231,7 +231,7 @@ export default function NewOlibSotdimPage() {
             <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
               <span className="text-sm font-semibold text-zinc-900">1. Qurilma ma&apos;lumotlari</span>
             </div>
-            <div className="p-4 grid grid-cols-2 gap-4">
+            <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Model <span className="text-red-500">*</span>
@@ -259,7 +259,7 @@ export default function NewOlibSotdimPage() {
                 <Input value={imei} onChange={(e) => setImei(e.target.value)} placeholder="Mavjud bo'lsa kiriting" className="h-9 text-sm border-zinc-200 rounded font-mono" />
                 <p className="mt-1 text-xs text-zinc-400">Bo&apos;sh qoldirilsa &quot;Kiritilmagan&quot; deb ko&apos;rsatiladi</p>
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <div className="flex items-center justify-between gap-3 mb-2">
                   <label className="block text-xs font-medium text-zinc-700">Rasm (ixtiyoriy)</label>
                   <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50">
@@ -286,7 +286,7 @@ export default function NewOlibSotdimPage() {
                   </div>
                 )}
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
                 <Textarea value={deviceNote} onChange={(e) => setDeviceNote(e.target.value)} placeholder="Qurilma haqida qo'shimcha ma'lumot..." className="text-sm border-zinc-200 rounded min-h-[60px]" />
               </div>
@@ -298,7 +298,7 @@ export default function NewOlibSotdimPage() {
             <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
               <span className="text-sm font-semibold text-zinc-900">2. Kimdan olindi</span>
             </div>
-            <div className="p-4 grid grid-cols-2 gap-4">
+            <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Ism / do&apos;kon <span className="text-red-500">*</span>
@@ -318,11 +318,11 @@ export default function NewOlibSotdimPage() {
                 />
                 {supplierPhoneError && <p className="mt-1 text-xs text-red-600">{supplierPhoneError}</p>}
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Manzil / joylashuv</label>
                 <Input value={supplierLocation} onChange={(e) => setSupplierLocation(e.target.value)} placeholder="Abu Saxiy 3-qator, Malika Bazar..." className="h-9 text-sm border-zinc-200 rounded" />
               </div>
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
                 <Textarea value={supplierNote} onChange={(e) => setSupplierNote(e.target.value)} className="text-sm border-zinc-200 rounded min-h-[50px]" />
               </div>
@@ -342,7 +342,7 @@ export default function NewOlibSotdimPage() {
                 )}
               </div>
 
-              <div className="col-span-2 pt-2 border-t border-zinc-100">
+              <div className="sm:col-span-2 pt-2 border-t border-zinc-100">
                 <label className="block text-xs font-medium text-zinc-700 mb-2">
                   Yetkazib beruvchiga to&apos;lov <span className="text-red-500">*</span>
                 </label>
@@ -397,12 +397,12 @@ export default function NewOlibSotdimPage() {
                     </label>
                     <Input type="date" value={supplierDueDate} onChange={(e) => setSupplierDueDate(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
                   </div>
-                  <div className="col-span-2 flex items-center gap-2">
+                  <div className="sm:col-span-2 flex items-center gap-2">
                     <input type="checkbox" id="supplier-reminder" checked={supplierReminderEnabled} onChange={(e) => setSupplierReminderEnabled(e.target.checked)} className="w-4 h-4 rounded border-zinc-300" />
                     <label htmlFor="supplier-reminder" className="text-sm text-zinc-700 cursor-pointer">Eslatma yuborish</label>
                   </div>
                   {supplierReminderEnabled && (
-                    <div className="col-span-2 flex items-center gap-2">
+                    <div className="sm:col-span-2 flex items-center gap-2">
                       <input type="checkbox" id="supplier-early-reminder" checked={earlyReminder} onChange={(e) => setEarlyReminder(e.target.checked)} className="w-4 h-4 rounded border-zinc-300" />
                       <label htmlFor="supplier-early-reminder" className="text-sm text-zinc-700 cursor-pointer">Ertaroq eslatilsinmi?</label>
                     </div>
@@ -425,7 +425,7 @@ export default function NewOlibSotdimPage() {
             <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
               <span className="text-sm font-semibold text-zinc-900">3. Kimga sotildi</span>
             </div>
-            <div className="p-4 grid grid-cols-2 gap-4">
+            <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Mijoz ismi <span className="text-red-500">*</span>
@@ -454,7 +454,7 @@ export default function NewOlibSotdimPage() {
             <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
               <span className="text-sm font-semibold text-zinc-900">4. Narxlar va to&apos;lov</span>
             </div>
-            <div className="p-4 grid grid-cols-2 gap-4">
+            <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Sotilgan narx ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
@@ -479,12 +479,12 @@ export default function NewOlibSotdimPage() {
               </div>
 
               {priceWarning && (
-                <div className="col-span-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+                <div className="sm:col-span-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                   Sotuv narxi olingan narxdan past
                 </div>
               )}
 
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-2">
                   To&apos;liq to&apos;ladimi? <span className="text-red-500">*</span>
                 </label>
@@ -512,14 +512,14 @@ export default function NewOlibSotdimPage() {
                     </label>
                     <Input type="date" value={partialDate} onChange={(e) => setPartialDate(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
                   </div>
-                  <div className="col-span-2 flex items-center gap-2">
+                  <div className="sm:col-span-2 flex items-center gap-2">
                     <input type="checkbox" id="customer-reminder" checked={customerReminderEnabled} onChange={(e) => setCustomerReminderEnabled(e.target.checked)} className="w-4 h-4 rounded border-zinc-300" />
                     <label htmlFor="customer-reminder" className="text-sm text-zinc-700 cursor-pointer">Mijozga eslatma yuborish</label>
                   </div>
                 </>
               )}
 
-              <div className="col-span-2">
+              <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
                 <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Qo'shimcha ma'lumot..." className="text-sm border-zinc-200 rounded min-h-[60px]" />
               </div>

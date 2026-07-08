@@ -13,6 +13,7 @@ import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 import { z, ZodError } from 'zod'
+import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -132,7 +133,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     return created(admin, "Admin muvaffaqiyatli qo'shildi")
   } catch (err) {
-    console.error('[POST /api/shops/[id]/admins]', err)
+    logger.error('[POST /api/shops/[id]/admins]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -196,7 +197,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     return ok(updated, "Admin paroli muvaffaqiyatli yangilandi")
   } catch (err) {
-    console.error('[PATCH /api/shops/[id]/admins]', err)
+    logger.error('[PATCH /api/shops/[id]/admins]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -258,7 +259,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
 
     return ok(deleted, "Admin muvaffaqiyatli o'chirildi")
   } catch (err) {
-    console.error('[DELETE /api/shops/[id]/admins]', err)
+    logger.error('[DELETE /api/shops/[id]/admins]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

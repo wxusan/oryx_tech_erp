@@ -133,7 +133,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
     }
-    console.error('[POST /api/devices/[id]/restock]', err)
+    logger.error('[POST /api/devices/[id]/restock]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

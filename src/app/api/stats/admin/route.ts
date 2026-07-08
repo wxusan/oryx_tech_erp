@@ -9,6 +9,7 @@ import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { tashkentMonthRange } from '@/lib/timezone'
 import { addDays } from 'date-fns'
+import { logger } from '@/lib/logger'
 
 export async function GET() {
   try {
@@ -63,9 +64,14 @@ export async function GET() {
         },
       }),
 
-      // All shops ordered by subscriptionDue for the table
+      // All shops ordered by subscriptionDue for the table. `expectedRevenue`
+      // below is a real aggregate over every ACTIVE shop, so this can't be
+      // paginated without breaking that number — the cap here is purely a
+      // safety net against unbounded growth (this is the platform operator's
+      // own shop count, not user-generated data), not a page size.
       prisma.shop.findMany({
         where: { deletedAt: null },
+        take: 2000,
         include: {
           admins: { where: { deletedAt: null, isActive: true }, select: shopAdminPublicSelect },
           payments: { where: { deletedAt: null }, orderBy: { paidAt: 'desc' }, take: 1 },
@@ -103,7 +109,7 @@ export async function GET() {
       shops,
     })
   } catch (err) {
-    console.error('[GET /api/stats/admin]', err)
+    logger.error('[GET /api/stats/admin]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

@@ -6,6 +6,7 @@ import { badRequest, conflict, notFound, ok, serverError } from '@/lib/api-helpe
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
 import { isTelegramIdTaken, nextTelegramVerifiedAt, normalizeTelegramId } from '@/lib/telegram-id'
+import { logger } from '@/lib/logger'
 
 const changePasswordSchema = z.object({
   currentPassword: z.string({ error: 'Joriy parol kiritilishi shart' }).min(1, 'Joriy parol kiritilishi shart'),
@@ -56,7 +57,7 @@ export async function GET() {
 
     return ok(admin)
   } catch (err) {
-    console.error('[GET /api/admin/profile]', err)
+    logger.error('[GET /api/admin/profile]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -218,7 +219,7 @@ export async function PATCH(req: NextRequest) {
 
     return ok({ passwordChanged: true }, 'Parol yangilandi. Qayta kiring.')
   } catch (err) {
-    console.error('[PATCH /api/admin/profile]', err)
+    logger.error('[PATCH /api/admin/profile]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

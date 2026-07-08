@@ -19,10 +19,11 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession } from '@/lib/api-auth'
 import { importNasiyaSchema } from '@/lib/validations'
 import { generateImportSchedule } from '@/lib/nasiya-utils'
-import { created, badRequest, conflict, forbidden, serverError } from '@/lib/api-helpers'
+import { created, badRequest, conflict, forbidden, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaImportedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
+import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
@@ -40,6 +41,11 @@ export async function POST(req: NextRequest) {
       return forbidden("Faqat do'kon adminlari eski nasiya import qila oladi")
     }
     const shopId = session.user.shopId
+
+    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    const rate = checkRateLimit(rateLimitKey('nasiya-import', shopId, session.user.id), { windowMs: 60_000, max: 10 })
+    if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
+
     const currency = await getShopCurrencyContext(shopId)
 
     const body: unknown = await req.json()
@@ -318,7 +324,7 @@ export async function POST(req: NextRequest) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict('Bu IMEI raqami allaqachon mavjud')
     }
-    console.error('[POST /api/nasiya/import]', err)
+    logger.error('[POST /api/nasiya/import]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

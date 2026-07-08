@@ -3,10 +3,11 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addSalePaymentSchema } from '@/lib/validations'
-import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { salePaymentMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
+import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
@@ -40,6 +41,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+
+    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    const rate = checkRateLimit(rateLimitKey('sale-payment', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
+
     const currency = await getShopCurrencyContext(shopId)
     let amountInput: Awaited<ReturnType<typeof moneyInputToUzs>>
     try {
@@ -268,7 +274,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
     }
-    console.error('[POST /api/sales/[id]/payment]', err)
+    logger.error('[POST /api/sales/[id]/payment]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

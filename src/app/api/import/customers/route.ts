@@ -3,8 +3,10 @@ import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
-import { ok, badRequest, conflict, serverError } from '@/lib/api-helpers'
+import { ok, badRequest, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { normalizePhone } from '@/lib/phone'
+import { logger } from '@/lib/logger'
+import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
 
 const customerImportSchema = z.object({
   shopId: z.string().optional(),
@@ -30,6 +32,10 @@ export async function POST(req: NextRequest) {
 
     const resolved = await resolveActiveShopId(session, parsed.data.shopId)
     if (!resolved.ok) return resolved.response
+
+    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    const rate = checkRateLimit(rateLimitKey('customer-import', resolved.shopId, session.user.id), { windowMs: 60_000, max: 10 })
+    if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       let created = 0
@@ -90,7 +96,7 @@ export async function POST(req: NextRequest) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict('Import ichida takrorlangan faol telefon raqam bor')
     }
-    console.error('[POST /api/import/customers]', err)
+    logger.error('[POST /api/import/customers]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

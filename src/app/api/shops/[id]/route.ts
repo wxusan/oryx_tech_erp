@@ -11,6 +11,7 @@ import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { z, ZodError } from 'zod'
+import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -48,7 +49,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     return ok(shop)
   } catch (err) {
-    console.error('[GET /api/shops/[id]]', err)
+    logger.error('[GET /api/shops/[id]]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -125,7 +126,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     return ok(updated, "Do'kon muvaffaqiyatli yangilandi")
   } catch (err) {
-    console.error('[PATCH /api/shops/[id]]', err)
+    logger.error('[PATCH /api/shops/[id]]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -188,7 +189,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
 
     return ok(deleted, "Do'kon muvaffaqiyatli o'chirildi")
   } catch (err) {
-    console.error('[DELETE /api/shops/[id]]', err)
+    logger.error('[DELETE /api/shops/[id]]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

@@ -11,6 +11,7 @@ import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { addMonths, max } from 'date-fns'
 import type { ZodError } from 'zod'
+import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -135,7 +136,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return serverError("Idempotency-Key bo'yicha to'lov allaqachon yozilgan. Iltimos, sahifani yangilang.")
     }
-    console.error('[POST /api/shops/[id]/payment]', err)
+    logger.error('[POST /api/shops/[id]/payment]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

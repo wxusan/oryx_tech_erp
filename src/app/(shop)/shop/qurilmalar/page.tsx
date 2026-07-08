@@ -20,10 +20,17 @@ export default async function QurilmalarPage({ searchParams }: QurilmalarPagePro
     ? (status as (typeof validStatuses)[number])
     : 'Barchasi'
 
-  const [devices, currency] = await Promise.all([
+  const [{ items: devices, truncated }, currency] = await Promise.all([
     getShopDevicesList(guarded.shopId),
     getShopCurrencyContext(guarded.shopId),
   ])
 
-  return <QurilmalarClient initialDevices={devices} currency={currency} initialStatus={initialStatus} />
+  return (
+    <QurilmalarClient
+      initialDevices={devices}
+      currency={currency}
+      initialStatus={initialStatus}
+      truncated={truncated}
+    />
+  )
 }

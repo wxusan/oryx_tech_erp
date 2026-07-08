@@ -12,6 +12,7 @@ import { requireApiSession } from '@/lib/api-auth'
 import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopReminderMutation } from '@/lib/server/cache-tags'
 import type { ZodError } from 'zod'
+import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -69,7 +70,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     return ok(updated, reminderEnabled ? 'Eslatma yoqildi' : "Eslatma o'chirildi")
   } catch (err) {
-    console.error('[PATCH /api/nasiya/[id]/reminder]', err)
+    logger.error('[PATCH /api/nasiya/[id]/reminder]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

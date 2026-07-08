@@ -13,6 +13,7 @@ import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 import type { ZodError } from 'zod'
+import { logger } from '@/lib/logger'
 
 // ---------------------------------------------------------------------------
 // GET /api/shops
@@ -57,7 +58,7 @@ export async function GET(req: NextRequest) {
 
     return ok(shops, "Do'konlar ro'yxati")
   } catch (err) {
-    console.error('[GET /api/shops]', err)
+    logger.error('[GET /api/shops]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -158,7 +159,7 @@ export async function POST(req: NextRequest) {
 
     return created(shop, "Do'kon muvaffaqiyatli yaratildi")
   } catch (err) {
-    console.error('[POST /api/shops]', err)
+    logger.error('[POST /api/shops]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

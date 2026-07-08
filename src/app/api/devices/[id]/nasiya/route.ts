@@ -12,10 +12,11 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { createNasiyaSchema } from '@/lib/validations'
 import { calculateNasiyaAmounts, generatePaymentSchedule } from '@/lib/nasiya-utils'
-import { created, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { created, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaCreatedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
+import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
@@ -49,6 +50,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+
+    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    const rate = checkRateLimit(rateLimitKey('nasiya-create', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
+
     const currency = await getShopCurrencyContext(shopId)
     if (passportPhotoUrl && !passportPhotoUrl.startsWith(`shops/${shopId}/passports/`)) {
       return badRequest("Pasport rasmi boshqa do'konga tegishli")
@@ -294,7 +300,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict('Bu telefon raqam bilan faol mijoz allaqachon mavjud')
     }
-    console.error('[POST /api/devices/[id]/nasiya]', err)
+    logger.error('[POST /api/devices/[id]/nasiya]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }

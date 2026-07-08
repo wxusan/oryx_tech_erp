@@ -36,3 +36,13 @@ export function conflict(error: string): NextResponse<ApiResponse> {
 export function serverError(error = "Server xatosi yuz berdi"): NextResponse<ApiResponse> {
   return NextResponse.json({ success: false, error }, { status: 500 })
 }
+
+export function tooManyRequests(
+  retryAfterSeconds: number,
+  error = "Juda ko'p so'rov yuborildi. Birozdan keyin qayta urinib ko'ring.",
+): NextResponse<ApiResponse> {
+  return NextResponse.json(
+    { success: false, error },
+    { status: 429, headers: { 'Retry-After': String(Math.max(1, Math.trunc(retryAfterSeconds))) } },
+  )
+}

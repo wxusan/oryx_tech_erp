@@ -6,6 +6,7 @@ import { prisma } from '@/lib/prisma'
 import { badRequest, conflict, forbidden, notFound, ok, serverError } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
 import { isTelegramIdTaken, nextTelegramVerifiedAt, normalizeTelegramId } from '@/lib/telegram-id'
+import { logger } from '@/lib/logger'
 
 const changePasswordSchema = z.object({
   currentPassword: z.string({ error: 'Joriy parol kiritilishi shart' }).min(1, 'Joriy parol kiritilishi shart'),
@@ -71,7 +72,7 @@ export async function GET() {
 
     return ok(admin)
   } catch (err) {
-    console.error('[GET /api/shop-admin/profile]', err)
+    logger.error('[GET /api/shop-admin/profile]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
@@ -258,7 +259,7 @@ export async function PATCH(req: NextRequest) {
 
     return ok({ passwordChanged: true }, 'Parol yangilandi. Qayta kiring.')
   } catch (err) {
-    console.error('[PATCH /api/shop-admin/profile]', err)
+    logger.error('[PATCH /api/shop-admin/profile]', { event: 'api.route_error', error: err })
     return serverError()
   }
 }
