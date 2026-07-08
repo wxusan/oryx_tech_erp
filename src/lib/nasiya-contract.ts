@@ -28,9 +28,20 @@ export function getCompletionToleranceForCurrency(currency: CurrencyCode): numbe
   return currency === 'USD' ? USD_COMPLETION_TOLERANCE : UZS_COMPLETION_TOLERANCE
 }
 
-/** Round a raw contract-currency amount to its smallest real unit — whole so'm for UZS, cents for USD. */
-export function roundContractMoney(value: number, currency: CurrencyCode): number {
-  return currency === 'USD' ? Math.round(value * 100) / 100 : Math.round(value)
+/**
+ * Round a raw contract-currency amount to its smallest real unit — whole
+ * so'm for UZS, cents for USD. Accepts `number | string` because every
+ * caller may be reading straight from an API response: a Prisma `Decimal`
+ * column serializes to a JSON STRING over the network (see
+ * `convertUsdToUzs`/`convertUzsToUsd` in `currency.ts`, which established
+ * this exact pattern), so `Number(value)` here is required, not optional —
+ * skipping it does not (usually) throw immediately, but every OTHER
+ * function in this file below builds on this one and calls `.toFixed()` on
+ * its result, which DOES throw for a raw string.
+ */
+export function roundContractMoney(value: number | string, currency: CurrencyCode): number {
+  const n = Number(value)
+  return currency === 'USD' ? Math.round(n * 100) / 100 : Math.round(n)
 }
 
 /**
@@ -38,10 +49,12 @@ export function roundContractMoney(value: number, currency: CurrencyCode): numbe
  * never negative, snapped to 0 within that currency's tolerance. Mirrors
  * `scheduleOutstanding` in nasiya-utils.ts (which stays UZS-only, untouched,
  * for the legacy ledger) — this is the contract-currency-aware counterpart
- * used by the payment route's new native allocation loop.
+ * used by the payment route's new native allocation loop. Accepts
+ * `number | string` for the same Decimal-serializes-to-a-string-over-JSON
+ * reason as `roundContractMoney` above.
  */
-export function contractScheduleOutstanding(expectedAmount: number, paidAmount: number, currency: CurrencyCode): number {
-  const raw = Math.max(0, expectedAmount - paidAmount)
+export function contractScheduleOutstanding(expectedAmount: number | string, paidAmount: number | string, currency: CurrencyCode): number {
+  const raw = Math.max(0, Number(expectedAmount) - Number(paidAmount))
   return raw <= getCompletionToleranceForCurrency(currency) ? 0 : raw
 }
 
@@ -54,10 +67,11 @@ export function contractScheduleOutstanding(expectedAmount: number, paidAmount: 
  * documented, honest degradation (see docs/currency-accounting-model.md)
  * instead of a hard failure of the whole aggregate.
  */
-export function convertContractAmountToUzs(amount: number, contractCurrency: CurrencyCode, usdUzsRate: number | null): number {
-  if (contractCurrency === 'UZS') return amount
-  if (!usdUzsRate) return amount
-  return convertUsdToUzs(amount, usdUzsRate)
+export function convertContractAmountToUzs(amount: number | string, contractCurrency: CurrencyCode, usdUzsRate: number | null): number {
+  const n = Number(amount)
+  if (contractCurrency === 'UZS') return n
+  if (!usdUzsRate) return n
+  return convertUsdToUzs(n, usdUzsRate)
 }
 
 /**
@@ -142,23 +156,38 @@ export function getScheduleContractPaidAmount(schedule: ContractScheduleLike): n
  * payment never mixes two different rates across its derived figures).
  */
 export function convertPaymentToContractCurrency(
-  amount: number,
+  amount: number | string,
   paymentCurrency: CurrencyCode,
   contractCurrency: CurrencyCode,
   rate: number | null,
 ): number {
-  if (paymentCurrency === contractCurrency) return amount
+  const n = Number(amount)
+  if (paymentCurrency === contractCurrency) return n
   if (!rate || rate <= 0) throw new Error("USD kursi mavjud emas")
   if (paymentCurrency === 'USD' && contractCurrency === 'UZS') {
-    return convertUsdToUzs(amount, rate)
+    return convertUsdToUzs(n, rate)
   }
   // paymentCurrency === 'UZS' && contractCurrency === 'USD'
-  return Math.round(convertUzsToUsd(amount, rate) * 100) / 100
+  return Math.round(convertUzsToUsd(n, rate) * 100) / 100
 }
 
-/** Format an amount that is already denominated in `currency` — never converts. */
-export function formatContractMoney(amount: number, currency: CurrencyCode): string {
-  return currency === 'USD' ? `$${amount.toFixed(2)}` : `${Math.round(amount).toLocaleString('ru-RU')} so'm`
+/**
+ * Format an amount that is already denominated in `currency` — never
+ * converts. Accepts `number | string`: a Prisma `Decimal` column (e.g.
+ * `Sale.contractSalePrice`, `SalePayment.appliedAmountInContractCurrency`,
+ * `Device.purchaseInputAmount`) serializes to a JSON STRING once it crosses
+ * an API response into the browser (`NextResponse.json()` → `fetch().json()`),
+ * exactly like `Device.purchasePrice` already did (see the regression test
+ * and comment in `tests/currency.test.ts`). Calling `.toFixed()` on that raw
+ * string throws `TypeError: amount.toFixed is not a function` for any
+ * USD-denominated value — this crashed the device detail page in production
+ * whenever a sale/purchase/payment was USD-native. `Number(amount)` here is
+ * the fix, mirroring the same pattern already used by
+ * `convertUsdToUzs`/`convertUzsToUsd` in `currency.ts`.
+ */
+export function formatContractMoney(amount: number | string, currency: CurrencyCode): string {
+  const n = Number(amount)
+  return currency === 'USD' ? `$${n.toFixed(2)}` : `${Math.round(n).toLocaleString('ru-RU')} so'm`
 }
 
 /**
@@ -168,18 +197,20 @@ export function formatContractMoney(amount: number, currency: CurrencyCode): str
  * display currency may differ. Converts using `rate` (typically today's
  * rate for a live view) — never used for a frozen historical payment record,
  * which always shows its own native amount instead (see
- * `paymentAmountDisplay` in the nasiya detail page).
+ * `paymentAmountDisplay` in the nasiya detail page). Accepts `number | string`
+ * for the same reason as `formatContractMoney` above.
  */
 export function formatDisplayMoneyFromContract(
-  amount: number,
+  amount: number | string,
   amountCurrency: CurrencyCode,
   displayCurrency: CurrencyCode,
   rate?: number | null,
 ): string {
-  if (amountCurrency === displayCurrency) return formatContractMoney(amount, amountCurrency)
-  if (!rate || rate <= 0) return `${formatContractMoney(amount, amountCurrency)} (kurs mavjud emas)`
-  if (amountCurrency === 'USD') return formatContractMoney(convertUsdToUzs(amount, rate), 'UZS')
-  return formatContractMoney(Math.round(convertUzsToUsd(amount, rate) * 100) / 100, 'USD')
+  const n = Number(amount)
+  if (amountCurrency === displayCurrency) return formatContractMoney(n, amountCurrency)
+  if (!rate || rate <= 0) return `${formatContractMoney(n, amountCurrency)} (kurs mavjud emas)`
+  if (amountCurrency === 'USD') return formatContractMoney(convertUsdToUzs(n, rate), 'UZS')
+  return formatContractMoney(Math.round(convertUzsToUsd(n, rate) * 100) / 100, 'USD')
 }
 
 /**
@@ -197,22 +228,24 @@ export function formatDisplayMoneyFromContract(
  * contract, but avoids inventing one).
  */
 export function computeContractCurrencyMargin(
-  contractAmount: number,
-  costUzs: number,
+  contractAmount: number | string,
+  costUzs: number | string,
   contractCurrency: CurrencyCode,
   contractExchangeRateAtCreation: number | null,
 ): number | null {
-  if (contractCurrency === 'UZS') return contractAmount - costUzs
+  const amount = Number(contractAmount)
+  const cost = Number(costUzs)
+  if (contractCurrency === 'UZS') return amount - cost
   if (!contractExchangeRateAtCreation) return null
-  const costInContractCurrency = Math.round(convertUzsToUsd(costUzs, contractExchangeRateAtCreation) * 100) / 100
-  return Math.round((contractAmount - costInContractCurrency) * 100) / 100
+  const costInContractCurrency = Math.round(convertUzsToUsd(cost, contractExchangeRateAtCreation) * 100) / 100
+  return Math.round((amount - costInContractCurrency) * 100) / 100
 }
 
 /** Minimal shape of a device's own purchase-currency context (see the `purchase*` fields on Device). */
 export interface PurchaseCostLike {
   purchaseCurrency: CurrencyCode
-  purchaseInputAmount: number
-  purchaseAmountUzsSnapshot: number
+  purchaseInputAmount: number | string
+  purchaseAmountUzsSnapshot: number | string
 }
 
 /**
@@ -229,13 +262,13 @@ export interface PurchaseCostLike {
  * available). See docs/currency-accounting-model.md.
  */
 export function computeSaleContractMargin(
-  contractAmount: number,
+  contractAmount: number | string,
   contractCurrency: CurrencyCode,
   contractExchangeRateAtCreation: number | null,
   purchase: PurchaseCostLike,
 ): number | null {
   if (purchase.purchaseCurrency === contractCurrency) {
-    return Math.round((contractAmount - purchase.purchaseInputAmount) * 100) / 100
+    return Math.round((Number(contractAmount) - Number(purchase.purchaseInputAmount)) * 100) / 100
   }
   return computeContractCurrencyMargin(contractAmount, purchase.purchaseAmountUzsSnapshot, contractCurrency, contractExchangeRateAtCreation)
 }
@@ -249,7 +282,7 @@ export function computeSaleContractMargin(
  * Falls back to just the native figure when no rate is available.
  */
 export function formatContractMoneyWithDisplay(
-  amount: number,
+  amount: number | string,
   contractCurrency: CurrencyCode,
   displayCurrency: CurrencyCode,
   rate?: number | null,
@@ -261,11 +294,11 @@ export function formatContractMoneyWithDisplay(
 
 /** Minimal shape a SalePayment row needs for `salePaymentAmountDisplay`. */
 export interface SalePaymentLike {
-  amount: number
-  paymentInputAmount: number | null
+  amount: number | string
+  paymentInputAmount: number | string | null
   paymentInputCurrency: CurrencyCode | null
-  paymentExchangeRate: number | null
-  appliedAmountInContractCurrency: number | null
+  paymentExchangeRate: number | string | null
+  appliedAmountInContractCurrency: number | string | null
 }
 
 /**
@@ -293,7 +326,7 @@ export function salePaymentAmountDisplay(
     const appliedAmount = payment.appliedAmountInContractCurrency ?? payment.amount
     const appliedText = formatContractMoney(appliedAmount, contractCurrency)
     const rateText = payment.paymentExchangeRate
-      ? ` · kurs: ${Math.round(payment.paymentExchangeRate).toLocaleString('ru-RU')}`
+      ? ` · kurs: ${Math.round(Number(payment.paymentExchangeRate)).toLocaleString('ru-RU')}`
       : ''
     return `${paidText} → ${appliedText}${rateText}`
   }

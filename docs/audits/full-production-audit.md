@@ -5,6 +5,20 @@ This is the top-level summary; see the companion docs in this folder for
 per-area detail (security, business logic, UI/UX, performance, code quality,
 test coverage, production readiness).
 
+**Addendum (same day, post-audit)**: a real production crash was reported
+on `/shop/qurilmalar/[id]` after this audit concluded. Root cause: a
+type-coercion gap in `src/lib/nasiya-contract.ts` (money-formatting
+functions called `.toFixed()` directly on values that arrive as JSON
+strings once a Prisma `Decimal` column crosses the API boundary — see
+`docs/currency-accounting-model.md` §23 for the full writeup). This was a
+real gap this audit's business-logic pass did not catch (the audit read
+the money-*logic* for correctness, not the money-*formatting* layer for
+type safety) and has been fixed, with regression tests added in
+`tests/device-detail-crash-fix.test.ts`. This does not change the "safe for
+client demo" verdict below — the underlying money logic verified by this
+audit was never wrong, only its client-side display for USD amounts could
+crash — but it is disclosed here for an accurate audit trail.
+
 ## Method
 
 Four parallel read-only discovery passes covered: (1) security/tenant

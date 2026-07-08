@@ -568,3 +568,52 @@ aggregates that could have raw-mixed currencies (`expectedThisMonth`,
   own legacy-UZS and display-currency amount side by side — this is a
   per-row historical export, not a summed aggregate, so it was not touched
   and carries no mixed-currency risk.
+
+## 23. Production incident: device detail page crash on USD-native sales (fixed)
+
+**Symptom**: `/shop/qurilmalar/[id]` crashed with Next.js's generic
+client-side error boundary ("This page couldn't load. Reload to try
+again.") after a device was marked sold, on some reloads.
+
+**Root cause**: a Prisma `Decimal` column serializes to a JSON **string**
+once it crosses `NextResponse.json()` → `fetch().json()` into the browser —
+this was already a known, previously-fixed issue for
+`Device.purchasePrice` (`currency.ts`'s `convertUsdToUzs`/`convertUzsToUsd`
+were hardened to accept `number | string` for exactly this reason; see the
+regression comment in `tests/currency.test.ts`). The newer helpers added
+across the Sale/Nasiya contract-currency work in `src/lib/nasiya-contract.ts`
+(`formatContractMoney`, `formatDisplayMoneyFromContract`,
+`formatContractMoneyWithDisplay`, `computeContractCurrencyMargin`,
+`computeSaleContractMargin`, `salePaymentAmountDisplay`,
+`roundContractMoney`, `contractScheduleOutstanding`,
+`convertContractAmountToUzs`, `convertPaymentToContractCurrency`) never
+received the same hardening — `formatContractMoney` called
+`amount.toFixed(2)` directly for a USD amount, which throws
+`TypeError: amount.toFixed is not a function` when `amount` is actually a
+string. This affected any sale/purchase/payment whose relevant currency was
+USD (a first-class, common case in this app, not an edge case) — e.g. a
+device with a USD `purchaseCurrency`, or a sale with a USD `contractCurrency`
+displayed in the shop's own USD display mode (the "same currency, no
+conversion" branch passes the raw un-converted value straight through, so
+it was never protected by the multiplication-based coercion that
+conversion functions get for free).
+
+**Not the cause**: this was verified NOT to be a missing production
+migration. The crash signature itself is diagnostic evidence: a missing
+column would fail the Prisma query server-side (caught by the route's
+`try/catch`, returning a JSON `{success:false}` response — the client would
+show "Qurilma topilmadi", not a React render-crash overlay). The specific
+overlay the user saw only happens on an *uncaught client-side JavaScript
+exception during render*, exactly matching the `.toFixed()` TypeError.
+Production (`https://oryx-tech-erp.vercel.app/api/health`, checked directly)
+was confirmed live and healthy on the latest deployed commit at the time of
+this fix.
+
+**Fix**: every money-accepting function in `nasiya-contract.ts` now accepts
+`number | string` and calls `Number(...)` before any arithmetic or
+`.toFixed()`, mirroring the exact pattern already established in
+`currency.ts`. `PurchaseCostLike`/`SalePaymentLike` interfaces were widened
+to match. See `tests/device-detail-crash-fix.test.ts` for the full set of
+serialized-Decimal-string regression tests (one per hardened function,
+plus page-level guard tests confirming every `.toFixed()` call site in the
+device detail page is fed by a hardened conversion, never a raw API field).
