@@ -11,21 +11,31 @@ export function isCurrencyCode(value: unknown): value is CurrencyCode {
   return value === 'UZS' || value === 'USD'
 }
 
-// Amounts may arrive as strings — Prisma Decimal columns serialize to a string
-// over JSON (e.g. device.purchasePrice from /api/devices). Coerce like
-// formatMoneyByCurrency already does; the conversion math is unchanged.
-export function convertUsdToUzs(amountUsd: number | string, rate: number): number {
+// Amounts (AND rates) may arrive as strings — Prisma Decimal columns
+// serialize to a string over JSON (e.g. device.purchasePrice from
+// /api/devices, but also Sale.contractExchangeRateAtCreation,
+// Device.purchaseExchangeRateAtCreation, CurrencyRate.rate). The `amount`
+// parameter was already coerced; `rate` was not, which meant
+// `assertRate()` — using the strict, non-coercing `Number.isFinite` — threw
+// "USD kursi noto'g'ri" for a perfectly valid rate that just happened to
+// still be a string, crashing any caller that passed a raw
+// `contractExchangeRateAtCreation`/`purchaseExchangeRateAtCreation` field
+// straight through (e.g. the device detail page's profit calculation for a
+// USD-native sale of a UZS-purchased device). Coerce both.
+export function convertUsdToUzs(amountUsd: number | string, rate: number | string): number {
   const usd = Number(amountUsd)
+  const r = Number(rate)
   assertMoney(usd, 'USD amount')
-  assertRate(rate)
-  return Math.round(usd * rate)
+  assertRate(r)
+  return Math.round(usd * r)
 }
 
-export function convertUzsToUsd(amountUzs: number | string, rate: number): number {
+export function convertUzsToUsd(amountUzs: number | string, rate: number | string): number {
   const uzs = Number(amountUzs)
+  const r = Number(rate)
   assertMoney(uzs, 'UZS amount')
-  assertRate(rate)
-  return uzs / rate
+  assertRate(r)
+  return uzs / r
 }
 
 export function normalizeMoneyInput(

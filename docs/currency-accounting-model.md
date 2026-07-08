@@ -617,3 +617,55 @@ to match. See `tests/device-detail-crash-fix.test.ts` for the full set of
 serialized-Decimal-string regression tests (one per hardened function,
 plus page-level guard tests confirming every `.toFixed()` call site in the
 device detail page is fed by a hardened conversion, never a raw API field).
+
+### 23a. Second, distinct crash: the same bug in the RATE parameter, not just the amount
+
+**Symptom**: the device detail page kept crashing after the §23 fix
+deployed (confirmed live via `/api/health`'s `commit` field).
+
+**Root cause**: `currency.ts`'s `convertUsdToUzs`/`convertUzsToUsd` had
+already been hardened to coerce their `amount` parameter
+(`Number(amountUsd)`/`Number(amountUzs)`) — but **not** their `rate`
+parameter, which was passed straight into `assertRate(rate)`. `assertRate`
+uses the strict, non-coercing `Number.isFinite(rate)` check, which returns
+`false` for a string even when it represents a perfectly valid rate.
+`Sale.contractExchangeRateAtCreation` and `Device.purchaseExchangeRateAtCreation`
+are both `Decimal?` columns, so they arrive as JSON strings exactly like
+every other Decimal field — and `computeContractCurrencyMargin` (called by
+`computeSaleContractMargin` for the device detail page's profit figure)
+passes `contractExchangeRateAtCreation` straight through as the `rate`
+argument to `convertUzsToUsd`. The §23 fix hardened every *amount*
+argument in `nasiya-contract.ts` but this one function still leaked an
+un-coerced *rate* argument into `currency.ts`'s stricter check.
+
+This reproduces whenever a device's `purchaseCurrency` differs from its
+sale's `contractCurrency` — e.g. a device purchased in UZS (the common
+default) and sold as a USD contract — which is a realistic, everyday
+scenario, not a rare edge case. That mismatch is exactly what routes
+`computeSaleContractMargin` into the `computeContractCurrencyMargin`
+fallback branch that uses the frozen creation rate.
+
+**Fix**: `convertUsdToUzs`/`convertUzsToUsd` in `currency.ts` now coerce
+`rate` via `Number(rate)` before `assertRate`, the same as `amount` always
+was. Every `rate`/`contractExchangeRateAtCreation`-shaped parameter across
+`nasiya-contract.ts` was widened from `number | null` to
+`number | string | null` to match the real runtime shape, with the
+truthy/`<= 0` guard comparisons updated to coerce first. The device detail
+page's `Sale.contractExchangeRateAtCreation`/`Device.purchaseExchangeRateAtCreation`
+TypeScript field types were widened to match, so the type system stops
+lying about the actual runtime shape.
+
+**Additional hardening added in the same pass** (defense-in-depth, not
+required to fix the crash but explicitly requested): `formatContractMoney`
+and `formatDisplayMoneyFromContract` now return `"—"` instead of
+`"$NaN"`/`"NaN so'm"` for a genuinely non-finite amount (missing/corrupt
+data), and `computeContractCurrencyMargin` returns `null` instead of
+attempting a conversion that would throw. The device detail page now shows
+an explicit warning card ("Bu qurilma sotilgan deb belgilangan, lekin savdo
+yozuvi topilmadi.") if a device is marked `SOLD_CASH` but its `Sale`
+relation is unexpectedly missing, instead of silently rendering nothing.
+
+See `tests/sold-device-detail-rate-crash-fix.test.ts` for the full
+regression suite: a worked example of the exact UZS-purchase/USD-sale
+scenario, direct tests of the now-hardened `rate` parameter, and the
+NaN-safety tests.

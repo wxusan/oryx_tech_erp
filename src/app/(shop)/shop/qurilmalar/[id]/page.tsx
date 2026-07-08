@@ -61,7 +61,16 @@ interface Sale {
   contractSalePrice: number
   contractAmountPaid: number
   contractRemainingAmount: number
-  contractExchangeRateAtCreation: number | null
+  // Prisma Decimal? — arrives as a STRING over JSON when non-null (see
+  // convertUsdToUzs/convertUzsToUsd in currency.ts, which coerce this
+  // safely). Every other `number`-typed field in this interface is a
+  // Decimal column too and has the same real runtime shape, but is only
+  // ever read through formatContractMoney/formatDisplayMoneyFromContract/
+  // computeSaleContractMargin (all Number()-coerced) or plain `-`
+  // subtraction (which auto-coerces) — this field is called out explicitly
+  // because it was the one actually passed as a RATE argument, which used
+  // to hit assertRate()'s strict, non-coercing Number.isFinite() check.
+  contractExchangeRateAtCreation: number | string | null
   payments: SalePaymentRow[]
 }
 
@@ -101,7 +110,8 @@ interface Device {
   // Native purchase-currency context — see docs/currency-accounting-model.md.
   purchaseCurrency: 'UZS' | 'USD'
   purchaseInputAmount: number
-  purchaseExchangeRateAtCreation: number | null
+  // Prisma Decimal? — see the identical comment on Sale.contractExchangeRateAtCreation above.
+  purchaseExchangeRateAtCreation: number | string | null
   purchaseAmountUzsSnapshot: number
   imei: string
   supplierPhone: string | null
@@ -500,7 +510,7 @@ export default function QurilmaDetailPage() {
   // contract amount — see docs/currency-accounting-model.md). The UZS hint
   // uses the rate frozen AT PURCHASE TIME, not today's.
   const purchaseRateHint = device.purchaseExchangeRateAtCreation
-    ? ` · kurs: ${Math.round(device.purchaseExchangeRateAtCreation).toLocaleString('ru-RU')}`
+    ? ` · kurs: ${Math.round(Number(device.purchaseExchangeRateAtCreation)).toLocaleString('ru-RU')}`
     : ''
   const infoRows: { label: string; value: string; hint?: string | null }[] = [
     { label: 'Model', value: device.model },
@@ -678,6 +688,15 @@ export default function QurilmaDetailPage() {
           ))}
         </div>
       </div>
+
+      {/* Inconsistent-data fallback: device is marked sold but the sale
+          relation itself is missing (should not happen, but must never
+          crash the page — surface it as a clear, honest warning instead). */}
+      {device.status === 'SOLD_CASH' && !latestSale && (
+        <div className="border border-amber-200 bg-amber-50 rounded px-4 py-3 text-sm text-amber-800">
+          Bu qurilma sotilgan deb belgilangan, lekin savdo yozuvi topilmadi.
+        </div>
+      )}
 
       {/* Sale info section */}
       {device.status === 'SOLD_CASH' && latestSale && (

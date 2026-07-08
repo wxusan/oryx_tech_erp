@@ -67,7 +67,7 @@ export function contractScheduleOutstanding(expectedAmount: number | string, pai
  * documented, honest degradation (see docs/currency-accounting-model.md)
  * instead of a hard failure of the whole aggregate.
  */
-export function convertContractAmountToUzs(amount: number | string, contractCurrency: CurrencyCode, usdUzsRate: number | null): number {
+export function convertContractAmountToUzs(amount: number | string, contractCurrency: CurrencyCode, usdUzsRate: number | string | null): number {
   const n = Number(amount)
   if (contractCurrency === 'UZS') return n
   if (!usdUzsRate) return n
@@ -89,7 +89,7 @@ export function contractOutstandingAsUzs(
   contractExpectedAmount: unknown,
   contractPaidAmount: unknown,
   contractCurrency: CurrencyCode,
-  usdUzsRate: number | null,
+  usdUzsRate: number | string | null,
 ): number {
   const raw = contractScheduleOutstanding(Number(contractExpectedAmount), Number(contractPaidAmount), contractCurrency)
   return convertContractAmountToUzs(raw, contractCurrency, usdUzsRate)
@@ -159,16 +159,17 @@ export function convertPaymentToContractCurrency(
   amount: number | string,
   paymentCurrency: CurrencyCode,
   contractCurrency: CurrencyCode,
-  rate: number | null,
+  rate: number | string | null,
 ): number {
   const n = Number(amount)
+  const r = rate == null ? null : Number(rate)
   if (paymentCurrency === contractCurrency) return n
-  if (!rate || rate <= 0) throw new Error("USD kursi mavjud emas")
+  if (!r || r <= 0) throw new Error("USD kursi mavjud emas")
   if (paymentCurrency === 'USD' && contractCurrency === 'UZS') {
-    return convertUsdToUzs(n, rate)
+    return convertUsdToUzs(n, r)
   }
   // paymentCurrency === 'UZS' && contractCurrency === 'USD'
-  return Math.round(convertUzsToUsd(n, rate) * 100) / 100
+  return Math.round(convertUzsToUsd(n, r) * 100) / 100
 }
 
 /**
@@ -187,6 +188,11 @@ export function convertPaymentToContractCurrency(
  */
 export function formatContractMoney(amount: number | string, currency: CurrencyCode): string {
   const n = Number(amount)
+  // Missing/corrupt data should look obviously incomplete, never "$NaN" /
+  // "NaN so'm" and never a crash. A missing/invalid `currency` (anything
+  // other than the literal 'USD') already safely falls back to the UZS
+  // branch via the ternary below.
+  if (!Number.isFinite(n)) return '—'
   return currency === 'USD' ? `$${n.toFixed(2)}` : `${Math.round(n).toLocaleString('ru-RU')} so'm`
 }
 
@@ -204,13 +210,17 @@ export function formatDisplayMoneyFromContract(
   amount: number | string,
   amountCurrency: CurrencyCode,
   displayCurrency: CurrencyCode,
-  rate?: number | null,
+  rate?: number | string | null,
 ): string {
   const n = Number(amount)
+  const r = rate == null ? null : Number(rate)
+  // Missing/corrupt amount — never attempt a conversion (convertUsdToUzs/
+  // convertUzsToUsd would throw on a non-finite value); show "—" instead.
+  if (!Number.isFinite(n)) return '—'
   if (amountCurrency === displayCurrency) return formatContractMoney(n, amountCurrency)
-  if (!rate || rate <= 0) return `${formatContractMoney(n, amountCurrency)} (kurs mavjud emas)`
-  if (amountCurrency === 'USD') return formatContractMoney(convertUsdToUzs(n, rate), 'UZS')
-  return formatContractMoney(Math.round(convertUzsToUsd(n, rate) * 100) / 100, 'USD')
+  if (!r || r <= 0) return `${formatContractMoney(n, amountCurrency)} (kurs mavjud emas)`
+  if (amountCurrency === 'USD') return formatContractMoney(convertUsdToUzs(n, r), 'UZS')
+  return formatContractMoney(Math.round(convertUzsToUsd(n, r) * 100) / 100, 'USD')
 }
 
 /**
@@ -231,10 +241,13 @@ export function computeContractCurrencyMargin(
   contractAmount: number | string,
   costUzs: number | string,
   contractCurrency: CurrencyCode,
-  contractExchangeRateAtCreation: number | null,
+  contractExchangeRateAtCreation: number | string | null,
 ): number | null {
   const amount = Number(contractAmount)
   const cost = Number(costUzs)
+  // Missing/corrupt data — never attempt a conversion (convertUzsToUsd would
+  // throw on a non-finite cost); no margin can be honestly computed.
+  if (!Number.isFinite(amount) || !Number.isFinite(cost)) return null
   if (contractCurrency === 'UZS') return amount - cost
   if (!contractExchangeRateAtCreation) return null
   const costInContractCurrency = Math.round(convertUzsToUsd(cost, contractExchangeRateAtCreation) * 100) / 100
@@ -264,7 +277,7 @@ export interface PurchaseCostLike {
 export function computeSaleContractMargin(
   contractAmount: number | string,
   contractCurrency: CurrencyCode,
-  contractExchangeRateAtCreation: number | null,
+  contractExchangeRateAtCreation: number | string | null,
   purchase: PurchaseCostLike,
 ): number | null {
   if (purchase.purchaseCurrency === contractCurrency) {
@@ -285,11 +298,12 @@ export function formatContractMoneyWithDisplay(
   amount: number | string,
   contractCurrency: CurrencyCode,
   displayCurrency: CurrencyCode,
-  rate?: number | null,
+  rate?: number | string | null,
 ): string {
   const native = formatContractMoney(amount, contractCurrency)
-  if (contractCurrency === displayCurrency || !rate || rate <= 0) return native
-  return `${native} (~${formatDisplayMoneyFromContract(amount, contractCurrency, displayCurrency, rate)})`
+  const r = rate == null ? null : Number(rate)
+  if (contractCurrency === displayCurrency || !r || r <= 0) return native
+  return `${native} (~${formatDisplayMoneyFromContract(amount, contractCurrency, displayCurrency, r)})`
 }
 
 /** Minimal shape a SalePayment row needs for `salePaymentAmountDisplay`. */
