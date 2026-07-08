@@ -5,7 +5,8 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import { uzDate } from '@/lib/dates'
-import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
+import type { CurrencyContext } from '@/lib/currency'
+import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 import { matchesNasiyaSearch } from '@/lib/search-match'
 import type { PaymentScoreColor, PaymentScoreLabel } from '@/lib/nasiya-payment-score'
@@ -35,6 +36,11 @@ interface Nasiya {
   interestPercent: number
   interestAmount: number
   finalNasiyaAmount: number
+  // Native contract-currency ledger — see docs/currency-accounting-model.md.
+  contractCurrency: 'UZS' | 'USD'
+  contractInterestAmount: number
+  contractFinalAmount: number
+  contractRemainingAmount: number
   status: NasiyaStatus
   isImported: boolean
   createdAt: string
@@ -79,10 +85,6 @@ function StatusBadge({ status }: { status: NasiyaStatus }) {
       {label}
     </span>
   )
-}
-
-function fmt(n: number, currency: CurrencyContext) {
-  return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
 }
 
 const scoreBadgeStyles: Record<PaymentScoreColor, string> = {
@@ -215,6 +217,12 @@ export default function NasiyalarClient({
           {filtered.map((n) => {
             const paidAmount = n.finalNasiyaAmount - n.remainingAmount
             const pct = n.finalNasiyaAmount > 0 ? Math.round((paidAmount / n.finalNasiyaAmount) * 100) : 0
+            // Money TEXT must convert from the deal's own contract currency via
+            // today's rate — never reconvert the legacy UZS snapshot (frozen at
+            // creation rate), which drifts for a USD contract as the rate moves.
+            // See docs/currency-accounting-model.md.
+            const dfmt = (amount: number) => formatDisplayMoneyFromContract(amount, n.contractCurrency, currency.currency, currency.usdUzsRate)
+            const contractPaidAmount = n.contractFinalAmount - n.contractRemainingAmount
             const isOverdue = n.isOverdue
             const canPay = (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
             return (
@@ -255,13 +263,13 @@ export default function NasiyalarClient({
                         <span className="text-xs text-zinc-500 whitespace-nowrap">{pct}%</span>
                       </div>
                       <div className="flex gap-3 mt-1 text-xs text-zinc-500">
-                        <span>To'langan: {fmt(paidAmount, currency)}</span>
+                        <span>To'langan: {dfmt(contractPaidAmount)}</span>
                         <span>·</span>
-                        <span>Nasiya jami: {fmt(n.finalNasiyaAmount, currency)}</span>
-                        {n.interestAmount > 0 && (
+                        <span>Nasiya jami: {dfmt(n.contractFinalAmount)}</span>
+                        {n.contractInterestAmount > 0 && (
                           <>
                             <span>·</span>
-                            <span>Foiz: {fmt(n.interestAmount, currency)}</span>
+                            <span>Foiz: {dfmt(n.contractInterestAmount)}</span>
                           </>
                         )}
                       </div>
@@ -270,7 +278,7 @@ export default function NasiyalarClient({
 
                   <div className="text-right flex-shrink-0 space-y-2">
                     <div>
-                      <div className="text-sm font-bold text-zinc-900">{fmt(n.remainingAmount, currency)}</div>
+                      <div className="text-sm font-bold text-zinc-900">{dfmt(n.contractRemainingAmount)}</div>
                       <div className="text-xs text-zinc-400 mt-0.5">qolgan</div>
                     </div>
                     {canPay && (

@@ -51,6 +51,11 @@ export interface ShopNasiyaListItem {
   interestPercent: number
   interestAmount: number
   finalNasiyaAmount: number
+  // Native contract-currency ledger — see docs/currency-accounting-model.md.
+  contractCurrency: 'UZS' | 'USD'
+  contractInterestAmount: number
+  contractFinalAmount: number
+  contractRemainingAmount: number
   /** Stored parent status (kept for reference / debugging). */
   status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
   /** True for imported (pre-Oryx) nasiyas — shown with an "Eski nasiya" badge. */
@@ -242,6 +247,9 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
       finalNasiyaAmount: true,
       // Native contract-currency ledger — see docs/currency-accounting-model.md.
       contractCurrency: true,
+      contractInterestAmount: true,
+      contractFinalAmount: true,
+      contractRemainingAmount: true,
       status: true,
       isImported: true,
       createdAt: true,
@@ -318,6 +326,10 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopNasiyaList
         interestPercent: Number(nasiya.interestPercent),
         interestAmount: Number(nasiya.interestAmount),
         finalNasiyaAmount: Number(nasiya.finalNasiyaAmount),
+        contractCurrency: nasiya.contractCurrency,
+        contractInterestAmount: Number(nasiya.contractInterestAmount),
+        contractFinalAmount: Number(nasiya.contractFinalAmount),
+        contractRemainingAmount: Number(nasiya.contractRemainingAmount),
         status: nasiya.status,
         isImported: nasiya.isImported,
         displayStatus: derived.displayStatus,

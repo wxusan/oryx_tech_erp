@@ -41,6 +41,29 @@ export function contractScheduleOutstanding(expectedAmount: number, paidAmount: 
 }
 
 /**
+ * A "current outstanding balance" report aggregate (dashboard expectedThisMonth/
+ * overdueMoney/upcomingPayments) must be computed from each nasiya's own
+ * contract-currency remaining balance, converted to UZS using TODAY's rate —
+ * never by summing the legacy UZS snapshot (frozen at each nasiya's own
+ * creation rate) and converting the total once. Those two are NOT equivalent
+ * once any nasiya is USD-native: the legacy snapshot's implicit "rate" is
+ * whatever the rate was at that nasiya's creation, so re-deriving through
+ * today's rate on the summed total silently drifts the USD-native nasiya's
+ * true balance. See docs/currency-accounting-model.md.
+ */
+export function contractOutstandingAsUzs(
+  contractExpectedAmount: unknown,
+  contractPaidAmount: unknown,
+  contractCurrency: CurrencyCode,
+  usdUzsRate: number | null,
+): number {
+  const raw = contractScheduleOutstanding(Number(contractExpectedAmount), Number(contractPaidAmount), contractCurrency)
+  if (contractCurrency === 'UZS') return raw
+  if (!usdUzsRate) return raw
+  return convertUsdToUzs(raw, usdUzsRate)
+}
+
+/**
  * Currency-aware counterpart of `isScheduleOverdue` in nasiya-utils.ts (which
  * stays UZS-only, untouched, for callers still reading the legacy ledger).
  * Feeding contract-currency amounts (e.g. USD cents) through the UZS-only

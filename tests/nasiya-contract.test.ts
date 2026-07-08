@@ -10,6 +10,7 @@ import {
   convertPaymentToContractCurrency,
   formatContractMoney,
   formatDisplayMoneyFromContract,
+  contractOutstandingAsUzs,
 } from '@/lib/nasiya-contract'
 
 describe('getCompletionToleranceForCurrency', () => {
@@ -102,5 +103,35 @@ describe('formatDisplayMoneyFromContract', () => {
     const text = formatDisplayMoneyFromContract(200, 'USD', 'UZS', null)
     expect(text).toContain('$200.00')
     expect(text).toContain('kurs mavjud emas')
+  })
+})
+
+describe('contractOutstandingAsUzs — report aggregates must convert per-row, never re-derive a summed total', () => {
+  it('UZS contract: passes through unchanged, rate irrelevant', () => {
+    expect(contractOutstandingAsUzs('2000000', '500000', 'UZS', null)).toBe(1_500_000)
+    expect(contractOutstandingAsUzs('2000000', '500000', 'UZS', 13_500)).toBe(1_500_000)
+  })
+
+  it('USD contract: converts the native outstanding balance using the GIVEN (today\'s) rate', () => {
+    // $600 remaining, today's rate 13,500 -> 8,100,000 so'm (not whatever the
+    // contract's own creation rate happened to be).
+    expect(contractOutstandingAsUzs('1000', '400', 'USD', 13_500)).toBe(8_100_000)
+  })
+
+  it('demonstrates the exact bug this replaces: summing legacy UZS snapshots then converting the TOTAL drifts from summing each row at today\'s rate', () => {
+    // A USD-native nasiya, $600 remaining, created at rate 12,500 -> legacy
+    // UZS snapshot = 7,500,000 (frozen). Today's rate has moved to 13,500.
+    const legacySnapshotUzs = 600 * 12_500 // 7,500,000 — what the OLD buggy code would sum directly
+    const correctUzsToday = contractOutstandingAsUzs('1000', '400', 'USD', 13_500) // 600 * 13,500 = 8,100,000
+    expect(legacySnapshotUzs).not.toBe(correctUzsToday)
+    expect(correctUzsToday).toBe(8_100_000)
+  })
+
+  it('falls back to the raw contract-currency number when no rate is available (never throws)', () => {
+    expect(contractOutstandingAsUzs('1000', '400', 'USD', null)).toBe(600)
+  })
+
+  it('snaps to 0 within the currency-aware tolerance (USD cents, not UZS so\'m)', () => {
+    expect(contractOutstandingAsUzs('1000', '999.99', 'USD', 12_500)).toBe(0)
   })
 })
