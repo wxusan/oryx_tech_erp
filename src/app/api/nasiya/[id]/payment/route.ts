@@ -377,14 +377,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             imei: nasiya.device.imei,
           },
           month: allocations.length === 1 ? selectedSchedule.monthNumber : 'MULTIPLE',
-          paidAmount: amountUzs,
+          paidAmount: appliedAmountInContractCurrency,
+          contractCurrency,
           paymentMethod,
-          remaining: remainingToStore,
+          remaining: contractRemainingToStore,
           note: auditNote,
           paymentInput: { amount, currency: amountInput.inputCurrency },
           adminName: session.user.name,
           currency,
-          allocations: allocations.map((a) => ({ monthNumber: a.monthNumber, amount: a.amount })),
+          allocations: allocations.map((a) => ({ monthNumber: a.monthNumber, amount: a.contractAmount })),
         })
         const completedMessage = justCompleted
           ? nasiyaCompletedMessage({
@@ -397,7 +398,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 color: nasiya.device.color,
                 imei: nasiya.device.imei,
               },
-              finalNasiyaAmount: Number(nasiya.finalNasiyaAmount),
+              finalNasiyaAmount: Number(nasiya.contractFinalAmount),
+              contractCurrency,
               adminName: session.user.name,
               currency,
             })

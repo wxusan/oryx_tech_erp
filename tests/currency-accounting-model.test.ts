@@ -99,24 +99,27 @@ describe('Telegram payment messages show payment-time context, not a recalculate
     adminName: 'Admin',
   }
 
-  it('nasiyaPaymentMessage: USD contract paid in UZS shows "paid X so\'m -> applied Y" only when currencies differ', () => {
+  it('nasiyaPaymentMessage: USD contract paid in UZS shows "paid X so\'m -> applied $Y" only when payment currency differs from CONTRACT currency', () => {
     const msg = nasiyaPaymentMessage({
       ...base,
       month: 1,
-      paidAmount: 2_500_000,
+      paidAmount: 200, // applied to the USD contract, not the UZS amount paid
+      contractCurrency: 'USD',
       remaining: 0,
       currency: { currency: 'USD', usdUzsRate: 12_500 },
       paymentInput: { amount: 2_500_000, currency: 'UZS' },
     })
     expect(msg).toContain("Shartnomaga qo'llandi:")
+    expect(msg).toContain('$200.00')
     expect(msg).toMatch(/2.?500.?000 so'm/)
   })
 
-  it('nasiyaPaymentMessage: shows a single line when payment currency matches display currency (nothing converted)', () => {
+  it('nasiyaPaymentMessage: shows a single line when payment currency matches CONTRACT currency (nothing converted), even if display currency differs', () => {
     const msg = nasiyaPaymentMessage({
       ...base,
       month: 1,
       paidAmount: 2_500_000,
+      contractCurrency: 'UZS',
       remaining: 0,
       currency: { currency: 'UZS', usdUzsRate: null },
       paymentInput: { amount: 2_500_000, currency: 'UZS' },

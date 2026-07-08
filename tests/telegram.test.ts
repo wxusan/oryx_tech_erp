@@ -277,6 +277,7 @@ describe('nasiya messages', () => {
       device: fullDevice,
       month: 3,
       paidAmount: 1_000_000,
+      contractCurrency: 'UZS',
       paymentMethod: 'CARD',
       remaining: 2_000_000,
       note: 'naqd berdi',
@@ -295,7 +296,7 @@ describe('nasiya messages', () => {
   it('nasiya payment shows To\'liq yopildi when cleared and Bir nechta oy for multi', () => {
     const cleared = nasiyaPaymentMessage({
       shopName: 'M', customerName: 'A', device: fullDevice, month: 'MULTIPLE',
-      paidAmount: 500_000, paymentMethod: 'CASH', remaining: 0,
+      paidAmount: 500_000, contractCurrency: 'UZS', paymentMethod: 'CASH', remaining: 0,
     })
     expect(cleared).toContain("Qolgan qarz: To'liq yopildi")
     expect(cleared).toContain('Oy: Bir nechta oy')
@@ -382,7 +383,7 @@ describe('global safety across every template', () => {
     deviceRestockedMessage({ shopName: 'S', device: fullDevice, note: 'n', adminName: 'A' }),
     nasiyaCreatedMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, totalAmount: 1, downPayment: 1, baseRemainingAmount: 1, interestPercent: 20, interestAmount: 1, finalNasiyaAmount: 1, months: 6, monthlyPayment: 1, nextPaymentDate: new Date(), adminName: 'A' }),
     nasiyaImportedMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, originalTotalAmount: 1, alreadyPaidBeforeImport: 0, remainingDebt: 1, monthlyPayment: 1, nextPaymentDate: new Date(), adminName: 'A' }),
-    nasiyaPaymentMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, paidAmount: 1, paymentMethod: 'CASH', remaining: 1, note: 'n', adminName: 'A' }),
+    nasiyaPaymentMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, paidAmount: 1, contractCurrency: 'UZS', paymentMethod: 'CASH', remaining: 1, note: 'n', adminName: 'A' }),
     nasiyaDueTodayMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, contractCurrency: 'UZS', dueDate: new Date() }),
     nasiyaOverdueMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, contractCurrency: 'UZS', dueDate: new Date(), daysLate: 1 }),
     salePaymentMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, paidAmount: 1, paymentMethod: 'CASH', remaining: 1, note: 'n', adminName: 'A' }),

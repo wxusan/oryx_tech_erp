@@ -297,9 +297,12 @@ export function nasiyaPaymentMessage(data: {
   customerPhone?: string | null
   device: DeviceSpecs
   month?: number | 'MULTIPLE' | null
+  /** Amount actually applied to the nasiya's own contract-currency debt — see docs/currency-accounting-model.md. */
   paidAmount: number
-  paymentMethod?: string | null
+  /** Remaining contract-currency debt after this payment. */
   remaining: number
+  contractCurrency: CurrencyCode
+  paymentMethod?: string | null
   note?: string | null
   adminName?: string | null
   currency?: CurrencyContext | null
@@ -308,14 +311,15 @@ export function nasiyaPaymentMessage(data: {
    * overpayment prepaying the next installment). First entry is always the
    * selected/current month; any further entries are future months paid ahead
    * of their due date. Omitted (or single-entry) payments show no breakdown.
+   * Amounts are in the nasiya's own contract currency.
    */
   allocations?: { monthNumber: number; amount: number }[]
   /**
-   * What the customer actually entered, when it differs from the shop's
-   * display currency (data.currency) — shows "To'langan: <native>" +
-   * "Shartnomaga qo'llandi: <applied>" instead of one figure, so a USD
-   * payment applied to a UZS debt (or vice versa) is unambiguous. Omit when
-   * payment currency matches display currency (nothing was converted).
+   * What the customer actually entered, when it differs from the deal's own
+   * contract currency — shows "To'langan: <native>" + "Shartnomaga
+   * qo'llandi: <applied>" instead of one figure, so a USD payment applied to
+   * a UZS contract (or vice versa) is unambiguous. Omit when payment
+   * currency matches contract currency (nothing was converted).
    */
   paymentInput?: { amount: number; currency: CurrencyCode } | null
 }): string {
@@ -325,21 +329,23 @@ export function nasiyaPaymentMessage(data: {
       : typeof data.month === 'number'
         ? `Oy: ${data.month}-oy`
         : null
+  const displayCurrency = data.currency?.currency ?? 'UZS'
+  const contractMoney = (amount: number) => formatContractMoneyWithDisplay(amount, data.contractCurrency, displayCurrency, data.currency?.usdUzsRate)
   const allocationBlock =
     data.allocations && data.allocations.length > 1
       ? data.allocations.map((allocation, index) =>
           index === 0
-            ? `${telegramMoney(allocation.amount, data.currency)} joriy oy uchun yopildi`
-            : `${telegramMoney(allocation.amount, data.currency)} ${allocation.monthNumber}-oyga oldindan qo'llandi`,
+            ? `${contractMoney(allocation.amount)} joriy oy uchun yopildi`
+            : `${contractMoney(allocation.amount)} ${allocation.monthNumber}-oyga oldindan qo'llandi`,
         )
       : null
   const paidLines =
-    data.paymentInput && data.paymentInput.currency !== (data.currency?.currency ?? 'UZS')
+    data.paymentInput && data.paymentInput.currency !== data.contractCurrency
       ? [
           `To'langan: ${formatNativeAmount(data.paymentInput.amount, data.paymentInput.currency)}`,
-          `Shartnomaga qo'llandi: ${telegramMoney(data.paidAmount, data.currency)}`,
+          `Shartnomaga qo'llandi: ${contractMoney(data.paidAmount)}`,
         ]
-      : [`To'langan: ${telegramMoney(data.paidAmount, data.currency)}`]
+      : [`To'langan: ${contractMoney(data.paidAmount)}`]
   return compose(
     "💰 Nasiya to'lovi qabul qilindi",
     optionalLine("Do'kon", data.shopName),
@@ -349,7 +355,7 @@ export function nasiyaPaymentMessage(data: {
       monthLine,
       ...paidLines,
       optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
-      `Qolgan qarz: ${remainingDebt(data.remaining, "To'liq yopildi", data.currency)}`,
+      `Qolgan qarz: ${data.remaining <= 0 ? "To'liq yopildi" : contractMoney(data.remaining)}`,
     ),
     allocationBlock,
     block(optionalLine('Izoh', cleanNote(data.note)), optionalLine('Admin', data.adminName)),
@@ -573,7 +579,9 @@ export function nasiyaCompletedMessage(data: {
   customerName: string
   customerPhone?: string | null
   device: DeviceSpecs
+  /** The nasiya's own contract-currency total — see docs/currency-accounting-model.md. */
   finalNasiyaAmount: number
+  contractCurrency: CurrencyCode
   adminName?: string | null
   currency?: CurrencyContext | null
 }): string {
@@ -582,7 +590,7 @@ export function nasiyaCompletedMessage(data: {
     optionalLine("Do'kon", data.shopName),
     block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
     formatDeviceSpecs(data.device, { battery: false }),
-    `Jami to'langan: ${telegramMoney(data.finalNasiyaAmount, data.currency)}`,
+    `Jami to'langan: ${formatContractMoneyWithDisplay(data.finalNasiyaAmount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
     optionalLine('Admin', data.adminName),
   )
 }

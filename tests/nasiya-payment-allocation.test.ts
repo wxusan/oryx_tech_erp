@@ -15,6 +15,7 @@ const baseData = {
   paymentMethod: 'CASH',
   adminName: 'Admin',
   currency: { currency: 'UZS' as const, usdUzsRate: null },
+  contractCurrency: 'UZS' as const,
 }
 
 describe('nasiyaPaymentMessage — overpayment allocation breakdown', () => {
@@ -67,7 +68,7 @@ describe('nasiyaPaymentMessage — overpayment allocation breakdown', () => {
     expect(idx3).toBeGreaterThan(idx2)
   })
 
-  it('respects the shop currency for both the total and the breakdown lines', () => {
+  it('leads with the contract-currency native amount even when the shop displays a different currency', () => {
     const msg = nasiyaPaymentMessage({
       ...baseData,
       month: 'MULTIPLE',
@@ -79,12 +80,13 @@ describe('nasiyaPaymentMessage — overpayment allocation breakdown', () => {
         { monthNumber: 2, amount: 100_000 },
       ],
     })
-    // Telegram messages show "$X (~Y so'm)" for USD shops by design (formatMoneyWithBase,
-    // pre-existing across every message type) — the breakdown must follow that same
-    // convention, not switch to a different format just because it's a new line.
+    // This is a UZS contract (amounts are so'm), viewed by a USD-display shop.
+    // The native contract figure always leads — it's the actual debt — with
+    // the display-currency conversion as a "(~...)" hint, never the reverse
+    // (see formatContractMoneyWithDisplay / docs/currency-accounting-model.md).
     expect(msg).toContain('$')
-    expect(msg).toMatch(/\$40\.00 \(~500.?000 so'm\) joriy oy uchun yopildi/)
-    expect(msg).toMatch(/\$8\.00 \(~100.?000 so'm\) 2-oyga oldindan qo'llandi/)
+    expect(msg).toMatch(/500.?000 so'm \(~\$40\.00\) joriy oy uchun yopildi/)
+    expect(msg).toMatch(/100.?000 so'm \(~\$8\.00\) 2-oyga oldindan qo'llandi/)
   })
 })
 
@@ -130,8 +132,8 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
     expect(source).toContain('contractScheduleOutstanding(Number(s.contractExpectedAmount), Number(s.contractPaidAmount), contractCurrency) <= 0')
   })
 
-  it('passes the per-schedule allocation breakdown into the Telegram message', () => {
-    expect(source).toContain('allocations: allocations.map((a) => ({ monthNumber: a.monthNumber, amount: a.amount }))')
+  it('passes the per-schedule allocation breakdown (in contract currency) into the Telegram message', () => {
+    expect(source).toContain('allocations: allocations.map((a) => ({ monthNumber: a.monthNumber, amount: a.contractAmount }))')
   })
 })
 
