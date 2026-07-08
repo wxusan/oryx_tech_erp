@@ -203,7 +203,9 @@ summing frozen snapshots and converting the total once).
   are unaffected on purpose: they're generated in the same request that
   freezes the creation rate, so there is no time for the rate to have moved
   — no drift is possible there.
-- Sale/Olib-sotdim Telegram messages are unaffected in this pass (§13).
+- **Supplier payable** reminders and paid-confirmation also fixed — see §13.
+- **Sale payment/sold-device messages** (`salePaymentMessage`,
+  `deviceSoldMessage`) are unaffected in this pass — deferred, see §17.
 
 ## 13. Olib-sotdim / SupplierPayable
 
@@ -214,13 +216,25 @@ gets `contractCurrency`/`contractAmount`/`contractExchangeRateAtCreation` at
 creation only, populated the same way as Nasiya/Sale. Supplier debt and
 customer debt remain entirely separate ledgers, as before.
 
-Sale itself also got the schema-only treatment: `contractCurrency`/
+Unlike Sale (below), supplier payable **reminders and the paid-confirmation
+Telegram message** were fixed in this pass too, since the cost was low and
+the ticket explicitly calls out "supplier payable reminders use contract
+currency" as a requirement: `supplierPayableDueTodayMessage`/
+`supplierPayableOverdueMessage`/`supplierPayableEarlyReminderMessage`/
+`supplierPayablePaidMessage` all now take `contractCurrency` and format via
+`formatContractMoneyWithDisplay`, reading `payable.contractAmount` instead of
+the legacy `payable.amount` — the same double-conversion-drift bug as §10
+applied here too (a payable's `amount` is frozen at creation rate; a paid
+confirmation or reminder sent later, at a different rate, would have
+misstated a USD-native payable's true amount).
+
+Sale itself got the schema-only treatment: `contractCurrency`/
 `contractSalePrice`/`contractAmountPaid`/`contractRemainingAmount`,
 populated at creation (both the normal sell route and olib-sotdim) and
 dual-written on every sale payment — but **not** wired into Sale's
-detail/list pages or Telegram messages in this pass (deliberately deferred,
-see §15). This is safe because Sale's legacy ledger stays accurate via its
-own lockstep, exactly like Nasiya's.
+detail/list pages or `salePaymentMessage`/`deviceSoldMessage` in this pass
+(deliberately deferred, see §17). This is safe because Sale's legacy ledger
+stays accurate via its own lockstep, exactly like Nasiya's.
 
 One incidental fix while touching this: the olib-sotdim route never set
 `Sale.creationCurrency`/`creationExchangeRate` at all (unlike the normal
@@ -278,13 +292,16 @@ Customer pays $200 at rate 12,500 → applied 2,500,000 so'm. Month 1:
 
 ## 17. What was deliberately deferred (not silently dropped)
 
-- **Sale/Olib-sotdim display layer** (detail pages, lists, Telegram
-  messages) — schema + creation/payment population is done and correct
-  (§13), but the surfaces still render the legacy UZS ledger. Safe today
-  (Sale's dual-ledger stays in lockstep exactly like Nasiya's), but a
-  Sale-side mirror of Nasiya's Phases 5/6/9 display fixes would be needed
-  before a shop routinely creates USD-native cash sales and expects the
-  same "no double-conversion drift" guarantee on the sale detail page.
+- **Sale display layer + Telegram** (detail pages, lists,
+  `salePaymentMessage`/`deviceSoldMessage`) — schema + creation/payment
+  population is done and correct (§13), but these surfaces still render the
+  legacy UZS ledger. Safe today (Sale's dual-ledger stays in lockstep exactly
+  like Nasiya's), but a Sale-side mirror of Nasiya's Phases 5/6/9 display
+  fixes would be needed before a shop routinely creates USD-native cash
+  sales and expects the same "no double-conversion drift" guarantee on the
+  sale detail page. (Supplier payable reminders/paid-message were fixed —
+  see §13 — since that gap was explicitly called out and cheap to close;
+  Sale's is a larger surface deferred for a follow-up pass.)
 - **No independent currency selector** in creation forms or the payment
   modal, distinct from the shop's global `preferredCurrency` toggle. The
   existing toggle already provides full flexibility once `contractCurrency`

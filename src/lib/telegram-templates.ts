@@ -649,7 +649,9 @@ export function supplierPayableDueTodayMessage(data: {
   device: DeviceSpecs
   supplierName: string
   supplierPhone?: string | null
+  /** The payable's own contract-currency amount — see docs/currency-accounting-model.md. */
   amount: number
+  contractCurrency: CurrencyCode
   dueDate: Date | string
   currency?: CurrencyContext | null
 }): string {
@@ -657,7 +659,10 @@ export function supplierPayableDueTodayMessage(data: {
     "⏰ Eslatma: yetkazib beruvchiga to'lov",
     formatDeviceSpecs(data.device, { battery: false }),
     supplierPayableIntro(data),
-    block(`To'lanadigan summa: ${telegramMoney(data.amount, data.currency)}`, `Muddat: ${formatUzDate(data.dueDate)}`),
+    block(
+      `To'lanadigan summa: ${formatContractMoneyWithDisplay(data.amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
+      `Muddat: ${formatUzDate(data.dueDate)}`,
+    ),
   )
 }
 
@@ -665,7 +670,9 @@ export function supplierPayableOverdueMessage(data: {
   device: DeviceSpecs
   supplierName: string
   supplierPhone?: string | null
+  /** The payable's own contract-currency amount — see docs/currency-accounting-model.md. */
   amount: number
+  contractCurrency: CurrencyCode
   dueDate: Date | string
   daysLate: number
   currency?: CurrencyContext | null
@@ -675,7 +682,7 @@ export function supplierPayableOverdueMessage(data: {
     formatDeviceSpecs(data.device, { battery: false }),
     supplierPayableIntro(data),
     block(
-      `To'lanadigan summa: ${telegramMoney(data.amount, data.currency)}`,
+      `To'lanadigan summa: ${formatContractMoneyWithDisplay(data.amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
       `Muddat: ${formatUzDate(data.dueDate)}`,
       `Kechikkan: ${data.daysLate} kun`,
     ),
@@ -686,7 +693,9 @@ export function supplierPayableEarlyReminderMessage(data: {
   device: DeviceSpecs
   supplierName: string
   supplierPhone?: string | null
+  /** The payable's own contract-currency amount — see docs/currency-accounting-model.md. */
   amount: number
+  contractCurrency: CurrencyCode
   dueDate: Date | string
   daysLeft: number
   currency?: CurrencyContext | null
@@ -696,7 +705,7 @@ export function supplierPayableEarlyReminderMessage(data: {
     formatDeviceSpecs(data.device, { battery: false }),
     supplierPayableIntro(data),
     block(
-      `To'lanadigan summa: ${telegramMoney(data.amount, data.currency)}`,
+      `To'lanadigan summa: ${formatContractMoneyWithDisplay(data.amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
       `Muddat: ${formatUzDate(data.dueDate)}`,
       `${data.daysLeft} kun oldin eslatma`,
     ),
@@ -708,7 +717,9 @@ export function supplierPayablePaidMessage(data: {
   device: DeviceSpecs
   supplierName: string
   supplierPhone?: string | null
+  /** The payable's own contract-currency amount — see docs/currency-accounting-model.md. */
   amount: number
+  contractCurrency: CurrencyCode
   paymentMethod?: string | null
   adminName?: string | null
   currency?: CurrencyContext | null
@@ -719,7 +730,7 @@ export function supplierPayablePaidMessage(data: {
     formatDeviceSpecs(data.device, { battery: false }),
     supplierPayableIntro(data),
     block(
-      `To'langan summa: ${telegramMoney(data.amount, data.currency)}`,
+      `To'langan summa: ${formatContractMoneyWithDisplay(data.amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
       optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
     ),
     optionalLine('Admin', data.adminName),
