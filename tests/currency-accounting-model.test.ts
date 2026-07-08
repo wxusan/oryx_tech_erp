@@ -131,6 +131,7 @@ describe('Telegram payment messages show payment-time context, not a recalculate
     const msg = salePaymentMessage({
       ...base,
       paidAmount: 2_000_000,
+      contractCurrency: 'UZS',
       remaining: 0,
       currency: { currency: 'UZS', usdUzsRate: null },
       paymentInput: { amount: 160, currency: 'USD' },

@@ -8,6 +8,8 @@ import { enrichLogsWithActors } from '@/lib/server/log-actors'
 import { deriveNasiyaOverdue, type NasiyaDisplayStatus } from '@/lib/nasiya-utils'
 import { computeNasiyaPaymentScore, type NasiyaPaymentScore } from '@/lib/nasiya-payment-score'
 import { getShopCurrencyContext } from '@/lib/server/currency'
+import { computeContractCurrencyMargin } from '@/lib/nasiya-contract'
+import type { CurrencyCode } from '@/lib/currency'
 
 /**
  * Sale/nasiya summary for a sold/returned device — purchase price vs. sold
@@ -15,12 +17,22 @@ import { getShopCurrencyContext } from '@/lib/server/currency'
  * `totalAmount` = original device price from `interestAmount`, so device
  * profit never silently absorbs interest income). `profit` is `null` for a
  * returned device rather than a misleading number.
+ *
+ * `soldPrice`/`profit`/`interestAmount` stay exactly as before (the legacy
+ * UZS snapshot, frozen at creation rate) for backward compatibility.
+ * `contractCurrency`/`contractSoldPrice`/`contractProfit` are additive —
+ * the deal's own native-currency source of truth, used by the UI to avoid
+ * reconverting the legacy snapshot through today's rate (see
+ * docs/currency-accounting-model.md).
  */
 export interface ShopDeviceSaleInfo {
   saleType: 'CASH' | 'NASIYA'
   soldPrice: number
   interestAmount: number
   profit: number | null
+  contractCurrency: CurrencyCode
+  contractSoldPrice: number
+  contractProfit: number | null
   customerName: string | null
   soldAt: string
   returned: boolean
@@ -118,8 +130,23 @@ export async function getShopDevicesList(shopId: string): Promise<ShopDeviceList
 function buildDeviceSaleInfo(device: {
   status: string
   purchasePrice: unknown
-  sales: { salePrice: unknown; createdAt: Date; customer: { name: string } }[]
-  nasiya: { totalAmount: unknown; interestAmount: unknown; createdAt: Date; customer: { name: string } }[]
+  sales: {
+    salePrice: unknown
+    createdAt: Date
+    customer: { name: string }
+    contractCurrency: CurrencyCode
+    contractSalePrice: unknown
+    contractExchangeRateAtCreation: unknown
+  }[]
+  nasiya: {
+    totalAmount: unknown
+    interestAmount: unknown
+    createdAt: Date
+    customer: { name: string }
+    contractCurrency: CurrencyCode
+    contractTotalAmount: unknown
+    contractExchangeRateAtCreation: unknown
+  }[]
   returns: { refundAmount: unknown; createdAt: Date }[]
 }): ShopDeviceSaleInfo | null {
   const latestSale = device.sales[0]
@@ -136,11 +163,18 @@ function buildDeviceSaleInfo(device: {
     // totalAmount = original device price BEFORE interest (see Nasiya model comment) —
     // never fold interest into device profit.
     const soldPrice = Number(latestNasiya.totalAmount)
+    const contractCurrency = latestNasiya.contractCurrency
+    const contractSoldPrice = Number(latestNasiya.contractTotalAmount)
+    const contractExchangeRateAtCreation =
+      latestNasiya.contractExchangeRateAtCreation != null ? Number(latestNasiya.contractExchangeRateAtCreation) : null
     return {
       saleType: 'NASIYA',
       soldPrice,
       interestAmount: Number(latestNasiya.interestAmount),
       profit: returned ? null : soldPrice - purchasePrice,
+      contractCurrency,
+      contractSoldPrice,
+      contractProfit: returned ? null : computeContractCurrencyMargin(contractSoldPrice, purchasePrice, contractCurrency, contractExchangeRateAtCreation),
       customerName: latestNasiya.customer.name,
       soldAt: latestNasiya.createdAt.toISOString(),
       returned,
@@ -148,11 +182,18 @@ function buildDeviceSaleInfo(device: {
     }
   }
   const soldPrice = Number(latestSale!.salePrice)
+  const contractCurrency = latestSale!.contractCurrency
+  const contractSoldPrice = Number(latestSale!.contractSalePrice)
+  const contractExchangeRateAtCreation =
+    latestSale!.contractExchangeRateAtCreation != null ? Number(latestSale!.contractExchangeRateAtCreation) : null
   return {
     saleType: 'CASH',
     soldPrice,
     interestAmount: 0,
     profit: returned ? null : soldPrice - purchasePrice,
+    contractCurrency,
+    contractSoldPrice,
+    contractProfit: returned ? null : computeContractCurrencyMargin(contractSoldPrice, purchasePrice, contractCurrency, contractExchangeRateAtCreation),
     customerName: latestSale!.customer.name,
     soldAt: latestSale!.createdAt.toISOString(),
     returned,
@@ -182,13 +223,28 @@ async function getShopDevicesListFresh(shopId: string): Promise<ShopDeviceListIt
         where: { deletedAt: null },
         orderBy: { createdAt: 'desc' },
         take: 1,
-        select: { salePrice: true, createdAt: true, customer: { select: { name: true } } },
+        select: {
+          salePrice: true,
+          createdAt: true,
+          customer: { select: { name: true } },
+          contractCurrency: true,
+          contractSalePrice: true,
+          contractExchangeRateAtCreation: true,
+        },
       },
       nasiya: {
         where: { deletedAt: null },
         orderBy: { createdAt: 'desc' },
         take: 1,
-        select: { totalAmount: true, interestAmount: true, createdAt: true, customer: { select: { name: true } } },
+        select: {
+          totalAmount: true,
+          interestAmount: true,
+          createdAt: true,
+          customer: { select: { name: true } },
+          contractCurrency: true,
+          contractTotalAmount: true,
+          contractExchangeRateAtCreation: true,
+        },
       },
       returns: {
         orderBy: { createdAt: 'desc' },

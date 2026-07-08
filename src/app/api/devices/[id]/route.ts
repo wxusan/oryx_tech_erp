@@ -84,6 +84,12 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
               customer: {
                 select: { name: true, phone: true },
               },
+              // Native contract-currency ledger — see docs/currency-accounting-model.md.
+              contractCurrency: true,
+              contractSalePrice: true,
+              contractAmountPaid: true,
+              contractRemainingAmount: true,
+              contractExchangeRateAtCreation: true,
             },
           orderBy: { createdAt: 'desc' },
           take: 1,

@@ -109,11 +109,6 @@ function compose(...blocks: Array<string | string[] | null | undefined>): string
     .join('\n\n')
 }
 
-/** Remaining-debt line value: "Yo'q" / "To'liq yopildi" when cleared. */
-function remainingDebt(remaining: number, clearedLabel: "Yo'q" | "To'liq yopildi", currency?: CurrencyContext | null): string {
-  return remaining <= 0 ? clearedLabel : telegramMoney(remaining, currency)
-}
-
 /** Format a native (already-in-that-currency) amount — never converts, unlike telegramMoney/formatMoneyByCurrency. */
 function formatNativeAmount(amount: number, currency: CurrencyCode): string {
   return currency === 'USD' ? `$${amount.toFixed(2)}` : formatMoney(amount)
@@ -177,22 +172,26 @@ export function deviceSoldMessage(data: {
   device: DeviceSpecs
   customerName: string
   customerPhone?: string | null
+  /** The sale's own contract-currency amounts — see docs/currency-accounting-model.md. */
   salePrice: number
   paidAmount: number
   remaining: number
+  contractCurrency: CurrencyCode
   paymentMethod?: string | null
   adminName?: string | null
   currency?: CurrencyContext | null
 }): string {
+  const contractMoney = (amount: number) =>
+    formatContractMoneyWithDisplay(amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)
   return compose(
     '✅ Qurilma sotildi',
     optionalLine("Do'kon", data.shopName),
     formatDeviceSpecs(data.device),
     block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
     block(
-      `Sotuv narxi: ${telegramMoney(data.salePrice, data.currency)}`,
-      `To'langan: ${telegramMoney(data.paidAmount, data.currency)}`,
-      `Qolgan qarz: ${remainingDebt(data.remaining, "Yo'q", data.currency)}`,
+      `Sotuv narxi: ${contractMoney(data.salePrice)}`,
+      `To'langan: ${contractMoney(data.paidAmount)}`,
+      `Qolgan qarz: ${data.remaining <= 0 ? "Yo'q" : contractMoney(data.remaining)}`,
       optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
     ),
     optionalLine('Admin', data.adminName),
@@ -455,22 +454,34 @@ export function salePaymentMessage(data: {
   customerName: string
   customerPhone?: string | null
   device: DeviceSpecs
+  /** Amount actually applied to the sale's own contract-currency debt — see docs/currency-accounting-model.md. */
   paidAmount: number
-  paymentMethod?: string | null
+  /** Remaining contract-currency debt after this payment. */
   remaining: number
+  contractCurrency: CurrencyCode
+  paymentMethod?: string | null
   note?: string | null
   adminName?: string | null
   currency?: CurrencyContext | null
-  /** Same as nasiyaPaymentMessage — shown only when it differs from data.currency. */
+  /**
+   * What the customer actually entered, when it differs from the sale's own
+   * contract currency (not the shop's display currency) — shows
+   * "To'langan: <native>" + "Shartnomaga qo'llandi: <applied>" instead of one
+   * figure, so a USD payment applied to a UZS sale (or vice versa) is
+   * unambiguous. Omit when payment currency matches contract currency
+   * (nothing was converted).
+   */
   paymentInput?: { amount: number; currency: CurrencyCode } | null
 }): string {
+  const displayCurrency = data.currency?.currency ?? 'UZS'
+  const contractMoney = (amount: number) => formatContractMoneyWithDisplay(amount, data.contractCurrency, displayCurrency, data.currency?.usdUzsRate)
   const paidLines =
-    data.paymentInput && data.paymentInput.currency !== (data.currency?.currency ?? 'UZS')
+    data.paymentInput && data.paymentInput.currency !== data.contractCurrency
       ? [
           `To'langan: ${formatNativeAmount(data.paymentInput.amount, data.paymentInput.currency)}`,
-          `Shartnomaga qo'llandi: ${telegramMoney(data.paidAmount, data.currency)}`,
+          `Shartnomaga qo'llandi: ${contractMoney(data.paidAmount)}`,
         ]
-      : [`To'langan: ${telegramMoney(data.paidAmount, data.currency)}`]
+      : [`To'langan: ${contractMoney(data.paidAmount)}`]
   return compose(
     "💰 Qarz to'lovi qabul qilindi",
     optionalLine("Do'kon", data.shopName),
@@ -479,7 +490,7 @@ export function salePaymentMessage(data: {
     block(
       ...paidLines,
       optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
-      `Qolgan qarz: ${remainingDebt(data.remaining, "To'liq yopildi", data.currency)}`,
+      `Qolgan qarz: ${data.remaining <= 0 ? "To'liq yopildi" : contractMoney(data.remaining)}`,
     ),
     block(optionalLine('Izoh', cleanNote(data.note)), optionalLine('Admin', data.adminName)),
   )
@@ -608,15 +619,19 @@ export function olibSotdimCreatedMessage(data: {
   supplierName: string
   supplierPhone?: string | null
   supplierLocation?: string | null
+  /** Purchase/sale/profit are all in this same contract currency by construction (one shared inputCurrency for the operation). */
   purchasePrice: number
   salePrice: number
   profit: number
+  contractCurrency: CurrencyCode
   supplierPaidNow: boolean
   customerName: string
   customerPhone?: string | null
   adminName?: string | null
   currency?: CurrencyContext | null
 }): string {
+  const contractMoney = (amount: number) =>
+    formatContractMoneyWithDisplay(amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)
   return compose(
     '🔄 Olib-sotdim: yangi operatsiya',
     optionalLine("Do'kon", data.shopName),
@@ -628,11 +643,11 @@ export function olibSotdimCreatedMessage(data: {
     ),
     block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
     block(
-      `Olingan narx: ${telegramMoney(data.purchasePrice, data.currency)}`,
-      `Sotilgan narx: ${telegramMoney(data.salePrice, data.currency)}`,
+      `Olingan narx: ${contractMoney(data.purchasePrice)}`,
+      `Sotilgan narx: ${contractMoney(data.salePrice)}`,
       data.supplierPaidNow
-        ? `Foyda: ${telegramMoney(data.profit, data.currency)}`
-        : `Kutilayotgan foyda: ${telegramMoney(data.profit, data.currency)} (yetkazib beruvchiga hali to'lanmagan)`,
+        ? `Foyda: ${contractMoney(data.profit)}`
+        : `Kutilayotgan foyda: ${contractMoney(data.profit)} (yetkazib beruvchiga hali to'lanmagan)`,
       `Yetkazib beruvchiga to'lov: ${data.supplierPaidNow ? 'hozir to\'landi' : "keyinroq to'lanadi"}`,
     ),
     optionalLine('Admin', data.adminName),

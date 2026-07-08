@@ -20,6 +20,7 @@ import { paymentMethodLabel } from '@/lib/labels'
 import { uzDate, uzDateTime } from '@/lib/dates'
 import { displayImei } from '@/lib/device-display'
 import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
+import { formatDisplayMoneyFromContract, formatContractMoney, computeContractCurrencyMargin, convertPaymentToContractCurrency } from '@/lib/nasiya-contract'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 
@@ -40,6 +41,13 @@ interface Sale {
   paymentMethod: string
   note: string | null
   createdAt: string
+  // Native contract-currency ledger — the deal's own frozen currency, source
+  // of truth for debt/display. See docs/currency-accounting-model.md.
+  contractCurrency: 'UZS' | 'USD'
+  contractSalePrice: number
+  contractAmountPaid: number
+  contractRemainingAmount: number
+  contractExchangeRateAtCreation: number | null
 }
 
 interface NasiyaSchedule {
@@ -484,6 +492,24 @@ export default function QurilmaDetailPage() {
   const latestSale = device.sales?.[0]
   const saleHasDebt = latestSale ? Number(latestSale.remainingAmount) > 0 && !latestSale.paidFully : false
   const saleProfit = latestSale ? latestSale.salePrice - device.purchasePrice : null
+  // Native contract-currency margin — stable, never re-derived from today's
+  // rate (see computeContractCurrencyMargin). Falls back to the legacy
+  // UZS-based saleProfit above when a USD contract has no creation rate on
+  // record (should not happen for a real USD sale).
+  const saleContractProfit = latestSale
+    ? computeContractCurrencyMargin(
+        latestSale.contractSalePrice,
+        device.purchasePrice,
+        latestSale.contractCurrency,
+        latestSale.contractExchangeRateAtCreation,
+      )
+    : null
+  // Money TEXT for this sale must convert from its own contract currency via
+  // today's rate — never reconvert the legacy UZS snapshot (frozen at
+  // creation rate), which would drift for a USD-native sale as the rate
+  // moves. See docs/currency-accounting-model.md.
+  const dfmtSale = (amount: number) =>
+    latestSale ? formatDisplayMoneyFromContract(amount, latestSale.contractCurrency, currency.currency, currency.usdUzsRate) : fmt(amount, currency)
   const latestNasiya = device.nasiya?.[0]
   const nasiyaProfit = latestNasiya ? latestNasiya.totalAmount - device.purchasePrice : null
   const latestReturn = device.returns?.[0]
@@ -638,22 +664,39 @@ export default function QurilmaDetailPage() {
             </div>
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">Sotuv narxi</span>
-              <span className="text-zinc-900 font-medium">{fmt(latestSale.salePrice, currency)}</span>
+              <span className="text-zinc-900 font-medium">{dfmtSale(latestSale.contractSalePrice)}</span>
             </div>
+            {latestSale.contractCurrency !== currency.currency && (
+              <div className="flex gap-4 text-sm">
+                <span className="text-zinc-500 w-32" />
+                <span className="text-xs text-zinc-400">
+                  Shartnoma: {formatContractMoney(latestSale.contractSalePrice, latestSale.contractCurrency)}
+                </span>
+              </div>
+            )}
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">Farq / Foyda</span>
-              <span className={saleProfit != null && saleProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
-                {fmt(saleProfit ?? 0, currency)}
-              </span>
+              {saleContractProfit != null ? (
+                <span className={saleContractProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
+                  {dfmtSale(saleContractProfit)}
+                </span>
+              ) : (
+                // Fallback for the rare case a USD contract has no creation
+                // rate on record — conservative legacy UZS figure rather than
+                // inventing a native profit (see computeContractCurrencyMargin).
+                <span className={saleProfit != null && saleProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
+                  {fmt(saleProfit ?? 0, currency)}
+                </span>
+              )}
             </div>
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">To'langan</span>
-              <span className="text-zinc-900 font-medium">{fmt(latestSale.amountPaid, currency)}</span>
+              <span className="text-zinc-900 font-medium">{dfmtSale(latestSale.contractAmountPaid)}</span>
             </div>
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">Qolgan</span>
               <span className={saleHasDebt ? 'text-red-700 font-medium' : 'text-zinc-900 font-medium'}>
-                {fmt(latestSale.remainingAmount, currency)}
+                {dfmtSale(latestSale.contractRemainingAmount)}
               </span>
             </div>
             {latestSale.dueDate && (
@@ -675,11 +718,22 @@ export default function QurilmaDetailPage() {
             {saleHasDebt && (
               <Button
                 onClick={() => {
-                  setSalePayAmount(
-                    currency.currency === 'USD' && currency.usdUzsRate
-                      ? convertUzsToUsd(latestSale.remainingAmount, currency.usdUzsRate).toFixed(2)
-                      : String(latestSale.remainingAmount),
-                  )
+                  // Suggest an amount that, once submitted, actually pays off
+                  // the sale exactly — computed from the sale's own
+                  // contract-currency balance, not the legacy UZS snapshot.
+                  // Falls back to the legacy suggestion if no rate is
+                  // available client-side to convert across currencies.
+                  if (latestSale.contractCurrency !== currency.currency && !currency.usdUzsRate) {
+                    setSalePayAmount(String(latestSale.remainingAmount))
+                  } else {
+                    const suggestion = convertPaymentToContractCurrency(
+                      latestSale.contractRemainingAmount,
+                      latestSale.contractCurrency,
+                      currency.currency,
+                      currency.usdUzsRate,
+                    )
+                    setSalePayAmount(currency.currency === 'USD' ? suggestion.toFixed(2) : String(Math.round(suggestion)))
+                  }
                   setSalePaymentOpen(true)
                 }}
                 className="mt-2 h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded"

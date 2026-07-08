@@ -205,7 +205,8 @@ summing frozen snapshots and converting the total once).
   — no drift is possible there.
 - **Supplier payable** reminders and paid-confirmation also fixed — see §13.
 - **Sale payment/sold-device messages** (`salePaymentMessage`,
-  `deviceSoldMessage`) are unaffected in this pass — deferred, see §17.
+  `deviceSoldMessage`, `olibSotdimCreatedMessage`) — fixed in a follow-up pass,
+  see §17.
 
 ## 13. Olib-sotdim / SupplierPayable
 
@@ -231,10 +232,8 @@ misstated a USD-native payable's true amount).
 Sale itself got the schema-only treatment: `contractCurrency`/
 `contractSalePrice`/`contractAmountPaid`/`contractRemainingAmount`,
 populated at creation (both the normal sell route and olib-sotdim) and
-dual-written on every sale payment — but **not** wired into Sale's
-detail/list pages or `salePaymentMessage`/`deviceSoldMessage` in this pass
-(deliberately deferred, see §17). This is safe because Sale's legacy ledger
-stays accurate via its own lockstep, exactly like Nasiya's.
+dual-written on every sale payment. A follow-up pass then wired this ledger
+into Sale's detail/list pages and Telegram messages — see §17.
 
 One incidental fix while touching this: the olib-sotdim route never set
 `Sale.creationCurrency`/`creationExchangeRate` at all (unlike the normal
@@ -290,18 +289,90 @@ Customer pays 3,125,000 so'm at rate 12,500 → applied $250. Month 1: $200
 Customer pays $200 at rate 12,500 → applied 2,500,000 so'm. Month 1:
 2,000,000 (closed). Month 2: 500,000 prepaid, 1,500,000 still owed.
 
-## 17. What was deliberately deferred (not silently dropped)
+## 17. Sale display and Telegram behavior (follow-up pass)
 
-- **Sale display layer + Telegram** (detail pages, lists,
-  `salePaymentMessage`/`deviceSoldMessage`) — schema + creation/payment
-  population is done and correct (§13), but these surfaces still render the
-  legacy UZS ledger. Safe today (Sale's dual-ledger stays in lockstep exactly
-  like Nasiya's), but a Sale-side mirror of Nasiya's Phases 5/6/9 display
-  fixes would be needed before a shop routinely creates USD-native cash
-  sales and expects the same "no double-conversion drift" guarantee on the
-  sale detail page. (Supplier payable reminders/paid-message were fixed —
-  see §13 — since that gap was explicitly called out and cheap to close;
-  Sale's is a larger surface deferred for a follow-up pass.)
+A later, narrowly-scoped pass closed the Sale-side display gap flagged in
+the original plan (§13/§18 above described it as safe-but-deferred). The
+concrete bug this closes: a $500 USD-native sale created at rate 12,500
+(legacy snapshot 6,250,000 so'm) previously rendered as `sale.amountUzs /
+todayRate` on the qurilmalar list/detail pages and in Telegram — so once the
+rate moved to 13,000 it would silently show "$480.76" instead of staying
+$500. This mirrors the exact drift bug already fixed for Nasiya in §10.
+
+**Source of truth.** `Sale.contractCurrency`/`contractSalePrice`/
+`contractAmountPaid`/`contractRemainingAmount` (frozen at creation, dual-
+written on every payment — see §13) are now the only inputs to every
+"current state" display. The legacy `salePrice`/`amountPaid`/
+`remainingAmount` UZS snapshot is never reconverted through today's rate for
+a live view; it's read only as a same-instant fallback when a contract field
+is unavailable (see profit, below).
+
+**Pages fixed** (all via `formatDisplayMoneyFromContract`/
+`formatContractMoney` from `src/lib/nasiya-contract.ts`, converting the
+native contract amount exactly once):
+- `src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx` — the "Sotuv narxi"
+  and "Farq" (profit) columns.
+- `src/app/(shop)/shop/qurilmalar/[id]/page.tsx` (device detail) — "Sotuv
+  narxi" (with an optional "Shartnoma: $X" reference line shown only when
+  display currency differs from contract currency), "Farq / Foyda",
+  "To'langan", "Qolgan", and the "pay remaining" prefill button (now via
+  `convertPaymentToContractCurrency`, with a safe string fallback when no
+  rate is available client-side).
+- `src/lib/server/shop-lists.ts` (`buildDeviceSaleInfo`, shared by both cash
+  sale and nasiya sold-device rows) — additive `contractSoldPrice`/
+  `contractProfit` fields alongside the untouched legacy `soldPrice`/
+  `profit`.
+
+**Payment history.** `salePaymentAmountDisplay` (in `nasiya-contract.ts`) is
+the Sale counterpart of Nasiya's `paymentAmountDisplay`: it shows the
+payment-time native amount, or (when payment currency differs from contract
+currency) "paid X → applied Y · kurs: Z", using `paymentInputAmount/
+Currency/paymentExchangeRate/appliedAmountInContractCurrency` — never
+reinventing a historical rate. Rows recorded before payment-time tracking
+existed fall back to `formatDisplayMoneyFromContract(payment.amount, 'UZS',
+...)`, same as before this fix. No dedicated Sale payment-history UI table
+exists yet (Nasiya has one; Sale doesn't) — this function is implemented and
+tested (`tests/nasiya-contract.test.ts`) so a future history view can use it
+directly, but building that table was out of scope for this pass.
+
+**Telegram.** `deviceSoldMessage`/`salePaymentMessage`/
+`olibSotdimCreatedMessage` all now take a `contractCurrency` param and
+format amounts via `formatContractMoneyWithDisplay` (native amount leads,
+`(~display equivalent)` is an optional secondary hint) — e.g. "Sotuv narxi:
+6 250 000 so'm (~$480.77)" for a UZS-native sale viewed while the shop
+displays USD, or "Sotuv narxi: $500.00" unchanged forever for a USD-native
+sale regardless of today's rate. `salePaymentMessage`'s paid/applied
+two-line breakdown now triggers when the payment currency differs from the
+sale's own **contract** currency (not the shop's display currency) — the
+same fix already applied to `nasiyaPaymentMessage` in §12. The three
+route call sites (`api/devices/[id]/sell`, `api/sales/[id]/payment`,
+`api/olib-sotdim`) were updated to pass their already-computed
+contract-native amounts instead of the legacy UZS ones.
+
+**Profit.** There is no `contractPurchasePrice`/`contractProfit` field on
+Sale — `Device.purchasePrice` stays UZS-only by design (see §18). A new
+helper, `computeContractCurrencyMargin`, gives a stable, non-inventing
+profit figure: for a UZS contract it's a plain subtraction; for a USD
+contract, the UZS purchase price is converted using the **frozen creation
+rate** (never today's rate) — mathematically identical to dividing the
+already-frozen legacy profit snapshot by that same rate, so it never drifts.
+It returns `null` only if a USD contract somehow has no creation rate on
+record, in which case every display falls back to the original
+`salePrice - purchasePrice` / legacy-UZS computation, preserving
+`tests/sold-device-profit.test.ts` exactly.
+
+**Olib-sotdim.** Reused `buildDeviceSaleInfo` (shared with regular cash
+sales) for its sold-device profit display; its `olibSotdimCreatedMessage`
+call now passes contract-native purchase/sale/profit amounts. No changes
+were made to supplier-payable partial-payment logic (there is none — see
+§13).
+
+**Reports.** Not touched in this pass — no report was found reading Sale's
+legacy fields in a way that would misrender a *future* USD sale (aggregates
+already documented in §11 as a live-view limitation, unchanged).
+
+## 18. What was deliberately deferred (not silently dropped)
+
 - **No independent currency selector** in creation forms or the payment
   modal, distinct from the shop's global `preferredCurrency` toggle. The
   existing toggle already provides full flexibility once `contractCurrency`

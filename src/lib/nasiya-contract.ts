@@ -17,7 +17,7 @@
  * ledgers consistent. See docs/currency-accounting-model.md.
  */
 
-import { convertUsdToUzs, convertUzsToUsd, type CurrencyCode } from '@/lib/currency'
+import { convertUsdToUzs, convertUzsToUsd, type CurrencyCode, type CurrencyContext } from '@/lib/currency'
 import { scheduleEffectiveDueTime, type OverdueScheduleInput } from '@/lib/nasiya-utils'
 
 /** UZS contracts tolerate 500 so'm of rounding dust; USD contracts (2 decimal places) tolerate 1 cent. */
@@ -170,6 +170,32 @@ export function formatDisplayMoneyFromContract(
 }
 
 /**
+ * Margin between a contract-currency amount (e.g. a sale price) and a
+ * UZS-only cost that has no native-currency concept of its own (e.g.
+ * Device.purchasePrice, which stays UZS-only by design — see
+ * docs/currency-accounting-model.md). For a UZS contract this is a plain
+ * subtraction. For a USD contract, the UZS cost is converted using the
+ * FROZEN creation rate — never today's rate — since that is the only
+ * well-defined conversion available (there is no genuine "USD purchase
+ * price" to read); this keeps the result stable and non-inventing, and
+ * mathematically equals dividing the already-frozen legacy UZS profit
+ * snapshot by the same creation rate. Returns null when a USD contract has
+ * no creation rate to convert with (should not happen for a real USD
+ * contract, but avoids inventing one).
+ */
+export function computeContractCurrencyMargin(
+  contractAmount: number,
+  costUzs: number,
+  contractCurrency: CurrencyCode,
+  contractExchangeRateAtCreation: number | null,
+): number | null {
+  if (contractCurrency === 'UZS') return contractAmount - costUzs
+  if (!contractExchangeRateAtCreation) return null
+  const costInContractCurrency = Math.round(convertUzsToUsd(costUzs, contractExchangeRateAtCreation) * 100) / 100
+  return Math.round((contractAmount - costInContractCurrency) * 100) / 100
+}
+
+/**
  * Native contract-currency amount, plus an optional "(~display equivalent)"
  * when the shop's chosen display currency differs — for reminders/messages
  * where the native figure must lead (it's the actual contract debt) but a
@@ -186,4 +212,47 @@ export function formatContractMoneyWithDisplay(
   const native = formatContractMoney(amount, contractCurrency)
   if (contractCurrency === displayCurrency || !rate || rate <= 0) return native
   return `${native} (~${formatDisplayMoneyFromContract(amount, contractCurrency, displayCurrency, rate)})`
+}
+
+/** Minimal shape a SalePayment row needs for `salePaymentAmountDisplay`. */
+export interface SalePaymentLike {
+  amount: number
+  paymentInputAmount: number | null
+  paymentInputCurrency: CurrencyCode | null
+  paymentExchangeRate: number | null
+  appliedAmountInContractCurrency: number | null
+}
+
+/**
+ * Payment history must show what actually happened at payment time, not a
+ * live reconversion at today's rate/shop currency — the Sale counterpart of
+ * `paymentAmountDisplay` in the nasiya detail page. `paymentInputAmount/
+ * Currency/ExchangeRate` preserve what the customer actually entered;
+ * `appliedAmountInContractCurrency` is what was actually applied to THIS
+ * sale's own contract-currency debt (native — $500, not always so'm).
+ * `payment.amount` stays the UZS compatibility snapshot, used only as a
+ * fallback for payments recorded before this was tracked (never invents a
+ * historical rate). See docs/currency-accounting-model.md.
+ */
+export function salePaymentAmountDisplay(
+  payment: SalePaymentLike,
+  contractCurrency: CurrencyCode,
+  displayCurrency: CurrencyContext,
+): string {
+  if (payment.paymentInputCurrency != null && payment.paymentInputAmount != null) {
+    const paidText = formatContractMoney(payment.paymentInputAmount, payment.paymentInputCurrency)
+    if (payment.paymentInputCurrency === contractCurrency) {
+      // Nothing was converted — a single native figure is unambiguous.
+      return paidText
+    }
+    const appliedAmount = payment.appliedAmountInContractCurrency ?? payment.amount
+    const appliedText = formatContractMoney(appliedAmount, contractCurrency)
+    const rateText = payment.paymentExchangeRate
+      ? ` · kurs: ${Math.round(payment.paymentExchangeRate).toLocaleString('ru-RU')}`
+      : ''
+    return `${paidText} → ${appliedText}${rateText}`
+  }
+  // Older payment recorded before payment-time currency was tracked — same
+  // fallback behavior as before this fix (today's display currency).
+  return formatDisplayMoneyFromContract(payment.amount, 'UZS', displayCurrency.currency, displayCurrency.usdUzsRate)
 }

@@ -7,7 +7,8 @@ import { Input } from '@/components/ui/input'
 import { exportUrl } from '@/lib/api-client'
 import { uzDate } from '@/lib/dates'
 import { displayImei } from '@/lib/device-display'
-import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
+import { formatMoneyByCurrency, type CurrencyContext, type CurrencyCode } from '@/lib/currency'
+import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { matchesDeviceSearch } from '@/lib/search-match'
 
 type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
@@ -18,6 +19,10 @@ interface DeviceSaleInfo {
   soldPrice: number
   interestAmount: number
   profit: number | null
+  // Native contract-currency ledger — see docs/currency-accounting-model.md.
+  contractCurrency: CurrencyCode
+  contractSoldPrice: number
+  contractProfit: number | null
   customerName: string | null
   soldAt: string
   returned: boolean
@@ -192,14 +197,27 @@ export default function QurilmalarClient({
                     <StatusBadge status={d.status} />
                   </td>
                   <td className="px-4 py-3 text-zinc-900 font-medium">
-                    {d.saleInfo ? formatMoneyByCurrency(d.saleInfo.soldPrice, currency.currency, currency.usdUzsRate) : '—'}
+                    {/* Converts from the deal's own contract currency, never the
+                        legacy UZS snapshot re-derived through today's rate — a
+                        USD-native sale must stay $500, not drift to $480.76
+                        (see docs/currency-accounting-model.md). */}
+                    {d.saleInfo
+                      ? formatDisplayMoneyFromContract(d.saleInfo.contractSoldPrice, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)
+                      : '—'}
                   </td>
                   <td className="px-4 py-3">
                     {!d.saleInfo ? (
                       '—'
                     ) : d.saleInfo.returned ? (
                       <span className="text-xs text-blue-700">Qaytarilgan</span>
+                    ) : d.saleInfo.contractProfit != null ? (
+                      <span className={d.saleInfo.contractProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
+                        {formatDisplayMoneyFromContract(d.saleInfo.contractProfit, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}
+                      </span>
                     ) : (
+                      // Fallback for the rare case a USD contract has no creation
+                      // rate on record — conservative legacy UZS figure rather
+                      // than inventing a native profit (see computeContractCurrencyMargin).
                       <span className={d.saleInfo.profit != null && d.saleInfo.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
                         {formatMoneyByCurrency(d.saleInfo.profit ?? 0, currency.currency, currency.usdUzsRate)}
                       </span>

@@ -11,6 +11,9 @@ import {
   formatContractMoney,
   formatDisplayMoneyFromContract,
   contractOutstandingAsUzs,
+  computeContractCurrencyMargin,
+  salePaymentAmountDisplay,
+  type SalePaymentLike,
 } from '@/lib/nasiya-contract'
 
 describe('getCompletionToleranceForCurrency', () => {
@@ -133,5 +136,93 @@ describe('contractOutstandingAsUzs — report aggregates must convert per-row, n
 
   it('snaps to 0 within the currency-aware tolerance (USD cents, not UZS so\'m)', () => {
     expect(contractOutstandingAsUzs('1000', '999.99', 'USD', 12_500)).toBe(0)
+  })
+})
+
+describe('computeContractCurrencyMargin — stable, never inventing a USD purchase price', () => {
+  it('UZS contract: plain subtraction, unaffected by any rate', () => {
+    expect(computeContractCurrencyMargin(6_250_000, 5_000_000, 'UZS', null)).toBe(1_250_000)
+  })
+
+  it('USD contract: converts the UZS-only cost using the FROZEN creation rate, never a later rate', () => {
+    // $500 sale, 5,000,000 so'm cost, created at rate 12,500 -> cost = $400 natively -> profit $100.
+    expect(computeContractCurrencyMargin(500, 5_000_000, 'USD', 12_500)).toBe(100)
+  })
+
+  it('is stable — the same margin regardless of what today\'s rate happens to be (never passed in)', () => {
+    const margin1 = computeContractCurrencyMargin(500, 5_000_000, 'USD', 12_500)
+    const margin2 = computeContractCurrencyMargin(500, 5_000_000, 'USD', 12_500)
+    expect(margin1).toBe(margin2)
+    expect(margin1).toBe(100)
+  })
+
+  it('returns null for a USD contract with no creation rate, rather than inventing one', () => {
+    expect(computeContractCurrencyMargin(500, 5_000_000, 'USD', null)).toBeNull()
+  })
+
+  it('matches dividing the already-frozen legacy UZS profit by the same creation rate (no double conversion)', () => {
+    const legacyProfitUzs = 6_250_000 - 5_000_000 // 1,250,000 so'm, frozen
+    const nativeMargin = computeContractCurrencyMargin(500, 5_000_000, 'USD', 12_500)
+    expect(nativeMargin).toBe(Math.round((legacyProfitUzs / 12_500) * 100) / 100)
+  })
+})
+
+describe('salePaymentAmountDisplay — Sale payment history never redisplays at today\'s rate', () => {
+  function payment(overrides: Partial<SalePaymentLike> = {}): SalePaymentLike {
+    return {
+      amount: 6_250_000,
+      paymentInputAmount: null,
+      paymentInputCurrency: null,
+      paymentExchangeRate: null,
+      appliedAmountInContractCurrency: null,
+      ...overrides,
+    }
+  }
+
+  const uzsDisplay = { currency: 'UZS' as const, usdUzsRate: null }
+  const usdDisplay = { currency: 'USD' as const, usdUzsRate: 13_000 } // deliberately different from the payment-time rate
+
+  it('USD sale paid in UZS: shows paid so\'m -> applied $ + rate, stable across display/rate changes', () => {
+    const p = payment({
+      amount: 6_250_000,
+      paymentInputAmount: 6_250_000,
+      paymentInputCurrency: 'UZS',
+      paymentExchangeRate: 12_500,
+      appliedAmountInContractCurrency: 500,
+    })
+    const text = salePaymentAmountDisplay(p, 'USD', usdDisplay)
+    expect(text).toMatch(/6.?250.?000 so'm/)
+    expect(text).toContain('$500.00')
+    expect(text).toMatch(/12.?500/)
+    expect(text).not.toMatch(/13.?000/)
+    expect(salePaymentAmountDisplay(p, 'USD', uzsDisplay)).toBe(text)
+  })
+
+  it('UZS sale paid in USD: shows paid $ -> applied so\'m + rate', () => {
+    const p = payment({
+      amount: 6_250_000,
+      paymentInputAmount: 500,
+      paymentInputCurrency: 'USD',
+      paymentExchangeRate: 12_500,
+      appliedAmountInContractCurrency: 6_250_000,
+    })
+    const text = salePaymentAmountDisplay(p, 'UZS', uzsDisplay)
+    expect(text).toContain('$500.00')
+    expect(text).toMatch(/6.?250.?000 so'm/)
+    expect(text).toMatch(/12.?500/)
+  })
+
+  it('same currency: single native figure, no arrow or rate', () => {
+    const p = payment({ amount: 500, paymentInputAmount: 500, paymentInputCurrency: 'USD', appliedAmountInContractCurrency: 500 })
+    const text = salePaymentAmountDisplay(p, 'USD', usdDisplay)
+    expect(text).toBe('$500.00')
+    expect(text).not.toContain('kurs')
+    expect(text).not.toContain('→')
+  })
+
+  it('legacy fallback: no payment-time fields -> today\'s display currency, never an invented rate', () => {
+    const legacy = payment({ amount: 6_250_000 })
+    expect(salePaymentAmountDisplay(legacy, 'USD', uzsDisplay)).toMatch(/6.?250.?000 so'm/)
+    expect(salePaymentAmountDisplay(legacy, 'USD', usdDisplay)).toContain('$')
   })
 })
