@@ -101,6 +101,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           note: auditNote,
           idempotencyKey,
           createdBy: session.user.id,
+          // What the customer actually entered, preserved for historical
+          // display — see docs/currency-accounting-model.md.
+          paymentInputAmount: parsed.data.amount,
+          paymentInputCurrency: amountInput.inputCurrency,
+          paymentExchangeRate: amountInput.exchangeRateUsed,
         },
       })
 
@@ -163,6 +168,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         paymentMethod: parsed.data.paymentMethod,
         remaining: nextRemaining,
         note: auditNote,
+        paymentInput: { amount: parsed.data.amount, currency: amountInput.inputCurrency },
         adminName: session.user.name,
         currency,
       })

@@ -115,6 +115,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           earlyReminderDays: earlyReminderEnabled ? earlyReminderDays : null,
           note,
           createdBy: session.user.id,
+          // Informational only — see docs/currency-accounting-model.md.
+          creationCurrency: salePriceInput.inputCurrency,
+          creationExchangeRate: salePriceInput.exchangeRateUsed,
         },
       })
 

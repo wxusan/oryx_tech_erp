@@ -40,13 +40,19 @@ interface NasiyaSchedule {
   status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED'
 }
 
-interface NasiyaPayment {
+export interface NasiyaPayment {
   id: string
   amount: number
   paymentMethod: string | null
   paidAt: string
   note: string | null
   nasiyaScheduleId: string | null
+  // What the customer actually entered at payment time — preserved so this
+  // never gets silently redisplayed with today's exchange rate. Null for
+  // older payments recorded before this was tracked.
+  paymentInputAmount: number | null
+  paymentInputCurrency: 'UZS' | 'USD' | null
+  paymentExchangeRate: number | null
 }
 
 interface NasiyaLog {
@@ -140,6 +146,31 @@ function RowBadge({ status }: { status: RowStatus }) {
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
   if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
   return Number(n).toLocaleString('ru-RU')
+}
+
+/**
+ * Payment history must show what actually happened at payment time, not a
+ * live reconversion at today's rate/shop currency (see
+ * docs/currency-accounting-model.md). `payment.amount` is always the UZS
+ * ledger figure applied to the debt; `paymentInputAmount/Currency/ExchangeRate`
+ * preserve what the customer actually entered, captured once at payment time
+ * and never touched again.
+ */
+export function paymentAmountDisplay(payment: NasiyaPayment, currency: ReturnType<typeof useShopCurrency>['currency']): string {
+  if (payment.paymentInputCurrency === 'USD' && payment.paymentInputAmount != null) {
+    const paidText = `$${payment.paymentInputAmount.toFixed(2)}`
+    const appliedText = formatMoneyByCurrency(payment.amount, 'UZS')
+    const rateText = payment.paymentExchangeRate
+      ? ` · kurs: ${Math.round(payment.paymentExchangeRate).toLocaleString('ru-RU')}`
+      : ''
+    return `${paidText} → ${appliedText}${rateText}`
+  }
+  if (payment.paymentInputCurrency === 'UZS' && payment.paymentInputAmount != null) {
+    return formatMoneyByCurrency(payment.paymentInputAmount, 'UZS')
+  }
+  // Older payment recorded before payment-time currency was tracked — same
+  // fallback behavior as before this fix (today's display currency).
+  return fmt(payment.amount, currency)
 }
 
 function ImportField({ label, value }: { label: string; value: string }) {
@@ -638,7 +669,7 @@ export default function NasiyaDetailPage() {
               {nasiya.payments.map((payment) => (
                 <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
                   <td className="px-4 py-3 text-zinc-700">{uzDate(payment.paidAt)}</td>
-                  <td className="px-4 py-3 font-medium text-zinc-900">{fmt(payment.amount, currency)}</td>
+                  <td className="px-4 py-3 font-medium text-zinc-900">{paymentAmountDisplay(payment, currency)}</td>
                   <td className="px-4 py-3 text-zinc-700">{paymentMethodLabel(payment.paymentMethod)}</td>
                   <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
                 </tr>

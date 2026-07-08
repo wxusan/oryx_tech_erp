@@ -12,7 +12,7 @@
 
 import { uzDate } from '@/lib/dates'
 import { telegramImei } from '@/lib/device-display'
-import { formatMoneyWithBase, type CurrencyContext } from '@/lib/currency'
+import { formatMoneyWithBase, type CurrencyContext, type CurrencyCode } from '@/lib/currency'
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -111,6 +111,11 @@ function compose(...blocks: Array<string | string[] | null | undefined>): string
 /** Remaining-debt line value: "Yo'q" / "To'liq yopildi" when cleared. */
 function remainingDebt(remaining: number, clearedLabel: "Yo'q" | "To'liq yopildi", currency?: CurrencyContext | null): string {
   return remaining <= 0 ? clearedLabel : telegramMoney(remaining, currency)
+}
+
+/** Format a native (already-in-that-currency) amount — never converts, unlike telegramMoney/formatMoneyByCurrency. */
+function formatNativeAmount(amount: number, currency: CurrencyCode): string {
+  return currency === 'USD' ? `$${amount.toFixed(2)}` : formatMoney(amount)
 }
 
 // ---------------------------------------------------------------------------
@@ -304,6 +309,14 @@ export function nasiyaPaymentMessage(data: {
    * of their due date. Omitted (or single-entry) payments show no breakdown.
    */
   allocations?: { monthNumber: number; amount: number }[]
+  /**
+   * What the customer actually entered, when it differs from the shop's
+   * display currency (data.currency) — shows "To'langan: <native>" +
+   * "Shartnomaga qo'llandi: <applied>" instead of one figure, so a USD
+   * payment applied to a UZS debt (or vice versa) is unambiguous. Omit when
+   * payment currency matches display currency (nothing was converted).
+   */
+  paymentInput?: { amount: number; currency: CurrencyCode } | null
 }): string {
   const monthLine =
     data.month === 'MULTIPLE'
@@ -319,6 +332,13 @@ export function nasiyaPaymentMessage(data: {
             : `${telegramMoney(allocation.amount, data.currency)} ${allocation.monthNumber}-oyga oldindan qo'llandi`,
         )
       : null
+  const paidLines =
+    data.paymentInput && data.paymentInput.currency !== (data.currency?.currency ?? 'UZS')
+      ? [
+          `To'langan: ${formatNativeAmount(data.paymentInput.amount, data.paymentInput.currency)}`,
+          `Shartnomaga qo'llandi: ${telegramMoney(data.paidAmount, data.currency)}`,
+        ]
+      : [`To'langan: ${telegramMoney(data.paidAmount, data.currency)}`]
   return compose(
     "💰 Nasiya to'lovi qabul qilindi",
     optionalLine("Do'kon", data.shopName),
@@ -326,7 +346,7 @@ export function nasiyaPaymentMessage(data: {
     formatDeviceSpecs(data.device, { battery: false }),
     block(
       monthLine,
-      `To'langan: ${telegramMoney(data.paidAmount, data.currency)}`,
+      ...paidLines,
       optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
       `Qolgan qarz: ${remainingDebt(data.remaining, "To'liq yopildi", data.currency)}`,
     ),
@@ -430,14 +450,23 @@ export function salePaymentMessage(data: {
   note?: string | null
   adminName?: string | null
   currency?: CurrencyContext | null
+  /** Same as nasiyaPaymentMessage — shown only when it differs from data.currency. */
+  paymentInput?: { amount: number; currency: CurrencyCode } | null
 }): string {
+  const paidLines =
+    data.paymentInput && data.paymentInput.currency !== (data.currency?.currency ?? 'UZS')
+      ? [
+          `To'langan: ${formatNativeAmount(data.paymentInput.amount, data.paymentInput.currency)}`,
+          `Shartnomaga qo'llandi: ${telegramMoney(data.paidAmount, data.currency)}`,
+        ]
+      : [`To'langan: ${telegramMoney(data.paidAmount, data.currency)}`]
   return compose(
     "💰 Qarz to'lovi qabul qilindi",
     optionalLine("Do'kon", data.shopName),
     block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      `To'langan: ${telegramMoney(data.paidAmount, data.currency)}`,
+      ...paidLines,
       optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
       `Qolgan qarz: ${remainingDebt(data.remaining, "To'liq yopildi", data.currency)}`,
     ),

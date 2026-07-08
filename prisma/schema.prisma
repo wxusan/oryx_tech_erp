@@ -352,6 +352,14 @@ model Sale {
   earlyReminderEnabled Boolean       @default(false)
   earlyReminderDays    Int?
   note                 String?
+  // Informational only — the shop's selected display currency + USD/UZS rate
+  // at the moment this sale was created. Never used in debt/report math
+  // (salePrice/amountPaid/remainingAmount stay the UZS ledger source of
+  // truth); purely lets the UI note "this deal was made in USD" even after
+  // the shop later switches preferredCurrency. Null for older rows (assume
+  // UZS, no rate to show) — see docs/currency-accounting-model.md.
+  creationCurrency     CurrencyCode?
+  creationExchangeRate Decimal?      @db.Decimal(12, 4)
   createdAt            DateTime      @default(now())
   createdBy            String
   deletedAt            DateTime?
@@ -380,19 +388,28 @@ model Sale {
 // ---------------------------------------------------------------------------
 
 model SalePayment {
-  id             String        @id @default(cuid())
-  saleId         String
-  shopId         String
-  amount         Decimal       @db.Decimal(12, 2)
-  paymentMethod  PaymentMethod
-  paidAt         DateTime      @default(now())
-  note           String?
-  idempotencyKey String?
-  createdBy      String
-  createdAt      DateTime      @default(now())
-  deletedAt      DateTime?
-  deletedBy      String?
-  deleteNote     String?
+  id                   String        @id @default(cuid())
+  saleId               String
+  shopId               String
+  amount               Decimal       @db.Decimal(12, 2)
+  paymentMethod        PaymentMethod
+  paidAt               DateTime      @default(now())
+  note                 String?
+  idempotencyKey       String?
+  // What the customer actually entered/paid, preserved for historical display
+  // — never recomputed from a later exchange rate. `amount` above (UZS)
+  // remains the authoritative applied-to-debt figure; these three are purely
+  // for showing "customer paid $200 at rate 12,500" verbatim later, even
+  // after the shop's rate or preferredCurrency has since changed. Null for
+  // older rows / UZS payments with no conversion involved.
+  paymentInputAmount   Decimal?      @db.Decimal(12, 2)
+  paymentInputCurrency CurrencyCode?
+  paymentExchangeRate  Decimal?      @db.Decimal(12, 4)
+  createdBy            String
+  createdAt            DateTime      @default(now())
+  deletedAt            DateTime?
+  deletedBy            String?
+  deleteNote           String?
 
   // Relations
   sale Sale @relation(fields: [saleId], references: [id])
@@ -461,33 +478,41 @@ model SupplierPayable {
 // ---------------------------------------------------------------------------
 
 model Nasiya {
-  id                   String       @id @default(cuid())
+  id                   String        @id @default(cuid())
   shopId               String
   deviceId             String
   customerId           String
   // Original agreed device sale price before down payment and nasiya interest.
-  totalAmount          Decimal      @db.Decimal(12, 2)
-  downPayment          Decimal      @db.Decimal(12, 2)
+  totalAmount          Decimal       @db.Decimal(12, 2)
+  downPayment          Decimal       @db.Decimal(12, 2)
   // Debt before interest: totalAmount - downPayment.
-  baseRemainingAmount  Decimal      @default(0) @db.Decimal(12, 2)
-  interestPercent      Decimal      @default(0) @db.Decimal(6, 2)
-  interestAmount       Decimal      @default(0) @db.Decimal(12, 2)
-  finalNasiyaAmount    Decimal      @default(0) @db.Decimal(12, 2)
-  remainingAmount      Decimal      @db.Decimal(12, 2)
+  baseRemainingAmount  Decimal       @default(0) @db.Decimal(12, 2)
+  interestPercent      Decimal       @default(0) @db.Decimal(6, 2)
+  interestAmount       Decimal       @default(0) @db.Decimal(12, 2)
+  finalNasiyaAmount    Decimal       @default(0) @db.Decimal(12, 2)
+  remainingAmount      Decimal       @db.Decimal(12, 2)
   months               Int
-  monthlyPayment       Decimal      @db.Decimal(12, 2)
+  monthlyPayment       Decimal       @db.Decimal(12, 2)
   startDate            DateTime
-  status               NasiyaStatus @default(ACTIVE)
-  reminderEnabled      Boolean      @default(true)
+  status               NasiyaStatus  @default(ACTIVE)
+  reminderEnabled      Boolean       @default(true)
   // "Ertaroq eslatilsinmi?" — an extra reminder N days before each schedule's
   // due date, in addition to the existing due-day reminder. Both respect
   // reminderEnabled; earlyReminderDays is only meaningful when the flag is set.
-  earlyReminderEnabled Boolean      @default(false)
+  earlyReminderEnabled Boolean       @default(false)
   earlyReminderDays    Int?
   note                 String?
-  createdAt            DateTime     @default(now())
+  // Informational only — the shop's selected display currency + USD/UZS rate
+  // at the moment this nasiya was created. Never used in debt/schedule math
+  // (totalAmount/finalNasiyaAmount/remainingAmount stay the UZS ledger
+  // source of truth); purely lets the UI note "this deal was made in USD"
+  // even after the shop later switches preferredCurrency. Null for older
+  // rows — see docs/currency-accounting-model.md.
+  creationCurrency     CurrencyCode?
+  creationExchangeRate Decimal?      @db.Decimal(12, 4)
+  createdAt            DateTime      @default(now())
   createdBy            String
-  updatedAt            DateTime     @updatedAt
+  updatedAt            DateTime      @updatedAt
   deletedAt            DateTime?
   deletedBy            String?
   deleteNote           String?
@@ -582,20 +607,29 @@ model NasiyaDeferral {
 // ---------------------------------------------------------------------------
 
 model NasiyaPayment {
-  id               String         @id @default(cuid())
-  nasiyaId         String
-  nasiyaScheduleId String?
-  shopId           String
-  amount           Decimal        @db.Decimal(12, 2)
-  paymentMethod    PaymentMethod?
-  paidAt           DateTime       @default(now())
-  note             String?
-  idempotencyKey   String?
-  createdBy        String
-  createdAt        DateTime       @default(now())
-  deletedAt        DateTime?
-  deletedBy        String?
-  deleteNote       String?
+  id                   String         @id @default(cuid())
+  nasiyaId             String
+  nasiyaScheduleId     String?
+  shopId               String
+  amount               Decimal        @db.Decimal(12, 2)
+  paymentMethod        PaymentMethod?
+  paidAt               DateTime       @default(now())
+  note                 String?
+  idempotencyKey       String?
+  // What the customer actually entered/paid, preserved for historical display
+  // — never recomputed from a later exchange rate. `amount` above (UZS)
+  // remains the authoritative applied-to-debt figure; these three are purely
+  // for showing "customer paid $200 at rate 12,500" verbatim later, even
+  // after the shop's rate or preferredCurrency has since changed. Null for
+  // older rows / UZS payments with no conversion involved.
+  paymentInputAmount   Decimal?       @db.Decimal(12, 2)
+  paymentInputCurrency CurrencyCode?
+  paymentExchangeRate  Decimal?       @db.Decimal(12, 4)
+  createdBy            String
+  createdAt            DateTime       @default(now())
+  deletedAt            DateTime?
+  deletedBy            String?
+  deleteNote           String?
 
   // Relations
   nasiya   Nasiya          @relation(fields: [nasiyaId], references: [id])

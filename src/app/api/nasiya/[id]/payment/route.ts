@@ -243,6 +243,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             note: auditNote,
             idempotencyKey,
             createdBy: session.user.id,
+            // What the customer actually entered, preserved for historical
+            // display — see docs/currency-accounting-model.md.
+            paymentInputAmount: amount,
+            paymentInputCurrency: amountInput.inputCurrency,
+            paymentExchangeRate: amountInput.exchangeRateUsed,
           },
         })
       }
@@ -305,6 +310,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           paymentMethod,
           remaining: remainingToStore,
           note: auditNote,
+          paymentInput: { amount, currency: amountInput.inputCurrency },
           adminName: session.user.name,
           currency,
           allocations: allocations.map((a) => ({ monthNumber: a.monthNumber, amount: a.amount })),
