@@ -9,8 +9,8 @@ function read(rel: string): string {
 describe('nasiya completion: status transition, log, and Telegram message', () => {
   const route = read('src/app/api/nasiya/[id]/payment/route.ts')
 
-  it('marks the nasiya COMPLETED in the same transaction when fully paid', () => {
-    expect(route).toContain("allFullyPaid || remaining <= 0 ? 'COMPLETED'")
+  it('marks the nasiya COMPLETED in the same transaction when fully paid (contract-currency ledger decides, see docs/currency-accounting-model.md)', () => {
+    expect(route).toContain("contractAllFullyPaid || contractRemaining <= 0 ? 'COMPLETED'")
   })
 
   it('only treats it as a fresh completion on the actual ACTIVE/OVERDUE -> COMPLETED transition', () => {

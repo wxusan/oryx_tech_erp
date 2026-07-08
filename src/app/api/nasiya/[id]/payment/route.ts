@@ -12,7 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
-import { calculateRemaining, scheduleOutstanding, isScheduleOverdue, isNasiyaEffectivelyComplete } from '@/lib/nasiya-utils'
+import { calculateRemaining, scheduleOutstanding, isScheduleOverdue } from '@/lib/nasiya-utils'
 import { convertPaymentToContractCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -321,32 +321,35 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const totalPaid = allSchedules.reduce((sum: number, s: { paidAmount: unknown }) => sum + Number(s.paidAmount), 0)
       const remaining = calculateRemaining(Number(nasiya.finalNasiyaAmount), totalPaid)
 
-      // Tolerance-aware: a schedule within COMPLETION_ROUNDING_TOLERANCE_UZS of
-      // fully paid counts as settled here too, so a nasiya can never get stuck
-      // "Faol" forever purely from UZS<->USD round-trip rounding dust while
-      // every card on screen already reads $0.00 / 0 so'm.
-      const allFullyPaid = isNasiyaEffectivelyComplete(scheduleInputs)
+      // Native contract-currency totals — the actual source of truth for
+      // whether this nasiya is complete (see docs/currency-accounting-model.md).
+      const contractTotalPaid = allSchedules.reduce((sum, s) => sum + Number(s.contractPaidAmount), 0)
+      const contractRemaining = Math.max(0, Number(nasiya.contractFinalAmount) - contractTotalPaid)
+
+      // Completion is decided from the contract ledger — currency-aware
+      // tolerance (500 so'm / $0.01), never the legacy UZS remainder, so a
+      // USD contract never gets stuck "Faol" over UZS-sized rounding dust
+      // (or the reverse: closed early by a UZS tolerance too loose for cents).
+      const contractAllFullyPaid =
+        allSchedules.length > 0 &&
+        allSchedules.every(
+          (s) => contractScheduleOutstanding(Number(s.contractExpectedAmount), Number(s.contractPaidAmount), contractCurrency) <= 0,
+        )
+      // Overdue-ness is due-date-driven (schedule.status/dueDate), not an
+      // amount comparison, so it stays on the existing currency-agnostic check.
       const hasOverdue = scheduleInputs.some((s) => isScheduleOverdue(s))
 
-      const newStatus = allFullyPaid || remaining <= 0 ? 'COMPLETED' : hasOverdue ? 'OVERDUE' : 'ACTIVE'
+      const newStatus = contractAllFullyPaid || contractRemaining <= 0 ? 'COMPLETED' : hasOverdue ? 'OVERDUE' : 'ACTIVE'
       // Only true the instant a nasiya crosses into COMPLETED — the guard at
       // the top of this transaction already rejects a request against a
       // nasiya whose stored status is COMPLETED, so reaching this line always
       // means the nasiya started as ACTIVE/OVERDUE; this can never fire twice.
       const justCompleted = newStatus === 'COMPLETED'
-      // Snap the stored remaining debt to exactly 0 once effectively complete —
-      // clean bookkeeping instead of a lingering rounding-dust remainder
-      // visible in UZS mode (USD mode already rounds it away at display time).
-      const remainingToStore = allFullyPaid ? 0 : remaining
-
-      // Native contract-currency mirror of the same recalculation — dual-write
-      // only in this phase (the COMPLETED decision above still comes from the
-      // legacy ledger; see docs/currency-accounting-model.md for why the two
-      // ledgers stay in lockstep by construction, both derived here from the
-      // same freshly-refetched schedule rows).
-      const contractTotalPaid = allSchedules.reduce((sum, s) => sum + Number(s.contractPaidAmount), 0)
-      const contractRemaining = Math.max(0, Number(nasiya.contractFinalAmount) - contractTotalPaid)
-      const contractRemainingToStore = allFullyPaid ? 0 : contractRemaining
+      // Snap the stored remaining debt to exactly 0 once effectively complete
+      // in contract-currency terms — clean bookkeeping instead of a lingering
+      // rounding-dust remainder, kept in lockstep across both ledgers.
+      const remainingToStore = contractAllFullyPaid ? 0 : remaining
+      const contractRemainingToStore = contractAllFullyPaid ? 0 : contractRemaining
 
       await tx.nasiya.update({
         where: { id: nasiyaId },

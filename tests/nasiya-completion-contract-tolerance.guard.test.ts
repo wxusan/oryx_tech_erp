@@ -1,0 +1,45 @@
+import { describe, it, expect } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { getCompletionToleranceForCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'
+
+function read(rel: string): string {
+  return readFileSync(resolve(process.cwd(), rel), 'utf8')
+}
+
+describe('nasiya completion is decided from the contract-currency ledger', () => {
+  const route = read('src/app/api/nasiya/[id]/payment/route.ts')
+
+  it('newStatus/remainingToStore/contractRemainingToStore all key off contractAllFullyPaid, not the legacy allFullyPaid', () => {
+    expect(route).toContain("const newStatus = contractAllFullyPaid || contractRemaining <= 0 ? 'COMPLETED'")
+    expect(route).toContain('const remainingToStore = contractAllFullyPaid ? 0 : remaining')
+    expect(route).toContain('const contractRemainingToStore = contractAllFullyPaid ? 0 : contractRemaining')
+  })
+
+  it('computes contractAllFullyPaid via the currency-aware contractScheduleOutstanding, not the UZS-only scheduleOutstanding', () => {
+    const idx = route.indexOf('const contractAllFullyPaid =')
+    const block = route.slice(idx, idx + 300)
+    expect(block).toContain('contractScheduleOutstanding(Number(s.contractExpectedAmount), Number(s.contractPaidAmount), contractCurrency) <= 0')
+  })
+
+  it('overdue-ness stays due-date-driven (unaffected currency-agnostic check)', () => {
+    expect(route).toContain('const hasOverdue = scheduleInputs.some((s) => isScheduleOverdue(s))')
+  })
+})
+
+describe('currency-aware completion tolerance (nasiya-contract.ts)', () => {
+  it('UZS tolerates 500 so\'m of rounding dust', () => {
+    expect(contractScheduleOutstanding(10_000_000, 9_999_600, 'UZS')).toBe(0) // 400 so'm short -> snapped
+    expect(contractScheduleOutstanding(10_000_000, 9_999_000, 'UZS')).toBe(1000) // 1000 so'm short -> real debt
+  })
+
+  it('USD tolerates only 1 cent, NOT 500 so\'m-equivalent slack', () => {
+    expect(contractScheduleOutstanding(1000, 999.99, 'USD')).toBe(0) // 1 cent short -> snapped
+    expect(contractScheduleOutstanding(1000, 999, 'USD')).toBe(1) // $1 short -> real debt, not silently forgiven
+  })
+
+  it('tolerance constants are exactly 500 so\'m / $0.01', () => {
+    expect(getCompletionToleranceForCurrency('UZS')).toBe(500)
+    expect(getCompletionToleranceForCurrency('USD')).toBe(0.01)
+  })
+})

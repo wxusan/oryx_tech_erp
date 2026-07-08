@@ -48,8 +48,7 @@ describe('nasiya payment route allocates in native contract currency alongside t
     expect(route).toContain('contractPaidAmount: contractTotalPaid')
     expect(route).toContain('contractRemainingAmount: contractRemainingToStore')
   })
-
-  it('does NOT change the legacy completion decision in this phase (newStatus/justCompleted still derive from the legacy ledger)', () => {
-    expect(route).toContain("const newStatus = allFullyPaid || remaining <= 0 ? 'COMPLETED'")
-  })
 })
+
+// The completion decision itself (which ledger decides newStatus/COMPLETED)
+// is covered by tests/nasiya-completion-contract-tolerance.guard.test.ts.

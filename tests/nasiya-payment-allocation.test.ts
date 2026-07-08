@@ -121,9 +121,13 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
     expect(source).toContain("const justCompleted = newStatus === 'COMPLETED'")
   })
 
-  it('uses the shared, tolerance-aware scheduleOutstanding/isNasiyaEffectivelyComplete helpers instead of duplicated inline math', () => {
-    expect(source).toContain("import { calculateRemaining, scheduleOutstanding, isScheduleOverdue, isNasiyaEffectivelyComplete } from '@/lib/nasiya-utils'")
-    expect(source).toContain('const allFullyPaid = isNasiyaEffectivelyComplete(scheduleInputs)')
+  it('uses the shared, tolerance-aware scheduleOutstanding/contractScheduleOutstanding helpers instead of duplicated inline math', () => {
+    expect(source).toContain("import { calculateRemaining, scheduleOutstanding, isScheduleOverdue } from '@/lib/nasiya-utils'")
+    expect(source).toContain("import { convertPaymentToContractCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'")
+    // Completion is decided from the contract-currency ledger (source of
+    // truth for debt) — see docs/currency-accounting-model.md.
+    expect(source).toContain('const contractAllFullyPaid =')
+    expect(source).toContain('contractScheduleOutstanding(Number(s.contractExpectedAmount), Number(s.contractPaidAmount), contractCurrency) <= 0')
   })
 
   it('passes the per-schedule allocation breakdown into the Telegram message', () => {
