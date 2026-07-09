@@ -52,6 +52,17 @@ silently skipped or faked, per the ticket's explicit instruction.
 > **Split payment means each payment method has its own amount. Total
 > payment is calculated as the sum of all payment parts.**
 
+> **Update (P0-02 sale payment validation):** `POST /api/sales/[id]/payment`
+> now validates a debt payment solely against the Sale's native contract
+> balance after converting the submitted amount at the payment-time rate. A
+> legacy UZS `remainingAmount` is a compatibility snapshot only and can no
+> longer reject a valid final USD settlement after exchange-rate movement.
+> The route still stores the original entered amount/currency/rate, the
+> native amount applied to debt, and the submitted split breakdown; existing
+> idempotency, serializable retry, history, and Telegram behavior remain in
+> place. See `docs/currency-accounting-model.md` §27 and
+> `tests/sale-contract-payment.test.ts`.
+
 > **Update (split-payment remaining-amount UX fix)**: after the amount-entry
 > fix above, the split UI was still confusing in a different way — the
 > second amount field kept whatever stale value it last held (e.g. a

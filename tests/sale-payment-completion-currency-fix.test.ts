@@ -63,34 +63,34 @@ describe('worked numeric example: legacy vs. contract-currency completion can di
   })
 })
 
-describe('sale payment route: completion decided from the contract ledger, not the legacy remainder', () => {
+describe('sale payment route: acceptance and completion decided from the contract ledger, not the legacy remainder', () => {
   const route = read('src/app/api/sales/[id]/payment/route.ts')
 
-  it('the already-closed guard rejects a payment attempt when EITHER ledger says the sale is done', () => {
-    expect(route).toContain('oldRemaining <= 0')
-    expect(route).toContain('sale.paidFully')
-    expect(route).toContain('contractScheduleOutstanding(Number(sale.contractSalePrice), Number(sale.contractAmountPaid), sale.contractCurrency) <= 0')
+  it('rejects a payment only when the contract helper says the sale is already settled or overpaid', () => {
+    expect(route).toContain('const contractPayment = applySalePaymentToContractLedger({')
+    expect(route).toContain("if (contractPayment.reason === 'ALREADY_SETTLED')")
+    expect(route).toContain("if (contractPayment.reason === 'OVERPAYMENT')")
+    expect(route).not.toContain('if (amount > oldRemaining)')
   })
 
-  it('paidFully/dueDate/reminderEnabled are decided from contractFullyPaid (contractScheduleOutstanding), never nextRemaining', () => {
-    expect(route).toContain('const nextContractRemaining = contractScheduleOutstanding(')
-    expect(route).toContain('Number(sale.contractSalePrice)')
-    expect(route).toContain('nextContractAmountPaid')
-    expect(route).toContain('sale.contractCurrency')
-    expect(route).toContain('const contractFullyPaid = nextContractRemaining <= 0')
-    expect(route).toContain('paidFully: contractFullyPaid,')
-    expect(route).toContain('dueDate: contractFullyPaid ? null : (parsed.data.nextDueDate ?? sale.dueDate),')
-    expect(route).toContain('reminderEnabled: contractFullyPaid ? false : sale.reminderEnabled,')
+  it('paidFully/dueDate/reminderEnabled are decided from contractPayment, never nextRemaining', () => {
+    expect(route).toContain('contractRemainingAmount: Number(sale.contractRemainingAmount)')
+    expect(route).toContain('appliedAmountInContractCurrency: requestedAppliedAmountInContractCurrency')
+    expect(route).toContain('paidFully: contractPayment.isFullyPaid,')
+    expect(route).toContain('dueDate: contractPayment.isFullyPaid ? null : (parsed.data.nextDueDate ?? sale.dueDate),')
+    expect(route).toContain('reminderEnabled: contractPayment.isFullyPaid ? false : sale.reminderEnabled,')
     expect(route).not.toContain('paidFully: nextRemaining <= 0')
-    expect(route).not.toContain('contractRemainingAmount: nextRemaining <= 0 ? 0 : nextContractRemaining')
   })
 
   it('the legacy remainingAmount is snapped to 0 in lockstep once the contract side is fully paid (remainingToStore)', () => {
-    expect(route).toContain('const remainingToStore = contractFullyPaid ? 0 : nextRemaining')
+    expect(route).toContain('const nextRemaining = Math.max(0, oldRemaining - amount)')
+    expect(route).toContain('const remainingToStore = contractPayment.isFullyPaid ? 0 : nextRemaining')
     expect(route).toContain('remainingAmount: remainingToStore,')
   })
 
   it('salePaymentMessage receives the same contract-currency remaining used for the completion decision', () => {
-    expect(route).toContain('remaining: nextContractRemaining,')
+    expect(route).toContain('paidAmount: contractPayment.appliedAmountInContractCurrency,')
+    expect(route).toContain('remaining: contractPayment.newContractRemainingAmount,')
+    expect(route).toContain('contractCurrency: sale.contractCurrency,')
   })
 })

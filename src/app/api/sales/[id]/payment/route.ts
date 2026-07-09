@@ -12,7 +12,8 @@ import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
-import { convertPaymentToContractCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'
+import { convertPaymentToContractCurrency } from '@/lib/nasiya-contract'
+import { applySalePaymentToContractLedger } from '@/lib/sale-contract-payment'
 import { validatePaymentBreakdown, representativePaymentMethod } from '@/lib/payment-breakdown'
 import type { ZodError } from 'zod'
 
@@ -81,7 +82,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
       }
     }
-    const appliedAmountInContractCurrency = convertPaymentToContractCurrency(
+    const requestedAppliedAmountInContractCurrency = convertPaymentToContractCurrency(
       parsed.data.amount,
       amountInput.inputCurrency,
       contractCurrency,
@@ -128,51 +129,36 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           })
           if (!sale) throw { status: 404, message: 'Sotuv topilmadi' }
 
+          // Contract fields decide whether a debt is payable and whether this
+          // payment fits. Legacy UZS fields below are compatibility snapshots
+          // only: an FX-rate change can make their remaining value smaller or
+          // larger than the real contract debt.
+          const contractPayment = applySalePaymentToContractLedger({
+            contractCurrency: sale.contractCurrency,
+            contractSalePrice: Number(sale.contractSalePrice),
+            contractAmountPaid: Number(sale.contractAmountPaid),
+            contractRemainingAmount: Number(sale.contractRemainingAmount),
+            appliedAmountInContractCurrency: requestedAppliedAmountInContractCurrency,
+          })
+          if (!contractPayment.accepted) {
+            if (contractPayment.reason === 'ALREADY_SETTLED') {
+              throw { status: 409, message: "Bu sotuv bo'yicha qarz yopilgan" }
+            }
+            if (contractPayment.reason === 'OVERPAYMENT') {
+              throw { status: 409, message: "To'lov qolgan shartnoma qarzidan oshib ketdi" }
+            }
+            throw { status: 400, message: "To'lov summasi noto'g'ri" }
+          }
+
           const oldRemaining = Number(sale.remainingAmount)
-          // Both ledgers are checked — a sale should never be payable again once
-          // EITHER its legacy or contract-currency balance says it's closed (see
-          // the contract-currency completion fix below for why these two can, in
-          // principle, disagree for a USD-native sale after a payment).
-          if (
-            oldRemaining <= 0 ||
-            sale.paidFully ||
-            contractScheduleOutstanding(Number(sale.contractSalePrice), Number(sale.contractAmountPaid), sale.contractCurrency) <= 0
-          ) {
-            throw { status: 409, message: "Bu sotuv bo'yicha qarz yopilgan" }
-          }
-
           const amount = amountInput.amountUzs
-          if (amount > oldRemaining) {
-            throw { status: 409, message: "To'lov qolgan qarzdan oshib ketdi" }
-          }
-
           const paidAt = parsed.data.paidAt ?? new Date()
-          const nextRemaining = oldRemaining - amount
+          // Legacy UZS figures are updated only after contract acceptance.
+          // They may drift under FX movement, but must stay non-negative and
+          // snap to zero once the native debt is genuinely settled.
+          const nextRemaining = Math.max(0, oldRemaining - amount)
           const nextAmountPaid = Number(sale.amountPaid) + amount
-          // Native contract-currency mirror — dual-write alongside the legacy
-          // UZS fields, same reasoning as the nasiya payment route. See
-          // docs/currency-accounting-model.md.
-          const nextContractAmountPaid = Number(sale.contractAmountPaid) + appliedAmountInContractCurrency
-          // Completion is decided from the CONTRACT ledger, with a currency-aware
-          // tolerance (500 so'm / $0.01) — never the legacy UZS remainder. A
-          // USD-native sale's legacy remainingAmount is converted at whatever
-          // rate was live on each individual payment's own day, so it can cross
-          // zero at a different moment than the contract-currency balance —
-          // deciding `paidFully` from the legacy side alone (the previous
-          // behavior) could silently forgive real USD debt, or the reverse: keep
-          // nagging a customer whose contract balance is genuinely settled. See
-          // docs/currency-accounting-model.md and the nasiya payment route,
-          // which already uses this exact pattern (`contractAllFullyPaid`).
-          const nextContractRemaining = contractScheduleOutstanding(
-            Number(sale.contractSalePrice),
-            nextContractAmountPaid,
-            sale.contractCurrency,
-          )
-          const contractFullyPaid = nextContractRemaining <= 0
-          // Snap the legacy remainder to exactly 0 in lockstep once the contract
-          // side is done — clean bookkeeping instead of lingering rate-drift
-          // dust, mirroring the nasiya payment route's remainingToStore.
-          const remainingToStore = contractFullyPaid ? 0 : nextRemaining
+          const remainingToStore = contractPayment.isFullyPaid ? 0 : nextRemaining
           const payment = await tx.salePayment.create({
             data: {
               saleId,
@@ -189,7 +175,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               paymentInputAmount: parsed.data.amount,
               paymentInputCurrency: amountInput.inputCurrency,
               paymentExchangeRate: contractRate,
-              appliedAmountInContractCurrency,
+              appliedAmountInContractCurrency: contractPayment.appliedAmountInContractCurrency,
             },
           })
 
@@ -198,11 +184,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             data: {
               amountPaid: nextAmountPaid,
               remainingAmount: remainingToStore,
-              paidFully: contractFullyPaid,
-              dueDate: contractFullyPaid ? null : (parsed.data.nextDueDate ?? sale.dueDate),
-              reminderEnabled: contractFullyPaid ? false : sale.reminderEnabled,
-              contractAmountPaid: nextContractAmountPaid,
-              contractRemainingAmount: nextContractRemaining,
+              paidFully: contractPayment.isFullyPaid,
+              dueDate: contractPayment.isFullyPaid ? null : (parsed.data.nextDueDate ?? sale.dueDate),
+              reminderEnabled: contractPayment.isFullyPaid ? false : sale.reminderEnabled,
+              contractAmountPaid: contractPayment.newContractAmountPaid,
+              contractRemainingAmount: contractPayment.newContractRemainingAmount,
             },
           })
 
@@ -228,6 +214,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 amountPaid: updatedSale.amountPaid,
                 remainingAmount: updatedSale.remainingAmount,
                 paidFully: updatedSale.paidFully,
+                contractAmountPaid: updatedSale.contractAmountPaid,
+                contractRemainingAmount: updatedSale.contractRemainingAmount,
+                appliedAmountInContractCurrency: contractPayment.appliedAmountInContractCurrency,
                 dueDate: updatedSale.dueDate,
                 auditReason: auditNote,
                 inputAmount: parsed.data.amount,
@@ -257,11 +246,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               color: sale.device.color,
               imei: sale.device.imei,
             },
-            paidAmount: appliedAmountInContractCurrency,
+            paidAmount: contractPayment.appliedAmountInContractCurrency,
             paymentMethod: effectivePaymentMethod,
             paymentBreakdown: parsed.data.paymentBreakdown,
-            remaining: nextContractRemaining,
-            contractCurrency,
+            remaining: contractPayment.newContractRemainingAmount,
+            contractCurrency: sale.contractCurrency,
             note: auditNote,
             paymentInput: {
               amount: parsed.data.amount,

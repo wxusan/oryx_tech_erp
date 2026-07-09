@@ -83,14 +83,19 @@ describe('sale payment route dual-writes the contract-currency ledger', () => {
     expect(route).toContain('convertPaymentToContractCurrency(')
   })
 
-  it('updates contractAmountPaid/contractRemainingAmount on the sale, and stores appliedAmountInContractCurrency on the payment', () => {
-    expect(route).toContain('contractAmountPaid: nextContractAmountPaid')
-    expect(route).toContain('contractRemainingAmount: nextContractRemaining')
-    expect(route).toContain('appliedAmountInContractCurrency,')
+  it('updates contractAmountPaid/contractRemainingAmount from the contract helper and stores its applied native amount on the payment', () => {
+    expect(route).toContain('contractAmountPaid: contractPayment.newContractAmountPaid')
+    expect(route).toContain('contractRemainingAmount: contractPayment.newContractRemainingAmount')
+    expect(route).toContain('appliedAmountInContractCurrency: contractPayment.appliedAmountInContractCurrency')
   })
 
-  it('does NOT change the legacy UZS overpayment validation (still the source of truth, kept in lockstep)', () => {
-    expect(route).toContain("if (amount > oldRemaining)")
+  it('uses contractRemainingAmount for acceptance; legacy UZS fields update only after the contract helper accepts', () => {
+    expect(route).toContain('applySalePaymentToContractLedger({')
+    expect(route).toContain('contractRemainingAmount: Number(sale.contractRemainingAmount)')
+    expect(route).not.toContain("if (amount > oldRemaining)")
+    const helperCall = route.indexOf('applySalePaymentToContractLedger({')
+    const legacyUpdate = route.indexOf('const oldRemaining = Number(sale.remainingAmount)')
+    expect(legacyUpdate).toBeGreaterThan(helperCall)
   })
 })
 

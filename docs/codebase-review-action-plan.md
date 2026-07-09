@@ -5,9 +5,9 @@ This plan is intentionally implementation-free. It prioritizes the review findin
 | Order | Priority | What to fix | Reason | Risk if delayed | Estimated effort |
 |---:|---|---|---|---|---|
 | 1 | P0 | **Implemented 2026-07-10:** replace legacy nasiya completion/overdue derivation with contract-currency derivation; remove unsafe GET self-heal; correct list/detail/export/payment/dashboard read paths. Historic-record repair remains a separately approved runbook. | Legacy UZS state could mark a USD plan completed while real contract debt remained | Debt forgiveness, blocked payment, false reports | Code complete; data repair pending |
-| 2 | P0 | Validate sale payments against contract outstanding only | Exact USD final payment can be rejected after rate movement | Customer debt cannot be settled | Small/medium |
+| 2 | P0 | **Implemented 2026-07-10:** validate sale payments against contract outstanding only; preserve legacy UZS values as post-acceptance compatibility snapshots. | Exact USD final payment could be rejected after rate movement | Customer debt cannot be settled | Code complete; live DB concurrency proof remains P1 |
 | 3 | P0 | Decide and design immutable return/refund/payment-adjustment ledger | Current partial/zero/full returns delete historic contracts rather than record financial reversal | Historic profit/revenue and retained/refunded money become untrustworthy | High |
-| 4 | P0 | **Partially implemented 2026-07-10:** add P0-01 rate-rise/rate-fall/exact-payment/cent-boundary status regression coverage. P0-02/P0-03 coverage remains separate work. | Existing tests missed the real read-path contradiction | P0 defects return unnoticed | P0-01 complete |
+| 4 | P0 | **Partially implemented 2026-07-10:** add P0-01 and P0-02 rate-rise/rate-fall/exact-payment/cross-currency/split/dust regression coverage. P0-03 coverage remains separate work. | Existing tests missed the real read-path contradiction | P0 defects return unnoticed | P0-01/P0-02 complete; P0-03 open |
 | 5 | P1 | Drain notifications in batches until time budget; expose queue age; align actual cron cadence with reminder timing | Daily global `take: 100` leaves reminders stale at scale | Staff stop trusting reminders | Medium |
 | 6 | P1 | Preserve payment input amount/currency/rate/breakdown for every initial sale/down payment | Initial payment history is not historically accurate | Audit and customer payment history drift | Medium |
 | 7 | P1 | Make sale reminder, Olib-sotdim list and exports contract-currency-aware | These paths still render legacy amounts through current rate | Incorrect USD messages, profit and exports | Medium |
@@ -25,9 +25,10 @@ This plan is intentionally implementation-free. It prioritizes the review findin
 
 ### Before demo
 
-- Item 1 code path and its P0-01 portion of item 4 are complete; run the
-  approved historic-data reconciliation only after staging rehearsal.
-- Complete items 2 and the remaining item 4 coverage.
+- Items 1 and 2 code paths and their P0-01/P0-02 portions of item 4 are
+  complete; run the approved P0-01 historic-data reconciliation only after
+  staging rehearsal.
+- Complete the P0-03 design and its remaining item 4 coverage.
 - Either remove/label partial return capability as unsupported or complete item 3’s contained safe behavior.
 - Do not demonstrate rate-change USD settlement or scale reminders until manually QA’d.
 

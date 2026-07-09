@@ -861,3 +861,37 @@ payment.
 Historical records are not automatically rewritten during reads. See
 `docs/nasiya-contract-status-repair-plan.md` for the approved dry-run,
 reconciliation, audit, and verification procedure.
+
+## 27. Sale payment acceptance is contract-authoritative — P0-02 fixed
+
+**Invariant:** the native Sale contract ledger decides whether a payment is
+allowed. `contractRemainingAmount`, `contractAmountPaid`,
+`contractSalePrice`, and `contractCurrency` take precedence over the legacy
+UZS `remainingAmount`, `amountPaid`, and `salePrice` snapshots.
+
+`src/lib/sale-contract-payment.ts` provides the pure settlement decision used
+inside `POST /api/sales/[id]/payment`'s existing serializable transaction:
+
+- the payment input is converted once using its payment-time USD/UZS rate;
+- the converted amount is accepted/rejected only against
+  `contractRemainingAmount`, with the shared strict contract-currency dust
+  rule (`$0.01` / `500 so'm` remain meaningful);
+- a real overpayment is rejected, while an excess below the dust threshold is
+  clamped to the debt actually applied;
+- when native debt reaches zero, the sale is marked paid and the legacy UZS
+  `remainingAmount` snapshot is snapped to zero. For a partial payment, that
+  legacy snapshot is reduced as before and clamped non-negative.
+
+This means a `$100` debt created at `12,000 UZS/USD` accepts an exact `$100`
+payment after a `13,000 UZS/USD` rate change, even though its payment-time
+UZS snapshot is `1,300,000` and the legacy remaining snapshot was
+`1,200,000`. The original customer-entered amount/currency/rate remains on
+`SalePayment`, as does the native amount actually applied to debt; history and
+Telegram continue to render one shop-display currency from those frozen
+payment-time values.
+
+The route retains shop-scoped lookup, idempotency, serializable retry, split
+payment validation, notifications, and cache invalidation. The remaining
+limitation is test infrastructure: unit and source-guard coverage prove the
+contract math and route wiring, but a disposable Postgres API/concurrency test
+is still a P1 follow-up.

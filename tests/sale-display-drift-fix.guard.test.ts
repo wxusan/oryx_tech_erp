@@ -108,11 +108,11 @@ describe('route wiring: Telegram calls pass native contract-currency amounts, no
     expect(route).toContain('contractCurrency,')
   })
 
-  it('sale payment route passes appliedAmountInContractCurrency + contract-currency remaining to salePaymentMessage', () => {
+  it('sale payment route passes the helper’s applied native amount and remaining to salePaymentMessage', () => {
     const route = read('src/app/api/sales/[id]/payment/route.ts')
-    expect(route).toContain('paidAmount: appliedAmountInContractCurrency,')
-    expect(route).toContain('remaining: nextContractRemaining,')
-    expect(route).toContain('contractCurrency,')
+    expect(route).toContain('paidAmount: contractPayment.appliedAmountInContractCurrency,')
+    expect(route).toContain('remaining: contractPayment.newContractRemainingAmount,')
+    expect(route).toContain('contractCurrency: sale.contractCurrency,')
   })
 
   it('olib-sotdim route passes contractPurchasePrice/contractSalePrice + contractCurrency to olibSotdimCreatedMessage', () => {

@@ -19,7 +19,19 @@ source wiring. Historical records are deliberately not changed during reads;
 the required dry-run and audited repair process is documented in
 `docs/nasiya-contract-status-repair-plan.md`.
 
-P0-02 and P0-03 were not modified by this implementation.
+**P0-02 is implemented in code.** Sale payment acceptance now converts the
+customer input at the payment-time rate and validates it only against native
+`contractRemainingAmount` inside the serializable transaction. The legacy UZS
+remaining snapshot is updated only after acceptance, so a `$100` payment at
+`13,000` can settle a `$100` debt whose frozen legacy snapshot was
+`1,200,000 UZS`. Input amount/currency/rate and applied native amount remain
+persisted on `SalePayment`; split payment, idempotency, tenant scoping, and
+Telegram/history wiring are retained. Pure regression and source-guard tests
+cover rate rise/fall, UZS/USD cross payments, partial payment, strict dust,
+real overpayment, and split-total settlement. Live database concurrency proof
+remains a P1 integration-test gap.
+
+P0-03 remains open and was not modified by either implementation.
 
 The project has a strong foundation: server-side session revalidation, pervasive shop scoping in business routes, explicit payment idempotency, serializable payment transactions, careful HTML escaping in Telegram templates, private image storage, meaningful audit logs, and genuinely useful pure-function tests around currency, allocation, and schedules. The architecture has clearly improved through several focused passes.
 
