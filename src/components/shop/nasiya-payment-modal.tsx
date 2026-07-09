@@ -10,7 +10,13 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
 import { convertUsdToUzs, convertUzsToUsd, currencyLabel, type CurrencyCode } from '@/lib/currency'
-import { convertPaymentToContractCurrency, contractScheduleOutstanding, formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
+import {
+  convertPaymentToContractCurrency,
+  contractScheduleOutstanding,
+  formatDisplayMoneyFromContract,
+  isContractCurrencyDust,
+  roundContractMoney,
+} from '@/lib/nasiya-contract'
 import { uzDate, uzMonthYear } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { tashkentTodayInputValue } from '@/lib/timezone'
@@ -198,7 +204,10 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   // explanation below — same-currency case needs no rate at all.
   const payAmountContract =
     !carryOver && payAmount.trim() ? (contractCurrency === currency.currency ? Number(payAmount) || 0 : (contractPreviewAmount ?? 0)) : 0
-  const overpayExtraContract = Math.max(0, payAmountContract - selectedScheduleContractOutstanding)
+  const rawOverpayExtraContract = Math.max(0, payAmountContract - selectedScheduleContractOutstanding)
+  const overpayExtraContract = isContractCurrencyDust(rawOverpayExtraContract, contractCurrency)
+    ? 0
+    : roundContractMoney(rawOverpayExtraContract, contractCurrency)
 
   // Item 12 — the second split part's amount is always the remainder, so
   // the user only ever types one side of the split.

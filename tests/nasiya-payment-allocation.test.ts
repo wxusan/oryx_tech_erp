@@ -96,7 +96,7 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
   })
 
   it('rejects a payment greater than the total outstanding balance — compared in CONTRACT currency (item 4 rate-drift fix), not a legacy-UZS sum', () => {
-    expect(source).toContain('if (appliedAmountInContractCurrency > totalOutstandingContract)')
+    expect(source).toContain('appliedAmountInContractCurrency > totalOutstandingContract')
     expect(source).toContain("To'lov qolgan nasiya summasidan oshib ketdi")
     expect(source).toContain('totalContractOutstanding(')
   })
@@ -124,7 +124,9 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
 
   it('uses the shared, tolerance-aware contractScheduleOutstanding helper instead of duplicated inline math', () => {
     expect(source).toContain("import { calculateRemaining, isScheduleOverdue } from '@/lib/nasiya-utils'")
-    expect(source).toContain("import { convertPaymentToContractCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'")
+    expect(source).toContain(
+      "import { convertPaymentToContractCurrency, contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'",
+    )
     // Completion is decided from the contract-currency ledger (source of
     // truth for debt) — see docs/currency-accounting-model.md.
     expect(source).toContain('const contractAllFullyPaid =')
@@ -137,6 +139,11 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
     expect(source).toContain('allocations: allocations.map((a) => ({')
     expect(source).toContain('monthNumber: a.monthNumber')
     expect(source).toContain('amount: a.contractAmount')
+  })
+
+  it('allows only meaningful overpayment above the contract-currency dust tolerance', () => {
+    expect(source).toContain('appliedAmountInContractCurrency > totalOutstandingContract')
+    expect(source).toContain('!isContractCurrencyDust(appliedAmountInContractCurrency - totalOutstandingContract, contractCurrency)')
   })
 })
 

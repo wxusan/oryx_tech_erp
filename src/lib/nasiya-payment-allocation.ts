@@ -47,7 +47,7 @@
  * nasiya-level completion do, after this fix).
  */
 
-import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
+import { contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'
 import { scheduleOutstanding } from '@/lib/nasiya-utils'
 import type { CurrencyCode } from '@/lib/currency'
 
@@ -80,6 +80,12 @@ export interface NasiyaAllocationUpdate {
   markPaidAt: boolean
 }
 
+function allocatableContractAmount(amount: number, currency: CurrencyCode): number {
+  if (!Number.isFinite(amount) || amount <= 0) return 0
+  const unitAmount = currency === 'USD' ? Math.floor((amount + 1e-9) * 100) / 100 : Math.floor(amount)
+  return isContractCurrencyDust(unitAmount, currency) ? 0 : unitAmount
+}
+
 /**
  * Allocates one payment across an ALREADY-ORDERED list of unpaid schedules
  * (selected schedule first, then oldest-unpaid-by-effective-due-date —
@@ -96,16 +102,21 @@ export function allocateNasiyaPayment(params: {
 }): NasiyaAllocationUpdate[] {
   const { schedules, contractCurrency, now } = params
   let remainingPayment = params.amountUzs
-  let remainingContractPayment = params.appliedAmountInContractCurrency
+  let remainingContractPayment = allocatableContractAmount(params.appliedAmountInContractCurrency, contractCurrency)
   const updates: NasiyaAllocationUpdate[] = []
 
   for (const schedule of schedules) {
-    if (remainingPayment <= 0 && remainingContractPayment <= 0) break
+    if (isContractCurrencyDust(remainingContractPayment, contractCurrency)) break
 
     // Contract-currency side — computed FIRST because it alone decides
     // completion (see file doc comment).
     const contractOutstanding = contractScheduleOutstanding(schedule.contractExpectedAmount, schedule.contractPaidAmount, contractCurrency)
-    const contractApplied = Math.min(remainingContractPayment, contractOutstanding)
+    if (contractOutstanding <= 0) continue
+
+    const rawContractApplied = Math.min(remainingContractPayment, contractOutstanding)
+    const contractApplied = allocatableContractAmount(rawContractApplied, contractCurrency)
+    if (contractApplied <= 0) break
+
     const newContractPaidAmountRaw = schedule.contractPaidAmount + contractApplied
     const isContractFullyPaid = contractScheduleOutstanding(schedule.contractExpectedAmount, newContractPaidAmountRaw, contractCurrency) <= 0
     const newContractPaidAmount = isContractFullyPaid ? schedule.contractExpectedAmount : newContractPaidAmountRaw
@@ -120,7 +131,7 @@ export function allocateNasiyaPayment(params: {
     const newPaidAmountRaw = schedule.paidAmount + appliedUzs
     const newPaidAmount = isContractFullyPaid ? schedule.expectedAmount : newPaidAmountRaw
 
-    const isPartial = !isContractFullyPaid && newPaidAmount > 0
+    const isPartial = !isContractFullyPaid && !isContractCurrencyDust(newContractPaidAmount, contractCurrency)
     const effectiveDueDate = schedule.delayedUntil ?? schedule.dueDate
     const isPastDue = effectiveDueDate < now
     const status: NasiyaAllocationUpdate['status'] = isContractFullyPaid ? 'PAID' : isPastDue ? 'OVERDUE' : isPartial ? 'PARTIAL' : 'PENDING'
@@ -138,7 +149,7 @@ export function allocateNasiyaPayment(params: {
     })
 
     remainingPayment -= appliedUzs
-    remainingContractPayment -= contractApplied
+    remainingContractPayment = allocatableContractAmount(remainingContractPayment - contractApplied, contractCurrency)
   }
 
   return updates

@@ -67,6 +67,25 @@ describe('nasiyaPaymentMessage — contract-currency allocation breakdown and co
     })
     expect(msg).toContain('Qolgan qarz: To‘liq yopildi')
   })
+
+  it('filters dust allocations so Telegram never shows a fake $0.00 next-month line', () => {
+    const msg = nasiyaPaymentMessage({
+      ...base,
+      month: 'MULTIPLE',
+      paidAmount: 36.89,
+      contractCurrency: 'USD',
+      remaining: 100,
+      currency: { currency: 'USD', usdUzsRate: 12_500 },
+      allocations: [
+        { monthNumber: 1, amount: 36.89 },
+        { monthNumber: 2, amount: 0.004 },
+      ],
+    })
+
+    expect(msg).not.toContain('$0.00')
+    expect(msg).not.toContain('2-oyga oldindan')
+    expect(msg).not.toContain('To‘lov taqsimoti')
+  })
 })
 
 describe('nasiyaCompletedMessage — shows the contract-currency total, never a stale UZS-reconversion', () => {

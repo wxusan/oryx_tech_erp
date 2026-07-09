@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { getCompletionToleranceForCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'
+import { getCompletionToleranceForCurrency, contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'
 
 function read(rel: string): string {
   return readFileSync(resolve(process.cwd(), rel), 'utf8')
@@ -41,5 +41,12 @@ describe('currency-aware completion tolerance (nasiya-contract.ts)', () => {
   it('tolerance constants are exactly 500 so\'m / $0.01', () => {
     expect(getCompletionToleranceForCurrency('UZS')).toBe(500)
     expect(getCompletionToleranceForCurrency('USD')).toBe(0.01)
+  })
+
+  it('dust allocation is strict: below tolerance is ignored, tolerance itself is meaningful', () => {
+    expect(isContractCurrencyDust(0.009, 'USD')).toBe(true)
+    expect(isContractCurrencyDust(0.01, 'USD')).toBe(false)
+    expect(isContractCurrencyDust(499, 'UZS')).toBe(true)
+    expect(isContractCurrencyDust(500, 'UZS')).toBe(false)
   })
 })

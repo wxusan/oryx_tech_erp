@@ -170,6 +170,73 @@ describe('allocateNasiyaPayment — rate-drift edge case (item 4)', () => {
   })
 })
 
+describe('allocateNasiyaPayment — ignores contract-currency rounding dust', () => {
+  it('does not allocate a USD dust remainder smaller than one cent to the next schedule', () => {
+    const schedule1 = schedule({ id: 's1', monthNumber: 1, contractExpectedAmount: 36.89, expectedAmount: 461_125 })
+    const schedule2 = schedule({ id: 's2', monthNumber: 2, contractExpectedAmount: 36.89, expectedAmount: 461_125 })
+
+    const updates = allocateNasiyaPayment({
+      schedules: [schedule1, schedule2],
+      amountUzs: 461_125,
+      appliedAmountInContractCurrency: 36.894,
+      contractCurrency: 'USD',
+      now: NOW,
+    })
+
+    expect(updates).toHaveLength(1)
+    expect(updates[0].scheduleId).toBe('s1')
+    expect(updates[0].appliedContract).toBe(36.89)
+    expect(updates[0].status).toBe('PAID')
+  })
+
+  it('does not mark a current schedule PARTIAL for a USD dust-only payment', () => {
+    const updates = allocateNasiyaPayment({
+      schedules: [schedule({ id: 's1', monthNumber: 1 })],
+      amountUzs: 100,
+      appliedAmountInContractCurrency: 0.004,
+      contractCurrency: 'USD',
+      now: NOW,
+    })
+
+    expect(updates).toHaveLength(0)
+  })
+
+  it('does not allocate tiny 1–499 so‘m UZS dust to the next schedule', () => {
+    const schedule1 = schedule({ id: 's1', monthNumber: 1, contractExpectedAmount: 500_000, expectedAmount: 500_000 })
+    const schedule2 = schedule({ id: 's2', monthNumber: 2, contractExpectedAmount: 500_000, expectedAmount: 500_000 })
+
+    const updates = allocateNasiyaPayment({
+      schedules: [schedule1, schedule2],
+      amountUzs: 500_499,
+      appliedAmountInContractCurrency: 500_499,
+      contractCurrency: 'UZS',
+      now: NOW,
+    })
+
+    expect(updates).toHaveLength(1)
+    expect(updates[0].scheduleId).toBe('s1')
+    expect(updates[0].appliedContract).toBe(500_000)
+  })
+
+  it('still allocates a real USD overpayment of one cent or more to the next schedule', () => {
+    const schedule1 = schedule({ id: 's1', monthNumber: 1, contractExpectedAmount: 36.89, expectedAmount: 461_125 })
+    const schedule2 = schedule({ id: 's2', monthNumber: 2, contractExpectedAmount: 36.89, expectedAmount: 461_125 })
+
+    const updates = allocateNasiyaPayment({
+      schedules: [schedule1, schedule2],
+      amountUzs: 461_250,
+      appliedAmountInContractCurrency: 36.9,
+      contractCurrency: 'USD',
+      now: NOW,
+    })
+
+    expect(updates).toHaveLength(2)
+    expect(updates[1].scheduleId).toBe('s2')
+    expect(updates[1].appliedContract).toBe(0.01)
+    expect(updates[1].status).toBe('PARTIAL')
+  })
+})
+
 describe('totalContractOutstanding (item 4 — overpayment gate uses contract currency, not legacy UZS)', () => {
   it('sums per-schedule contract-currency outstanding, ignoring legacy UZS entirely', () => {
     const schedules = [

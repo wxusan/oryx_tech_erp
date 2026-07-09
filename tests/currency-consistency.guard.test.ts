@@ -81,6 +81,7 @@ describe('nasiya payment modal: overpayment explanation and validation use the s
   })
 
   it('shows the overpayment explanation and total-remaining line via dfmt() (contract-currency-aware formatter)', () => {
+    expect(source).toContain('isContractCurrencyDust(rawOverpayExtraContract, contractCurrency)')
     expect(source).toContain('Ortiqcha {dfmt(overpayExtraContract)} keyingi oy')
     expect(source).toContain('Jami qolgan qarz')
   })

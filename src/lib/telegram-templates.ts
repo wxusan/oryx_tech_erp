@@ -13,7 +13,7 @@
 import { uzDate } from '@/lib/dates'
 import { telegramImei } from '@/lib/device-display'
 import { formatUserFacingMoney, type CurrencyContext, type CurrencyCode } from '@/lib/currency'
-import { formatContractMoneyWithDisplay } from '@/lib/nasiya-contract'
+import { formatContractMoneyWithDisplay, isContractCurrencyDust } from '@/lib/nasiya-contract'
 
 // ---------------------------------------------------------------------------
 // Formatting helpers
@@ -377,9 +377,10 @@ export function nasiyaPaymentMessage(data: {
         }),
       )
     : historicalContractMoney(data.paidAmount)
+  const meaningfulAllocations = data.allocations?.filter((allocation) => !isContractCurrencyDust(allocation.amount, data.contractCurrency))
   const allocationBlock =
-    data.allocations && data.allocations.length > 1
-      ? data.allocations.map((allocation, index) =>
+    meaningfulAllocations && meaningfulAllocations.length > 1
+      ? meaningfulAllocations.map((allocation, index) =>
           index === 0
             ? `• ${historicalContractMoney(allocation.amount)} joriy oy uchun yopildi`
             : `• ${historicalContractMoney(allocation.amount)} ${escapeTelegramHtml(allocation.monthNumber)}-oyga oldindan qo‘llandi`,

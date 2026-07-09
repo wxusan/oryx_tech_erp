@@ -13,7 +13,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
 import { calculateRemaining, isScheduleOverdue } from '@/lib/nasiya-utils'
-import { convertPaymentToContractCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'
+import { convertPaymentToContractCurrency, contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'
 import { allocateNasiyaPayment, totalContractOutstanding } from '@/lib/nasiya-payment-allocation'
 import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -269,7 +269,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               })),
               contractCurrency,
             )
-            if (appliedAmountInContractCurrency > totalOutstandingContract) {
+            if (
+              appliedAmountInContractCurrency > totalOutstandingContract &&
+              !isContractCurrencyDust(appliedAmountInContractCurrency - totalOutstandingContract, contractCurrency)
+            ) {
               throw {
                 status: 409,
                 message: "To'lov qolgan nasiya summasidan oshib ketdi",

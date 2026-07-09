@@ -24,9 +24,10 @@ describe('nasiya payment route allocates in native contract currency alongside t
     // src/lib/nasiya-payment-allocation.ts (item 4 rate-drift fix) so it
     // can be unit-tested directly — see tests/nasiya-allocation-rate-drift.test.ts.
     const allocation = read('src/lib/nasiya-payment-allocation.ts')
-    expect(allocation).toContain('let remainingContractPayment = params.appliedAmountInContractCurrency')
-    expect(allocation).toContain('const contractApplied = Math.min(remainingContractPayment, contractOutstanding)')
-    expect(allocation).toContain('remainingContractPayment -= contractApplied')
+    expect(allocation).toContain('let remainingContractPayment = allocatableContractAmount(params.appliedAmountInContractCurrency, contractCurrency)')
+    expect(allocation).toContain('const rawContractApplied = Math.min(remainingContractPayment, contractOutstanding)')
+    expect(allocation).toContain('const contractApplied = allocatableContractAmount(rawContractApplied, contractCurrency)')
+    expect(allocation).toContain('remainingContractPayment = allocatableContractAmount(remainingContractPayment - contractApplied, contractCurrency)')
   })
 
   it('uses contractScheduleOutstanding (currency-aware tolerance), not the UZS-only scheduleOutstanding, for the contract ledger', () => {

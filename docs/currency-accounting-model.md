@@ -781,3 +781,53 @@ order. `tests/nasiya-payment-allocation.test.ts` and
 `tests/nasiya-payment-contract-currency.guard.test.ts` were updated to
 assert the new pure-function-based call sites instead of the removed
 inline loop.
+
+## 25. Nasiya payment allocation dust tolerance — fixed
+
+**Symptom**: a suggested/current-month nasiya payment could leave a tiny
+floating-point/conversion remainder such as `$0.004`, which formatted as
+`$0.00` but was still treated as a real overpayment by the allocation flow.
+That could create a fake next-month allocation, mark the next schedule
+`PARTIAL`, show the modal warning ("Ortiqcha $0.00 keyingi oy..."), include
+a Telegram allocation line, or write misleading allocation data into logs.
+
+**Rule**: dust is defined in the contract's own currency before promoting a
+remainder into a real allocation:
+
+- USD: amounts smaller than `$0.01` are ignored; `$0.01` and above remain
+  meaningful.
+- UZS: amounts smaller than `500 so'm` are ignored; `500 so'm` and above
+  remain meaningful, preserving the existing completion tolerance.
+
+**Fix**:
+
+- Added `isContractCurrencyDust()` in `src/lib/nasiya-contract.ts` so the
+  tolerance rule is shared by server allocation, API validation, UI preview,
+  and Telegram rendering.
+- `allocateNasiyaPayment()` now rounds the remaining contract-currency
+  amount and stops before touching another schedule if the remainder is
+  dust. Dust-only payments therefore create no schedule update and never
+  mark a schedule `PARTIAL`.
+- The payment route's "payment exceeds remaining debt" guard still rejects
+  real overpayments, but allows dust-sized excess so an exact final payment
+  is not blocked by conversion noise.
+- The nasiya payment modal computes `overpayExtraContract` through the same
+  dust helper, so it no longer shows a `$0.00` / tiny-so'm next-month
+  warning.
+- `nasiyaPaymentMessage()` filters dust allocations defensively, so even if
+  an old/hand-built caller passes a `$0.004` allocation, Telegram will not
+  render a fake `$0.00 2-oyga oldindan qo'llandi` line.
+
+Regression coverage:
+
+- `tests/nasiya-allocation-rate-drift.test.ts`: USD dust does not allocate,
+  UZS `1–499 so'm` dust does not allocate, real `$0.01` overpayment still
+  allocates, and dust-only payment leaves the current schedule untouched.
+- `tests/nasiya-payment-message-contract-currency.test.ts`: Telegram filters
+  `$0.00` dust allocations.
+- `tests/currency-consistency.guard.test.ts`: modal warning remains guarded
+  by `isContractCurrencyDust`.
+- `tests/nasiya-payment-allocation.test.ts` /
+  `tests/nasiya-payment-contract-currency.guard.test.ts`: API/allocation
+  source guards verify the shared helper remains wired into the route and
+  pure allocator.

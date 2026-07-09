@@ -14,6 +14,13 @@ silently skipped or faked, per the ticket's explicit instruction.
 > items 2, 10, 13 were implemented from scratch with tests). Item 1's
 > hisobot month-selection gap was also closed in that same follow-up pass.
 > The rows below are left as-is for history; each has a short "Resolved" note.
+>
+> **Update (nasiya allocation precision follow-up)**: a later pass fixed a
+> rounding-dust edge case in the same contract-currency allocation engine:
+> USD remainders smaller than `$0.01` and UZS remainders smaller than `500
+> so'm` are now ignored before allocating to the next schedule, before
+> showing the modal overpayment warning, and before rendering Telegram
+> allocation lines. See `docs/currency-accounting-model.md` §25.
 
 ## Item-by-item table
 

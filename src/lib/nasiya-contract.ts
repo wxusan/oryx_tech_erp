@@ -45,6 +45,17 @@ export function roundContractMoney(value: number | string, currency: CurrencyCod
 }
 
 /**
+ * True when an amount is too small to be treated as a real payment/allocation
+ * in the contract's own currency. This is intentionally a STRICT comparison:
+ * $0.009 / 499 so'm are dust, while $0.01 / 500 so'm remain meaningful.
+ */
+export function isContractCurrencyDust(amount: number | string, currency: CurrencyCode): boolean {
+  const n = Math.abs(Number(amount))
+  if (!Number.isFinite(n)) return true
+  return n < getCompletionToleranceForCurrency(currency)
+}
+
+/**
  * Outstanding (unpaid) balance of a schedule in its OWN contract currency,
  * never negative, snapped to 0 within that currency's tolerance. Mirrors
  * `scheduleOutstanding` in nasiya-utils.ts (which stays UZS-only, untouched,
