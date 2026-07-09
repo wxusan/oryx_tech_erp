@@ -3,8 +3,8 @@
  *
  * Rules (enforced by tests):
  *   - Pure functions, typed input, NO DB queries here.
- *   - Plain text only — NO Markdown asterisks (sendTelegramMessage sends without
- *     parse_mode, so `*bold*` would render literally).
+ *   - Telegram HTML: bold title only; body remains normal-weight.
+ *   - Every dynamic text value is escaped before interpolation.
  *   - Consistent Uzbek wording + money/date formatting.
  *   - Optional lines are omitted cleanly (never "undefined"/"null").
  *   - Never include raw DB IDs, passport URLs, tokens, secrets, or logins.
@@ -22,12 +22,16 @@ import { formatContractMoneyWithDisplay } from '@/lib/nasiya-contract'
 /** "8 500 000 so'm" (ru-RU groups with spaces). */
 export function formatMoney(value: number | string | null | undefined): string {
   const n = Number(value ?? 0)
-  return `${(Number.isFinite(n) ? n : 0).toLocaleString('ru-RU')} so'm`
+  return `${(Number.isFinite(n) ? n : 0).toLocaleString('ru-RU')} so‘m`
+}
+
+function telegramTypography(value: string): string {
+  return value.replaceAll("so'm", 'so‘m')
 }
 
 function telegramMoney(value: number | string | null | undefined, currency?: CurrencyContext | null): string {
   if (!currency) return formatMoney(value)
-  return formatMoneyWithBase(value, currency.currency, currency.usdUzsRate)
+  return telegramTypography(formatMoneyWithBase(value, currency.currency, currency.usdUzsRate))
 }
 
 /** "30.09.2026" — locale-independent numeric date. */
@@ -41,7 +45,7 @@ export function formatPaymentMethod(value?: string | null): string | null {
     case 'CASH':
       return 'Naqd'
     case 'TRANSFER':
-      return "O'tkazma"
+      return 'O‘tkazma'
     case 'CARD':
       return 'Karta'
     case 'OTHER':
@@ -58,11 +62,21 @@ export function cleanNote(value?: string | null): string | null {
   return cleaned.length > 0 ? cleaned : null
 }
 
-/** `${label}: ${value}` when value is present, otherwise null (omitted). */
-export function optionalLine(label: string, value?: string | number | null): string | null {
+/** Escape a dynamic value before inserting it into a Telegram HTML message. */
+export function escapeTelegramHtml(value: string | number): string {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+}
+
+/** `${icon} ${label}: ${escapedValue}` when present; otherwise omit cleanly. */
+export function optionalLine(label: string, value?: string | number | null, icon?: string): string | null {
   if (value === null || value === undefined) return null
   const str = String(value).trim()
-  return str.length > 0 ? `${label}: ${str}` : null
+  return str.length > 0 ? `${icon ? `${icon} ` : ''}${label}: ${escapeTelegramHtml(str)}` : null
 }
 
 export interface DeviceSpecs {
@@ -80,13 +94,13 @@ export interface DeviceSpecs {
 export function formatDeviceSpecs(device: DeviceSpecs, opts: { battery?: boolean } = {}): string[] {
   const includeBattery = opts.battery ?? true
   return [
-    optionalLine('Qurilma', device.deviceModel),
-    optionalLine('Xotira', device.storage),
-    optionalLine('Rang', device.color),
+    optionalLine('Qurilma', device.deviceModel, '📱'),
+    optionalLine('Xotira', device.storage, '💾'),
+    optionalLine('Rang', device.color, '🎨'),
     includeBattery && typeof device.batteryHealth === 'number'
-      ? `Batareya: ${device.batteryHealth}%`
+      ? `🔋 Batareya: ${escapeTelegramHtml(device.batteryHealth)}%`
       : null,
-    optionalLine('IMEI', telegramImei(device.imei)),
+    optionalLine('IMEI', telegramImei(device.imei), '🔢'),
   ].filter((line): line is string => line !== null)
 }
 
@@ -114,13 +128,36 @@ function formatNativeAmount(amount: number, currency: CurrencyCode): string {
   return currency === 'USD' ? `$${amount.toFixed(2)}` : formatMoney(amount)
 }
 
+function contractMoney(
+  amount: number,
+  contractCurrency: CurrencyCode,
+  currency?: CurrencyContext | null,
+): string {
+  return telegramTypography(
+    formatContractMoneyWithDisplay(
+      amount,
+      contractCurrency,
+      currency?.currency ?? 'UZS',
+      currency?.usdUzsRate,
+    ),
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Bot direct replies
 // ---------------------------------------------------------------------------
 
+export function telegramIdUnavailableMessage(): string {
+  return compose(
+    '<b>⚠️ Telegram ID aniqlanmadi</b>',
+    'Iltimos, botni shaxsiy Telegram akkauntingizdan oching.',
+  )
+}
+
 export function startSuperAdminMessage(adminName: string): string {
   return compose(
-    `👋 Assalomu alaykum, ${adminName}`,
+    '<b>👋 Oryx ERP botiga xush kelibsiz</b>',
+    optionalLine('Admin', adminName, '👨‍💼'),
     'Siz Oryx ERP super admin sifatida ulandingiz.',
     'Endi platformadagi muhim bildirishnomalar shu bot orqali keladi.',
   )
@@ -128,22 +165,24 @@ export function startSuperAdminMessage(adminName: string): string {
 
 export function startShopAdminMessage(adminName: string, shopName: string): string {
   return compose(
-    `👋 Assalomu alaykum, ${adminName}`,
-    `Siz ${shopName} do'koni uchun Oryx ERP bildirishnomalariga ulandingiz.`,
-    "Endi sotuv, nasiya, to'lov va eslatmalar shu yerga keladi.",
+    '<b>👋 Oryx ERP botiga xush kelibsiz</b>',
+    block(optionalLine('Admin', adminName, '👨‍💼'), optionalLine('Do‘kon', shopName, '🏪')),
+    'Siz do‘kon bildirishnomalariga muvaffaqiyatli ulandingiz.',
+    'Endi sotuv, nasiya, to‘lov va eslatmalar shu yerga keladi.',
   )
 }
 
 export function startUnknownMessage(telegramId: string): string {
   return compose(
-    '⚠️ Telegram akkauntingiz Oryx ERP hisobiga ulanmagan.',
-    "Iltimos, admin panelda Telegram ID'ingiz to'g'ri kiritilganini tekshiring.",
-    `Sizning Telegram ID: ${telegramId}`,
+    '<b>⚠️ Telegram akkaunt ulanmagan</b>',
+    'Telegram akkauntingiz Oryx ERP hisobiga ulanmagan.',
+    'Iltimos, admin panelda Telegram ID’ingiz to‘g‘ri kiritilganini tekshiring.',
+    optionalLine('Telegram ID', telegramId, '🆔'),
   )
 }
 
 export function unknownCommandMessage(): string {
-  return compose('❓ Bu buyruq mavjud emas.', 'Botdan foydalanish uchun /start yuboring.')
+  return compose('<b>❓ Buyruq topilmadi</b>', 'Botdan foydalanish uchun /start buyrug‘ini yuboring.')
 }
 
 // ---------------------------------------------------------------------------
@@ -161,14 +200,14 @@ export function deviceAddedMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    "📦 Yangi qurilma qo'shildi",
-    optionalLine("Do'kon", data.shopName),
+    '<b>📦 Yangi qurilma qo‘shildi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
     formatDeviceSpecs(data.device),
     block(
-      `Kelish narxi: ${formatContractMoneyWithDisplay(data.purchasePrice, data.purchaseCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
-      optionalLine('Yetkazib beruvchi', data.supplierPhone),
+      `💵 Olingan narx: ${contractMoney(data.purchasePrice, data.purchaseCurrency, data.currency)}`,
+      optionalLine('Yetkazib beruvchi', data.supplierPhone, '📞'),
     ),
-    optionalLine('Admin', data.adminName),
+    optionalLine('Admin', data.adminName, '👨‍💼'),
   )
 }
 
@@ -188,21 +227,20 @@ export function deviceSoldMessage(data: {
   /** Item 14 — sale margin in the same contract currency, when computable (see computeSaleContractMargin). Omitted rather than guessed when unavailable. */
   profit?: number | null
 }): string {
-  const contractMoney = (amount: number) =>
-    formatContractMoneyWithDisplay(amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)
+  const money = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency)
   return compose(
-    '✅ Qurilma sotildi',
-    optionalLine("Do'kon", data.shopName),
+    '<b>✅ Qurilma sotildi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
     formatDeviceSpecs(data.device),
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     block(
-      `Sotuv narxi: ${contractMoney(data.salePrice)}`,
-      `To'langan: ${contractMoney(data.paidAmount)}`,
-      `Qolgan qarz: ${data.remaining <= 0 ? "Yo'q" : contractMoney(data.remaining)}`,
-      optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
-      typeof data.profit === 'number' ? `Foyda: ${contractMoney(data.profit)}` : null,
+      `💵 Sotilish narxi: ${money(data.salePrice)}`,
+      `💰 To‘langan: ${money(data.paidAmount)}`,
+      `⏳ Qolgan qarz: ${data.remaining <= 0 ? 'Yo‘q' : money(data.remaining)}`,
+      optionalLine('To‘lov usuli', formatPaymentMethod(data.paymentMethod), '💳'),
+      typeof data.profit === 'number' ? `📊 Foyda: ${money(data.profit)}` : null,
     ),
-    optionalLine('Admin', data.adminName),
+    optionalLine('Admin', data.adminName, '👨‍💼'),
   )
 }
 
@@ -217,14 +255,14 @@ export function deviceReturnedMessage(data: {
 }): string {
   const showMethod = data.refundAmount > 0 || Boolean(formatPaymentMethod(data.refundMethod))
   return compose(
-    '↩️ Qurilma qaytarildi',
-    optionalLine("Do'kon", data.shopName),
+    '<b>↩️ Qurilma qaytarildi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
     formatDeviceSpecs(data.device),
     block(
-      `Qaytarilgan summa: ${telegramMoney(data.refundAmount, data.currency)}`,
-      showMethod ? optionalLine('Qaytarish usuli', formatPaymentMethod(data.refundMethod)) : null,
+      `💵 Qaytarilgan summa: ${telegramMoney(data.refundAmount, data.currency)}`,
+      showMethod ? optionalLine('Qaytarish usuli', formatPaymentMethod(data.refundMethod), '💳') : null,
     ),
-    block(optionalLine('Sabab', cleanNote(data.note)), optionalLine('Admin', data.adminName)),
+    block(optionalLine('Izoh', cleanNote(data.note), '📝'), optionalLine('Admin', data.adminName, '👨‍💼')),
   )
 }
 
@@ -235,10 +273,10 @@ export function deviceRestockedMessage(data: {
   adminName?: string | null
 }): string {
   return compose(
-    '🔄 Qurilma qayta sotuvga chiqarildi',
-    optionalLine("Do'kon", data.shopName),
+    '<b>🔄 Qurilma qayta sotuvga chiqarildi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
     formatDeviceSpecs(data.device),
-    block(optionalLine('Sabab', cleanNote(data.note)), optionalLine('Admin', data.adminName)),
+    block(optionalLine('Izoh', cleanNote(data.note), '📝'), optionalLine('Admin', data.adminName, '👨‍💼')),
   )
 }
 
@@ -266,35 +304,35 @@ export function nasiyaCreatedMessage(data: {
   const hasInterest = data.interestPercent > 0
   const moneyBlock = hasInterest
     ? block(
-        `Narx: ${telegramMoney(data.totalAmount, data.currency)}`,
-        `Boshlang'ich to'lov: ${telegramMoney(data.downPayment, data.currency)}`,
-        `Qolgan summa: ${telegramMoney(data.baseRemainingAmount, data.currency)}`,
+        `💵 Sotilish narxi: ${telegramMoney(data.totalAmount, data.currency)}`,
+        `💰 Boshlang‘ich to‘lov: ${telegramMoney(data.downPayment, data.currency)}`,
+        `⏳ Qolgan qarz: ${telegramMoney(data.baseRemainingAmount, data.currency)}`,
       )
     : block(
-        `Narx: ${telegramMoney(data.totalAmount, data.currency)}`,
-        `Boshlang'ich to'lov: ${telegramMoney(data.downPayment, data.currency)}`,
-        `Nasiya jami: ${telegramMoney(data.finalNasiyaAmount, data.currency)}`,
+        `💵 Sotilish narxi: ${telegramMoney(data.totalAmount, data.currency)}`,
+        `💰 Boshlang‘ich to‘lov: ${telegramMoney(data.downPayment, data.currency)}`,
+        `📊 Nasiya jami: ${telegramMoney(data.finalNasiyaAmount, data.currency)}`,
       )
   const interestBlock = hasInterest
     ? block(
-        `Nasiya foizi: ${data.interestPercent}%`,
-        `Foiz summasi: ${telegramMoney(data.interestAmount, data.currency)}`,
-        `Nasiya jami: ${telegramMoney(data.finalNasiyaAmount, data.currency)}`,
+        `📈 Nasiya foizi: ${escapeTelegramHtml(data.interestPercent)}%`,
+        `➕ Foiz summasi: ${telegramMoney(data.interestAmount, data.currency)}`,
+        `📊 Nasiya jami: ${telegramMoney(data.finalNasiyaAmount, data.currency)}`,
       )
     : null
   return compose(
-    '📝 Yangi nasiya yaratildi',
-    optionalLine("Do'kon", data.shopName),
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    '<b>📝 Yangi nasiya yaratildi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device),
     moneyBlock,
     interestBlock,
     block(
-      `Muddat: ${data.months} oy`,
-      `Oylik to'lov: ${telegramMoney(data.monthlyPayment, data.currency)}`,
-      data.nextPaymentDate ? `Keyingi to'lov: ${formatUzDate(data.nextPaymentDate)}` : null,
+      `📅 Muddat: ${escapeTelegramHtml(data.months)} oy`,
+      `💵 Oylik to‘lov: ${telegramMoney(data.monthlyPayment, data.currency)}`,
+      data.nextPaymentDate ? `🗓 Keyingi to‘lov: ${formatUzDate(data.nextPaymentDate)}` : null,
     ),
-    optionalLine('Admin', data.adminName),
+    optionalLine('Admin', data.adminName, '👨‍💼'),
   )
 }
 
@@ -334,43 +372,43 @@ export function nasiyaPaymentMessage(data: {
 }): string {
   const monthLine =
     data.month === 'MULTIPLE'
-      ? 'Oy: Bir nechta oy'
+      ? '📆 Oy: Bir nechta oy'
       : typeof data.month === 'number'
-        ? `Oy: ${data.month}-oy`
+        ? `📆 Oy: ${escapeTelegramHtml(data.month)}-oy`
         : null
   const displayCurrency = data.currency?.currency ?? 'UZS'
-  const contractMoney = (amount: number) => formatContractMoneyWithDisplay(amount, data.contractCurrency, displayCurrency, data.currency?.usdUzsRate)
+  const money = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency)
   const allocationBlock =
     data.allocations && data.allocations.length > 1
       ? data.allocations.map((allocation, index) =>
           index === 0
-            ? `${contractMoney(allocation.amount)} joriy oy uchun yopildi`
-            : `${contractMoney(allocation.amount)} ${allocation.monthNumber}-oyga oldindan qo'llandi`,
+            ? `• ${money(allocation.amount)} joriy oy uchun yopildi`
+            : `• ${money(allocation.amount)} ${escapeTelegramHtml(allocation.monthNumber)}-oyga oldindan qo‘llandi`,
         )
       : null
   const paidLines =
     data.paymentInput && data.paymentInput.currency !== data.contractCurrency
       ? [
-          `To'langan: ${formatNativeAmount(data.paymentInput.amount, data.paymentInput.currency)}`,
-          `Shartnomaga qo'llandi: ${contractMoney(data.paidAmount)}`,
+          `💰 To‘langan: ${formatNativeAmount(data.paymentInput.amount, data.paymentInput.currency)}`,
+          `🔄 Shartnomaga qo‘llandi: ${money(data.paidAmount)}`,
         ]
-      : [`To'langan: ${contractMoney(data.paidAmount)}`]
+      : [`💰 To‘langan: ${money(data.paidAmount)}`]
   const paymentMethodLine = data.paymentBreakdown?.length
-    ? `To'lov usuli: ${formatPaymentBreakdown(data.paymentBreakdown, data.paymentInput?.currency ?? displayCurrency)}`
-    : optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod))
+    ? formatPaymentBreakdown(data.paymentBreakdown, data.paymentInput?.currency ?? displayCurrency)
+    : optionalLine('To‘lov usuli', formatPaymentMethod(data.paymentMethod), '💳')
   return compose(
-    "💰 Nasiya to'lovi qabul qilindi",
-    optionalLine("Do'kon", data.shopName),
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    '<b>💰 Nasiya to‘lovi qabul qilindi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
       monthLine,
       ...paidLines,
       paymentMethodLine,
-      `Qolgan qarz: ${data.remaining <= 0 ? "To'liq yopildi" : contractMoney(data.remaining)}`,
+      `⏳ Qolgan qarz: ${data.remaining <= 0 ? 'To‘liq yopildi' : money(data.remaining)}`,
     ),
-    allocationBlock,
-    block(optionalLine('Izoh', cleanNote(data.note)), optionalLine('Admin', data.adminName)),
+    allocationBlock ? block('📋 To‘lov taqsimoti:', ...allocationBlock) : null,
+    block(optionalLine('Izoh', cleanNote(data.note), '📝'), optionalLine('Admin', data.adminName, '👨‍💼')),
   )
 }
 
@@ -386,13 +424,13 @@ export function nasiyaDueTodayMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    "⏰ Bugun nasiya to'lovi kuni",
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    '<b>⏰ Bugun to‘lov kuni</b>',
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      typeof data.month === 'number' ? `Oy: ${data.month}-oy` : null,
-      `To'lov summasi: ${formatContractMoneyWithDisplay(data.amountDue, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
-      `Muddat: ${formatUzDate(data.dueDate)}`,
+      typeof data.month === 'number' ? `📆 Oy: ${escapeTelegramHtml(data.month)}-oy` : null,
+      `💵 To‘lov summasi: ${contractMoney(data.amountDue, data.contractCurrency, data.currency)}`,
+      '📅 Muddat: Bugun',
     ),
   )
 }
@@ -410,14 +448,14 @@ export function nasiyaOverdueMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    "⚠️ Nasiya to'lovi muddati o'tgan",
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    '<b>⚠️ To‘lov muddati o‘tgan</b>',
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      typeof data.month === 'number' ? `Oy: ${data.month}-oy` : null,
-      `Qolgan to'lov: ${formatContractMoneyWithDisplay(data.amountDue, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
-      `Muddat: ${formatUzDate(data.dueDate)}`,
-      `Kechikkan: ${data.daysLate} kun`,
+      typeof data.month === 'number' ? `📆 Oy: ${escapeTelegramHtml(data.month)}-oy` : null,
+      `💵 Qolgan to‘lov: ${contractMoney(data.amountDue, data.contractCurrency, data.currency)}`,
+      `📅 Muddat: ${formatUzDate(data.dueDate)}`,
+      `⏳ Kechikkan: ${escapeTelegramHtml(data.daysLate)} kun`,
     ),
   )
 }
@@ -441,20 +479,20 @@ export function nasiyaImportedMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    '📥 Eski nasiya import qilindi',
-    optionalLine("Do'kon", data.shopName),
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    '<b>📥 Eski nasiya import qilindi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      `Eski nasiya summasi: ${telegramMoney(data.originalTotalAmount, data.currency)}`,
-      `Importgacha to'langan: ${telegramMoney(data.alreadyPaidBeforeImport, data.currency)}`,
-      `Hozirgi qolgan qarz: ${telegramMoney(data.remainingDebt, data.currency)}`,
+      `💵 Eski nasiya summasi: ${telegramMoney(data.originalTotalAmount, data.currency)}`,
+      `💰 Importgacha to‘langan: ${telegramMoney(data.alreadyPaidBeforeImport, data.currency)}`,
+      `⏳ Qolgan qarz: ${telegramMoney(data.remainingDebt, data.currency)}`,
     ),
     block(
-      `Oylik to'lov: ${telegramMoney(data.monthlyPayment, data.currency)}`,
-      `Keyingi to'lov: ${formatUzDate(data.nextPaymentDate)}`,
+      `💵 Oylik to‘lov: ${telegramMoney(data.monthlyPayment, data.currency)}`,
+      `🗓 Keyingi to‘lov: ${formatUzDate(data.nextPaymentDate)}`,
     ),
-    optionalLine('Admin', data.adminName),
+    optionalLine('Admin', data.adminName, '👨‍💼'),
   )
 }
 
@@ -489,34 +527,37 @@ export function salePaymentMessage(data: {
   paymentBreakdown?: { method: string; amount: number }[] | null
 }): string {
   const displayCurrency = data.currency?.currency ?? 'UZS'
-  const contractMoney = (amount: number) => formatContractMoneyWithDisplay(amount, data.contractCurrency, displayCurrency, data.currency?.usdUzsRate)
+  const money = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency)
   const paidLines =
     data.paymentInput && data.paymentInput.currency !== data.contractCurrency
       ? [
-          `To'langan: ${formatNativeAmount(data.paymentInput.amount, data.paymentInput.currency)}`,
-          `Shartnomaga qo'llandi: ${contractMoney(data.paidAmount)}`,
+          `💰 To‘langan: ${formatNativeAmount(data.paymentInput.amount, data.paymentInput.currency)}`,
+          `🔄 Shartnomaga qo‘llandi: ${money(data.paidAmount)}`,
         ]
-      : [`To'langan: ${contractMoney(data.paidAmount)}`]
+      : [`💰 To‘langan: ${money(data.paidAmount)}`]
   const paymentMethodLine = data.paymentBreakdown?.length
-    ? `To'lov usuli: ${formatPaymentBreakdown(data.paymentBreakdown, data.paymentInput?.currency ?? displayCurrency)}`
-    : optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod))
+    ? formatPaymentBreakdown(data.paymentBreakdown, data.paymentInput?.currency ?? displayCurrency)
+    : optionalLine('To‘lov usuli', formatPaymentMethod(data.paymentMethod), '💳')
   return compose(
-    "💰 Qarz to'lovi qabul qilindi",
-    optionalLine("Do'kon", data.shopName),
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    '<b>💰 Qarz to‘lovi qabul qilindi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
       ...paidLines,
       paymentMethodLine,
-      `Qolgan qarz: ${data.remaining <= 0 ? "To'liq yopildi" : contractMoney(data.remaining)}`,
+      `⏳ Qolgan qarz: ${data.remaining <= 0 ? 'To‘liq yopildi' : money(data.remaining)}`,
     ),
-    block(optionalLine('Izoh', cleanNote(data.note)), optionalLine('Admin', data.adminName)),
+    block(optionalLine('Izoh', cleanNote(data.note), '📝'), optionalLine('Admin', data.adminName, '👨‍💼')),
   )
 }
 
-/** Item 12 — renders a split-payment breakdown for a Telegram message, e.g. "Naqd: 500 000 so'm, Karta: 500 000 so'm". */
+/** Readable multi-line split-payment breakdown. */
 function formatPaymentBreakdown(parts: { method: string; amount: number }[], currency: CurrencyCode): string {
-  return parts.map((part) => `${formatPaymentMethod(part.method)}: ${formatNativeAmount(part.amount, currency)}`).join(', ')
+  return block(
+    '💳 To‘lov usuli:',
+    ...parts.map((part) => `• ${formatPaymentMethod(part.method) ?? 'Boshqa'}: ${formatNativeAmount(part.amount, currency)}`),
+  )
 }
 
 export function saleDueTodayMessage(data: {
@@ -528,10 +569,10 @@ export function saleDueTodayMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    "⏰ Bugun qarz to'lovi kuni",
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    '<b>⏰ Bugun to‘lov kuni</b>',
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
-    block(`To'lov summasi: ${telegramMoney(data.remainingAmount, data.currency)}`, `Muddat: ${formatUzDate(data.dueDate)}`),
+    block(`💵 To‘lov summasi: ${telegramMoney(data.remainingAmount, data.currency)}`, '📅 Muddat: Bugun'),
   )
 }
 
@@ -545,13 +586,13 @@ export function saleOverdueMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    "⚠️ Qarz to'lovi muddati o'tgan",
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    '<b>⚠️ To‘lov muddati o‘tgan</b>',
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      `Qolgan qarz: ${telegramMoney(data.remainingAmount, data.currency)}`,
-      `Muddat: ${formatUzDate(data.dueDate)}`,
-      `Kechikkan: ${data.daysLate} kun`,
+      `💵 Qolgan to‘lov: ${telegramMoney(data.remainingAmount, data.currency)}`,
+      `📅 Muddat: ${formatUzDate(data.dueDate)}`,
+      `⏳ Kechikkan: ${escapeTelegramHtml(data.daysLate)} kun`,
     ),
   )
 }
@@ -574,14 +615,14 @@ export function nasiyaEarlyReminderMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    "🔔 Nasiya to'lovi yaqinlashmoqda",
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    '<b>🔔 Nasiya to‘lovi yaqinlashmoqda</b>',
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      typeof data.month === 'number' ? `Oy: ${data.month}-oy` : null,
-      `To'lov summasi: ${formatContractMoneyWithDisplay(data.amountDue, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
-      `Muddat: ${formatUzDate(data.dueDate)}`,
-      `Qoldi: ${data.daysLeft} kun`,
+      typeof data.month === 'number' ? `📆 Oy: ${escapeTelegramHtml(data.month)}-oy` : null,
+      `💵 To‘lov summasi: ${contractMoney(data.amountDue, data.contractCurrency, data.currency)}`,
+      `📅 Muddat: ${formatUzDate(data.dueDate)}`,
+      `⏳ Qoldi: ${escapeTelegramHtml(data.daysLeft)} kun`,
     ),
   )
 }
@@ -596,13 +637,13 @@ export function saleEarlyReminderMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    "🔔 Qarz to'lovi yaqinlashmoqda",
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    '<b>🔔 Qarz to‘lovi yaqinlashmoqda</b>',
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      `To'lov summasi: ${telegramMoney(data.remainingAmount, data.currency)}`,
-      `Muddat: ${formatUzDate(data.dueDate)}`,
-      `Qoldi: ${data.daysLeft} kun`,
+      `💵 To‘lov summasi: ${telegramMoney(data.remainingAmount, data.currency)}`,
+      `📅 Muddat: ${formatUzDate(data.dueDate)}`,
+      `⏳ Qoldi: ${escapeTelegramHtml(data.daysLeft)} kun`,
     ),
   )
 }
@@ -620,12 +661,12 @@ export function nasiyaCompletedMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    '✅ Nasiya yakunlandi',
-    optionalLine("Do'kon", data.shopName),
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    '<b>✅ Nasiya yakunlandi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
-    `Jami to'langan: ${formatContractMoneyWithDisplay(data.finalNasiyaAmount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
-    optionalLine('Admin', data.adminName),
+    `💰 Jami to‘langan: ${contractMoney(data.finalNasiyaAmount, data.contractCurrency, data.currency)}`,
+    optionalLine('Admin', data.adminName, '👨‍💼'),
   )
 }
 
@@ -653,32 +694,31 @@ export function olibSotdimCreatedMessage(data: {
   adminName?: string | null
   currency?: CurrencyContext | null
 }): string {
-  const contractMoney = (amount: number) =>
-    formatContractMoneyWithDisplay(amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)
+  const money = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency)
   return compose(
-    '🔄 Olib-sotdim: yangi operatsiya',
-    optionalLine("Do'kon", data.shopName),
+    '<b>🔄 Olib-sotdim operatsiyasi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
     formatDeviceSpecs(data.device),
     block(
-      optionalLine('Kimdan olindi', data.supplierName),
-      optionalLine('Yetkazib beruvchi tel', data.supplierPhone),
-      optionalLine('Manzil', data.supplierLocation),
+      optionalLine('Kimdan olindi', data.supplierName, '🏬'),
+      optionalLine('Yetkazib beruvchi', data.supplierPhone, '📞'),
+      optionalLine('Manzil', data.supplierLocation, '📍'),
     ),
-    block(optionalLine('Mijoz', data.customerName), optionalLine('Tel', data.customerPhone)),
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     block(
-      `Olingan narx: ${contractMoney(data.purchasePrice)}`,
-      `Sotilgan narx: ${contractMoney(data.salePrice)}`,
+      `💵 Olingan narx: ${money(data.purchasePrice)}`,
+      `💰 Sotilish narxi: ${money(data.salePrice)}`,
       data.supplierPaidNow
-        ? `Foyda: ${contractMoney(data.profit)}`
-        : `Kutilayotgan foyda: ${contractMoney(data.profit)} (yetkazib beruvchiga hali to'lanmagan)`,
-      `Yetkazib beruvchiga to'lov: ${data.supplierPaidNow ? 'hozir to\'landi' : "keyinroq to'lanadi"}`,
+        ? `📊 Foyda: ${money(data.profit)}`
+        : `📊 Kutilayotgan foyda: ${money(data.profit)} (yetkazib beruvchiga hali to‘lanmagan)`,
+      `💳 Yetkazib beruvchiga to‘lov: ${data.supplierPaidNow ? 'hozir to‘landi' : 'keyinroq to‘lanadi'}`,
     ),
-    optionalLine('Admin', data.adminName),
+    optionalLine('Admin', data.adminName, '👨‍💼'),
   )
 }
 
 function supplierPayableIntro(data: { supplierName: string; supplierPhone?: string | null }): string[] {
-  return [optionalLine('Kimdan olindi', data.supplierName), optionalLine('Yetkazib beruvchi tel', data.supplierPhone)].filter(
+  return [optionalLine('Kimdan olindi', data.supplierName, '🏬'), optionalLine('Yetkazib beruvchi', data.supplierPhone, '📞')].filter(
     (l): l is string => l !== null,
   )
 }
@@ -694,12 +734,12 @@ export function supplierPayableDueTodayMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    "⏰ Eslatma: yetkazib beruvchiga to'lov",
+    '<b>📌 Yetkazib beruvchiga to‘lov</b>',
     formatDeviceSpecs(data.device, { battery: false }),
     supplierPayableIntro(data),
     block(
-      `To'lanadigan summa: ${formatContractMoneyWithDisplay(data.amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
-      `Muddat: ${formatUzDate(data.dueDate)}`,
+      `💵 To‘lov summasi: ${contractMoney(data.amount, data.contractCurrency, data.currency)}`,
+      '📅 Muddat: Bugun',
     ),
   )
 }
@@ -716,13 +756,13 @@ export function supplierPayableOverdueMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    "⚠️ Yetkazib beruvchiga to'lov muddati o'tdi",
+    '<b>⚠️ Yetkazib beruvchiga to‘lov muddati o‘tgan</b>',
     formatDeviceSpecs(data.device, { battery: false }),
     supplierPayableIntro(data),
     block(
-      `To'lanadigan summa: ${formatContractMoneyWithDisplay(data.amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
-      `Muddat: ${formatUzDate(data.dueDate)}`,
-      `Kechikkan: ${data.daysLate} kun`,
+      `💵 Qolgan to‘lov: ${contractMoney(data.amount, data.contractCurrency, data.currency)}`,
+      `📅 Muddat: ${formatUzDate(data.dueDate)}`,
+      `⏳ Kechikkan: ${escapeTelegramHtml(data.daysLate)} kun`,
     ),
   )
 }
@@ -739,13 +779,13 @@ export function supplierPayableEarlyReminderMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    "🔔 Eslatma: yetkazib beruvchiga to'lov yaqinlashmoqda",
+    '<b>🔔 Yetkazib beruvchiga to‘lov yaqinlashmoqda</b>',
     formatDeviceSpecs(data.device, { battery: false }),
     supplierPayableIntro(data),
     block(
-      `To'lanadigan summa: ${formatContractMoneyWithDisplay(data.amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
-      `Muddat: ${formatUzDate(data.dueDate)}`,
-      `${data.daysLeft} kun oldin eslatma`,
+      `💵 To‘lov summasi: ${contractMoney(data.amount, data.contractCurrency, data.currency)}`,
+      `📅 Muddat: ${formatUzDate(data.dueDate)}`,
+      `⏳ Qoldi: ${escapeTelegramHtml(data.daysLeft)} kun`,
     ),
   )
 }
@@ -763,14 +803,14 @@ export function supplierPayablePaidMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    "✅ Yetkazib beruvchiga to'lov qilindi",
-    optionalLine("Do'kon", data.shopName),
+    '<b>✅ Yetkazib beruvchiga to‘lov qilindi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
     formatDeviceSpecs(data.device, { battery: false }),
     supplierPayableIntro(data),
     block(
-      `To'langan summa: ${formatContractMoneyWithDisplay(data.amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)}`,
-      optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
+      `💰 To‘langan: ${contractMoney(data.amount, data.contractCurrency, data.currency)}`,
+      optionalLine('To‘lov usuli', formatPaymentMethod(data.paymentMethod), '💳'),
     ),
-    optionalLine('Admin', data.adminName),
+    optionalLine('Admin', data.adminName, '👨‍💼'),
   )
 }

@@ -63,9 +63,7 @@ describe('Device creation/edit/olib-sotdim routes populate the purchase-currency
   it('deviceAddedMessage shows the device\'s own native purchase currency, not always UZS', () => {
     const templates = read('src/lib/telegram-templates.ts')
     expect(templates).toContain('purchaseCurrency: CurrencyCode')
-    expect(templates).toContain(
-      "formatContractMoneyWithDisplay(data.purchasePrice, data.purchaseCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)",
-    )
+    expect(templates).toContain('contractMoney(data.purchasePrice, data.purchaseCurrency, data.currency)')
     const route = read('src/app/api/devices/route.ts')
     expect(route).toContain('purchaseCurrency: purchaseInput.inputCurrency,')
   })

@@ -45,7 +45,7 @@ describe('nasiyaPaymentMessage — overpayment allocation breakdown', () => {
     expect(msg).toMatch(/500.?000/)
     expect(msg).toContain('joriy oy uchun yopildi')
     expect(msg).toMatch(/100.?000/)
-    expect(msg).toContain("2-oyga oldindan qo'llandi")
+    expect(msg).toContain("2-oyga oldindan qo‘llandi")
   })
 
   it('breaks down a payment spanning three schedules in order', () => {
@@ -80,13 +80,13 @@ describe('nasiyaPaymentMessage — overpayment allocation breakdown', () => {
         { monthNumber: 2, amount: 100_000 },
       ],
     })
-    // This is a UZS contract (amounts are so'm), viewed by a USD-display shop.
+    // This is a UZS contract (amounts are so‘m), viewed by a USD-display shop.
     // The native contract figure always leads — it's the actual debt — with
     // the display-currency conversion as a "(~...)" hint, never the reverse
     // (see formatContractMoneyWithDisplay / docs/currency-accounting-model.md).
     expect(msg).toContain('$')
-    expect(msg).toMatch(/500.?000 so'm \(~\$40\.00\) joriy oy uchun yopildi/)
-    expect(msg).toMatch(/100.?000 so'm \(~\$8\.00\) 2-oyga oldindan qo'llandi/)
+    expect(msg).toMatch(/500.?000 so‘m \(~\$40\.00\) joriy oy uchun yopildi/)
+    expect(msg).toMatch(/100.?000 so‘m \(~\$8\.00\) 2-oyga oldindan qo‘llandi/)
   })
 })
 

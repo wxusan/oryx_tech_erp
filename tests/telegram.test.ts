@@ -51,13 +51,13 @@ describe('nextTelegramVerifiedAt', () => {
 
 describe('helpers', () => {
   it('formatDeviceSpecs includes battery only when requested and numeric', () => {
-    expect(formatDeviceSpecs(fullDevice)).toContain('Batareya: 88%')
+    expect(formatDeviceSpecs(fullDevice)).toContain('🔋 Batareya: 88%')
     expect(formatDeviceSpecs(fullDevice, { battery: false })).not.toContain('Batareya')
   })
 
   it('formatDeviceSpecs omits empty optional lines', () => {
     const lines = formatDeviceSpecs({ deviceModel: 'Redmi', storage: null, color: '', batteryHealth: null, imei: null })
-    expect(lines).toEqual(['Qurilma: Redmi'])
+    expect(lines).toEqual(['📱 Qurilma: Redmi'])
   })
 
   it('formatDeviceSpecs omits internal import placeholder IMEIs', () => {
@@ -70,7 +70,7 @@ describe('helpers', () => {
 
   it('formatPaymentMethod maps known values and returns null otherwise', () => {
     expect(formatPaymentMethod('CASH')).toBe('Naqd')
-    expect(formatPaymentMethod('TRANSFER')).toBe("O'tkazma")
+    expect(formatPaymentMethod('TRANSFER')).toBe("O‘tkazma")
     expect(formatPaymentMethod('???')).toBeNull()
     expect(formatPaymentMethod(null)).toBeNull()
   })
@@ -97,7 +97,7 @@ describe('bot direct replies', () => {
   it('unknown-user reply tells them to check Telegram ID and never mentions /link', () => {
     const msg = startUnknownMessage('123456789')
     expect(msg).toContain('Telegram ID')
-    expect(msg).toContain('Sizning Telegram ID: 123456789')
+    expect(msg).toContain('Telegram ID: 123456789')
     expect(msg.toLowerCase()).not.toContain('/link')
     expect(msg).not.toContain('KOD')
   })
@@ -124,7 +124,7 @@ describe('device messages', () => {
     expect(msg).toContain('Rang: Titanium')
     expect(msg).toContain('Batareya: 88%')
     expect(msg).toContain('IMEI: 123456789012345')
-    expect(msg).toMatch(/Kelish narxi: 6.?000.?000 so'm/)
+    expect(msg).toMatch(/Olingan narx: 6.?000.?000 so‘m/)
     expect(msg).toContain('Yetkazib beruvchi: +998901234567')
     expect(msg).toContain('Admin: Dilshod')
   })
@@ -176,10 +176,10 @@ describe('device messages', () => {
     expect(msg).toContain('Xotira: 256GB')
     expect(msg).toContain('Batareya: 88%')
     expect(msg).toContain('IMEI: 123456789012345')
-    expect(msg).toMatch(/Sotuv narxi: 8.?500.?000 so'm/)
-    expect(msg).toMatch(/To'langan: 5.?000.?000 so'm/)
-    expect(msg).toMatch(/Qolgan qarz: 3.?500.?000 so'm/)
-    expect(msg).toContain("To'lov usuli: Naqd")
+    expect(msg).toMatch(/Sotilish narxi: 8.?500.?000 so‘m/)
+    expect(msg).toMatch(/To‘langan: 5.?000.?000 so‘m/)
+    expect(msg).toMatch(/Qolgan qarz: 3.?500.?000 so‘m/)
+    expect(msg).toContain("To‘lov usuli: Naqd")
   })
 
   it('device sold shows Foyda (profit) when provided, omitted when not (item 14)', () => {
@@ -194,7 +194,7 @@ describe('device messages', () => {
       paymentMethod: 'CASH',
       profit: 1_500_000,
     })
-    expect(withProfit).toMatch(/Foyda: 1.?500.?000 so'm/)
+    expect(withProfit).toMatch(/Foyda: 1.?500.?000 so‘m/)
 
     const withoutProfit = deviceSoldMessage({
       shopName: 'Malika',
@@ -222,12 +222,12 @@ describe('device messages', () => {
       currency: { currency: 'USD', usdUzsRate: 12_500 },
     })
 
-    expect(msg).toMatch(/Sotuv narxi: 1.?250.?000 so'm \(~\$100\.00\)/)
-    expect(msg).toMatch(/To'langan: 625.?000 so'm \(~\$50\.00\)/)
-    expect(msg).toMatch(/Qolgan qarz: 625.?000 so'm \(~\$50\.00\)/)
+    expect(msg).toMatch(/Sotilish narxi: 1.?250.?000 so‘m \(~\$100\.00\)/)
+    expect(msg).toMatch(/To‘langan: 625.?000 so‘m \(~\$50\.00\)/)
+    expect(msg).toMatch(/Qolgan qarz: 625.?000 so‘m \(~\$50\.00\)/)
   })
 
-  it("device sold shows Qolgan qarz: Yo'q when fully paid", () => {
+  it("device sold shows Qolgan qarz: Yo‘q when fully paid", () => {
     const msg = deviceSoldMessage({
       shopName: 'Malika',
       device: fullDevice,
@@ -238,7 +238,7 @@ describe('device messages', () => {
       contractCurrency: 'UZS',
       paymentMethod: 'CASH',
     })
-    expect(msg).toContain("Qolgan qarz: Yo'q")
+    expect(msg).toContain("Qolgan qarz: Yo‘q")
   })
 
   it('device returned shows 0 refund and reason', () => {
@@ -249,14 +249,14 @@ describe('device messages', () => {
       refundMethod: null,
       note: 'mijoz bekor qildi',
     })
-    expect(msg).toMatch(/Qaytarilgan summa: 0 so'm/)
+    expect(msg).toMatch(/Qaytarilgan summa: 0 so‘m/)
     expect(msg).not.toContain('Qaytarish usuli')
-    expect(msg).toContain('Sabab: mijoz bekor qildi')
+    expect(msg).toContain('Izoh: mijoz bekor qildi')
   })
 
   it('device restocked includes reason', () => {
     const msg = deviceRestockedMessage({ shopName: 'Malika', device: fullDevice, note: "ko'rikdan o'tdi", adminName: 'Dilshod' })
-    expect(msg).toContain("Sabab: ko'rikdan o'tdi")
+    expect(msg).toContain('Izoh: ko&#39;rikdan o&#39;tdi')
     expect(msg).toContain('Admin: Dilshod')
   })
 })
@@ -286,7 +286,7 @@ describe('nasiya messages', () => {
     expect(msg).not.toContain('Nasiya foizi')
     expect(msg).not.toContain('Foiz summasi')
     expect(msg).toContain('Nasiya jami')
-    expect(msg).toContain('Keyingi to\'lov: 01.08.2026')
+    expect(msg).toContain('Keyingi to‘lov: 01.08.2026')
   })
 
   it('20% nasiya includes interest percent and amount', () => {
@@ -297,8 +297,8 @@ describe('nasiya messages', () => {
       finalNasiyaAmount: 4_440_000,
     })
     expect(msg).toContain('Nasiya foizi: 20%')
-    expect(msg).toMatch(/Foiz summasi: 740.?000 so'm/)
-    expect(msg).toContain('Qolgan summa')
+    expect(msg).toMatch(/Foiz summasi: 740.?000 so‘m/)
+    expect(msg).toContain('Qolgan qarz')
   })
 
   it('nasiya payment never shows a raw nasiya id and includes the essentials', () => {
@@ -319,9 +319,9 @@ describe('nasiya messages', () => {
     expect(msg).not.toContain('Nasiya:')
     expect(msg).toContain('Mijoz: Ali')
     expect(msg).toContain('Oy: 3-oy')
-    expect(msg).toMatch(/To'langan: 1.?000.?000 so'm/)
-    expect(msg).toContain("To'lov usuli: Karta")
-    expect(msg).toMatch(/Qolgan qarz: 2.?000.?000 so'm/)
+    expect(msg).toMatch(/To‘langan: 1.?000.?000 so‘m/)
+    expect(msg).toContain("To‘lov usuli: Karta")
+    expect(msg).toMatch(/Qolgan qarz: 2.?000.?000 so‘m/)
     expect(msg).not.toContain('Batareya')
   })
 
@@ -330,7 +330,7 @@ describe('nasiya messages', () => {
       shopName: 'M', customerName: 'A', device: fullDevice, month: 'MULTIPLE',
       paidAmount: 500_000, contractCurrency: 'UZS', paymentMethod: 'CASH', remaining: 0,
     })
-    expect(cleared).toContain("Qolgan qarz: To'liq yopildi")
+    expect(cleared).toContain("Qolgan qarz: To‘liq yopildi")
     expect(cleared).toContain('Oy: Bir nechta oy')
   })
 
@@ -340,8 +340,8 @@ describe('nasiya messages', () => {
       month: 2, amountDue: 616_667, contractCurrency: 'UZS', dueDate: new Date(2026, 7, 1),
     })
     expect(msg).toContain('Oy: 2-oy')
-    expect(msg).toMatch(/To'lov summasi: 616.?667 so'm/)
-    expect(msg).toContain('Muddat: 01.08.2026')
+    expect(msg).toMatch(/To‘lov summasi: 616.?667 so‘m/)
+    expect(msg).toContain('Muddat: Bugun')
   })
 
   it('nasiya overdue includes daysLate', () => {
@@ -369,8 +369,8 @@ describe('nasiya messages', () => {
     expect(msg).not.toContain('IMPORT-')
     expect(msg).not.toContain('IMEI')
     expect(msg).toContain('Eski nasiya summasi: $200.00')
-    expect(msg).toMatch(/~2.?500.?000 so'm/)
-    expect(msg).toContain("Oylik to'lov: $50.00")
+    expect(msg).toMatch(/~2.?500.?000 so‘m/)
+    expect(msg).toContain("Oylik to‘lov: $50.00")
   })
 })
 
@@ -380,13 +380,13 @@ describe('sale debt messages', () => {
       shopName: 'M', customerName: 'A', customerPhone: '+998900000000', device: fullDevice,
       paidAmount: 1_000_000, contractCurrency: 'UZS', paymentMethod: 'CASH', remaining: 500_000, note: null, adminName: 'D',
     })
-    expect(open).toMatch(/Qolgan qarz: 500.?000 so'm/)
+    expect(open).toMatch(/Qolgan qarz: 500.?000 so‘m/)
     expect(open).not.toContain('Izoh') // note null -> omitted
     const cleared = salePaymentMessage({
       shopName: 'M', customerName: 'A', device: fullDevice,
       paidAmount: 500_000, contractCurrency: 'UZS', paymentMethod: 'CASH', remaining: 0,
     })
-    expect(cleared).toContain("Qolgan qarz: To'liq yopildi")
+    expect(cleared).toContain("Qolgan qarz: To‘liq yopildi")
   })
 
   it('sale due + overdue include due date and daysLate', () => {
@@ -394,7 +394,7 @@ describe('sale debt messages', () => {
       customerName: 'A', customerPhone: '+998900000000', device: fullDevice,
       remainingAmount: 2_000_000, dueDate: new Date(2026, 7, 1),
     })
-    expect(due).toContain('Muddat: 01.08.2026')
+    expect(due).toContain('Muddat: Bugun')
     const overdue = saleOverdueMessage({
       customerName: 'A', customerPhone: '+998900000000', device: fullDevice,
       remainingAmount: 2_000_000, dueDate: new Date(2026, 6, 1), daysLate: 9,

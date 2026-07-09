@@ -109,9 +109,9 @@ describe('Telegram payment messages show payment-time context, not a recalculate
       currency: { currency: 'USD', usdUzsRate: 12_500 },
       paymentInput: { amount: 2_500_000, currency: 'UZS' },
     })
-    expect(msg).toContain("Shartnomaga qo'llandi:")
+    expect(msg).toContain("Shartnomaga qo‘llandi:")
     expect(msg).toContain('$200.00')
-    expect(msg).toMatch(/2.?500.?000 so'm/)
+    expect(msg).toMatch(/2.?500.?000 so‘m/)
   })
 
   it('nasiyaPaymentMessage: shows a single line when payment currency matches CONTRACT currency (nothing converted), even if display currency differs', () => {
@@ -124,7 +124,7 @@ describe('Telegram payment messages show payment-time context, not a recalculate
       currency: { currency: 'UZS', usdUzsRate: null },
       paymentInput: { amount: 2_500_000, currency: 'UZS' },
     })
-    expect(msg).not.toContain("Shartnomaga qo'llandi:")
+    expect(msg).not.toContain("Shartnomaga qo‘llandi:")
   })
 
   it('salePaymentMessage: UZS contract paid in USD shows the native $ amount and the applied so\'m amount', () => {
@@ -137,6 +137,6 @@ describe('Telegram payment messages show payment-time context, not a recalculate
       paymentInput: { amount: 160, currency: 'USD' },
     })
     expect(msg).toContain('$160.00')
-    expect(msg).toContain("Shartnomaga qo'llandi:")
+    expect(msg).toContain("Shartnomaga qo‘llandi:")
   })
 })

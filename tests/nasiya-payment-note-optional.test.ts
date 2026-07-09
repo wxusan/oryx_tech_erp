@@ -78,7 +78,7 @@ describe('nasiya payment modal: Izoh is optional in the UI', () => {
 describe('empty note does not break Telegram, logs, or payment history', () => {
   it('nasiyaPaymentMessage omits the Izoh line cleanly via optionalLine/cleanNote', () => {
     const templates = read('src/lib/telegram-templates.ts')
-    expect(templates).toContain("optionalLine('Izoh', cleanNote(data.note))")
+    expect(templates).toContain("optionalLine('Izoh', cleanNote(data.note), '📝')")
   })
 
   it('the payment route stores a trimmed/undefined note, never a fabricated default', () => {

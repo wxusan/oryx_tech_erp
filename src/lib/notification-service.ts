@@ -195,7 +195,7 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
 
         let deliveredWithImage = plan.method === 'photo' && result.ok
         // If the photo send failed (e.g. Telegram couldn't fetch the image),
-        // fall back to a plain text message so the notification still lands.
+        // fall back to the same HTML text message so the notification still lands.
         if (plan.method === 'photo' && !result.ok) {
           result = await sendTelegramMessage(notification.telegramId, notification.message)
           deliveredWithImage = false

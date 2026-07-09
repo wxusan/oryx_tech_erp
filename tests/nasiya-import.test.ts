@@ -98,9 +98,9 @@ describe('nasiyaImportedMessage', () => {
   })
 
   it('shows original, already-paid and remaining amounts distinctly', () => {
-    expect(msg).toMatch(/Eski nasiya summasi: 5.?200.?000 so'm/)
-    expect(msg).toMatch(/Importgacha to'langan: 1.?500.?000 so'm/)
-    expect(msg).toMatch(/Hozirgi qolgan qarz: 3.?700.?000 so'm/)
+    expect(msg).toMatch(/Eski nasiya summasi: 5.?200.?000 so‘m/)
+    expect(msg).toMatch(/Importgacha to‘langan: 1.?500.?000 so‘m/)
+    expect(msg).toMatch(/Qolgan qarz: 3.?700.?000 so‘m/)
   })
 
   it('leaks no sensitive data and uses no Markdown', () => {

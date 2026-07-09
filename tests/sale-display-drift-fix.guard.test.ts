@@ -84,9 +84,9 @@ describe('Telegram: deviceSoldMessage / salePaymentMessage use the sale\'s own c
   const templates = read('src/lib/telegram-templates.ts')
 
   it('deviceSoldMessage formats salePrice/paidAmount/remaining via formatContractMoneyWithDisplay + contractCurrency', () => {
-    expect(templates).toContain(
-      "const contractMoney = (amount: number) =>\n    formatContractMoneyWithDisplay(amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)",
-    )
+    expect(templates).toContain('function contractMoney(')
+    expect(templates).toContain('formatContractMoneyWithDisplay(')
+    expect(templates).toContain('contractMoney(amount, data.contractCurrency, data.currency)')
   })
 
   it('salePaymentMessage compares payment currency against the sale\'s CONTRACT currency, not the shop display currency', () => {
@@ -94,9 +94,7 @@ describe('Telegram: deviceSoldMessage / salePaymentMessage use the sale\'s own c
   })
 
   it('olibSotdimCreatedMessage formats purchase/sale/profit via the shared contract currency', () => {
-    expect(templates).toContain(
-      "formatContractMoneyWithDisplay(amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)",
-    )
+    expect(templates).toContain('const money = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency)')
   })
 })
 

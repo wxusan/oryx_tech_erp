@@ -13,8 +13,8 @@ describe('import placeholder IMEI user-facing guard', () => {
     const src = read('src/lib/telegram-templates.ts')
 
     expect(src).toContain("import { telegramImei } from '@/lib/device-display'")
-    expect(src).toContain("optionalLine('IMEI', telegramImei(device.imei))")
-    expect(src).not.toContain("optionalLine('IMEI', device.imei)")
+    expect(src).toContain("optionalLine('IMEI', telegramImei(device.imei), '🔢')")
+    expect(src).not.toContain("optionalLine('IMEI', device.imei,")
   })
 
   it('routes device exports through the display IMEI helper', () => {

@@ -38,6 +38,7 @@ describe('telegram webhook /start recognition guard', () => {
     expect(src).toContain('startSuperAdminMessage(owner.user.name)')
     expect(src).toContain('startShopAdminMessage(owner.user.name, owner.user.shop.name)')
     expect(src).toContain('startUnknownMessage(telegramId)')
+    expect(src).toContain("parse_mode: 'HTML'")
   })
 
   it('has no /link command handler and never mentions /link or link codes', () => {
@@ -149,6 +150,6 @@ describe('item 14 — Telegram message design polish', () => {
   it('deviceSoldMessage shows Foyda (profit) when the sell route can compute it', () => {
     const route = read('src/app/api/devices/[id]/sell/route.ts')
     expect(route).toContain('computeSaleContractMargin(contractSalePrice, contractCurrency, salePriceInput.exchangeRateUsed,')
-    expect(templates).toContain("typeof data.profit === 'number' ? `Foyda: ${contractMoney(data.profit)}` : null")
+    expect(templates).toContain("typeof data.profit === 'number' ? `📊 Foyda: ${money(data.profit)}` : null")
   })
 })

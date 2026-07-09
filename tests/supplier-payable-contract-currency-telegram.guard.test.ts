@@ -28,7 +28,7 @@ describe('supplier payable Telegram messages read the contract-currency amount, 
       currency: { currency: 'UZS', usdUzsRate: 12_500 },
     })
     expect(msg).toContain('$200.00')
-    expect(msg).toMatch(/\(~2.?500.?000 so'm\)/)
+    expect(msg).toMatch(/\(~2.?500.?000 so‘m\)/)
   })
 
   it('overdue: same native-leads formatting', () => {
@@ -40,7 +40,7 @@ describe('supplier payable Telegram messages read the contract-currency amount, 
       daysLate: 7,
       currency: { currency: 'USD', usdUzsRate: 12_500 },
     })
-    expect(msg).toMatch(/2.?000.?000 so'm/)
+    expect(msg).toMatch(/2.?000.?000 so‘m/)
     expect(msg).toContain('(~$160.00)')
   })
 

@@ -25,15 +25,15 @@ function read(rel: string): string {
  */
 describe('worked numeric example: legacy vs. contract-currency completion can diverge', () => {
   it('a USD sale can still owe real money by contract math while the legacy-UZS math already reads zero', () => {
-    // $500 sale created at rate 12,500 -> legacy snapshot 6,250,000 so'm.
+    // $500 sale created at rate 12,500 -> legacy snapshot 6,250,000 so‘m.
     // Customer pays in two USD-denominated instalments; the rate has moved to
     // 13,000 by the time the SECOND payment's legacy-UZS delta is computed
     // (moneyInputToUzs always uses TODAY's rate for a non-UZS payment).
     // First payment: $250 paid in USD (matches contract currency, no FX
     // needed on the contract side) -> contract remaining = $250.
-    // Its legacy delta was converted at rate 12,600 (some earlier day) -> 3,150,000 so'm.
+    // Its legacy delta was converted at rate 12,600 (some earlier day) -> 3,150,000 so‘m.
     // Second payment: another $250 in USD -> contract remaining goes to $0.
-    // Its legacy delta is converted at TODAY's rate 13,000 -> 3,250,000 so'm.
+    // Its legacy delta is converted at TODAY's rate 13,000 -> 3,250,000 so‘m.
     // Total legacy paid = 3,150,000 + 3,250,000 = 6,400,000 > the 6,250,000
     // legacy snapshot -- i.e. the legacy ledger "overshoots" zero before the
     // contract ledger even finishes, or (in the opposite rate-drift
@@ -58,8 +58,8 @@ describe('worked numeric example: legacy vs. contract-currency completion can di
   it('contractScheduleOutstanding applies a currency-aware tolerance (cents for USD, so\'m for UZS), matching the nasiya completion pattern', () => {
     expect(contractScheduleOutstanding(500, 499.99, 'USD')).toBe(0) // 1 cent short -> snapped
     expect(contractScheduleOutstanding(500, 499, 'USD')).toBe(1) // $1 short -> real debt
-    expect(contractScheduleOutstanding(6_250_000, 6_249_600, 'UZS')).toBe(0) // 400 so'm short -> snapped
-    expect(contractScheduleOutstanding(6_250_000, 6_249_000, 'UZS')).toBe(1000) // 1000 so'm short -> real debt
+    expect(contractScheduleOutstanding(6_250_000, 6_249_600, 'UZS')).toBe(0) // 400 so‘m short -> snapped
+    expect(contractScheduleOutstanding(6_250_000, 6_249_000, 'UZS')).toBe(1000) // 1000 so‘m short -> real debt
   })
 })
 

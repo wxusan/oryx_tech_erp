@@ -28,9 +28,10 @@ describe('cron reminders use contract-currency remaining amounts', () => {
 describe('nasiya reminder Telegram templates format the contract-currency amount natively', () => {
   const templates = read('src/lib/telegram-templates.ts')
 
-  it('nasiyaDueTodayMessage/nasiyaOverdueMessage/nasiyaEarlyReminderMessage require contractCurrency and use formatContractMoneyWithDisplay', () => {
-    const occurrences = templates.split('formatContractMoneyWithDisplay(data.amountDue, data.contractCurrency,').length - 1
+  it('nasiyaDueTodayMessage/nasiyaOverdueMessage/nasiyaEarlyReminderMessage require contractCurrency and use the shared contract-money wrapper', () => {
+    const occurrences = templates.split('contractMoney(data.amountDue, data.contractCurrency, data.currency)').length - 1
     expect(occurrences).toBe(3)
+    expect(templates).toContain('formatContractMoneyWithDisplay(')
   })
 })
 

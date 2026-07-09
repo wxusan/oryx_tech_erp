@@ -15,6 +15,11 @@ describe('centralized image-aware Telegram delivery', () => {
     expect(telegram).toContain('api.sendPhoto(')
   })
 
+  it('uses Telegram HTML parse mode for messages and photo captions', () => {
+    expect(telegram).toContain("sendMessage(telegramId, text, { parse_mode: 'HTML' })")
+    expect(telegram).toContain("caption ? { caption, parse_mode: 'HTML' } : undefined")
+  })
+
   it('the queue processor resolves a safe image and chooses photo vs message', () => {
     expect(service).toContain('resolveNotificationImageUrl(notification)')
     expect(service).toContain('chooseTelegramDelivery({ imageUrl, caption: notification.message })')

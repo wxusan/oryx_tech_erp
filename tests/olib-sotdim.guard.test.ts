@@ -134,7 +134,7 @@ describe('Telegram: photo pipeline covers SupplierPayable, never touches passpor
     expect(templates).toContain('export function supplierPayableOverdueMessage')
     expect(templates).toContain('export function supplierPayableEarlyReminderMessage')
     expect(templates).toContain('export function supplierPayablePaidMessage')
-    expect(templates).toContain("yetkazib beruvchiga to'lov")
+    expect(templates).toContain('Yetkazib beruvchiga to‘lov')
   })
 
   it('unverified telegram IDs are still excluded (unchanged admin filter reused by the new route)', () => {

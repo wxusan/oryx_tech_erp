@@ -28,10 +28,10 @@ export interface TelegramSendResult {
 }
 
 /**
- * Send a plain-text message to a single Telegram user.
+ * Send a Telegram HTML message to a single Telegram user.
  *
- * Sent WITHOUT parse_mode — message bodies are plain text (see
- * `@/lib/telegram-templates`). Returns { ok: true } on success, or
+ * Templates escape every dynamic value and use HTML only for a bold title.
+ * Returns { ok: true } on success, or
  * { ok: false, errorCode, description } on any error (network, blocked bot, …).
  * grammy's GrammyError carries the Telegram API error_code + description, which
  * we surface for observability.
@@ -41,7 +41,7 @@ export async function sendTelegramMessage(
   text: string,
 ): Promise<TelegramSendResult> {
   try {
-    await getBot().api.sendMessage(telegramId, text)
+    await getBot().api.sendMessage(telegramId, text, { parse_mode: 'HTML' })
     return { ok: true }
   } catch (error) {
     return handleSendError('sendMessage', error)
@@ -52,8 +52,9 @@ export async function sendTelegramMessage(
  * Send a photo with an optional caption to a single Telegram user.
  *
  * `photoUrl` MUST be a URL Telegram can fetch (e.g. a short-lived signed URL) —
- * never a permanent private URL. The caption is the same plain text a message
- * would carry (no parse_mode). Same result contract as sendTelegramMessage.
+ * never a permanent private URL. The caption is the same HTML text a message
+ * would carry, using the same parse mode. Same result contract as
+ * sendTelegramMessage.
  */
 export async function sendTelegramPhoto(
   telegramId: string,
@@ -61,7 +62,11 @@ export async function sendTelegramPhoto(
   caption?: string,
 ): Promise<TelegramSendResult> {
   try {
-    await getBot().api.sendPhoto(telegramId, photoUrl, caption ? { caption } : undefined)
+    await getBot().api.sendPhoto(
+      telegramId,
+      photoUrl,
+      caption ? { caption, parse_mode: 'HTML' } : undefined,
+    )
     return { ok: true }
   } catch (error) {
     return handleSendError('sendPhoto', error)

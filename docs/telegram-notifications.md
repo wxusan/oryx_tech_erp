@@ -3,8 +3,9 @@
 ## Architecture
 
 1. **Templates** (`src/lib/telegram-templates.ts`) — pure functions, no DB
-   access, no Markdown (messages are sent as plain text — `parse_mode` is
-   never set, so literal `*`/`_` would render as-is). Every template uses
+   access, no Markdown. Messages use Telegram HTML with exactly one
+   `<b>...</b>` title; the body remains normal-weight. Every dynamic string
+   passes through `escapeTelegramHtml` before interpolation. Every template uses
    the same small builder helpers: `compose()`/`block()`/`optionalLine()`
    for consistent spacing, `formatMoney`/`telegramMoney`/
    `formatContractMoneyWithDisplay`/`formatNativeAmount` for consistent,
@@ -24,8 +25,9 @@
    `src/lib/server/notification-image.ts`) — `chooseTelegramDelivery({
    imageUrl, caption })` picks `sendTelegramPhoto` when an image URL is
    available AND the caption fits Telegram's 1024-char photo-caption limit,
-   otherwise falls back to `sendTelegramMessage` (plain text, no length
-   limit issue). `resolveNotificationImageUrl(notification)` resolves a
+   otherwise falls back to `sendTelegramMessage`. Both methods use
+   `parse_mode: 'HTML'`, including photo captions.
+   `resolveNotificationImageUrl(notification)` resolves a
    **device** image only — it switches on `notification.relatedType` (one
    of `Device`/`Sale`/`DeviceReturn`/`Nasiya`/`NasiyaSchedule`/
    `SupplierPayable`), looks up that record's linked Device, and only signs
@@ -51,11 +53,17 @@
 
 ## Split-payment breakdown
 
-`salePaymentMessage`/`nasiyaPaymentMessage`/`deviceSoldMessage` accept an
-optional `paymentBreakdown?: { method, amount }[]`. When present (a split
-cash+card payment), the "To'lov usuli" line renders
-`formatPaymentBreakdown()` — e.g. `Naqd: 250 000 so'm, Karta: 250 000 so'm`
-— instead of the single-method label. Never both at once.
+`salePaymentMessage` and `nasiyaPaymentMessage` accept an optional
+`paymentBreakdown?: { method, amount }[]`. When present, the single-method line
+is replaced by a readable block:
+
+```txt
+💳 To‘lov usuli:
+• Naqd: 250 000 so‘m
+• Karta: 250 000 so‘m
+```
+
+`deviceSoldMessage` does not currently receive a split-payment breakdown.
 
 ## Portal banner (not Telegram, but the other half of "reminders")
 
@@ -78,8 +86,9 @@ limits.
 ## Where to look when adding a new notification type
 
 1. Add a pure template function to `telegram-templates.ts` (reuse
-   `compose()`/`block()`/`optionalLine()`, format all money through the
-   shared helpers, never embed a URL/passport reference).
+   `compose()`/`block()`/`optionalLine()`, start with one bold title, escape
+   every dynamic value, format all money through the shared helpers, and never
+   embed a URL/passport reference).
 2. Add a guard test asserting the new function exists and formats money via
    the shared helpers (follow the pattern in `tests/telegram.test.ts` /
    `tests/telegram.guard.test.ts`).

@@ -26,8 +26,8 @@ describe('nasiyaPaymentMessage — contract-currency allocation breakdown and co
       ],
     })
     expect(msg).toContain('$200.00 joriy oy uchun yopildi')
-    expect(msg).toContain("$50.00 2-oyga oldindan qo'llandi")
-    expect(msg).toContain("Shartnomaga qo'llandi: $250.00")
+    expect(msg).toContain("$50.00 2-oyga oldindan qo‘llandi")
+    expect(msg).toContain("Shartnomaga qo‘llandi: $250.00")
   })
 
   it('Example D — UZS contract overpayment paid in USD: allocation breakdown shows native so\'m amounts', () => {
@@ -44,15 +44,15 @@ describe('nasiyaPaymentMessage — contract-currency allocation breakdown and co
         { monthNumber: 2, amount: 500_000 },
       ],
     })
-    expect(msg).toMatch(/2.?000.?000 so'm joriy oy uchun yopildi/)
-    expect(msg).toMatch(/500.?000 so'm 2-oyga oldindan qo'llandi/)
-    expect(msg).toContain('To\'langan: $200.00')
-    expect(msg).toMatch(/Shartnomaga qo'llandi: 2.?500.?000 so'm/)
+    expect(msg).toMatch(/2.?000.?000 so‘m joriy oy uchun yopildi/)
+    expect(msg).toMatch(/500.?000 so‘m 2-oyga oldindan qo‘llandi/)
+    expect(msg).toContain('To‘langan: $200.00')
+    expect(msg).toMatch(/Shartnomaga qo‘llandi: 2.?500.?000 so‘m/)
   })
 
   it('shows "To\'liq yopildi" for a fully-cleared contract regardless of currency', () => {
     const msg = nasiyaPaymentMessage({ ...base, month: 1, paidAmount: 200, contractCurrency: 'USD', remaining: 0 })
-    expect(msg).toContain("Qolgan qarz: To'liq yopildi")
+    expect(msg).toContain("Qolgan qarz: To‘liq yopildi")
   })
 })
 
@@ -74,6 +74,6 @@ describe('nasiyaCompletedMessage — shows the contract-currency total, never a 
       contractCurrency: 'UZS',
       currency: { currency: 'USD', usdUzsRate: 13_500 },
     })
-    expect(msg).toMatch(/12.?000.?000 so'm/)
+    expect(msg).toMatch(/12.?000.?000 so‘m/)
   })
 })

@@ -26,6 +26,7 @@ import {
   startShopAdminMessage,
   startSuperAdminMessage,
   startUnknownMessage,
+  telegramIdUnavailableMessage,
   unknownCommandMessage,
 } from '@/lib/telegram-templates'
 
@@ -44,13 +45,13 @@ function webhookBot() {
     const telegramId = ctx.from?.id?.toString()
 
     if (!telegramId) {
-      await ctx.reply("Telegram ID aniqlanmadi. Iltimos, botni shaxsiy akkauntingizdan oching.")
+      await ctx.reply(telegramIdUnavailableMessage(), { parse_mode: 'HTML' })
       return
     }
 
     const owner = await findTelegramOwner(telegramId)
     if (!owner) {
-      await ctx.reply(startUnknownMessage(telegramId))
+      await ctx.reply(startUnknownMessage(telegramId), { parse_mode: 'HTML' })
       logger.info('telegram /start from unlinked id', { event: 'telegram.start_unlinked' })
       return
     }
@@ -83,7 +84,7 @@ function webhookBot() {
       owner.type === 'SUPER_ADMIN'
         ? startSuperAdminMessage(owner.user.name)
         : startShopAdminMessage(owner.user.name, owner.user.shop.name)
-    await ctx.reply(welcome)
+    await ctx.reply(welcome, { parse_mode: 'HTML' })
 
     logger.info('telegram /start linked', { event: 'telegram.start', actorType: owner.type })
   })
@@ -91,7 +92,7 @@ function webhookBot() {
   bot.on('message', async (ctx) => {
     const text = ctx.message.text ?? ''
     if (text.startsWith('/')) {
-      await ctx.reply(unknownCommandMessage())
+      await ctx.reply(unknownCommandMessage(), { parse_mode: 'HTML' })
     }
   })
 
