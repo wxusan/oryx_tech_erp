@@ -3,6 +3,7 @@ import {
   convertUsdToUzs,
   convertUzsToUsd,
   formatMoneyByCurrency,
+  formatUserFacingMoney,
   formatMoneyWithBase,
   normalizeMoneyInput,
 } from '@/lib/currency'
@@ -16,8 +17,42 @@ describe('currency helpers', () => {
     expect(formatMoneyByCurrency(1_520_000, 'USD', 12_500)).toBe('$121.60')
   })
 
-  it('keeps UZS context when formatting USD display for Telegram/export clarity', () => {
+  it('legacy base formatter still exists for internal diagnostics only', () => {
     expect(formatMoneyWithBase(1_520_000, 'USD', 12_500)).toMatch(/\$121\.60 \(~1.?520.?000 so'm\)/)
+  })
+
+  it('formats user-facing money in exactly one selected display currency', () => {
+    expect(
+      formatUserFacingMoney({
+        amount: 1_520_000,
+        amountCurrency: 'UZS',
+        displayCurrency: 'USD',
+        rate: 12_500,
+      }),
+    ).toBe('$121.60')
+    expect(
+      formatUserFacingMoney({
+        amount: 121.6,
+        amountCurrency: 'USD',
+        displayCurrency: 'UZS',
+        rate: 12_500,
+      }),
+    ).toMatch(/1.?520.?000 so'm/)
+    expect(
+      formatUserFacingMoney({
+        amount: 121.6,
+        amountCurrency: 'USD',
+        displayCurrency: 'USD',
+      }),
+    ).toBe('$121.60')
+    expect(
+      formatUserFacingMoney({
+        amount: 1_520_000,
+        amountCurrency: 'UZS',
+        displayCurrency: 'USD',
+        rate: null,
+      }),
+    ).toBe('—')
   })
 
   it('converts USD input to rounded UZS server-side units', () => {

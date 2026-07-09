@@ -87,15 +87,18 @@ describe('Sale-margin profit uses computeSaleContractMargin (purchase-currency a
   })
 })
 
-describe('Device detail UI: purchase price shows its own native currency, never a live reconversion', () => {
+describe('Device detail UI: purchase price shows only the shop display currency', () => {
   const page = read('src/app/(shop)/shop/qurilmalar/[id]/page.tsx')
 
-  it('Kelish narxi value uses formatContractMoney with the device\'s own purchaseCurrency', () => {
-    expect(page).toContain('value: formatContractMoney(device.purchaseInputAmount, device.purchaseCurrency),')
+  it('Kelish narxi value converts from the device\'s own purchaseCurrency to the shop display currency', () => {
+    expect(page).toContain('value: formatDisplayMoneyFromContract(')
+    expect(page).toContain('device.purchaseInputAmount')
+    expect(page).toContain('device.purchaseCurrency')
+    expect(page).toContain('currency.currency')
   })
 
-  it('shows a UZS + rate hint only when the purchase currency is not UZS, using the FROZEN purchase-time rate', () => {
-    expect(page).toContain("hint: device.purchaseCurrency !== 'UZS' ? `${formatContractMoney(device.purchaseAmountUzsSnapshot, 'UZS')}${purchaseRateHint}` : null,")
-    expect(page).toContain('const purchaseRateHint = device.purchaseExchangeRateAtCreation')
+  it('does not show a secondary UZS + rate hint in normal shop-facing UI', () => {
+    expect(page).not.toContain('purchaseRateHint')
+    expect(page).not.toContain("hint: device.purchaseCurrency !== 'UZS'")
   })
 })

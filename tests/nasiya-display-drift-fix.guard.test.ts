@@ -26,12 +26,22 @@ describe('nasiya detail page: no double-conversion drift for USD contracts', () 
   })
 
   it('every summary card money value uses dfmt() + a contract* field, not fmt() + a legacy field', () => {
-    expect(page).toContain('{ label: \'Sotilish narxi\', value: dfmt(nasiya.contractTotalAmount) }')
-    expect(page).toContain('{ label: "Boshlang\'ich to\'lov", value: dfmt(nasiya.contractDownPayment) }')
-    expect(page).toContain('{ label: \'Nasiya jami\', value: dfmt(nasiya.contractFinalAmount) }')
-    expect(page).toContain('{ label: "To\'langan", value: dfmt(nasiya.contractPaidAmount) }')
-    expect(page).toContain('{ label: "Qarz qoldig\'i", value: dfmt(nasiya.contractRemainingAmount) }')
-    expect(page).toContain('{ label: "Oylik to\'lov", value: dfmt(contractMonthlyPayment) }')
+    for (const text of [
+      'Sotilish narxi',
+      "Boshlang'ich to'lov",
+      'Nasiya jami',
+      "To'langan",
+      "Qarz qoldig'i",
+      "Oylik to'lov",
+      'dfmt(nasiya.contractTotalAmount)',
+      'dfmt(nasiya.contractDownPayment)',
+      'dfmt(nasiya.contractFinalAmount)',
+      'dfmt(nasiya.contractPaidAmount)',
+      'dfmt(nasiya.contractRemainingAmount)',
+      'dfmt(contractMonthlyPayment)',
+    ]) {
+      expect(page).toContain(text)
+    }
   })
 
   it('the progress card and per-schedule table also use dfmt() + contract fields', () => {

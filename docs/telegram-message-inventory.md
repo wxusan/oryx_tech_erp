@@ -1,40 +1,47 @@
 # Telegram Message Inventory
 
-Updated: 2026-07-09 after the HTML copy/design pass.
+Updated: 2026-07-09 after the HTML copy/design pass and single display-currency
+money pass.
 
 All messages use Telegram HTML. The first line is the only bold text, dynamic
 values are escaped, and queued messages use the same HTML for `sendMessage` and
 `sendPhoto` captions.
 
+Money values show only the shop's selected display currency. USD-display
+messages contain `$` values only; UZS-display messages contain `so‘m` values
+only. Mixed values like `so‘m (~$...)`, `$... (~so‘m)`, and the old
+`Shartnomaga qo‘llandi` user-facing line are not used in normal Telegram
+messages.
+
 ## Summary
 
-| # | Function/template | Trigger | Receiver | Delivery |
-|---:|---|---|---|---|
-| 1 | `telegramIdUnavailableMessage` | `/start` without sender ID | Current chat | Direct HTML reply |
-| 2 | `startSuperAdminMessage` | Recognised super admin `/start` | Current chat | Direct HTML reply |
-| 3 | `startShopAdminMessage` | Recognised shop admin `/start` | Current chat | Direct HTML reply |
-| 4 | `startUnknownMessage` | Unlinked `/start` | Current chat | Direct HTML reply |
-| 5 | `unknownCommandMessage` | Unsupported slash command | Current chat | Direct HTML reply |
-| 6 | `deviceAddedMessage` | Device created | Verified shop admins | Photo/text queue |
-| 7 | `deviceSoldMessage` | Normal sale created | Verified shop admins | Photo/text queue |
-| 8 | `deviceReturnedMessage` | Device returned | Verified shop admins | Photo/text queue |
-| 9 | `deviceRestockedMessage` | Device restocked | Verified shop admins | Photo/text queue |
-| 10 | `nasiyaCreatedMessage` | Nasiya created | Verified shop admins | Photo/text queue |
-| 11 | `nasiyaPaymentMessage` | Positive nasiya payment | Verified shop admins | Photo/text queue |
-| 12 | `nasiyaCompletedMessage` | Nasiya becomes completed | Verified shop admins | Photo/text queue |
-| 13 | `nasiyaImportedMessage` | Historical nasiya imported | Verified shop admins | Photo/text queue |
-| 14 | `nasiyaEarlyReminderMessage` | Configured days before due | Verified shop admins | Photo/text queue |
-| 15 | `nasiyaDueTodayMessage` | Nasiya schedule due today | Verified shop admins | Photo/text queue |
-| 16 | `nasiyaOverdueMessage` | Nasiya schedule overdue | Verified shop admins | Photo/text queue |
-| 17 | `salePaymentMessage` | Later normal-sale payment | Verified shop admins | Photo/text queue |
-| 18 | `saleEarlyReminderMessage` | Configured days before due | Verified shop admins | Photo/text queue |
-| 19 | `saleDueTodayMessage` | Sale debt due today | Verified shop admins | Photo/text queue |
-| 20 | `saleOverdueMessage` | Sale debt overdue | Verified shop admins | Photo/text queue |
-| 21 | `olibSotdimCreatedMessage` | Olib-sotdim created | Verified shop admins | Photo/text queue |
-| 22 | `supplierPayableEarlyReminderMessage` | Supplier debt approaching | Verified shop admins | Photo/text queue |
-| 23 | `supplierPayableDueTodayMessage` | Supplier debt due today | Verified shop admins | Photo/text queue |
-| 24 | `supplierPayableOverdueMessage` | Supplier debt overdue | Verified shop admins | Photo/text queue |
-| 25 | `supplierPayablePaidMessage` | Supplier payable marked paid | Verified shop admins | Photo/text queue |
+|   # | Function/template                     | Trigger                         | Receiver             | Delivery          |
+| --: | ------------------------------------- | ------------------------------- | -------------------- | ----------------- |
+|   1 | `telegramIdUnavailableMessage`        | `/start` without sender ID      | Current chat         | Direct HTML reply |
+|   2 | `startSuperAdminMessage`              | Recognised super admin `/start` | Current chat         | Direct HTML reply |
+|   3 | `startShopAdminMessage`               | Recognised shop admin `/start`  | Current chat         | Direct HTML reply |
+|   4 | `startUnknownMessage`                 | Unlinked `/start`               | Current chat         | Direct HTML reply |
+|   5 | `unknownCommandMessage`               | Unsupported slash command       | Current chat         | Direct HTML reply |
+|   6 | `deviceAddedMessage`                  | Device created                  | Verified shop admins | Photo/text queue  |
+|   7 | `deviceSoldMessage`                   | Normal sale created             | Verified shop admins | Photo/text queue  |
+|   8 | `deviceReturnedMessage`               | Device returned                 | Verified shop admins | Photo/text queue  |
+|   9 | `deviceRestockedMessage`              | Device restocked                | Verified shop admins | Photo/text queue  |
+|  10 | `nasiyaCreatedMessage`                | Nasiya created                  | Verified shop admins | Photo/text queue  |
+|  11 | `nasiyaPaymentMessage`                | Positive nasiya payment         | Verified shop admins | Photo/text queue  |
+|  12 | `nasiyaCompletedMessage`              | Nasiya becomes completed        | Verified shop admins | Photo/text queue  |
+|  13 | `nasiyaImportedMessage`               | Historical nasiya imported      | Verified shop admins | Photo/text queue  |
+|  14 | `nasiyaEarlyReminderMessage`          | Configured days before due      | Verified shop admins | Photo/text queue  |
+|  15 | `nasiyaDueTodayMessage`               | Nasiya schedule due today       | Verified shop admins | Photo/text queue  |
+|  16 | `nasiyaOverdueMessage`                | Nasiya schedule overdue         | Verified shop admins | Photo/text queue  |
+|  17 | `salePaymentMessage`                  | Later normal-sale payment       | Verified shop admins | Photo/text queue  |
+|  18 | `saleEarlyReminderMessage`            | Configured days before due      | Verified shop admins | Photo/text queue  |
+|  19 | `saleDueTodayMessage`                 | Sale debt due today             | Verified shop admins | Photo/text queue  |
+|  20 | `saleOverdueMessage`                  | Sale debt overdue               | Verified shop admins | Photo/text queue  |
+|  21 | `olibSotdimCreatedMessage`            | Olib-sotdim created             | Verified shop admins | Photo/text queue  |
+|  22 | `supplierPayableEarlyReminderMessage` | Supplier debt approaching       | Verified shop admins | Photo/text queue  |
+|  23 | `supplierPayableDueTodayMessage`      | Supplier debt due today         | Verified shop admins | Photo/text queue  |
+|  24 | `supplierPayableOverdueMessage`       | Supplier debt overdue           | Verified shop admins | Photo/text queue  |
+|  25 | `supplierPayablePaidMessage`          | Supplier payable marked paid    | Verified shop admins | Photo/text queue  |
 
 ## Detailed inventory
 
@@ -54,11 +61,8 @@ Iltimos, botni shaxsiy Telegram akkauntingizdan oching.
 ```html
 <b>👋 Oryx ERP botiga xush kelibsiz</b>
 
-👨‍💼 Admin: {adminName}
-
-Siz Oryx ERP super admin sifatida ulandingiz.
-
-Endi platformadagi muhim bildirishnomalar shu bot orqali keladi.
+👨‍💼 Admin: {adminName} Siz Oryx ERP super admin sifatida ulandingiz. Endi
+platformadagi muhim bildirishnomalar shu bot orqali keladi.
 ```
 
 ### 3. Shop-admin welcome
@@ -66,12 +70,9 @@ Endi platformadagi muhim bildirishnomalar shu bot orqali keladi.
 ```html
 <b>👋 Oryx ERP botiga xush kelibsiz</b>
 
-👨‍💼 Admin: {adminName}
-🏪 Do‘kon: {shopName}
-
-Siz do‘kon bildirishnomalariga muvaffaqiyatli ulandingiz.
-
-Endi sotuv, nasiya, to‘lov va eslatmalar shu yerga keladi.
+👨‍💼 Admin: {adminName} 🏪 Do‘kon: {shopName} Siz do‘kon bildirishnomalariga
+muvaffaqiyatli ulandingiz. Endi sotuv, nasiya, to‘lov va eslatmalar shu yerga
+keladi.
 ```
 
 ### 4. Unlinked account
@@ -79,11 +80,8 @@ Endi sotuv, nasiya, to‘lov va eslatmalar shu yerga keladi.
 ```html
 <b>⚠️ Telegram akkaunt ulanmagan</b>
 
-Telegram akkauntingiz Oryx ERP hisobiga ulanmagan.
-
-Iltimos, admin panelda Telegram ID’ingiz to‘g‘ri kiritilganini tekshiring.
-
-🆔 Telegram ID: {telegramId}
+Telegram akkauntingiz Oryx ERP hisobiga ulanmagan. Iltimos, admin panelda
+Telegram ID’ingiz to‘g‘ri kiritilganini tekshiring. 🆔 Telegram ID: {telegramId}
 ```
 
 ### 5. Unknown command
@@ -150,26 +148,12 @@ Return/restock note block:
 ```html
 <b>📝 Yangi nasiya yaratildi</b>
 
-🏪 Do‘kon: {shopName}
-
-👤 Mijoz: {customerName}
-📞 Tel: {customerPhone}
-
-{device group}
-
-💵 Sotilish narxi: {totalAmount}
-💰 Boshlang‘ich to‘lov: {downPayment}
-⏳ Qolgan qarz: {baseRemainingAmount}
-
-📈 Nasiya foizi: {interestPercent}%
-➕ Foiz summasi: {interestAmount}
-📊 Nasiya jami: {finalNasiyaAmount}
-
-📅 Muddat: {months} oy
-💵 Oylik to‘lov: {monthlyPayment}
-🗓 Keyingi to‘lov: {nextPaymentDate}
-
-👨‍💼 Admin: {adminName}
+🏪 Do‘kon: {shopName} 👤 Mijoz: {customerName} 📞 Tel: {customerPhone} {device
+group} 💵 Sotilish narxi: {totalAmount} 💰 Boshlang‘ich to‘lov: {downPayment} ⏳
+Qolgan qarz: {baseRemainingAmount} 📈 Nasiya foizi: {interestPercent}% ➕ Foiz
+summasi: {interestAmount} 📊 Nasiya jami: {finalNasiyaAmount} 📅 Muddat:
+{months} oy 💵 Oylik to‘lov: {monthlyPayment} 🗓 Keyingi to‘lov:
+{nextPaymentDate} 👨‍💼 Admin: {adminName}
 ```
 
 At zero interest, the remaining/interest block disappears and `Nasiya jami`
@@ -180,29 +164,17 @@ stays in the main financial block.
 ```html
 <b>💰 Nasiya to‘lovi qabul qilindi</b>
 
-🏪 Do‘kon: {shopName}
-
-👤 Mijoz: {customerName}
-📞 Tel: {customerPhone}
-
-{device group without battery}
-
-📆 Oy: {month | Bir nechta oy}
-💰 To‘langan: {paidAmount}
-🔄 Shartnomaga qo‘llandi: {contractAmount}
-{payment method block}
-⏳ Qolgan qarz: {remaining | To‘liq yopildi}
-
-📋 To‘lov taqsimoti:
-• {amount} joriy oy uchun yopildi
-• {amount} {month}-oyga oldindan qo‘llandi
-
-📝 Izoh: {note}
-👨‍💼 Admin: {adminName}
+🏪 Do‘kon: {shopName} 👤 Mijoz: {customerName} 📞 Tel: {customerPhone} {device
+group without battery} 📆 Oy: {month | Bir nechta oy} 💰 To‘langan: {paidAmount}
+{payment method block} ⏳ Qolgan qarz: {remaining | To‘liq yopildi} 📋 To‘lov
+taqsimoti: • {amount} joriy oy uchun yopildi • {amount} {month}-oyga oldindan
+qo‘llandi 📝 Izoh: {note} 👨‍💼 Admin: {adminName}
 ```
 
-`Shartnomaga qo‘llandi` appears only for cross-currency input. Allocation
-lines appear only for multi-schedule payments.
+`To‘langan`, allocation lines, and `Qolgan qarz` are all rendered in the shop
+display currency. Cross-currency input is converted for display with the
+payment's saved payment-time exchange rate. Allocation lines appear only for
+multi-schedule payments.
 
 Split payment:
 
@@ -217,16 +189,9 @@ Split payment:
 ```html
 <b>✅ Nasiya yakunlandi</b>
 
-🏪 Do‘kon: {shopName}
-
-👤 Mijoz: {customerName}
-📞 Tel: {customerPhone}
-
-{device group without battery}
-
-💰 Jami to‘langan: {finalNasiyaAmount}
-
-👨‍💼 Admin: {adminName}
+🏪 Do‘kon: {shopName} 👤 Mijoz: {customerName} 📞 Tel: {customerPhone} {device
+group without battery} 💰 Jami to‘langan: {finalNasiyaAmount} 👨‍💼 Admin:
+{adminName}
 ```
 
 ### 13. Historical nasiya imported
@@ -234,21 +199,11 @@ Split payment:
 ```html
 <b>📥 Eski nasiya import qilindi</b>
 
-🏪 Do‘kon: {shopName}
-
-👤 Mijoz: {customerName}
-📞 Tel: {customerPhone}
-
-{device group without battery}
-
-💵 Eski nasiya summasi: {originalTotalAmount}
-💰 Importgacha to‘langan: {alreadyPaidBeforeImport}
-⏳ Qolgan qarz: {remainingDebt}
-
-💵 Oylik to‘lov: {monthlyPayment}
-🗓 Keyingi to‘lov: {nextPaymentDate}
-
-👨‍💼 Admin: {adminName}
+🏪 Do‘kon: {shopName} 👤 Mijoz: {customerName} 📞 Tel: {customerPhone} {device
+group without battery} 💵 Eski nasiya summasi: {originalTotalAmount} 💰
+Importgacha to‘langan: {alreadyPaidBeforeImport} ⏳ Qolgan qarz: {remainingDebt}
+💵 Oylik to‘lov: {monthlyPayment} 🗓 Keyingi to‘lov: {nextPaymentDate} 👨‍💼 Admin:
+{adminName}
 ```
 
 ### 14–16. Nasiya reminders
@@ -292,23 +247,11 @@ Reminder bodies use `To‘lov summasi`, `Qolgan to‘lov`, `Muddat`,
 ```html
 <b>🔄 Olib-sotdim operatsiyasi</b>
 
-🏪 Do‘kon: {shopName}
-
-{device group}
-
-🏬 Kimdan olindi: {supplierName}
-📞 Yetkazib beruvchi: {supplierPhone}
-📍 Manzil: {supplierLocation}
-
-👤 Mijoz: {customerName}
-📞 Tel: {customerPhone}
-
-💵 Olingan narx: {purchasePrice}
-💰 Sotilish narxi: {salePrice}
-📊 Foyda / Kutilayotgan foyda: {profit}
-💳 Yetkazib beruvchiga to‘lov: {hozir to‘landi | keyinroq to‘lanadi}
-
-👨‍💼 Admin: {adminName}
+🏪 Do‘kon: {shopName} {device group} 🏬 Kimdan olindi: {supplierName} 📞
+Yetkazib beruvchi: {supplierPhone} 📍 Manzil: {supplierLocation} 👤 Mijoz:
+{customerName} 📞 Tel: {customerPhone} 💵 Olingan narx: {purchasePrice} 💰
+Sotilish narxi: {salePrice} 📊 Foyda / Kutilayotgan foyda: {profit} 💳 Yetkazib
+beruvchiga to‘lov: {hozir to‘landi | keyinroq to‘lanadi} 👨‍💼 Admin: {adminName}
 ```
 
 ### 22–25. Supplier payable messages

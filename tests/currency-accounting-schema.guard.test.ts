@@ -57,14 +57,14 @@ describe('payment routes persist what the customer actually entered', () => {
     const route = read('src/app/api/nasiya/[id]/payment/route.ts')
     expect(route).toContain('paymentInputAmount: amount')
     expect(route).toContain('paymentInputCurrency: amountInput.inputCurrency')
-    expect(route).toContain('paymentExchangeRate: amountInput.exchangeRateUsed')
+    expect(route).toContain('paymentExchangeRate: contractRate')
   })
 
   it('sale payment stores paymentInputAmount/Currency/ExchangeRate on the SalePayment row itself', () => {
     const route = read('src/app/api/sales/[id]/payment/route.ts')
     expect(route).toContain('paymentInputAmount: parsed.data.amount')
     expect(route).toContain('paymentInputCurrency: amountInput.inputCurrency')
-    expect(route).toContain('paymentExchangeRate: amountInput.exchangeRateUsed')
+    expect(route).toContain('paymentExchangeRate: contractRate')
   })
 
   it('GET /api/nasiya/[id] selects the new payment fields so the detail page can render historical amounts', () => {

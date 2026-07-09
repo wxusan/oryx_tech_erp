@@ -12,7 +12,7 @@
 
 import { uzDate } from '@/lib/dates'
 import { telegramImei } from '@/lib/device-display'
-import { formatMoneyWithBase, type CurrencyContext, type CurrencyCode } from '@/lib/currency'
+import { formatUserFacingMoney, type CurrencyContext, type CurrencyCode } from '@/lib/currency'
 import { formatContractMoneyWithDisplay } from '@/lib/nasiya-contract'
 
 // ---------------------------------------------------------------------------
@@ -31,7 +31,14 @@ function telegramTypography(value: string): string {
 
 function telegramMoney(value: number | string | null | undefined, currency?: CurrencyContext | null): string {
   if (!currency) return formatMoney(value)
-  return telegramTypography(formatMoneyWithBase(value, currency.currency, currency.usdUzsRate))
+  return telegramTypography(
+    formatUserFacingMoney({
+      amount: value,
+      amountCurrency: 'UZS',
+      displayCurrency: currency.currency,
+      rate: currency.usdUzsRate,
+    }),
+  )
 }
 
 /** "30.09.2026" — locale-independent numeric date. */
@@ -97,9 +104,7 @@ export function formatDeviceSpecs(device: DeviceSpecs, opts: { battery?: boolean
     optionalLine('Qurilma', device.deviceModel, '📱'),
     optionalLine('Xotira', device.storage, '💾'),
     optionalLine('Rang', device.color, '🎨'),
-    includeBattery && typeof device.batteryHealth === 'number'
-      ? `🔋 Batareya: ${escapeTelegramHtml(device.batteryHealth)}%`
-      : null,
+    includeBattery && typeof device.batteryHealth === 'number' ? `🔋 Batareya: ${escapeTelegramHtml(device.batteryHealth)}%` : null,
     optionalLine('IMEI', telegramImei(device.imei), '🔢'),
   ].filter((line): line is string => line !== null)
 }
@@ -123,23 +128,14 @@ function compose(...blocks: Array<string | string[] | null | undefined>): string
     .join('\n\n')
 }
 
-/** Format a native (already-in-that-currency) amount — never converts, unlike telegramMoney/formatMoneyByCurrency. */
-function formatNativeAmount(amount: number, currency: CurrencyCode): string {
-  return currency === 'USD' ? `$${amount.toFixed(2)}` : formatMoney(amount)
-}
-
 function contractMoney(
-  amount: number,
+  amount: number | string,
   contractCurrency: CurrencyCode,
   currency?: CurrencyContext | null,
+  rateOverride?: number | string | null,
 ): string {
   return telegramTypography(
-    formatContractMoneyWithDisplay(
-      amount,
-      contractCurrency,
-      currency?.currency ?? 'UZS',
-      currency?.usdUzsRate,
-    ),
+    formatContractMoneyWithDisplay(amount, contractCurrency, currency?.currency ?? 'UZS', rateOverride ?? currency?.usdUzsRate),
   )
 }
 
@@ -148,10 +144,7 @@ function contractMoney(
 // ---------------------------------------------------------------------------
 
 export function telegramIdUnavailableMessage(): string {
-  return compose(
-    '<b>⚠️ Telegram ID aniqlanmadi</b>',
-    'Iltimos, botni shaxsiy Telegram akkauntingizdan oching.',
-  )
+  return compose('<b>⚠️ Telegram ID aniqlanmadi</b>', 'Iltimos, botni shaxsiy Telegram akkauntingizdan oching.')
 }
 
 export function startSuperAdminMessage(adminName: string): string {
@@ -266,12 +259,7 @@ export function deviceReturnedMessage(data: {
   )
 }
 
-export function deviceRestockedMessage(data: {
-  shopName: string
-  device: DeviceSpecs
-  note: string
-  adminName?: string | null
-}): string {
+export function deviceRestockedMessage(data: { shopName: string; device: DeviceSpecs; note: string; adminName?: string | null }): string {
   return compose(
     '<b>🔄 Qurilma qayta sotuvga chiqarildi</b>',
     optionalLine('Do‘kon', data.shopName, '🏪'),
@@ -360,13 +348,12 @@ export function nasiyaPaymentMessage(data: {
    */
   allocations?: { monthNumber: number; amount: number }[]
   /**
-   * What the customer actually entered, when it differs from the deal's own
-   * contract currency — shows "To'langan: <native>" + "Shartnomaga
-   * qo'llandi: <applied>" instead of one figure, so a USD payment applied to
-   * a UZS contract (or vice versa) is unambiguous. Omit when payment
-   * currency matches contract currency (nothing was converted).
+   * What the customer actually entered. User-facing Telegram shows it in the
+   * shop display currency only; `paymentExchangeRate` is used when converting
+   * this historical payment for display.
    */
   paymentInput?: { amount: number; currency: CurrencyCode } | null
+  paymentExchangeRate?: number | string | null
   /** Item 12 — split payment breakdown (e.g. half cash, half card). */
   paymentBreakdown?: { method: string; amount: number }[] | null
 }): string {
@@ -378,35 +365,36 @@ export function nasiyaPaymentMessage(data: {
         : null
   const displayCurrency = data.currency?.currency ?? 'UZS'
   const money = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency)
+  const paymentRate = data.paymentExchangeRate ?? data.currency?.usdUzsRate
+  const historicalContractMoney = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency, paymentRate)
+  const paymentInputMoney = data.paymentInput
+    ? telegramTypography(
+        formatUserFacingMoney({
+          amount: data.paymentInput.amount,
+          amountCurrency: data.paymentInput.currency,
+          displayCurrency,
+          rate: paymentRate,
+        }),
+      )
+    : historicalContractMoney(data.paidAmount)
   const allocationBlock =
     data.allocations && data.allocations.length > 1
       ? data.allocations.map((allocation, index) =>
           index === 0
-            ? `• ${money(allocation.amount)} joriy oy uchun yopildi`
-            : `• ${money(allocation.amount)} ${escapeTelegramHtml(allocation.monthNumber)}-oyga oldindan qo‘llandi`,
+            ? `• ${historicalContractMoney(allocation.amount)} joriy oy uchun yopildi`
+            : `• ${historicalContractMoney(allocation.amount)} ${escapeTelegramHtml(allocation.monthNumber)}-oyga oldindan qo‘llandi`,
         )
       : null
-  const paidLines =
-    data.paymentInput && data.paymentInput.currency !== data.contractCurrency
-      ? [
-          `💰 To‘langan: ${formatNativeAmount(data.paymentInput.amount, data.paymentInput.currency)}`,
-          `🔄 Shartnomaga qo‘llandi: ${money(data.paidAmount)}`,
-        ]
-      : [`💰 To‘langan: ${money(data.paidAmount)}`]
+  const paidLines = [`💰 To‘langan: ${paymentInputMoney}`]
   const paymentMethodLine = data.paymentBreakdown?.length
-    ? formatPaymentBreakdown(data.paymentBreakdown, data.paymentInput?.currency ?? displayCurrency)
+    ? formatPaymentBreakdown(data.paymentBreakdown, data.paymentInput?.currency ?? displayCurrency, displayCurrency, paymentRate)
     : optionalLine('To‘lov usuli', formatPaymentMethod(data.paymentMethod), '💳')
   return compose(
     '<b>💰 Nasiya to‘lovi qabul qilindi</b>',
     optionalLine('Do‘kon', data.shopName, '🏪'),
     block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
-    block(
-      monthLine,
-      ...paidLines,
-      paymentMethodLine,
-      `⏳ Qolgan qarz: ${data.remaining <= 0 ? 'To‘liq yopildi' : money(data.remaining)}`,
-    ),
+    block(monthLine, ...paidLines, paymentMethodLine, `⏳ Qolgan qarz: ${data.remaining <= 0 ? 'To‘liq yopildi' : money(data.remaining)}`),
     allocationBlock ? block('📋 To‘lov taqsimoti:', ...allocationBlock) : null,
     block(optionalLine('Izoh', cleanNote(data.note), '📝'), optionalLine('Admin', data.adminName, '👨‍💼')),
   )
@@ -515,48 +503,62 @@ export function salePaymentMessage(data: {
   adminName?: string | null
   currency?: CurrencyContext | null
   /**
-   * What the customer actually entered, when it differs from the sale's own
-   * contract currency (not the shop's display currency) — shows
-   * "To'langan: <native>" + "Shartnomaga qo'llandi: <applied>" instead of one
-   * figure, so a USD payment applied to a UZS sale (or vice versa) is
-   * unambiguous. Omit when payment currency matches contract currency
-   * (nothing was converted).
+   * What the customer actually entered. User-facing Telegram shows it in the
+   * shop display currency only; `paymentExchangeRate` is used when converting
+   * this historical payment for display.
    */
   paymentInput?: { amount: number; currency: CurrencyCode } | null
+  paymentExchangeRate?: number | string | null
   /** Item 12 — split payment breakdown (e.g. half cash, half card). */
   paymentBreakdown?: { method: string; amount: number }[] | null
 }): string {
   const displayCurrency = data.currency?.currency ?? 'UZS'
   const money = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency)
-  const paidLines =
-    data.paymentInput && data.paymentInput.currency !== data.contractCurrency
-      ? [
-          `💰 To‘langan: ${formatNativeAmount(data.paymentInput.amount, data.paymentInput.currency)}`,
-          `🔄 Shartnomaga qo‘llandi: ${money(data.paidAmount)}`,
-        ]
-      : [`💰 To‘langan: ${money(data.paidAmount)}`]
+  const paymentRate = data.paymentExchangeRate ?? data.currency?.usdUzsRate
+  const paidMoney = data.paymentInput
+    ? telegramTypography(
+        formatUserFacingMoney({
+          amount: data.paymentInput.amount,
+          amountCurrency: data.paymentInput.currency,
+          displayCurrency,
+          rate: paymentRate,
+        }),
+      )
+    : contractMoney(data.paidAmount, data.contractCurrency, data.currency, paymentRate)
+  const paidLines = [`💰 To‘langan: ${paidMoney}`]
   const paymentMethodLine = data.paymentBreakdown?.length
-    ? formatPaymentBreakdown(data.paymentBreakdown, data.paymentInput?.currency ?? displayCurrency)
+    ? formatPaymentBreakdown(data.paymentBreakdown, data.paymentInput?.currency ?? displayCurrency, displayCurrency, paymentRate)
     : optionalLine('To‘lov usuli', formatPaymentMethod(data.paymentMethod), '💳')
   return compose(
     '<b>💰 Qarz to‘lovi qabul qilindi</b>',
     optionalLine('Do‘kon', data.shopName, '🏪'),
     block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
-    block(
-      ...paidLines,
-      paymentMethodLine,
-      `⏳ Qolgan qarz: ${data.remaining <= 0 ? 'To‘liq yopildi' : money(data.remaining)}`,
-    ),
+    block(...paidLines, paymentMethodLine, `⏳ Qolgan qarz: ${data.remaining <= 0 ? 'To‘liq yopildi' : money(data.remaining)}`),
     block(optionalLine('Izoh', cleanNote(data.note), '📝'), optionalLine('Admin', data.adminName, '👨‍💼')),
   )
 }
 
 /** Readable multi-line split-payment breakdown. */
-function formatPaymentBreakdown(parts: { method: string; amount: number }[], currency: CurrencyCode): string {
+function formatPaymentBreakdown(
+  parts: { method: string; amount: number }[],
+  amountCurrency: CurrencyCode,
+  displayCurrency: CurrencyCode,
+  rate?: number | string | null,
+): string {
   return block(
     '💳 To‘lov usuli:',
-    ...parts.map((part) => `• ${formatPaymentMethod(part.method) ?? 'Boshqa'}: ${formatNativeAmount(part.amount, currency)}`),
+    ...parts.map(
+      (part) =>
+        `• ${formatPaymentMethod(part.method) ?? 'Boshqa'}: ${telegramTypography(
+          formatUserFacingMoney({
+            amount: part.amount,
+            amountCurrency,
+            displayCurrency,
+            rate,
+          }),
+        )}`,
+    ),
   )
 }
 
@@ -737,10 +739,7 @@ export function supplierPayableDueTodayMessage(data: {
     '<b>📌 Yetkazib beruvchiga to‘lov</b>',
     formatDeviceSpecs(data.device, { battery: false }),
     supplierPayableIntro(data),
-    block(
-      `💵 To‘lov summasi: ${contractMoney(data.amount, data.contractCurrency, data.currency)}`,
-      '📅 Muddat: Bugun',
-    ),
+    block(`💵 To‘lov summasi: ${contractMoney(data.amount, data.contractCurrency, data.currency)}`, '📅 Muddat: Bugun'),
   )
 }
 

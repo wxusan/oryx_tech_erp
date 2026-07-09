@@ -9,14 +9,8 @@ import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
-import { convertUsdToUzs, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { tashkentTodayInputValue } from '@/lib/timezone'
@@ -143,7 +137,10 @@ export default function NewOlibSotdimPage() {
       imageFiles.map(async (file) => {
         const formData = new FormData()
         formData.append('file', file)
-        const res = await fetch('/api/uploads/device', { method: 'POST', body: formData })
+        const res = await fetch('/api/uploads/device', {
+          method: 'POST',
+          body: formData,
+        })
         const json = await res.json()
         if (!res.ok || !json.success) throw new Error(json.error || 'Qurilma rasmini yuklashda xatolik')
         return json.data.key as string
@@ -216,14 +213,10 @@ export default function NewOlibSotdimPage() {
 
       <div>
         <h1 className="text-xl font-bold text-zinc-900">Olib-sotdim</h1>
-        <p className="text-sm text-zinc-500 mt-0.5">
-          Omborda yo&apos;q qurilmani boshqa do&apos;kondan olib, mijozga soting
-        </p>
+        <p className="text-sm text-zinc-500 mt-0.5">Omborda yo&apos;q qurilmani boshqa do&apos;kondan olib, mijozga soting</p>
       </div>
 
-      {submitError && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">{submitError}</div>
-      )}
+      {submitError && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">{submitError}</div>}
 
       {step === 1 && (
         <div className="space-y-4">
@@ -237,27 +230,60 @@ export default function NewOlibSotdimPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Model <span className="text-red-500">*</span>
                 </label>
-                <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder="iPhone 13 Pro" className="h-9 text-sm border-zinc-200 rounded" />
+                <Input
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="iPhone 13 Pro"
+                  className="h-9 text-sm border-zinc-200 rounded"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Rang</label>
-                <Input value={color} onChange={(e) => setColor(e.target.value)} placeholder="Qora, Oq..." className="h-9 text-sm border-zinc-200 rounded" />
+                <Input
+                  value={color}
+                  onChange={(e) => setColor(e.target.value)}
+                  placeholder="Qora, Oq..."
+                  className="h-9 text-sm border-zinc-200 rounded"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Xotira (GB)</label>
-                <Input value={storage} onChange={(e) => setStorage(e.target.value)} placeholder="128, 256..." className="h-9 text-sm border-zinc-200 rounded" />
+                <Input
+                  value={storage}
+                  onChange={(e) => setStorage(e.target.value)}
+                  placeholder="128, 256..."
+                  className="h-9 text-sm border-zinc-200 rounded"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Akkumulyator %</label>
-                <Input type="number" min={1} max={100} value={battery} onChange={(e) => setBattery(e.target.value)} placeholder="85" className="h-9 text-sm border-zinc-200 rounded" />
+                <Input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={battery}
+                  onChange={(e) => setBattery(e.target.value)}
+                  placeholder="85"
+                  className="h-9 text-sm border-zinc-200 rounded"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Holati</label>
-                <Input value={condition} onChange={(e) => setCondition(e.target.value)} placeholder="Yangi, A klass..." className="h-9 text-sm border-zinc-200 rounded" />
+                <Input
+                  value={condition}
+                  onChange={(e) => setCondition(e.target.value)}
+                  placeholder="Yangi, A klass..."
+                  className="h-9 text-sm border-zinc-200 rounded"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">IMEI</label>
-                <Input value={imei} onChange={(e) => setImei(e.target.value)} placeholder="Mavjud bo'lsa kiriting" className="h-9 text-sm border-zinc-200 rounded font-mono" />
+                <Input
+                  value={imei}
+                  onChange={(e) => setImei(e.target.value)}
+                  placeholder="Mavjud bo'lsa kiriting"
+                  className="h-9 text-sm border-zinc-200 rounded font-mono"
+                />
                 <p className="mt-1 text-xs text-zinc-400">Bo&apos;sh qoldirilsa &quot;Kiritilmagan&quot; deb ko&apos;rsatiladi</p>
               </div>
               <div className="sm:col-span-2">
@@ -272,7 +298,10 @@ export default function NewOlibSotdimPage() {
                 {imagePreviews.length > 0 && (
                   <div className="grid grid-cols-3 gap-3">
                     {imagePreviews.map((preview, index) => (
-                      <div key={`${preview}-${index}`} className="relative aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+                      <div
+                        key={`${preview}-${index}`}
+                        className="relative aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50"
+                      >
                         <Image src={preview} alt={`Qurilma rasmi ${index + 1}`} fill sizes="160px" unoptimized className="object-cover" />
                         <button
                           type="button"
@@ -289,7 +318,12 @@ export default function NewOlibSotdimPage() {
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
-                <Textarea value={deviceNote} onChange={(e) => setDeviceNote(e.target.value)} placeholder="Qurilma haqida qo'shimcha ma'lumot..." className="text-sm border-zinc-200 rounded min-h-[60px]" />
+                <Textarea
+                  value={deviceNote}
+                  onChange={(e) => setDeviceNote(e.target.value)}
+                  placeholder="Qurilma haqida qo'shimcha ma'lumot..."
+                  className="text-sm border-zinc-200 rounded min-h-[60px]"
+                />
               </div>
             </div>
           </div>
@@ -304,7 +338,12 @@ export default function NewOlibSotdimPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Ism / do&apos;kon <span className="text-red-500">*</span>
                 </label>
-                <Input value={supplierName} onChange={(e) => setSupplierName(e.target.value)} placeholder="Ali aka, 21-do'kon..." className="h-9 text-sm border-zinc-200 rounded" />
+                <Input
+                  value={supplierName}
+                  onChange={(e) => setSupplierName(e.target.value)}
+                  placeholder="Ali aka, 21-do'kon..."
+                  className="h-9 text-sm border-zinc-200 rounded"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
@@ -312,7 +351,10 @@ export default function NewOlibSotdimPage() {
                 </label>
                 <PhoneInput
                   value={supplierPhone}
-                  onChange={(value) => { setSupplierPhone(value); if (supplierPhoneError) setSupplierPhoneError('') }}
+                  onChange={(value) => {
+                    setSupplierPhone(value)
+                    if (supplierPhoneError) setSupplierPhoneError('')
+                  }}
                   aria-invalid={!!supplierPhoneError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
@@ -320,11 +362,20 @@ export default function NewOlibSotdimPage() {
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Manzil / joylashuv</label>
-                <Input value={supplierLocation} onChange={(e) => setSupplierLocation(e.target.value)} placeholder="Abu Saxiy 3-qator, Malika Bazar..." className="h-9 text-sm border-zinc-200 rounded" />
+                <Input
+                  value={supplierLocation}
+                  onChange={(e) => setSupplierLocation(e.target.value)}
+                  placeholder="Abu Saxiy 3-qator, Malika Bazar..."
+                  className="h-9 text-sm border-zinc-200 rounded"
+                />
               </div>
               <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
-                <Textarea value={supplierNote} onChange={(e) => setSupplierNote(e.target.value)} className="text-sm border-zinc-200 rounded min-h-[50px]" />
+                <Textarea
+                  value={supplierNote}
+                  onChange={(e) => setSupplierNote(e.target.value)}
+                  className="text-sm border-zinc-200 rounded min-h-[50px]"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
@@ -337,9 +388,6 @@ export default function NewOlibSotdimPage() {
                   placeholder={currency.currency === 'USD' ? '500.00' : '6500000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-                {currency.currency === 'USD' && currency.usdUzsRate && Number(purchasePrice) > 0 && (
-                  <p className="mt-1 text-xs text-zinc-500">Saqlanadi: {formatMoneyByCurrency(convertUsdToUzs(Number(purchasePrice), currency.usdUzsRate), 'UZS')}</p>
-                )}
               </div>
 
               <div className="sm:col-span-2 pt-2 border-t border-zinc-100">
@@ -384,7 +432,12 @@ export default function NewOlibSotdimPage() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">To&apos;lov sanasi</label>
-                    <Input type="date" value={supplierPaidDate} onChange={(e) => setSupplierPaidDate(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
+                    <Input
+                      type="date"
+                      value={supplierPaidDate}
+                      onChange={(e) => setSupplierPaidDate(e.target.value)}
+                      className="h-9 text-sm border-zinc-200 rounded"
+                    />
                   </div>
                 </>
               )}
@@ -395,16 +448,37 @@ export default function NewOlibSotdimPage() {
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                       To&apos;lov muddati <span className="text-red-500">*</span>
                     </label>
-                    <Input type="date" value={supplierDueDate} onChange={(e) => setSupplierDueDate(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
+                    <Input
+                      type="date"
+                      value={supplierDueDate}
+                      onChange={(e) => setSupplierDueDate(e.target.value)}
+                      className="h-9 text-sm border-zinc-200 rounded"
+                    />
                   </div>
                   <div className="sm:col-span-2 flex items-center gap-2">
-                    <input type="checkbox" id="supplier-reminder" checked={supplierReminderEnabled} onChange={(e) => setSupplierReminderEnabled(e.target.checked)} className="w-4 h-4 rounded border-zinc-300" />
-                    <label htmlFor="supplier-reminder" className="text-sm text-zinc-700 cursor-pointer">Eslatma yuborish</label>
+                    <input
+                      type="checkbox"
+                      id="supplier-reminder"
+                      checked={supplierReminderEnabled}
+                      onChange={(e) => setSupplierReminderEnabled(e.target.checked)}
+                      className="w-4 h-4 rounded border-zinc-300"
+                    />
+                    <label htmlFor="supplier-reminder" className="text-sm text-zinc-700 cursor-pointer">
+                      Eslatma yuborish
+                    </label>
                   </div>
                   {supplierReminderEnabled && (
                     <div className="sm:col-span-2 flex items-center gap-2">
-                      <input type="checkbox" id="supplier-early-reminder" checked={earlyReminder} onChange={(e) => setEarlyReminder(e.target.checked)} className="w-4 h-4 rounded border-zinc-300" />
-                      <label htmlFor="supplier-early-reminder" className="text-sm text-zinc-700 cursor-pointer">Ertaroq eslatilsinmi?</label>
+                      <input
+                        type="checkbox"
+                        id="supplier-early-reminder"
+                        checked={earlyReminder}
+                        onChange={(e) => setEarlyReminder(e.target.checked)}
+                        className="w-4 h-4 rounded border-zinc-300"
+                      />
+                      <label htmlFor="supplier-early-reminder" className="text-sm text-zinc-700 cursor-pointer">
+                        Ertaroq eslatilsinmi?
+                      </label>
                     </div>
                   )}
                   {supplierReminderEnabled && earlyReminder && (
@@ -412,7 +486,15 @@ export default function NewOlibSotdimPage() {
                       <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                         Necha kun oldin? <span className="text-red-500">*</span>
                       </label>
-                      <Input type="number" min={1} max={60} value={earlyReminderDays} onChange={(e) => setEarlyReminderDays(e.target.value)} placeholder="3" className="h-9 text-sm border-zinc-200 rounded" />
+                      <Input
+                        type="number"
+                        min={1}
+                        max={60}
+                        value={earlyReminderDays}
+                        onChange={(e) => setEarlyReminderDays(e.target.value)}
+                        placeholder="3"
+                        className="h-9 text-sm border-zinc-200 rounded"
+                      />
                     </div>
                   )}
                 </>
@@ -430,7 +512,12 @@ export default function NewOlibSotdimPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Mijoz ismi <span className="text-red-500">*</span>
                 </label>
-                <Input value={customerName} onChange={(e) => setCustomerName(e.target.value)} placeholder="To'liq ism" className="h-9 text-sm border-zinc-200 rounded" />
+                <Input
+                  value={customerName}
+                  onChange={(e) => setCustomerName(e.target.value)}
+                  placeholder="To'liq ism"
+                  className="h-9 text-sm border-zinc-200 rounded"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
@@ -439,7 +526,10 @@ export default function NewOlibSotdimPage() {
                 <PhoneInput
                   ref={customerPhoneRef}
                   value={customerPhone}
-                  onChange={(value) => { setCustomerPhone(value); if (customerPhoneError) setCustomerPhoneError('') }}
+                  onChange={(value) => {
+                    setCustomerPhone(value)
+                    if (customerPhoneError) setCustomerPhoneError('')
+                  }}
                   aria-invalid={!!customerPhoneError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
@@ -458,7 +548,13 @@ export default function NewOlibSotdimPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Sotilgan narx ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
-                <MoneyInput currency={currency.currency} value={salePrice} onChange={setSalePrice} placeholder={currency.currency === 'USD' ? '600.00' : '7500000'} className="h-9 text-sm border-zinc-200 rounded" />
+                <MoneyInput
+                  currency={currency.currency}
+                  value={salePrice}
+                  onChange={setSalePrice}
+                  placeholder={currency.currency === 'USD' ? '600.00' : '7500000'}
+                  className="h-9 text-sm border-zinc-200 rounded"
+                />
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
@@ -488,10 +584,18 @@ export default function NewOlibSotdimPage() {
                   To&apos;liq to&apos;ladimi? <span className="text-red-500">*</span>
                 </label>
                 <div className="flex gap-2">
-                  <button type="button" onClick={() => setFullyPaid(true)} className={`px-4 py-2 text-sm rounded border transition-colors ${fullyPaid === true ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}>
+                  <button
+                    type="button"
+                    onClick={() => setFullyPaid(true)}
+                    className={`px-4 py-2 text-sm rounded border transition-colors ${fullyPaid === true ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
+                  >
                     Ha
                   </button>
-                  <button type="button" onClick={() => setFullyPaid(false)} className={`px-4 py-2 text-sm rounded border transition-colors ${fullyPaid === false ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}>
+                  <button
+                    type="button"
+                    onClick={() => setFullyPaid(false)}
+                    className={`px-4 py-2 text-sm rounded border transition-colors ${fullyPaid === false ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
+                  >
                     Yo&apos;q
                   </button>
                 </div>
@@ -503,24 +607,48 @@ export default function NewOlibSotdimPage() {
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                       Qancha to&apos;ladi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                     </label>
-                    <MoneyInput currency={currency.currency} value={partialAmount} onChange={setPartialAmount} placeholder={currency.currency === 'USD' ? '200.00' : '2500000'} className="h-9 text-sm border-zinc-200 rounded" />
+                    <MoneyInput
+                      currency={currency.currency}
+                      value={partialAmount}
+                      onChange={setPartialAmount}
+                      placeholder={currency.currency === 'USD' ? '200.00' : '2500000'}
+                      className="h-9 text-sm border-zinc-200 rounded"
+                    />
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                       Qachon to&apos;laydi <span className="text-red-500">*</span>
                     </label>
-                    <Input type="date" value={partialDate} onChange={(e) => setPartialDate(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
+                    <Input
+                      type="date"
+                      value={partialDate}
+                      onChange={(e) => setPartialDate(e.target.value)}
+                      className="h-9 text-sm border-zinc-200 rounded"
+                    />
                   </div>
                   <div className="sm:col-span-2 flex items-center gap-2">
-                    <input type="checkbox" id="customer-reminder" checked={customerReminderEnabled} onChange={(e) => setCustomerReminderEnabled(e.target.checked)} className="w-4 h-4 rounded border-zinc-300" />
-                    <label htmlFor="customer-reminder" className="text-sm text-zinc-700 cursor-pointer">Mijozga eslatma yuborish</label>
+                    <input
+                      type="checkbox"
+                      id="customer-reminder"
+                      checked={customerReminderEnabled}
+                      onChange={(e) => setCustomerReminderEnabled(e.target.checked)}
+                      className="w-4 h-4 rounded border-zinc-300"
+                    />
+                    <label htmlFor="customer-reminder" className="text-sm text-zinc-700 cursor-pointer">
+                      Mijozga eslatma yuborish
+                    </label>
                   </div>
                 </>
               )}
 
               <div className="sm:col-span-2">
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
-                <Textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Qo'shimcha ma'lumot..." className="text-sm border-zinc-200 rounded min-h-[60px]" />
+                <Textarea
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder="Qo'shimcha ma'lumot..."
+                  className="text-sm border-zinc-200 rounded min-h-[60px]"
+                />
               </div>
             </div>
           </div>
@@ -541,17 +669,23 @@ export default function NewOlibSotdimPage() {
           <div className="border border-zinc-200 rounded overflow-hidden">
             <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between">
               <span className="text-sm font-semibold text-zinc-900">5. Tasdiqlash</span>
-              <button type="button" onClick={() => setStep(1)} className="text-xs text-zinc-400 hover:text-zinc-700">O&apos;zgartirish</button>
+              <button type="button" onClick={() => setStep(1)} className="text-xs text-zinc-400 hover:text-zinc-700">
+                O&apos;zgartirish
+              </button>
             </div>
             <div className="p-4 space-y-4 text-sm">
               <div>
                 <div className="text-xs font-semibold text-zinc-500 mb-1.5">Qurilma</div>
-                <div className="text-zinc-900">{model} {color && `· ${color}`} {storage && `· ${storage}GB`}</div>
+                <div className="text-zinc-900">
+                  {model} {color && `· ${color}`} {storage && `· ${storage}GB`}
+                </div>
                 <div className="text-xs text-zinc-500 mt-0.5">IMEI: {imei.trim() || 'Kiritilmagan'}</div>
               </div>
               <div>
                 <div className="text-xs font-semibold text-zinc-500 mb-1.5">Kimdan olindi</div>
-                <div className="text-zinc-900">{supplierName} · {supplierPhone}</div>
+                <div className="text-zinc-900">
+                  {supplierName} · {supplierPhone}
+                </div>
                 {supplierLocation && <div className="text-xs text-zinc-500 mt-0.5">{supplierLocation}</div>}
                 <div className="text-xs text-zinc-500 mt-0.5">
                   Olingan narx: {fmt(Number(purchasePrice))} · {supplierPaidNow ? "Hozir to'landi" : `Keyin to'lanadi (${supplierDueDate})`}
@@ -559,13 +693,13 @@ export default function NewOlibSotdimPage() {
               </div>
               <div>
                 <div className="text-xs font-semibold text-zinc-500 mb-1.5">Kimga sotildi</div>
-                <div className="text-zinc-900">{customerName} · {customerPhone}</div>
+                <div className="text-zinc-900">
+                  {customerName} · {customerPhone}
+                </div>
                 <div className="text-xs text-zinc-500 mt-0.5">Sotilgan narx: {fmt(Number(salePrice))}</div>
               </div>
               <div className="pt-3 border-t border-zinc-100 flex items-center justify-between">
-                <span className="text-xs font-semibold text-zinc-500">
-                  {supplierPaidNow ? 'Foyda' : 'Kutilayotgan foyda'}
-                </span>
+                <span className="text-xs font-semibold text-zinc-500">{supplierPaidNow ? 'Foyda' : 'Kutilayotgan foyda'}</span>
                 <span className={`text-base font-bold ${profit < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{fmt(profit)}</span>
               </div>
               {!supplierPaidNow && (

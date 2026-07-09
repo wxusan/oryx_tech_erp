@@ -20,10 +20,10 @@ import {
 } from '@/lib/nasiya-contract'
 
 describe('getCompletionToleranceForCurrency', () => {
-  it('UZS contracts tolerate 500 so\'m', () => {
+  it("UZS contracts tolerate 500 so'm", () => {
     expect(getCompletionToleranceForCurrency('UZS')).toBe(500)
   })
-  it('USD contracts tolerate 1 cent, not 500 so\'m', () => {
+  it("USD contracts tolerate 1 cent, not 500 so'm", () => {
     expect(getCompletionToleranceForCurrency('USD')).toBe(0.01)
   })
 })
@@ -42,7 +42,10 @@ describe('contract field readers', () => {
     expect(getContractPaidAmount(nasiya)).toBe(400)
   })
   it('reads schedule contract expected/paid amounts', () => {
-    const schedule = { contractExpectedAmount: '200.00', contractPaidAmount: '200.00' }
+    const schedule = {
+      contractExpectedAmount: '200.00',
+      contractPaidAmount: '200.00',
+    }
     expect(getScheduleContractExpectedAmount(schedule)).toBe(200)
     expect(getScheduleContractPaidAmount(schedule)).toBe(200)
   })
@@ -54,19 +57,19 @@ describe('convertPaymentToContractCurrency', () => {
     expect(convertPaymentToContractCurrency(200, 'USD', 'USD', null)).toBe(200)
   })
 
-  it('Example A — USD contract paid in UZS: 2,500,000 so\'m at rate 12,500 -> $200', () => {
+  it("Example A — USD contract paid in UZS: 2,500,000 so'm at rate 12,500 -> $200", () => {
     expect(convertPaymentToContractCurrency(2_500_000, 'UZS', 'USD', 12_500)).toBe(200)
   })
 
-  it('Example B — UZS contract paid in USD: $160 at rate 12,500 -> 2,000,000 so\'m', () => {
+  it("Example B — UZS contract paid in USD: $160 at rate 12,500 -> 2,000,000 so'm", () => {
     expect(convertPaymentToContractCurrency(160, 'USD', 'UZS', 12_500)).toBe(2_000_000)
   })
 
-  it('Example C — USD contract overpayment paid in UZS: 3,125,000 so\'m at rate 12,500 -> $250', () => {
+  it("Example C — USD contract overpayment paid in UZS: 3,125,000 so'm at rate 12,500 -> $250", () => {
     expect(convertPaymentToContractCurrency(3_125_000, 'UZS', 'USD', 12_500)).toBe(250)
   })
 
-  it('Example D — UZS contract overpayment paid in USD: $200 at rate 12,500 -> 2,500,000 so\'m', () => {
+  it("Example D — UZS contract overpayment paid in USD: $200 at rate 12,500 -> 2,500,000 so'm", () => {
     expect(convertPaymentToContractCurrency(200, 'USD', 'UZS', 12_500)).toBe(2_500_000)
   })
 
@@ -85,7 +88,7 @@ describe('formatContractMoney (native, never converts)', () => {
   it('formats USD with $ and 2 decimals', () => {
     expect(formatContractMoney(200, 'USD')).toBe('$200.00')
   })
-  it('formats UZS with so\'m suffix, rounded', () => {
+  it("formats UZS with so'm suffix, rounded", () => {
     expect(formatContractMoney(2_500_000, 'UZS')).toMatch(/2.?500.?000 so'm/)
   })
 })
@@ -105,10 +108,8 @@ describe('formatDisplayMoneyFromContract', () => {
     expect(text).toBe('$160.00')
   })
 
-  it('falls back to native formatting with a note when no rate is available', () => {
-    const text = formatDisplayMoneyFromContract(200, 'USD', 'UZS', null)
-    expect(text).toContain('$200.00')
-    expect(text).toContain('kurs mavjud emas')
+  it('returns a dash instead of leaking another currency when no rate is available', () => {
+    expect(formatDisplayMoneyFromContract(200, 'USD', 'UZS', null)).toBe('—')
   })
 })
 
@@ -118,13 +119,13 @@ describe('contractOutstandingAsUzs — report aggregates must convert per-row, n
     expect(contractOutstandingAsUzs('2000000', '500000', 'UZS', 13_500)).toBe(1_500_000)
   })
 
-  it('USD contract: converts the native outstanding balance using the GIVEN (today\'s) rate', () => {
+  it("USD contract: converts the native outstanding balance using the GIVEN (today's) rate", () => {
     // $600 remaining, today's rate 13,500 -> 8,100,000 so'm (not whatever the
     // contract's own creation rate happened to be).
     expect(contractOutstandingAsUzs('1000', '400', 'USD', 13_500)).toBe(8_100_000)
   })
 
-  it('demonstrates the exact bug this replaces: summing legacy UZS snapshots then converting the TOTAL drifts from summing each row at today\'s rate', () => {
+  it("demonstrates the exact bug this replaces: summing legacy UZS snapshots then converting the TOTAL drifts from summing each row at today's rate", () => {
     // A USD-native nasiya, $600 remaining, created at rate 12,500 -> legacy
     // UZS snapshot = 7,500,000 (frozen). Today's rate has moved to 13,500.
     const legacySnapshotUzs = 600 * 12_500 // 7,500,000 — what the OLD buggy code would sum directly
@@ -137,7 +138,7 @@ describe('contractOutstandingAsUzs — report aggregates must convert per-row, n
     expect(contractOutstandingAsUzs('1000', '400', 'USD', null)).toBe(600)
   })
 
-  it('snaps to 0 within the currency-aware tolerance (USD cents, not UZS so\'m)', () => {
+  it("snaps to 0 within the currency-aware tolerance (USD cents, not UZS so'm)", () => {
     expect(contractOutstandingAsUzs('1000', '999.99', 'USD', 12_500)).toBe(0)
   })
 })
@@ -152,7 +153,7 @@ describe('computeContractCurrencyMargin — stable, never inventing a USD purcha
     expect(computeContractCurrencyMargin(500, 5_000_000, 'USD', 12_500)).toBe(100)
   })
 
-  it('is stable — the same margin regardless of what today\'s rate happens to be (never passed in)', () => {
+  it("is stable — the same margin regardless of what today's rate happens to be (never passed in)", () => {
     const margin1 = computeContractCurrencyMargin(500, 5_000_000, 'USD', 12_500)
     const margin2 = computeContractCurrencyMargin(500, 5_000_000, 'USD', 12_500)
     expect(margin1).toBe(margin2)
@@ -170,7 +171,7 @@ describe('computeContractCurrencyMargin — stable, never inventing a USD purcha
   })
 })
 
-describe('salePaymentAmountDisplay — Sale payment history never redisplays at today\'s rate', () => {
+describe('salePaymentAmountDisplay — Sale payment history shows one display currency using payment-time rate', () => {
   function payment(overrides: Partial<SalePaymentLike> = {}): SalePaymentLike {
     return {
       amount: 6_250_000,
@@ -185,7 +186,7 @@ describe('salePaymentAmountDisplay — Sale payment history never redisplays at 
   const uzsDisplay = { currency: 'UZS' as const, usdUzsRate: null }
   const usdDisplay = { currency: 'USD' as const, usdUzsRate: 13_000 } // deliberately different from the payment-time rate
 
-  it('USD sale paid in UZS: shows paid so\'m -> applied $ + rate, stable across display/rate changes', () => {
+  it('USD sale paid in UZS: USD display shows only the payment-time USD value', () => {
     const p = payment({
       amount: 6_250_000,
       paymentInputAmount: 6_250_000,
@@ -194,14 +195,25 @@ describe('salePaymentAmountDisplay — Sale payment history never redisplays at 
       appliedAmountInContractCurrency: 500,
     })
     const text = salePaymentAmountDisplay(p, 'USD', usdDisplay)
-    expect(text).toMatch(/6.?250.?000 so'm/)
-    expect(text).toContain('$500.00')
-    expect(text).toMatch(/12.?500/)
+    expect(text).toBe('$500.00')
+    expect(text).not.toMatch(/so'm/)
+    expect(text).not.toContain('kurs')
     expect(text).not.toMatch(/13.?000/)
-    expect(salePaymentAmountDisplay(p, 'USD', uzsDisplay)).toBe(text)
   })
 
-  it('UZS sale paid in USD: shows paid $ -> applied so\'m + rate', () => {
+  it('USD sale paid in UZS: UZS display shows only the original UZS amount', () => {
+    const p = payment({
+      amount: 6_250_000,
+      paymentInputAmount: 6_250_000,
+      paymentInputCurrency: 'UZS',
+      paymentExchangeRate: 12_500,
+      appliedAmountInContractCurrency: 500,
+    })
+    expect(salePaymentAmountDisplay(p, 'USD', uzsDisplay)).toMatch(/6.?250.?000 so'm/)
+    expect(salePaymentAmountDisplay(p, 'USD', uzsDisplay)).not.toContain('$')
+  })
+
+  it('UZS sale paid in USD: UZS display converts the paid amount at the payment-time rate', () => {
     const p = payment({
       amount: 6_250_000,
       paymentInputAmount: 500,
@@ -210,20 +222,25 @@ describe('salePaymentAmountDisplay — Sale payment history never redisplays at 
       appliedAmountInContractCurrency: 6_250_000,
     })
     const text = salePaymentAmountDisplay(p, 'UZS', uzsDisplay)
-    expect(text).toContain('$500.00')
     expect(text).toMatch(/6.?250.?000 so'm/)
-    expect(text).toMatch(/12.?500/)
+    expect(text).not.toContain('$')
+    expect(text).not.toContain('kurs')
   })
 
   it('same currency: single native figure, no arrow or rate', () => {
-    const p = payment({ amount: 500, paymentInputAmount: 500, paymentInputCurrency: 'USD', appliedAmountInContractCurrency: 500 })
+    const p = payment({
+      amount: 500,
+      paymentInputAmount: 500,
+      paymentInputCurrency: 'USD',
+      appliedAmountInContractCurrency: 500,
+    })
     const text = salePaymentAmountDisplay(p, 'USD', usdDisplay)
     expect(text).toBe('$500.00')
     expect(text).not.toContain('kurs')
     expect(text).not.toContain('→')
   })
 
-  it('legacy fallback: no payment-time fields -> today\'s display currency, never an invented rate', () => {
+  it("legacy fallback: no payment-time fields -> today's display currency, never an invented rate", () => {
     const legacy = payment({ amount: 6_250_000 })
     expect(salePaymentAmountDisplay(legacy, 'USD', uzsDisplay)).toMatch(/6.?250.?000 so'm/)
     expect(salePaymentAmountDisplay(legacy, 'USD', usdDisplay)).toContain('$')
@@ -258,7 +275,11 @@ describe('computeSaleContractMargin — purchase-currency aware, never double-co
   it('same currency (USD sale, USD purchase): plain native subtraction, no FX conversion at all', () => {
     // Bought for $400, sold for $500 -> $100 margin, regardless of what the
     // purchase-time and sale-time rates happened to be.
-    const p = purchase({ purchaseCurrency: 'USD', purchaseInputAmount: 400, purchaseAmountUzsSnapshot: 5_000_000 })
+    const p = purchase({
+      purchaseCurrency: 'USD',
+      purchaseInputAmount: 400,
+      purchaseAmountUzsSnapshot: 5_000_000,
+    })
     expect(computeSaleContractMargin(500, 'USD', 12_500, p)).toBe(100)
   })
 
@@ -266,26 +287,40 @@ describe('computeSaleContractMargin — purchase-currency aware, never double-co
     // Purchase-time UZS snapshot used a different rate (13,000) than the
     // sale's own creation rate (12,500) — the native-currency result must
     // not depend on either rate at all, unlike a round-trip through UZS.
-    const p = purchase({ purchaseCurrency: 'USD', purchaseInputAmount: 400, purchaseAmountUzsSnapshot: 5_200_000 })
+    const p = purchase({
+      purchaseCurrency: 'USD',
+      purchaseInputAmount: 400,
+      purchaseAmountUzsSnapshot: 5_200_000,
+    })
     expect(computeSaleContractMargin(500, 'USD', 12_500, p)).toBe(100)
   })
 
   it('same currency (UZS sale, UZS purchase): plain native subtraction', () => {
-    const p = purchase({ purchaseCurrency: 'UZS', purchaseInputAmount: 5_000_000, purchaseAmountUzsSnapshot: 5_000_000 })
+    const p = purchase({
+      purchaseCurrency: 'UZS',
+      purchaseInputAmount: 5_000_000,
+      purchaseAmountUzsSnapshot: 5_000_000,
+    })
     expect(computeSaleContractMargin(6_250_000, 'UZS', null, p)).toBe(1_250_000)
   })
 
-  it('different currencies: falls back to converting the purchase UZS snapshot via the SALE\'s frozen creation rate', () => {
+  it("different currencies: falls back to converting the purchase UZS snapshot via the SALE's frozen creation rate", () => {
     // Device bought in UZS (5,000,000 so'm), sold as a $500 USD contract
     // created at rate 12,500 -> matches computeContractCurrencyMargin exactly.
-    const p = purchase({ purchaseCurrency: 'UZS', purchaseInputAmount: 5_000_000, purchaseAmountUzsSnapshot: 5_000_000 })
-    expect(computeSaleContractMargin(500, 'USD', 12_500, p)).toBe(
-      computeContractCurrencyMargin(500, 5_000_000, 'USD', 12_500),
-    )
+    const p = purchase({
+      purchaseCurrency: 'UZS',
+      purchaseInputAmount: 5_000_000,
+      purchaseAmountUzsSnapshot: 5_000_000,
+    })
+    expect(computeSaleContractMargin(500, 'USD', 12_500, p)).toBe(computeContractCurrencyMargin(500, 5_000_000, 'USD', 12_500))
   })
 
   it('different currencies, no creation rate on a USD sale: returns null rather than inventing one', () => {
-    const p = purchase({ purchaseCurrency: 'UZS', purchaseInputAmount: 5_000_000, purchaseAmountUzsSnapshot: 5_000_000 })
+    const p = purchase({
+      purchaseCurrency: 'UZS',
+      purchaseInputAmount: 5_000_000,
+      purchaseAmountUzsSnapshot: 5_000_000,
+    })
     expect(computeSaleContractMargin(500, 'USD', null, p)).toBeNull()
   })
 })

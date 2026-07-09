@@ -6,26 +6,13 @@ import { useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from '@/components/ui/card'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { paymentMethodLabel } from '@/lib/labels'
 import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
-import { formatMoneyByCurrency } from '@/lib/currency'
-import { formatContractMoney, formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
+import { formatMoneyByCurrency, formatUserFacingMoney } from '@/lib/currency'
+import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { uzDate, uzDateTime } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
@@ -73,7 +60,11 @@ interface NasiyaLog {
   targetType: string
   targetId: string
   createdAt: string
-  newValue?: { oldDueDate?: string; newDueDate?: string; reminderEnabled?: boolean } | null
+  newValue?: {
+    oldDueDate?: string
+    newDueDate?: string
+    reminderEnabled?: boolean
+  } | null
 }
 
 interface Nasiya {
@@ -176,14 +167,11 @@ function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency'
 }
 
 /**
- * Payment history must show what actually happened at payment time, not a
- * live reconversion at today's rate/shop currency (see
- * docs/currency-accounting-model.md). `paymentInputAmount/Currency/
- * ExchangeRate` preserve what the customer actually entered; `appliedAmountIn
- * ContractCurrency` is what was actually applied to THIS nasiya's own
- * contract-currency debt (native — $200, not always so'm). `payment.amount`
- * stays the UZS compatibility snapshot, used only as a fallback for payments
- * recorded before this was tracked.
+ * Payment history shows exactly one user-facing currency: the shop's selected
+ * display currency. For tracked payments we convert the original input amount
+ * with the payment-time rate, never today's rate. `payment.amount` stays the
+ * UZS compatibility snapshot, used only as a fallback for older payments
+ * recorded before payment input currency/rate was tracked.
  */
 export function paymentAmountDisplay(
   payment: NasiyaPayment,
@@ -191,17 +179,12 @@ export function paymentAmountDisplay(
   currency: ReturnType<typeof useShopCurrency>['currency'],
 ): string {
   if (payment.paymentInputCurrency != null && payment.paymentInputAmount != null) {
-    const paidText = formatContractMoney(payment.paymentInputAmount, payment.paymentInputCurrency)
-    if (payment.paymentInputCurrency === contractCurrency) {
-      // Nothing was converted — a single native figure is unambiguous.
-      return paidText
-    }
-    const appliedAmount = payment.appliedAmountInContractCurrency ?? payment.amount
-    const appliedText = formatContractMoney(appliedAmount, contractCurrency)
-    const rateText = payment.paymentExchangeRate
-      ? ` · kurs: ${Math.round(payment.paymentExchangeRate).toLocaleString('ru-RU')}`
-      : ''
-    return `${paidText} → ${appliedText}${rateText}`
+    return formatUserFacingMoney({
+      amount: payment.paymentInputAmount,
+      amountCurrency: payment.paymentInputCurrency,
+      displayCurrency: currency.currency,
+      rate: payment.paymentExchangeRate ?? currency.usdUzsRate,
+    })
   }
   // Older payment recorded before payment-time currency was tracked — same
   // fallback behavior as before this fix (today's display currency).
@@ -230,7 +213,7 @@ function nasiyaLogLabel(log: NasiyaLog): string {
     if (enabled === false) return "Eslatma o'chirildi"
     return "Eslatma o'zgartirildi"
   }
-  if (action === 'UPDATE') return "Nasiya tahrirlandi"
+  if (action === 'UPDATE') return 'Nasiya tahrirlandi'
   if (action === 'DELETE') return "O'chirildi"
   if (action === 'RETURN') return 'Qaytarildi'
   return action
@@ -374,10 +357,10 @@ export default function NasiyaDetailPage() {
         setEditOpen(false)
         fetchNasiya()
       } else {
-        setEditError(json.error || "Saqlashda xatolik")
+        setEditError(json.error || 'Saqlashda xatolik')
       }
     } catch {
-      setEditError("Saqlashda xatolik")
+      setEditError('Saqlashda xatolik')
     } finally {
       setEditSaving(false)
     }
@@ -408,9 +391,7 @@ export default function NasiyaDetailPage() {
   if (error || !nasiya) {
     return (
       <div className="p-6">
-        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">
-          {error || 'Nasiya topilmadi'}
-        </div>
+        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">{error || 'Nasiya topilmadi'}</div>
       </div>
     )
   }
@@ -422,10 +403,7 @@ export default function NasiyaDetailPage() {
   // contract currency using TODAY's rate, never reconvert the frozen-rate
   // legacy UZS snapshot a second time (that would silently drift from the
   // true contract value as the rate moves). See docs/currency-accounting-model.md.
-  const contractMonthlyPayment =
-    nasiya.schedules?.length > 0
-      ? nasiya.schedules[0].contractExpectedAmount
-      : nasiya.contractMonthlyPayment
+  const contractMonthlyPayment = nasiya.schedules?.length > 0 ? nasiya.schedules[0].contractExpectedAmount : nasiya.contractMonthlyPayment
   const dfmt = (n: number) => formatDisplayMoneyFromContract(n, nasiya.contractCurrency, currency.currency, currency.usdUzsRate)
 
   const sortedSchedules = [...(nasiya.schedules ?? [])].sort((a, b) => a.monthNumber - b.monthNumber)
@@ -465,25 +443,20 @@ export default function NasiyaDetailPage() {
             </span>
             {nasiya.customerTrust && <TrustBadge trust={nasiya.customerTrust} />}
           </div>
-          <p className="text-sm text-zinc-500 mt-0.5">{nasiya.device.model} · {nasiya.customer.phone}</p>
+          <p className="text-sm text-zinc-500 mt-0.5">
+            {nasiya.device.model} · {nasiya.customer.phone}
+          </p>
           {nasiya.customerTrust && nasiya.customerTrust.reasons.length > 0 && (
             <p className="text-xs text-zinc-400 mt-1">{nasiya.customerTrust.reasons.join(' · ')}</p>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            onClick={openEdit}
-            className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded"
-          >
+          <Button variant="outline" onClick={openEdit} className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded">
             <Pencil size={14} />
             Tahrirlash
           </Button>
           {!isCompleted && displayStatus !== 'CANCELLED' && (
-            <Button
-              onClick={() => setPaymentModalOpen(true)}
-              className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded"
-            >
+            <Button onClick={() => setPaymentModalOpen(true)} className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">
               To'lov qabul qilish
             </Button>
           )}
@@ -493,9 +466,7 @@ export default function NasiyaDetailPage() {
       {isCompleted && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
           <div className="text-sm font-semibold text-emerald-900">Bu nasiya to'liq yopilgan.</div>
-          <div className="text-xs text-emerald-800/80 mt-0.5">
-            Qurilma sotilgan/nasiyadagi holatida qoladi — omborga qaytarilmaydi.
-          </div>
+          <div className="text-xs text-emerald-800/80 mt-0.5">Qurilma sotilgan/nasiyadagi holatida qoladi — omborga qaytarilmaydi.</div>
         </div>
       )}
 
@@ -509,16 +480,14 @@ export default function NasiyaDetailPage() {
       {nasiya.isImported && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-center gap-2">
-            <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">
-              Eski nasiya
-            </span>
+            <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Eski nasiya</span>
             <span className="text-sm font-semibold text-amber-900">Import qilingan nasiya</span>
           </div>
           <p className="mt-1 text-xs text-amber-800/80">
             Bu Oryx'dan oldingi eski nasiya. Importgacha to'langan pul joriy oy daromadiga qo'shilmaydi.
           </p>
           <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
-            <ImportField label="Manba" value={nasiya.importSource === 'MANUAL' ? "Qo'lda" : nasiya.importSource ?? '—'} />
+            <ImportField label="Manba" value={nasiya.importSource === 'MANUAL' ? "Qo'lda" : (nasiya.importSource ?? '—')} />
             <ImportField label="Import sanasi" value={nasiya.importedAt ? uzDate(nasiya.importedAt) : '—'} />
             <ImportField label="Eski sotuv sanasi" value={nasiya.originalSaleDate ? uzDate(nasiya.originalSaleDate) : '—'} />
             <ImportField label="Eski nasiya summasi" value={fmt(nasiya.originalTotalAmount ?? 0, currency)} />
@@ -530,16 +499,6 @@ export default function NasiyaDetailPage() {
               <span className="font-medium">Izoh:</span> {nasiya.importNote}
             </div>
           )}
-        </div>
-      )}
-
-      {/* Below figures are the shop's current display currency (live view —
-          see docs/currency-accounting-model.md). This deal's own contract
-          currency is frozen at creation and never changes, regardless of the
-          shop's display toggle — call it out when the two differ. */}
-      {nasiya.contractCurrency !== currency.currency && (
-        <div className="text-xs text-zinc-500">
-          Shartnoma: {formatContractMoney(nasiya.contractFinalAmount, nasiya.contractCurrency)}
         </div>
       )}
 
@@ -557,16 +516,28 @@ export default function NasiyaDetailPage() {
           // contract value as the rate moves (see
           // docs/currency-accounting-model.md).
           { label: 'Sotilish narxi', value: dfmt(nasiya.contractTotalAmount) },
-          { label: "Boshlang'ich to'lov", value: dfmt(nasiya.contractDownPayment) },
+          {
+            label: "Boshlang'ich to'lov",
+            value: dfmt(nasiya.contractDownPayment),
+          },
           ...(nasiya.contractInterestAmount > 0
             ? [
-                { label: 'Nasiya foizi', value: `${fmt(nasiya.interestPercent)}%` },
-                { label: 'Foiz summasi', value: dfmt(nasiya.contractInterestAmount) },
+                {
+                  label: 'Nasiya foizi',
+                  value: `${fmt(nasiya.interestPercent)}%`,
+                },
+                {
+                  label: 'Foiz summasi',
+                  value: dfmt(nasiya.contractInterestAmount),
+                },
               ]
             : []),
           { label: 'Nasiya jami', value: dfmt(nasiya.contractFinalAmount) },
           { label: "To'langan", value: dfmt(nasiya.contractPaidAmount) },
-          { label: "Qarz qoldig'i", value: dfmt(nasiya.contractRemainingAmount) },
+          {
+            label: "Qarz qoldig'i",
+            value: dfmt(nasiya.contractRemainingAmount),
+          },
           { label: "Oylik to'lov", value: dfmt(contractMonthlyPayment) },
         ].map((c) => (
           <Card key={c.label} className="rounded-lg" size="sm">
@@ -582,9 +553,7 @@ export default function NasiyaDetailPage() {
       <Card className="rounded-lg">
         <CardHeader>
           <CardTitle>Umumiy progress</CardTitle>
-          <CardDescription>
-            {isCompleted ? "Nasiya to'liq yopilgan" : "Nasiya bo'yicha jami to'langan summa"}
-          </CardDescription>
+          <CardDescription>{isCompleted ? "Nasiya to'liq yopilgan" : "Nasiya bo'yicha jami to'langan summa"}</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="flex justify-between text-sm mb-2">
@@ -605,16 +574,12 @@ export default function NasiyaDetailPage() {
         <CardHeader>
           <CardTitle>{isCompleted ? "To'lov tarixi bahosi" : "To'lov ishonchi"}</CardTitle>
           <CardDescription>
-            {isCompleted
-              ? "Yakunlangan nasiya bo'yicha tarixiy to'lov xatti-harakati"
-              : "Mijozning to'lov tarixiga asoslangan baho"}
+            {isCompleted ? "Yakunlangan nasiya bo'yicha tarixiy to'lov xatti-harakati" : "Mijozning to'lov tarixiga asoslangan baho"}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="flex items-center gap-3">
-            <span
-              className={`inline-block px-2.5 py-1 rounded text-sm font-medium ${scoreCardStyles[nasiya.paymentScore.color]}`}
-            >
+            <span className={`inline-block px-2.5 py-1 rounded text-sm font-medium ${scoreCardStyles[nasiya.paymentScore.color]}`}>
               {nasiya.paymentScore.label}
             </span>
             <span className="text-sm font-bold text-zinc-900">{nasiya.paymentScore.score}/100</span>
@@ -633,9 +598,7 @@ export default function NasiyaDetailPage() {
       <div className="border border-zinc-200 rounded p-4 flex items-center justify-between gap-4">
         <div>
           <div className="text-sm font-semibold text-zinc-900">To'lov eslatmasi</div>
-          <div className="text-xs text-zinc-500 mt-0.5">
-            {nasiya.reminderEnabled ? 'Eslatma yoqilgan' : "Eslatma o'chirilgan"}
-          </div>
+          <div className="text-xs text-zinc-500 mt-0.5">{nasiya.reminderEnabled ? 'Eslatma yoqilgan' : "Eslatma o'chirilgan"}</div>
         </div>
         <Button
           onClick={handleToggleReminder}
@@ -647,27 +610,17 @@ export default function NasiyaDetailPage() {
               : 'h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40'
           }
         >
-          {reminderSubmitting
-            ? 'Saqlanmoqda...'
-            : nasiya.reminderEnabled
-              ? "Eslatmani o'chirish"
-              : 'Eslatmani yoqish'}
+          {reminderSubmitting ? 'Saqlanmoqda...' : nasiya.reminderEnabled ? "Eslatmani o'chirish" : 'Eslatmani yoqish'}
         </Button>
       </div>
 
       {/* Passport photo */}
       <div className="border border-zinc-200 rounded overflow-hidden">
-        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">
-          Pasport rasmi
-        </div>
+        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">Pasport rasmi</div>
         <div className="p-4">
           {passportKey && passportUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={passportUrl}
-              alt="Pasport rasmi"
-              className="max-h-80 w-auto rounded border border-zinc-200"
-            />
+            <img src={passportUrl} alt="Pasport rasmi" className="max-h-80 w-auto rounded border border-zinc-200" />
           ) : passportKey && !passportUrl ? (
             <div className="text-sm text-zinc-400">Yuklanmoqda...</div>
           ) : (
@@ -678,47 +631,12 @@ export default function NasiyaDetailPage() {
 
       {/* Payment schedule */}
       <div className="border border-zinc-200 rounded overflow-hidden">
-        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">
-          To'lov jadvali
-        </div>
+        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">To'lov jadvali</div>
         <div className="overflow-x-auto">
-        <table className="min-w-[640px] w-full text-sm">
-          <thead className="border-b border-zinc-200">
-            <tr>
-                {['#', 'Sana', 'Miqdor', "To'langan", 'Status'].map((h) => (
-                <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide bg-zinc-50">
-                  {h}
-                </th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {sortedSchedules.map((row) => (
-              <tr key={row.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
-                <td className="px-4 py-3 text-zinc-500">{row.monthNumber}</td>
-                <td className="px-4 py-3 text-zinc-700">{uzDate(row.dueDate)}</td>
-                <td className="px-4 py-3 font-medium text-zinc-900">{dfmt(row.contractExpectedAmount)}</td>
-                <td className="px-4 py-3 text-zinc-700">{dfmt(row.contractPaidAmount)}</td>
-                <td className="px-4 py-3">
-                  <RowBadge status={rowDisplayStatus(row)} />
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        </div>
-      </div>
-
-      <div className="border border-zinc-200 rounded overflow-hidden">
-        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">
-          To'lov tarixi
-        </div>
-        {nasiya.payments?.length ? (
-          <div className="overflow-x-auto">
-          <table className="min-w-[560px] w-full text-sm">
+          <table className="min-w-[640px] w-full text-sm">
             <thead className="border-b border-zinc-200">
               <tr>
-                {['Sana', 'Miqdor', 'Usul', 'Izoh'].map((h) => (
+                {['#', 'Sana', 'Miqdor', "To'langan", 'Status'].map((h) => (
                   <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide bg-zinc-50">
                     {h}
                   </th>
@@ -726,24 +644,57 @@ export default function NasiyaDetailPage() {
               </tr>
             </thead>
             <tbody>
-              {nasiya.payments.map((payment) => (
-                <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
-                  <td className="px-4 py-3 text-zinc-700">{uzDate(payment.paidAt)}</td>
-                  <td className="px-4 py-3 font-medium text-zinc-900">{paymentAmountDisplay(payment, nasiya.contractCurrency, currency)}</td>
-                  <td className="px-4 py-3 text-zinc-700">
-                    {payment.paymentBreakdown?.length ? (
-                      <span title={payment.paymentBreakdown.map((p) => `${paymentMethodLabel(p.method)}: ${p.amount}`).join(', ')}>
-                        {payment.paymentBreakdown.map((p) => paymentMethodLabel(p.method)).join(' + ')}
-                      </span>
-                    ) : (
-                      paymentMethodLabel(payment.paymentMethod)
-                    )}
+              {sortedSchedules.map((row) => (
+                <tr key={row.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
+                  <td className="px-4 py-3 text-zinc-500">{row.monthNumber}</td>
+                  <td className="px-4 py-3 text-zinc-700">{uzDate(row.dueDate)}</td>
+                  <td className="px-4 py-3 font-medium text-zinc-900">{dfmt(row.contractExpectedAmount)}</td>
+                  <td className="px-4 py-3 text-zinc-700">{dfmt(row.contractPaidAmount)}</td>
+                  <td className="px-4 py-3">
+                    <RowBadge status={rowDisplayStatus(row)} />
                   </td>
-                  <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <div className="border border-zinc-200 rounded overflow-hidden">
+        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">To'lov tarixi</div>
+        {nasiya.payments?.length ? (
+          <div className="overflow-x-auto">
+            <table className="min-w-[560px] w-full text-sm">
+              <thead className="border-b border-zinc-200">
+                <tr>
+                  {['Sana', 'Miqdor', 'Usul', 'Izoh'].map((h) => (
+                    <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide bg-zinc-50">
+                      {h}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {nasiya.payments.map((payment) => (
+                  <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
+                    <td className="px-4 py-3 text-zinc-700">{uzDate(payment.paidAt)}</td>
+                    <td className="px-4 py-3 font-medium text-zinc-900">
+                      {paymentAmountDisplay(payment, nasiya.contractCurrency, currency)}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-700">
+                      {payment.paymentBreakdown?.length ? (
+                        <span title={payment.paymentBreakdown.map((p) => `${paymentMethodLabel(p.method)}: ${p.amount}`).join(', ')}>
+                          {payment.paymentBreakdown.map((p) => paymentMethodLabel(p.method)).join(' + ')}
+                        </span>
+                      ) : (
+                        paymentMethodLabel(payment.paymentMethod)
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         ) : (
           <div className="px-4 py-6 text-sm text-zinc-500">To'lov tarixi hali yo'q</div>
@@ -752,9 +703,7 @@ export default function NasiyaDetailPage() {
 
       {/* Action logs */}
       <div className="border border-zinc-200 rounded overflow-hidden">
-        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">
-          Amallar tarixi
-        </div>
+        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">Amallar tarixi</div>
         {logs.length ? (
           <ul className="divide-y divide-zinc-100">
             {logs.map((l) => (
@@ -764,9 +713,7 @@ export default function NasiyaDetailPage() {
                   {nasiyaLogDetail(l) && <div className="text-xs text-zinc-500 mt-0.5">{nasiyaLogDetail(l)}</div>}
                   {l.note && <div className="text-xs text-zinc-500 mt-0.5">{l.note}</div>}
                 </div>
-                <div className="text-xs text-zinc-400 whitespace-nowrap flex-shrink-0">
-                  {uzDateTime(l.createdAt)}
-                </div>
+                <div className="text-xs text-zinc-400 whitespace-nowrap flex-shrink-0">{uzDateTime(l.createdAt)}</div>
               </li>
             ))}
           </ul>
@@ -782,7 +729,10 @@ export default function NasiyaDetailPage() {
         onOpenChange={setPaymentModalOpen}
         customerName={nasiya.customer.name}
         deviceName={nasiya.device.model}
-        onSuccess={() => { setLoading(true); fetchNasiya() }}
+        onSuccess={() => {
+          setLoading(true)
+          fetchNasiya()
+        }}
       />
 
       {/* Edit (safe fields) Dialog */}
@@ -795,11 +745,7 @@ export default function NasiyaDetailPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-1">
-            {editError && (
-              <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-                {editError}
-              </div>
-            )}
+            {editError && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{editError}</div>}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-zinc-700">Mijoz ismi</label>
@@ -843,11 +789,7 @@ export default function NasiyaDetailPage() {
             </label>
           </div>
           <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setEditOpen(false)}
-              className="rounded-lg border-zinc-200 text-zinc-700"
-            >
+            <Button variant="outline" onClick={() => setEditOpen(false)} className="rounded-lg border-zinc-200 text-zinc-700">
               Bekor qilish
             </Button>
             <Button

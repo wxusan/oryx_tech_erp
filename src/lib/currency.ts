@@ -42,37 +42,65 @@ export function normalizeMoneyInput(
   amount: number,
   currency: CurrencyCode,
   rate: number | null | undefined,
-): { amountUzs: number; inputCurrency: CurrencyCode; exchangeRateUsed: number | null } {
+): {
+  amountUzs: number
+  inputCurrency: CurrencyCode
+  exchangeRateUsed: number | null
+} {
   if (currency === 'UZS') {
     assertMoney(amount, 'UZS amount')
-    return { amountUzs: Math.round(amount), inputCurrency: 'UZS', exchangeRateUsed: null }
+    return {
+      amountUzs: Math.round(amount),
+      inputCurrency: 'UZS',
+      exchangeRateUsed: null,
+    }
   }
   if (!rate) throw new Error('USD kursi mavjud emas')
-  return { amountUzs: convertUsdToUzs(amount, rate), inputCurrency: 'USD', exchangeRateUsed: rate }
-}
-
-export function formatMoneyByCurrency(
-  amountUzs: number | string | null | undefined,
-  currency: CurrencyCode,
-  rate?: number | null,
-): string {
-  const value = Number(amountUzs ?? 0)
-  if (currency === 'USD') {
-    if (!rate || rate <= 0) return `${formatUzs(value)} (USD kursi mavjud emas)`
-    return formatUsd(convertUzsToUsd(value, rate))
+  return {
+    amountUzs: convertUsdToUzs(amount, rate),
+    inputCurrency: 'USD',
+    exchangeRateUsed: rate,
   }
-  return formatUzs(value)
 }
 
-export function formatMoneyWithBase(
-  amountUzs: number | string | null | undefined,
-  currency: CurrencyCode,
-  rate?: number | null,
-): string {
+export function formatMoneyByCurrency(amountUzs: number | string | null | undefined, currency: CurrencyCode, rate?: number | null): string {
+  return formatUserFacingMoney({
+    amount: amountUzs,
+    amountCurrency: 'UZS',
+    displayCurrency: currency,
+    rate,
+  })
+}
+
+export function formatMoneyWithBase(amountUzs: number | string | null | undefined, currency: CurrencyCode, rate?: number | null): string {
   const value = Number(amountUzs ?? 0)
   if (currency !== 'USD') return formatUzs(value)
   if (!rate || rate <= 0) return `${formatUzs(value)} (USD kursi mavjud emas)`
   return `${formatUsd(convertUzsToUsd(value, rate))} (~${formatUzs(value)})`
+}
+
+export function formatUserFacingMoney({
+  amount,
+  amountCurrency,
+  displayCurrency,
+  rate,
+}: {
+  amount: number | string | null | undefined
+  amountCurrency: CurrencyCode
+  displayCurrency: CurrencyCode
+  rate?: number | string | null
+}): string {
+  if (amount === null || amount === undefined) return '—'
+  const value = Number(amount ?? 0)
+  const r = rate == null ? null : Number(rate)
+
+  if (!Number.isFinite(value)) return '—'
+  if (amountCurrency === displayCurrency) {
+    return displayCurrency === 'USD' ? formatUsd(value) : formatUzs(value)
+  }
+  if (!r || r <= 0 || !Number.isFinite(r)) return '—'
+  if (amountCurrency === 'USD') return formatUzs(convertUsdToUzs(value, r))
+  return formatUsd(convertUzsToUsd(value, r))
 }
 
 export function currencyLabel(currency: CurrencyCode) {

@@ -1,8 +1,8 @@
 # Currency accounting model
 
 This supersedes the earlier "payment-display-only" version of this document
-(commit `919f9cc`). That pass fixed historical payment *display* but left
-the debt/schedule *ledger* itself UZS-only. This document describes the full
+(commit `919f9cc`). That pass fixed historical payment _display_ but left
+the debt/schedule _ledger_ itself UZS-only. This document describes the full
 native contract-currency model built on top of it, in 11 phases (Nasiya
 first — full treatment; Sale/Olib-sotdim — minimal, additive; reports/import
 audited and fixed where genuinely broken).
@@ -24,6 +24,12 @@ payment. Preserved verbatim (`paymentInputAmount`/`paymentInputCurrency`/
 it re-renders every screen through today's rate; it never rewrites a stored
 deal, schedule, payment, or report figure. See §4.
 
+**User-facing display rule** — normal shop-facing UI and Telegram show exactly
+one money currency: the selected display currency. Internal accounting may keep
+native contract currency, payment input currency, payment-time rates, UZS
+snapshots, and USD snapshots, but UI/Telegram must not render mixed strings
+like `600 238 so'm (~$50.00)` or `$50.00 (~600 238 so'm)`.
+
 ## 2. Architecture: dual ledger, one frozen conversion factor
 
 Every contract (Nasiya, Sale, SupplierPayable) carries **two** representations:
@@ -43,7 +49,7 @@ Every contract (Nasiya, Sale, SupplierPayable) carries **two** representations:
 For a UZS contract the two ledgers are numerically identical (rate is
 irrelevant). For a USD contract, the legacy fields are a frozen
 creation-rate snapshot — useful for backward-compatible reporting, but never
-authoritative for debt math and never reconverted through *today's* rate for
+authoritative for debt math and never reconverted through _today's_ rate for
 "current state" display (that specific bug — reconverting a frozen snapshot
 through a later rate — is exactly what Phases 6 and 9 found and fixed; see
 §10 and §11).
@@ -146,12 +152,17 @@ dust. Both ledgers snap to exactly 0 together once complete.
 
 ## 9. Historical payment display
 
-Unchanged from the prior pass, now generalized: `paymentAmountDisplay` (nasiya
-detail page) shows the payment's own native amount, and — only when payment
-currency differs from **contract** currency (not display currency) — the
-applied contract-currency figure plus the rate used, e.g.
-`"$160.00 → 2 000 000 so'm · kurs: 12 500"`. This is frozen at payment time
-and never recalculated, regardless of later rate/display changes.
+`paymentAmountDisplay` (nasiya detail page) and `salePaymentAmountDisplay`
+(sale history on device detail) show exactly one user-facing currency: the
+shop's selected display currency. For tracked payments they start from the
+customer's original `paymentInputAmount`/`paymentInputCurrency` and convert
+with that row's saved `paymentExchangeRate` when needed. They never use
+today's rate for an old payment amount, and they no longer show mixed
+`paid → applied · kurs` text in normal UI.
+
+Rows recorded before payment-time fields existed fall back to the legacy UZS
+snapshot and the current display conversion rule, because no historical input
+currency/rate exists to use.
 
 ## 10. A confirmed bug this project found and fixed: double-conversion drift
 
@@ -191,16 +202,17 @@ summing frozen snapshots and converting the total once).
 
 - **Reminders** (`nasiyaDueTodayMessage`/`nasiyaOverdueMessage`/
   `nasiyaEarlyReminderMessage`): amount is the schedule's own contract-currency
-  balance, formatted natively with an optional `(~display equivalent)` hint
-  (`formatContractMoneyWithDisplay`) — native leads because it's the real debt.
+  balance, formatted into the shop display currency only
+  (`formatContractMoneyWithDisplay` now delegates to the one-currency display
+  helper).
 - **Payment confirmation** (`nasiyaPaymentMessage`): allocation breakdown and
-  applied/remaining figures are in contract currency; the "paid vs. applied"
-  two-line breakdown triggers when payment currency differs from
-  **contract** currency (not display currency).
+  paid figures are shown in the shop display currency only. The paid input and
+  allocation lines use the payment's saved `paymentExchangeRate`; remaining
+  debt uses the current display conversion rule.
 - **Completion** (`nasiyaCompletedMessage`): now shows the contract-currency
-  total, fixing the same double-conversion-drift bug (§10) — this message
-  fires whenever the last payment happens, potentially long after creation,
-  so it was just as exposed to rate drift as the dashboard.
+  total converted to the shop display currency, fixing the same
+  double-conversion-drift bug (§10) while still obeying the one-currency UI
+  rule.
 - **Creation messages** (`nasiyaCreatedMessage`, `nasiyaImportedMessage`)
   are unaffected on purpose: they're generated in the same request that
   freezes the creation rate, so there is no time for the rate to have moved
@@ -226,10 +238,11 @@ currency" as a requirement: `supplierPayableDueTodayMessage`/
 `supplierPayableOverdueMessage`/`supplierPayableEarlyReminderMessage`/
 `supplierPayablePaidMessage` all now take `contractCurrency` and format via
 `formatContractMoneyWithDisplay`, reading `payable.contractAmount` instead of
-the legacy `payable.amount` — the same double-conversion-drift bug as §10
-applied here too (a payable's `amount` is frozen at creation rate; a paid
-confirmation or reminder sent later, at a different rate, would have
-misstated a USD-native payable's true amount).
+the legacy `payable.amount`, while showing only the selected display currency.
+The same double-conversion-drift bug as §10 applied here too (a payable's
+`amount` is frozen at creation rate; a paid confirmation or reminder sent
+later, at a different rate, would have misstated a USD-native payable's true
+amount).
 
 Sale itself got the schema-only treatment: `contractCurrency`/
 `contractSalePrice`/`contractAmountPaid`/`contractRemainingAmount`,
@@ -312,11 +325,11 @@ is unavailable (see profit, below).
 **Pages fixed** (all via `formatDisplayMoneyFromContract`/
 `formatContractMoney` from `src/lib/nasiya-contract.ts`, converting the
 native contract amount exactly once):
+
 - `src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx` — the "Sotuv narxi"
   and "Farq" (profit) columns.
 - `src/app/(shop)/shop/qurilmalar/[id]/page.tsx` (device detail) — "Sotuv
-  narxi" (with an optional "Shartnoma: $X" reference line shown only when
-  display currency differs from contract currency), "Farq / Foyda",
+  narxi", "Farq / Foyda",
   "To'langan", "Qolgan", and the "pay remaining" prefill button (now via
   `convertPaymentToContractCurrency`, with a safe string fallback when no
   rate is available client-side).
@@ -326,10 +339,9 @@ native contract amount exactly once):
   `profit`.
 
 **Payment history.** `salePaymentAmountDisplay` (in `nasiya-contract.ts`) is
-the Sale counterpart of Nasiya's `paymentAmountDisplay`: it shows the
-payment-time native amount, or (when payment currency differs from contract
-currency) "paid X → applied Y · kurs: Z", using `paymentInputAmount/
-Currency/paymentExchangeRate/appliedAmountInContractCurrency` — never
+the Sale counterpart of Nasiya's `paymentAmountDisplay`: it shows exactly one
+selected display currency, starting from `paymentInputAmount/Currency` and
+using `paymentExchangeRate` for historical cross-currency conversion — never
 reinventing a historical rate. Rows recorded before payment-time tracking
 existed fall back to `formatDisplayMoneyFromContract(payment.amount, 'UZS',
 ...)`, same as before this fix. A dedicated Sale payment-history table was
@@ -337,15 +349,11 @@ added in a later pass — see §19.
 
 **Telegram.** `deviceSoldMessage`/`salePaymentMessage`/
 `olibSotdimCreatedMessage` all now take a `contractCurrency` param and
-format amounts via `formatContractMoneyWithDisplay` (native amount leads,
-`(~display equivalent)` is an optional secondary hint) — e.g. "Sotuv narxi:
-6 250 000 so'm (~$480.77)" for a UZS-native sale viewed while the shop
-displays USD, or "Sotuv narxi: $500.00" unchanged forever for a USD-native
-sale regardless of today's rate. `salePaymentMessage`'s paid/applied
-two-line breakdown now triggers when the payment currency differs from the
-sale's own **contract** currency (not the shop's display currency) — the
-same fix already applied to `nasiyaPaymentMessage` in §12. The three
-route call sites (`api/devices/[id]/sell`, `api/sales/[id]/payment`,
+format amounts via `formatContractMoneyWithDisplay`, which now renders only
+the shop's selected display currency. `salePaymentMessage` uses the
+payment-time rate for the paid input and no longer shows the old paid/applied
+two-line breakdown. The three route call sites (`api/devices/[id]/sell`,
+`api/sales/[id]/payment`,
 `api/olib-sotdim`) were updated to pass their already-computed
 contract-native amounts instead of the legacy UZS ones.
 
@@ -369,8 +377,8 @@ call now passes contract-native purchase/sale/profit amounts. No changes
 were made to supplier-payable partial-payment logic (there is none — see
 §13).
 
-**Reports.** Not touched in *this* pass — no report was found reading
-Sale's legacy fields in a way that would misrender a *future* USD sale. A
+**Reports.** Not touched in _this_ pass — no report was found reading
+Sale's legacy fields in a way that would misrender a _future_ USD sale. A
 later pass did fix the one live-aggregate case that mattered (Sale's
 `expectedThisMonth`/`overdueMoney`) — see §11 and §21.
 
@@ -399,15 +407,13 @@ that card, mirroring the nasiya detail page's own payment-history table:
 - `GET /api/devices/[id]` now selects `SalePayment` rows under the sale
   (`where: { deletedAt: null }`, `orderBy: { paidAt: 'asc' }`) together with
   `paymentInputAmount/paymentInputCurrency/paymentExchangeRate/
-  appliedAmountInContractCurrency`.
+appliedAmountInContractCurrency`.
 - Each row renders via `salePaymentAmountDisplay(payment,
-  latestSale.contractCurrency, currency)` (already implemented and tested in
-  §17/`tests/nasiya-contract.test.ts`) — payment-time native amount, or
-  "paid X → applied Y · kurs: Z" when payment currency differs from
-  contract currency, never a live reconversion at today's rate. Example
-  rows: `"6 250 000 so'm → $500.00 · kurs: 12 500"` (USD sale paid in UZS),
-  `"$160.00 → 2 000 000 so'm · kurs: 12 500"` (UZS sale paid in USD), or a
-  single `"$500.00"` when nothing was converted.
+latestSale.contractCurrency, currency)` (already implemented and tested in
+  §17/`tests/nasiya-contract.test.ts`) — one selected display currency, using
+  the payment-time rate when the original payment input must be converted for
+  display. Example: a UZS payment of `6 250 000 so'm` at rate 12 500 displays
+  as `"$500.00"` in USD mode and `"6 250 000 so'm"` in UZS mode.
 - Legacy `SalePayment` rows recorded before payment-time tracking existed
   fall back to `formatDisplayMoneyFromContract(payment.amount, 'UZS', ...)`
   — today's display currency, never an invented historical rate.
@@ -505,7 +511,7 @@ shared helper, `convertContractAmountToUzs`, that `contractOutstandingAsUzs`
 itself now calls) before summing — never by summing the legacy
 `remainingAmount` snapshot directly. This matters because, unlike a
 device's one-time purchase conversion, Sale's legacy `remainingAmount` is
-decremented by a *sequence* of payments, each converted at whatever rate was
+decremented by a _sequence_ of payments, each converted at whatever rate was
 live on that payment's own day — so for a USD-native sale with several
 payments on different days, the legacy snapshot's implicit "rate" is not
 even well-defined, and summing it across many sales would silently mix
@@ -537,6 +543,7 @@ aggregates that could have raw-mixed currencies (`expectedThisMonth`,
 `overdueMoney`).
 
 **Deliberately deferred, not silently dropped:**
+
 - **No independent currency selector** in creation forms or the payment
   modal, distinct from the shop's global `preferredCurrency` toggle (see
   §18) — unchanged, still assessed as unnecessary risk for a capability the
@@ -603,8 +610,8 @@ migration. The crash signature itself is diagnostic evidence: a missing
 column would fail the Prisma query server-side (caught by the route's
 `try/catch`, returning a JSON `{success:false}` response — the client would
 show "Qurilma topilmadi", not a React render-crash overlay). The specific
-overlay the user saw only happens on an *uncaught client-side JavaScript
-exception during render*, exactly matching the `.toFixed()` TypeError.
+overlay the user saw only happens on an _uncaught client-side JavaScript
+exception during render_, exactly matching the `.toFixed()` TypeError.
 Production (`https://oryx-tech-erp.vercel.app/api/health`, checked directly)
 was confirmed live and healthy on the latest deployed commit at the time of
 this fix.
@@ -634,9 +641,9 @@ are both `Decimal?` columns, so they arrive as JSON strings exactly like
 every other Decimal field — and `computeContractCurrencyMargin` (called by
 `computeSaleContractMargin` for the device detail page's profit figure)
 passes `contractExchangeRateAtCreation` straight through as the `rate`
-argument to `convertUzsToUsd`. The §23 fix hardened every *amount*
+argument to `convertUzsToUsd`. The §23 fix hardened every _amount_
 argument in `nasiya-contract.ts` but this one function still leaked an
-un-coerced *rate* argument into `currency.ts`'s stricter check.
+un-coerced _rate_ argument into `currency.ts`'s stricter check.
 
 This reproduces whenever a device's `purchaseCurrency` differs from its
 sale's `contractCurrency` — e.g. a device purchased in UZS (the common

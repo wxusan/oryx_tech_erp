@@ -67,16 +67,19 @@ describe('sale payment route: completion decided from the contract ledger, not t
   const route = read('src/app/api/sales/[id]/payment/route.ts')
 
   it('the already-closed guard rejects a payment attempt when EITHER ledger says the sale is done', () => {
-    expect(route).toContain(
-      "if (oldRemaining <= 0 || sale.paidFully || contractScheduleOutstanding(Number(sale.contractSalePrice), Number(sale.contractAmountPaid), sale.contractCurrency) <= 0) {",
-    )
+    expect(route).toContain('oldRemaining <= 0')
+    expect(route).toContain('sale.paidFully')
+    expect(route).toContain('contractScheduleOutstanding(Number(sale.contractSalePrice), Number(sale.contractAmountPaid), sale.contractCurrency) <= 0')
   })
 
   it('paidFully/dueDate/reminderEnabled are decided from contractFullyPaid (contractScheduleOutstanding), never nextRemaining', () => {
-    expect(route).toContain('const nextContractRemaining = contractScheduleOutstanding(Number(sale.contractSalePrice), nextContractAmountPaid, sale.contractCurrency)')
+    expect(route).toContain('const nextContractRemaining = contractScheduleOutstanding(')
+    expect(route).toContain('Number(sale.contractSalePrice)')
+    expect(route).toContain('nextContractAmountPaid')
+    expect(route).toContain('sale.contractCurrency')
     expect(route).toContain('const contractFullyPaid = nextContractRemaining <= 0')
     expect(route).toContain('paidFully: contractFullyPaid,')
-    expect(route).toContain('dueDate: contractFullyPaid ? null : parsed.data.nextDueDate ?? sale.dueDate,')
+    expect(route).toContain('dueDate: contractFullyPaid ? null : (parsed.data.nextDueDate ?? sale.dueDate),')
     expect(route).toContain('reminderEnabled: contractFullyPaid ? false : sale.reminderEnabled,')
     expect(route).not.toContain('paidFully: nextRemaining <= 0')
     expect(route).not.toContain('contractRemainingAmount: nextRemaining <= 0 ? 0 : nextContractRemaining')

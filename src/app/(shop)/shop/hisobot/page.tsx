@@ -1,26 +1,13 @@
 import { redirect } from 'next/navigation'
-import {
-  AlertTriangle,
-  Boxes,
-  CalendarClock,
-  CircleDollarSign,
-  RotateCcw,
-  TrendingUp,
-} from 'lucide-react'
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-} from '@/components/ui/card'
+import { AlertTriangle, Boxes, CalendarClock, CircleDollarSign, RotateCcw, TrendingUp } from 'lucide-react'
+import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import type { ChartConfig } from '@/components/ui/chart'
 import { requireApiSession } from '@/lib/api-auth'
 import { getShopStats } from '@/lib/server/shop-stats'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { formatMoneyByCurrency, formatMoneyWithBase, type CurrencyContext } from '@/lib/currency'
+import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
 import { recentTashkentMonthKeys, tashkentMonthRangeFromKey } from '@/lib/timezone'
 import { prisma } from '@/lib/prisma'
 import HisobotChartsLoader from './hisobot-charts-loader'
@@ -31,23 +18,10 @@ function fmt(value: number, currency: CurrencyContext) {
 }
 
 function fmtBase(value: number, currency: CurrencyContext) {
-  return formatMoneyWithBase(value, currency.currency, currency.usdUzsRate)
+  return formatMoneyByCurrency(value, currency.currency, currency.usdUzsRate)
 }
 
-const UZ_MONTHS = [
-  'Yanvar',
-  'Fevral',
-  'Mart',
-  'Aprel',
-  'May',
-  'Iyun',
-  'Iyul',
-  'Avgust',
-  'Sentabr',
-  'Oktabr',
-  'Noyabr',
-  'Dekabr',
-]
+const UZ_MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr']
 
 /** Item 8 — parses a `YYYY-MM` key directly (never a Date's local-timezone getters, which would drift from Tashkent on a non-Tashkent server). */
 function uzMonthLabelFromKey(monthKey: string) {
@@ -56,7 +30,10 @@ function uzMonthLabelFromKey(monthKey: string) {
 }
 
 interface ShopReportPageProps {
-  searchParams?: Promise<{ month?: string | string[]; admin?: string | string[] }>
+  searchParams?: Promise<{
+    month?: string | string[]
+    admin?: string | string[]
+  }>
 }
 
 export default async function ShopReportPage({ searchParams }: ShopReportPageProps) {
@@ -82,7 +59,10 @@ export default async function ShopReportPage({ searchParams }: ShopReportPagePro
     }),
   ])
 
-  const monthOptions = recentTashkentMonthKeys(12).map((key) => ({ value: key, label: uzMonthLabelFromKey(key) }))
+  const monthOptions = recentTashkentMonthKeys(12).map((key) => ({
+    value: key,
+    label: uzMonthLabelFromKey(key),
+  }))
   const monthLabel = uzMonthLabelFromKey(stats.monthKey)
   const collected = stats.grossCashInThisMonth ?? stats.cashCollectedThisMonth ?? stats.cashReceivedThisMonth
   const netCash = stats.netCashFlowThisMonth ?? stats.netCashAfterReturnsThisMonth
@@ -96,9 +76,17 @@ export default async function ShopReportPage({ searchParams }: ShopReportPagePro
   const collectionRate = collectionBase > 0 ? Math.round((collected / collectionBase) * 100) : 0
 
   const cashFlowData = [
-    { name: 'Umumiy aylanma', amount: collected, fill: 'var(--color-collected)' },
+    {
+      name: 'Umumiy aylanma',
+      amount: collected,
+      fill: 'var(--color-collected)',
+    },
     { name: 'Sof tushum', amount: netCash, fill: 'var(--color-net)' },
-    { name: 'Qaytarilgan summa', amount: refunds, fill: 'var(--color-refunds)' },
+    {
+      name: 'Qaytarilgan summa',
+      amount: refunds,
+      fill: 'var(--color-refunds)',
+    },
     { name: 'Kutilmoqda', amount: expected, fill: 'var(--color-expected)' },
     { name: 'Kechikkan', amount: overdue, fill: 'var(--color-overdue)' },
   ]
@@ -106,7 +94,11 @@ export default async function ShopReportPage({ searchParams }: ShopReportPagePro
   const businessData = [
     { name: 'Ombor', amount: inventory, fill: 'var(--color-inventory)' },
     { name: 'Sotuv foydasi', amount: grossProfit, fill: 'var(--color-gross)' },
-    { name: 'Nasiya foizi', amount: interestProfit, fill: 'var(--color-interest)' },
+    {
+      name: 'Nasiya foizi',
+      amount: interestProfit,
+      fill: 'var(--color-interest)',
+    },
   ]
 
   const chartConfig = {
@@ -155,122 +147,125 @@ export default async function ShopReportPage({ searchParams }: ShopReportPagePro
 
       {stats.filteredByAdmin && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-          Admin filtri faqat u amalga oshirgan sotuv/nasiya/to'lov/qaytarish va faoliyat jurnaliga taalluqli.
-          Ombordagi tannarx, joriy faol nasiyalar, kutilayotgan va kechikkan qarzdorlik — bularni bitta adminga bog'lab bo'lmaydi, shuning uchun ular barcha adminlar bo'yicha ko'rsatiladi.
+          Admin filtri faqat u amalga oshirgan sotuv/nasiya/to'lov/qaytarish va faoliyat jurnaliga taalluqli. Ombordagi tannarx, joriy faol
+          nasiyalar, kutilayotgan va kechikkan qarzdorlik — bularni bitta adminga bog'lab bo'lmaydi, shuning uchun ular barcha adminlar
+          bo'yicha ko'rsatiladi.
         </div>
       )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-            <Card className="rounded-lg">
-              <CardHeader>
-                <CardDescription title="Faqat haqiqatda qabul qilingan to'lovlar (naqd sotuv va nasiya to'lovlari) — hali to'lanmagan sotuvlar bu yerga kirmaydi">
-                  Bu oy tushgan pul
-                </CardDescription>
-                <CardAction><CircleDollarSign className="size-4 text-blue-600" /></CardAction>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-zinc-900">{fmt(collected, currency)}</div>
-                <div className="mt-3 space-y-2">
-                  <div className="flex justify-between text-xs text-zinc-500">
-                    <span>Kutilgan pulga nisbatan</span>
-                    <span className="font-semibold text-zinc-800">{collectionRate}%</span>
-                  </div>
-                  <Progress value={collectionRate} className="[&_[data-slot=progress-fill]]:bg-blue-600" />
-                </div>
-              </CardContent>
-            </Card>
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardDescription title="Faqat haqiqatda qabul qilingan to'lovlar (naqd sotuv va nasiya to'lovlari) — hali to'lanmagan sotuvlar bu yerga kirmaydi">
+              Bu oy tushgan pul
+            </CardDescription>
+            <CardAction>
+              <CircleDollarSign className="size-4 text-blue-600" />
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-zinc-900">{fmt(collected, currency)}</div>
+            <div className="mt-3 space-y-2">
+              <div className="flex justify-between text-xs text-zinc-500">
+                <span>Kutilgan pulga nisbatan</span>
+                <span className="font-semibold text-zinc-800">{collectionRate}%</span>
+              </div>
+              <Progress value={collectionRate} className="[&_[data-slot=progress-fill]]:bg-blue-600" />
+            </div>
+          </CardContent>
+        </Card>
 
-            <Card className="rounded-lg">
-              <CardHeader>
-                <CardDescription>Bu oy kutilmoqda</CardDescription>
-                <CardAction><CalendarClock className="size-4 text-teal-700" /></CardAction>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-zinc-900">{fmt(expected, currency)}</div>
-                <p className="mt-3 text-xs text-zinc-500">
-                  Nasiya va qisman sotuvlardan qolgan oy ichidagi summa · joriy kurs bo'yicha
-                </p>
-              </CardContent>
-            </Card>
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardDescription>Bu oy kutilmoqda</CardDescription>
+            <CardAction>
+              <CalendarClock className="size-4 text-teal-700" />
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-zinc-900">{fmt(expected, currency)}</div>
+            <p className="mt-3 text-xs text-zinc-500">Nasiya va qisman sotuvlardan qolgan oy ichidagi summa · joriy kurs bo'yicha</p>
+          </CardContent>
+        </Card>
 
-            <Card className="rounded-lg">
-              <CardHeader>
-                <CardDescription>Qaytarilgan pul</CardDescription>
-                <CardAction><RotateCcw className="size-4 text-purple-600" /></CardAction>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-zinc-900">{fmt(refunds, currency)}</div>
-                <p className="mt-3 text-xs text-zinc-500">
-                  Bu oy {stats.returnsThisMonth} ta qaytarish bo'yicha yozilgan summa
-                </p>
-              </CardContent>
-            </Card>
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardDescription>Qaytarilgan pul</CardDescription>
+            <CardAction>
+              <RotateCcw className="size-4 text-purple-600" />
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-zinc-900">{fmt(refunds, currency)}</div>
+            <p className="mt-3 text-xs text-zinc-500">Bu oy {stats.returnsThisMonth} ta qaytarish bo'yicha yozilgan summa</p>
+          </CardContent>
+        </Card>
 
-            <Card className="rounded-lg border-red-200 bg-red-50/50">
-              <CardHeader>
-                <CardDescription className="text-red-700">Muddati o'tgan qarz</CardDescription>
-                <CardAction><AlertTriangle className="size-4 text-red-600" /></CardAction>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-red-700">{fmt(overdue, currency)}</div>
-                <p className="mt-3 text-xs text-red-700/70">
-                  Bugun ko'rib chiqilishi kerak bo'lgan qarzdorlik · joriy kurs bo'yicha
-                </p>
-              </CardContent>
-            </Card>
+        <Card className="rounded-lg border-red-200 bg-red-50/50">
+          <CardHeader>
+            <CardDescription className="text-red-700">Muddati o'tgan qarz</CardDescription>
+            <CardAction>
+              <AlertTriangle className="size-4 text-red-600" />
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-red-700">{fmt(overdue, currency)}</div>
+            <p className="mt-3 text-xs text-red-700/70">Bugun ko'rib chiqilishi kerak bo'lgan qarzdorlik · joriy kurs bo'yicha</p>
+          </CardContent>
+        </Card>
 
-            <Card className="rounded-lg">
-              <CardHeader>
-                <CardDescription>Ombordagi tannarx</CardDescription>
-                <CardAction><Boxes className="size-4 text-slate-500" /></CardAction>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-zinc-900">{fmt(inventory, currency)}</div>
-                <p className="mt-3 text-xs text-zinc-500">Hali sotilmagan qurilmalarga bog'langan pul</p>
-              </CardContent>
-            </Card>
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardDescription>Ombordagi tannarx</CardDescription>
+            <CardAction>
+              <Boxes className="size-4 text-slate-500" />
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-zinc-900">{fmt(inventory, currency)}</div>
+            <p className="mt-3 text-xs text-zinc-500">Hali sotilmagan qurilmalarga bog'langan pul</p>
+          </CardContent>
+        </Card>
       </div>
 
-      <HisobotChartsLoader
-            cashFlowData={cashFlowData}
-            businessData={businessData}
-            chartConfig={chartConfig}
-            currency={currency}
-      />
+      <HisobotChartsLoader cashFlowData={cashFlowData} businessData={businessData} chartConfig={chartConfig} currency={currency} />
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            <Card className="rounded-lg">
-              <CardHeader>
-                <CardDescription>Sotuv foydasi</CardDescription>
-                <CardAction><TrendingUp className="size-4 text-emerald-600" /></CardAction>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-zinc-900">{fmt(grossProfit, currency)}</div>
-                <p className="mt-3 text-xs text-zinc-500">
-                  Sotilgan qurilmalar narxidan tannarx ayirilgandagi foyda · sotuv amalga oshirilgan zahoti hisoblanadi, to'lov holatidan qat'iy nazar
-                </p>
-              </CardContent>
-            </Card>
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardDescription>Sotuv foydasi</CardDescription>
+            <CardAction>
+              <TrendingUp className="size-4 text-emerald-600" />
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-zinc-900">{fmt(grossProfit, currency)}</div>
+            <p className="mt-3 text-xs text-zinc-500">
+              Sotilgan qurilmalar narxidan tannarx ayirilgandagi foyda · sotuv amalga oshirilgan zahoti hisoblanadi, to'lov holatidan qat'iy
+              nazar
+            </p>
+          </CardContent>
+        </Card>
 
-            <Card className="rounded-lg">
-              <CardHeader>
-                <CardDescription>Qisqa xulosa</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                {[
-                  ["Yig'ilgan", fmtBase(collected, currency)],
-                  ['Kutilayotgan', fmt(expected, currency)],
-                  ['Kechikkan', fmt(overdue, currency)],
-                  ['Nasiya foizi', fmt(interestProfit, currency)],
-                  ['Ombor', fmt(inventory, currency)],
-                ].map(([label, value]) => (
-                  <div key={label} className="flex items-center justify-between border-b border-zinc-100 pb-2 last:border-0 last:pb-0">
-                    <span className="text-sm text-zinc-500">{label}</span>
-                    <span className="text-sm font-semibold text-zinc-900">{value}</span>
-                  </div>
-                ))}
-              </CardContent>
-            </Card>
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardDescription>Qisqa xulosa</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {[
+              ["Yig'ilgan", fmtBase(collected, currency)],
+              ['Kutilayotgan', fmt(expected, currency)],
+              ['Kechikkan', fmt(overdue, currency)],
+              ['Nasiya foizi', fmt(interestProfit, currency)],
+              ['Ombor', fmt(inventory, currency)],
+            ].map(([label, value]) => (
+              <div key={label} className="flex items-center justify-between border-b border-zinc-100 pb-2 last:border-0 last:pb-0">
+                <span className="text-sm text-zinc-500">{label}</span>
+                <span className="text-sm font-semibold text-zinc-900">{value}</span>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
       </div>
     </div>
   )

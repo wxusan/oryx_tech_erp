@@ -119,8 +119,10 @@ describe('device detail page: renders every sale/payment/purchase figure through
     }
   })
 
-  it('purchase price / profit / sale amounts all route through formatContractMoney / computeSaleContractMargin (both hardened)', () => {
-    expect(page).toContain('formatContractMoney(device.purchaseInputAmount, device.purchaseCurrency)')
+  it('purchase price / profit / sale amounts all route through display/contract helpers', () => {
+    expect(page).toContain('formatDisplayMoneyFromContract(')
+    expect(page).toContain('device.purchaseInputAmount')
+    expect(page).toContain('device.purchaseCurrency')
     expect(page).toContain('computeSaleContractMargin(')
   })
 

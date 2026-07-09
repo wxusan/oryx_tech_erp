@@ -6,24 +6,11 @@ import { Input } from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog'
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from '@/components/ui/select'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
 import { convertUsdToUzs, convertUzsToUsd, currencyLabel, type CurrencyCode } from '@/lib/currency'
-import { convertPaymentToContractCurrency, contractScheduleOutstanding, formatContractMoney, formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
+import { convertPaymentToContractCurrency, contractScheduleOutstanding, formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { uzDate, uzMonthYear } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { tashkentTodayInputValue } from '@/lib/timezone'
@@ -87,19 +74,15 @@ export interface NasiyaPaymentModalProps {
   deviceName?: string
 }
 
-export function NasiyaPaymentModal({
-  nasiyaId,
-  open,
-  onOpenChange,
-  onSuccess,
-  customerName,
-  deviceName,
-}: NasiyaPaymentModalProps) {
+export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, customerName, deviceName }: NasiyaPaymentModalProps) {
   const { currency } = useShopCurrency()
 
   const [schedules, setSchedules] = useState<Schedule[]>([])
   const [loadingData, setLoadingData] = useState(false)
-  const [fetched, setFetched] = useState<{ customerName: string; deviceName: string } | null>(null)
+  const [fetched, setFetched] = useState<{
+    customerName: string
+    deviceName: string
+  } | null>(null)
   const [nasiyaRemainingAmount, setNasiyaRemainingAmount] = useState(0)
   // Frozen at creation, never changes with the shop's display toggle — see
   // docs/currency-accounting-model.md.
@@ -214,11 +197,7 @@ export function NasiyaPaymentModal({
   // Contract-currency view of the same typed amount, used for the overpay
   // explanation below — same-currency case needs no rate at all.
   const payAmountContract =
-    !carryOver && payAmount.trim()
-      ? contractCurrency === currency.currency
-        ? Number(payAmount) || 0
-        : (contractPreviewAmount ?? 0)
-      : 0
+    !carryOver && payAmount.trim() ? (contractCurrency === currency.currency ? Number(payAmount) || 0 : (contractPreviewAmount ?? 0)) : 0
   const overpayExtraContract = Math.max(0, payAmountContract - selectedScheduleContractOutstanding)
 
   // Item 12 — the second split part's amount is always the remainder, so
@@ -226,11 +205,7 @@ export function NasiyaPaymentModal({
   const splitAmount2 = Math.round((Number(payAmount || 0) - Number(splitAmount1Input || 0)) * 100) / 100
   const splitValid =
     !splitPayment ||
-    (splitMethod2 &&
-      splitAmount1Input.trim() &&
-      Number(splitAmount1Input) > 0 &&
-      splitAmount2 > 0 &&
-      splitMethod2 !== payMethod)
+    (splitMethod2 && splitAmount1Input.trim() && Number(splitAmount1Input) > 0 && splitAmount2 > 0 && splitMethod2 !== payMethod)
 
   // "Izoh" is optional for a regular payment — only the carry-over/defer flow
   // ("Mijoz bu oy to'lamadi, muddatni uzaytirish") still requires a reason,
@@ -301,11 +276,7 @@ export function NasiyaPaymentModal({
         </DialogHeader>
 
         <div className="max-h-[65vh] space-y-4 overflow-y-auto px-5 py-4">
-          {payError && (
-            <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-              {payError}
-            </div>
-          )}
+          {payError && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{payError}</div>}
 
           {loadingData ? (
             <div className="py-6 text-center text-sm text-zinc-400">Yuklanmoqda...</div>
@@ -381,7 +352,9 @@ export function NasiyaPaymentModal({
                           ? currency.currency === 'USD' && currency.usdUzsRate
                             ? convertUzsToUsd(selectedScheduleOutstanding, currency.usdUzsRate).toFixed(2)
                             : String(selectedScheduleOutstanding)
-                          : currency.currency === 'USD' ? '100.00' : '1000000'
+                          : currency.currency === 'USD'
+                            ? '100.00'
+                            : '1000000'
                       }
                       className="h-12 rounded-lg border-zinc-200 pr-14 text-lg font-semibold"
                     />
@@ -420,19 +393,13 @@ export function NasiyaPaymentModal({
                     <span className="font-medium text-zinc-700">{dfmt(nasiyaContractRemainingAmount)}</span>
                   </div>
                   {contractPreviewAmount != null && (
-                    <p className="text-xs text-zinc-500">
-                      Shartnomaga qo&apos;llanadi: {formatContractMoney(contractPreviewAmount, contractCurrency)}
-                      {currency.usdUzsRate ? ` · kurs: ${Math.round(currency.usdUzsRate).toLocaleString('ru-RU')}` : ''}
-                    </p>
+                    <p className="text-xs text-zinc-500">Shartnomaga qo&apos;llanadi: {dfmt(contractPreviewAmount)}</p>
                   )}
                   {exceedsRemaining ? (
-                    <p className="text-xs text-red-600">
-                      To&apos;lov summasi qolgan qarzdan oshmasligi kerak.
-                    </p>
+                    <p className="text-xs text-red-600">To&apos;lov summasi qolgan qarzdan oshmasligi kerak.</p>
                   ) : overpayExtraContract > 0 ? (
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                      To&apos;lov joriy oydan oshdi. Ortiqcha {dfmt(overpayExtraContract)} keyingi oy to&apos;loviga
-                      qo&apos;llanadi.
+                      To&apos;lov joriy oydan oshdi. Ortiqcha {dfmt(overpayExtraContract)} keyingi oy to&apos;loviga qo&apos;llanadi.
                     </p>
                   ) : null}
                 </div>
@@ -485,7 +452,7 @@ export function NasiyaPaymentModal({
                     <div className="grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 sm:grid-cols-2">
                       <div className="space-y-1.5">
                         <label className="block text-xs text-zinc-600">
-                          {payMethod ? paymentMethodLabel(payMethod) : "Birinchi usul"} summasi
+                          {payMethod ? paymentMethodLabel(payMethod) : 'Birinchi usul'} summasi
                         </label>
                         <MoneyInput
                           currency={currency.currency}
@@ -510,7 +477,8 @@ export function NasiyaPaymentModal({
                         </Select>
                       </div>
                       <p className="text-xs text-zinc-500 sm:col-span-2">
-                        Ikkinchi usul summasi: {splitAmount2 > 0 ? currencyLabel(currency.currency) + ' ' + splitAmount2 : '—'} (avtomatik hisoblanadi)
+                        Ikkinchi usul summasi: {splitAmount2 > 0 ? currencyLabel(currency.currency) + ' ' + splitAmount2 : '—'} (avtomatik
+                        hisoblanadi)
                       </p>
                     </div>
                   )}
@@ -535,7 +503,10 @@ export function NasiyaPaymentModal({
         <DialogFooter className="gap-2 border-t border-zinc-100 px-5 py-4">
           <Button
             variant="outline"
-            onClick={() => { onOpenChange(false); setPayError('') }}
+            onClick={() => {
+              onOpenChange(false)
+              setPayError('')
+            }}
             className="rounded-lg border-zinc-200 text-zinc-700"
           >
             Bekor qilish

@@ -56,12 +56,24 @@ describe('helpers', () => {
   })
 
   it('formatDeviceSpecs omits empty optional lines', () => {
-    const lines = formatDeviceSpecs({ deviceModel: 'Redmi', storage: null, color: '', batteryHealth: null, imei: null })
+    const lines = formatDeviceSpecs({
+      deviceModel: 'Redmi',
+      storage: null,
+      color: '',
+      batteryHealth: null,
+      imei: null,
+    })
     expect(lines).toEqual(['📱 Qurilma: Redmi'])
   })
 
   it('formatDeviceSpecs omits internal import placeholder IMEIs', () => {
-    const lines = formatDeviceSpecs({ deviceModel: 'Redmi', storage: null, color: null, batteryHealth: null, imei: 'IMPORT-abc' })
+    const lines = formatDeviceSpecs({
+      deviceModel: 'Redmi',
+      storage: null,
+      color: null,
+      batteryHealth: null,
+      imei: 'IMPORT-abc',
+    })
     const msg = lines.join('\n')
 
     expect(msg).not.toContain('IMPORT-')
@@ -70,7 +82,7 @@ describe('helpers', () => {
 
   it('formatPaymentMethod maps known values and returns null otherwise', () => {
     expect(formatPaymentMethod('CASH')).toBe('Naqd')
-    expect(formatPaymentMethod('TRANSFER')).toBe("O‘tkazma")
+    expect(formatPaymentMethod('TRANSFER')).toBe('O‘tkazma')
     expect(formatPaymentMethod('???')).toBeNull()
     expect(formatPaymentMethod(null)).toBeNull()
   })
@@ -132,7 +144,13 @@ describe('device messages', () => {
   it('device added omits empty optional lines', () => {
     const msg = deviceAddedMessage({
       shopName: 'Malika',
-      device: { deviceModel: 'Redmi 12', storage: null, color: null, batteryHealth: null, imei: null },
+      device: {
+        deviceModel: 'Redmi 12',
+        storage: null,
+        color: null,
+        batteryHealth: null,
+        imei: null,
+      },
       purchasePrice: 1_000_000,
       purchaseCurrency: 'UZS',
       supplierPhone: null,
@@ -149,7 +167,13 @@ describe('device messages', () => {
   it('device added omits internal import placeholder IMEIs', () => {
     const msg = deviceAddedMessage({
       shopName: 'Malika',
-      device: { deviceModel: 'Redmi 12', storage: null, color: null, batteryHealth: null, imei: 'IMPORT-abc' },
+      device: {
+        deviceModel: 'Redmi 12',
+        storage: null,
+        color: null,
+        batteryHealth: null,
+        imei: 'IMPORT-abc',
+      },
       purchasePrice: 1_000_000,
       purchaseCurrency: 'UZS',
       supplierPhone: null,
@@ -179,7 +203,7 @@ describe('device messages', () => {
     expect(msg).toMatch(/Sotilish narxi: 8.?500.?000 so‘m/)
     expect(msg).toMatch(/To‘langan: 5.?000.?000 so‘m/)
     expect(msg).toMatch(/Qolgan qarz: 3.?500.?000 so‘m/)
-    expect(msg).toContain("To‘lov usuli: Naqd")
+    expect(msg).toContain('To‘lov usuli: Naqd')
   })
 
   it('device sold shows Foyda (profit) when provided, omitted when not (item 14)', () => {
@@ -209,7 +233,7 @@ describe('device messages', () => {
     expect(withoutProfit).not.toContain('Foyda')
   })
 
-  it('device sold for a UZS contract shows the native so\'m amount with a USD hint when display currency differs', () => {
+  it('device sold for a UZS contract shows only USD when display currency is USD', () => {
     const msg = deviceSoldMessage({
       shopName: 'Malika',
       device: fullDevice,
@@ -222,12 +246,14 @@ describe('device messages', () => {
       currency: { currency: 'USD', usdUzsRate: 12_500 },
     })
 
-    expect(msg).toMatch(/Sotilish narxi: 1.?250.?000 so‘m \(~\$100\.00\)/)
-    expect(msg).toMatch(/To‘langan: 625.?000 so‘m \(~\$50\.00\)/)
-    expect(msg).toMatch(/Qolgan qarz: 625.?000 so‘m \(~\$50\.00\)/)
+    expect(msg).toContain('Sotilish narxi: $100.00')
+    expect(msg).toContain('To‘langan: $50.00')
+    expect(msg).toContain('Qolgan qarz: $50.00')
+    expect(msg).not.toContain('so‘m')
+    expect(msg).not.toContain('(~')
   })
 
-  it("device sold shows Qolgan qarz: Yo‘q when fully paid", () => {
+  it('device sold shows Qolgan qarz: Yo‘q when fully paid', () => {
     const msg = deviceSoldMessage({
       shopName: 'Malika',
       device: fullDevice,
@@ -238,7 +264,7 @@ describe('device messages', () => {
       contractCurrency: 'UZS',
       paymentMethod: 'CASH',
     })
-    expect(msg).toContain("Qolgan qarz: Yo‘q")
+    expect(msg).toContain('Qolgan qarz: Yo‘q')
   })
 
   it('device returned shows 0 refund and reason', () => {
@@ -255,7 +281,12 @@ describe('device messages', () => {
   })
 
   it('device restocked includes reason', () => {
-    const msg = deviceRestockedMessage({ shopName: 'Malika', device: fullDevice, note: "ko'rikdan o'tdi", adminName: 'Dilshod' })
+    const msg = deviceRestockedMessage({
+      shopName: 'Malika',
+      device: fullDevice,
+      note: "ko'rikdan o'tdi",
+      adminName: 'Dilshod',
+    })
     expect(msg).toContain('Izoh: ko&#39;rikdan o&#39;tdi')
     expect(msg).toContain('Admin: Dilshod')
   })
@@ -320,24 +351,35 @@ describe('nasiya messages', () => {
     expect(msg).toContain('Mijoz: Ali')
     expect(msg).toContain('Oy: 3-oy')
     expect(msg).toMatch(/To‘langan: 1.?000.?000 so‘m/)
-    expect(msg).toContain("To‘lov usuli: Karta")
+    expect(msg).toContain('To‘lov usuli: Karta')
     expect(msg).toMatch(/Qolgan qarz: 2.?000.?000 so‘m/)
     expect(msg).not.toContain('Batareya')
   })
 
-  it('nasiya payment shows To\'liq yopildi when cleared and Bir nechta oy for multi', () => {
+  it("nasiya payment shows To'liq yopildi when cleared and Bir nechta oy for multi", () => {
     const cleared = nasiyaPaymentMessage({
-      shopName: 'M', customerName: 'A', device: fullDevice, month: 'MULTIPLE',
-      paidAmount: 500_000, contractCurrency: 'UZS', paymentMethod: 'CASH', remaining: 0,
+      shopName: 'M',
+      customerName: 'A',
+      device: fullDevice,
+      month: 'MULTIPLE',
+      paidAmount: 500_000,
+      contractCurrency: 'UZS',
+      paymentMethod: 'CASH',
+      remaining: 0,
     })
-    expect(cleared).toContain("Qolgan qarz: To‘liq yopildi")
+    expect(cleared).toContain('Qolgan qarz: To‘liq yopildi')
     expect(cleared).toContain('Oy: Bir nechta oy')
   })
 
   it('nasiya due reminder includes month, amount and due date', () => {
     const msg = nasiyaDueTodayMessage({
-      customerName: 'Ali', customerPhone: '+998900000000', device: fullDevice,
-      month: 2, amountDue: 616_667, contractCurrency: 'UZS', dueDate: new Date(2026, 7, 1),
+      customerName: 'Ali',
+      customerPhone: '+998900000000',
+      device: fullDevice,
+      month: 2,
+      amountDue: 616_667,
+      contractCurrency: 'UZS',
+      dueDate: new Date(2026, 7, 1),
     })
     expect(msg).toContain('Oy: 2-oy')
     expect(msg).toMatch(/To‘lov summasi: 616.?667 so‘m/)
@@ -346,13 +388,19 @@ describe('nasiya messages', () => {
 
   it('nasiya overdue includes daysLate', () => {
     const msg = nasiyaOverdueMessage({
-      customerName: 'Ali', customerPhone: '+998900000000', device: fullDevice,
-      month: 2, amountDue: 616_667, contractCurrency: 'UZS', dueDate: new Date(2026, 6, 1), daysLate: 12,
+      customerName: 'Ali',
+      customerPhone: '+998900000000',
+      device: fullDevice,
+      month: 2,
+      amountDue: 616_667,
+      contractCurrency: 'UZS',
+      dueDate: new Date(2026, 6, 1),
+      daysLate: 12,
     })
     expect(msg).toContain('Kechikkan: 12 kun')
   })
 
-  it('imported nasiya Telegram message omits placeholder IMEI and keeps USD plus UZS context', () => {
+  it('imported nasiya Telegram message omits placeholder IMEI and shows USD only in USD display mode', () => {
     const msg = nasiyaImportedMessage({
       shopName: 'Malika',
       customerName: 'Ali',
@@ -369,35 +417,56 @@ describe('nasiya messages', () => {
     expect(msg).not.toContain('IMPORT-')
     expect(msg).not.toContain('IMEI')
     expect(msg).toContain('Eski nasiya summasi: $200.00')
-    expect(msg).toMatch(/~2.?500.?000 so‘m/)
-    expect(msg).toContain("Oylik to‘lov: $50.00")
+    expect(msg).not.toContain('so‘m')
+    expect(msg).not.toContain('(~')
+    expect(msg).toContain('Oylik to‘lov: $50.00')
   })
 })
 
 describe('sale debt messages', () => {
   it('sale payment shows remaining debt and cleared label', () => {
     const open = salePaymentMessage({
-      shopName: 'M', customerName: 'A', customerPhone: '+998900000000', device: fullDevice,
-      paidAmount: 1_000_000, contractCurrency: 'UZS', paymentMethod: 'CASH', remaining: 500_000, note: null, adminName: 'D',
+      shopName: 'M',
+      customerName: 'A',
+      customerPhone: '+998900000000',
+      device: fullDevice,
+      paidAmount: 1_000_000,
+      contractCurrency: 'UZS',
+      paymentMethod: 'CASH',
+      remaining: 500_000,
+      note: null,
+      adminName: 'D',
     })
     expect(open).toMatch(/Qolgan qarz: 500.?000 so‘m/)
     expect(open).not.toContain('Izoh') // note null -> omitted
     const cleared = salePaymentMessage({
-      shopName: 'M', customerName: 'A', device: fullDevice,
-      paidAmount: 500_000, contractCurrency: 'UZS', paymentMethod: 'CASH', remaining: 0,
+      shopName: 'M',
+      customerName: 'A',
+      device: fullDevice,
+      paidAmount: 500_000,
+      contractCurrency: 'UZS',
+      paymentMethod: 'CASH',
+      remaining: 0,
     })
-    expect(cleared).toContain("Qolgan qarz: To‘liq yopildi")
+    expect(cleared).toContain('Qolgan qarz: To‘liq yopildi')
   })
 
   it('sale due + overdue include due date and daysLate', () => {
     const due = saleDueTodayMessage({
-      customerName: 'A', customerPhone: '+998900000000', device: fullDevice,
-      remainingAmount: 2_000_000, dueDate: new Date(2026, 7, 1),
+      customerName: 'A',
+      customerPhone: '+998900000000',
+      device: fullDevice,
+      remainingAmount: 2_000_000,
+      dueDate: new Date(2026, 7, 1),
     })
     expect(due).toContain('Muddat: Bugun')
     const overdue = saleOverdueMessage({
-      customerName: 'A', customerPhone: '+998900000000', device: fullDevice,
-      remainingAmount: 2_000_000, dueDate: new Date(2026, 6, 1), daysLate: 9,
+      customerName: 'A',
+      customerPhone: '+998900000000',
+      device: fullDevice,
+      remainingAmount: 2_000_000,
+      dueDate: new Date(2026, 6, 1),
+      daysLate: 9,
     })
     expect(overdue).toContain('Kechikkan: 9 kun')
   })
@@ -409,18 +478,127 @@ describe('global safety across every template', () => {
     startShopAdminMessage('A', 'Shop'),
     startUnknownMessage('123456789'),
     unknownCommandMessage(),
-    deviceAddedMessage({ shopName: 'S', device: fullDevice, purchasePrice: 1, purchaseCurrency: 'UZS', supplierPhone: '1', adminName: 'A' }),
-    deviceSoldMessage({ shopName: 'S', device: fullDevice, customerName: 'A', customerPhone: '1', salePrice: 1, paidAmount: 1, remaining: 0, contractCurrency: 'UZS', paymentMethod: 'CASH', adminName: 'A' }),
-    deviceReturnedMessage({ shopName: 'S', device: fullDevice, refundAmount: 1, refundMethod: 'CASH', note: 'n', adminName: 'A' }),
-    deviceRestockedMessage({ shopName: 'S', device: fullDevice, note: 'n', adminName: 'A' }),
-    nasiyaCreatedMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, totalAmount: 1, downPayment: 1, baseRemainingAmount: 1, interestPercent: 20, interestAmount: 1, finalNasiyaAmount: 1, months: 6, monthlyPayment: 1, nextPaymentDate: new Date(), adminName: 'A' }),
-    nasiyaImportedMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, originalTotalAmount: 1, alreadyPaidBeforeImport: 0, remainingDebt: 1, monthlyPayment: 1, nextPaymentDate: new Date(), adminName: 'A' }),
-    nasiyaPaymentMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, paidAmount: 1, contractCurrency: 'UZS', paymentMethod: 'CASH', remaining: 1, note: 'n', adminName: 'A' }),
-    nasiyaDueTodayMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, contractCurrency: 'UZS', dueDate: new Date() }),
-    nasiyaOverdueMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, month: 1, amountDue: 1, contractCurrency: 'UZS', dueDate: new Date(), daysLate: 1 }),
-    salePaymentMessage({ shopName: 'S', customerName: 'A', customerPhone: '1', device: fullDevice, paidAmount: 1, contractCurrency: 'UZS', paymentMethod: 'CASH', remaining: 1, note: 'n', adminName: 'A' }),
-    saleDueTodayMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, remainingAmount: 1, dueDate: new Date() }),
-    saleOverdueMessage({ customerName: 'A', customerPhone: '1', device: fullDevice, remainingAmount: 1, dueDate: new Date(), daysLate: 1 }),
+    deviceAddedMessage({
+      shopName: 'S',
+      device: fullDevice,
+      purchasePrice: 1,
+      purchaseCurrency: 'UZS',
+      supplierPhone: '1',
+      adminName: 'A',
+    }),
+    deviceSoldMessage({
+      shopName: 'S',
+      device: fullDevice,
+      customerName: 'A',
+      customerPhone: '1',
+      salePrice: 1,
+      paidAmount: 1,
+      remaining: 0,
+      contractCurrency: 'UZS',
+      paymentMethod: 'CASH',
+      adminName: 'A',
+    }),
+    deviceReturnedMessage({
+      shopName: 'S',
+      device: fullDevice,
+      refundAmount: 1,
+      refundMethod: 'CASH',
+      note: 'n',
+      adminName: 'A',
+    }),
+    deviceRestockedMessage({
+      shopName: 'S',
+      device: fullDevice,
+      note: 'n',
+      adminName: 'A',
+    }),
+    nasiyaCreatedMessage({
+      shopName: 'S',
+      customerName: 'A',
+      customerPhone: '1',
+      device: fullDevice,
+      totalAmount: 1,
+      downPayment: 1,
+      baseRemainingAmount: 1,
+      interestPercent: 20,
+      interestAmount: 1,
+      finalNasiyaAmount: 1,
+      months: 6,
+      monthlyPayment: 1,
+      nextPaymentDate: new Date(),
+      adminName: 'A',
+    }),
+    nasiyaImportedMessage({
+      shopName: 'S',
+      customerName: 'A',
+      customerPhone: '1',
+      device: fullDevice,
+      originalTotalAmount: 1,
+      alreadyPaidBeforeImport: 0,
+      remainingDebt: 1,
+      monthlyPayment: 1,
+      nextPaymentDate: new Date(),
+      adminName: 'A',
+    }),
+    nasiyaPaymentMessage({
+      shopName: 'S',
+      customerName: 'A',
+      customerPhone: '1',
+      device: fullDevice,
+      month: 1,
+      paidAmount: 1,
+      contractCurrency: 'UZS',
+      paymentMethod: 'CASH',
+      remaining: 1,
+      note: 'n',
+      adminName: 'A',
+    }),
+    nasiyaDueTodayMessage({
+      customerName: 'A',
+      customerPhone: '1',
+      device: fullDevice,
+      month: 1,
+      amountDue: 1,
+      contractCurrency: 'UZS',
+      dueDate: new Date(),
+    }),
+    nasiyaOverdueMessage({
+      customerName: 'A',
+      customerPhone: '1',
+      device: fullDevice,
+      month: 1,
+      amountDue: 1,
+      contractCurrency: 'UZS',
+      dueDate: new Date(),
+      daysLate: 1,
+    }),
+    salePaymentMessage({
+      shopName: 'S',
+      customerName: 'A',
+      customerPhone: '1',
+      device: fullDevice,
+      paidAmount: 1,
+      contractCurrency: 'UZS',
+      paymentMethod: 'CASH',
+      remaining: 1,
+      note: 'n',
+      adminName: 'A',
+    }),
+    saleDueTodayMessage({
+      customerName: 'A',
+      customerPhone: '1',
+      device: fullDevice,
+      remainingAmount: 1,
+      dueDate: new Date(),
+    }),
+    saleOverdueMessage({
+      customerName: 'A',
+      customerPhone: '1',
+      device: fullDevice,
+      remainingAmount: 1,
+      dueDate: new Date(),
+      daysLate: 1,
+    }),
   ]
 
   it('never mentions /link or a link KOD instruction', () => {
@@ -437,7 +615,17 @@ describe('global safety across every template', () => {
   })
 
   it('leaks no sensitive field names / URLs', () => {
-    const forbidden = ['passportPhotoUrl', 'password', 'passwordHash', 'token', 'DATABASE_URL', 'signedUrl', 'attachmentUrl', 'http://', 'https://']
+    const forbidden = [
+      'passportPhotoUrl',
+      'password',
+      'passwordHash',
+      'token',
+      'DATABASE_URL',
+      'signedUrl',
+      'attachmentUrl',
+      'http://',
+      'https://',
+    ]
     for (const msg of messages) {
       for (const word of forbidden) {
         expect(msg).not.toContain(word)

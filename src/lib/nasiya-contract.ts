@@ -17,7 +17,7 @@
  * ledgers consistent. See docs/currency-accounting-model.md.
  */
 
-import { convertUsdToUzs, convertUzsToUsd, type CurrencyCode, type CurrencyContext } from '@/lib/currency'
+import { convertUsdToUzs, convertUzsToUsd, formatUserFacingMoney, type CurrencyCode, type CurrencyContext } from '@/lib/currency'
 import { scheduleEffectiveDueTime, type OverdueScheduleInput } from '@/lib/nasiya-utils'
 
 /** UZS contracts tolerate 500 so'm of rounding dust; USD contracts (2 decimal places) tolerate 1 cent. */
@@ -67,7 +67,11 @@ export function contractScheduleOutstanding(expectedAmount: number | string, pai
  * documented, honest degradation (see docs/currency-accounting-model.md)
  * instead of a hard failure of the whole aggregate.
  */
-export function convertContractAmountToUzs(amount: number | string, contractCurrency: CurrencyCode, usdUzsRate: number | string | null): number {
+export function convertContractAmountToUzs(
+  amount: number | string,
+  contractCurrency: CurrencyCode,
+  usdUzsRate: number | string | null,
+): number {
   const n = Number(amount)
   if (contractCurrency === 'UZS') return n
   if (!usdUzsRate) return n
@@ -164,7 +168,7 @@ export function convertPaymentToContractCurrency(
   const n = Number(amount)
   const r = rate == null ? null : Number(rate)
   if (paymentCurrency === contractCurrency) return n
-  if (!r || r <= 0) throw new Error("USD kursi mavjud emas")
+  if (!r || r <= 0) throw new Error('USD kursi mavjud emas')
   if (paymentCurrency === 'USD' && contractCurrency === 'UZS') {
     return convertUsdToUzs(n, r)
   }
@@ -212,15 +216,12 @@ export function formatDisplayMoneyFromContract(
   displayCurrency: CurrencyCode,
   rate?: number | string | null,
 ): string {
-  const n = Number(amount)
-  const r = rate == null ? null : Number(rate)
-  // Missing/corrupt amount — never attempt a conversion (convertUsdToUzs/
-  // convertUzsToUsd would throw on a non-finite value); show "—" instead.
-  if (!Number.isFinite(n)) return '—'
-  if (amountCurrency === displayCurrency) return formatContractMoney(n, amountCurrency)
-  if (!r || r <= 0) return `${formatContractMoney(n, amountCurrency)} (kurs mavjud emas)`
-  if (amountCurrency === 'USD') return formatContractMoney(convertUsdToUzs(n, r), 'UZS')
-  return formatContractMoney(Math.round(convertUzsToUsd(n, r) * 100) / 100, 'USD')
+  return formatUserFacingMoney({
+    amount,
+    amountCurrency,
+    displayCurrency,
+    rate,
+  })
 }
 
 /**
@@ -287,12 +288,10 @@ export function computeSaleContractMargin(
 }
 
 /**
- * Native contract-currency amount, plus an optional "(~display equivalent)"
- * when the shop's chosen display currency differs — for reminders/messages
- * where the native figure must lead (it's the actual contract debt) but a
- * display-currency hint is still useful context. Mirrors the two-part style
- * of `formatMoneyWithBase` in currency.ts, generalized beyond a UZS base.
- * Falls back to just the native figure when no rate is available.
+ * Format a contract-currency amount for a user-facing surface. The selected
+ * shop display currency is the only currency shown; if conversion is required
+ * but no rate is available, returns an explicit dash instead of leaking a
+ * second/native currency into the UI.
  */
 export function formatContractMoneyWithDisplay(
   amount: number | string,
@@ -300,10 +299,7 @@ export function formatContractMoneyWithDisplay(
   displayCurrency: CurrencyCode,
   rate?: number | string | null,
 ): string {
-  const native = formatContractMoney(amount, contractCurrency)
-  const r = rate == null ? null : Number(rate)
-  if (contractCurrency === displayCurrency || !r || r <= 0) return native
-  return `${native} (~${formatDisplayMoneyFromContract(amount, contractCurrency, displayCurrency, r)})`
+  return formatDisplayMoneyFromContract(amount, contractCurrency, displayCurrency, rate)
 }
 
 /** Minimal shape a SalePayment row needs for `salePaymentAmountDisplay`. */
@@ -332,17 +328,12 @@ export function salePaymentAmountDisplay(
   displayCurrency: CurrencyContext,
 ): string {
   if (payment.paymentInputCurrency != null && payment.paymentInputAmount != null) {
-    const paidText = formatContractMoney(payment.paymentInputAmount, payment.paymentInputCurrency)
-    if (payment.paymentInputCurrency === contractCurrency) {
-      // Nothing was converted — a single native figure is unambiguous.
-      return paidText
-    }
-    const appliedAmount = payment.appliedAmountInContractCurrency ?? payment.amount
-    const appliedText = formatContractMoney(appliedAmount, contractCurrency)
-    const rateText = payment.paymentExchangeRate
-      ? ` · kurs: ${Math.round(Number(payment.paymentExchangeRate)).toLocaleString('ru-RU')}`
-      : ''
-    return `${paidText} → ${appliedText}${rateText}`
+    return formatUserFacingMoney({
+      amount: payment.paymentInputAmount,
+      amountCurrency: payment.paymentInputCurrency,
+      displayCurrency: displayCurrency.currency,
+      rate: payment.paymentExchangeRate ?? displayCurrency.usdUzsRate,
+    })
   }
   // Older payment recorded before payment-time currency was tracked — same
   // fallback behavior as before this fix (today's display currency).

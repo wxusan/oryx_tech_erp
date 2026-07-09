@@ -8,8 +8,8 @@
    passes through `escapeTelegramHtml` before interpolation. Every template uses
    the same small builder helpers: `compose()`/`block()`/`optionalLine()`
    for consistent spacing, `formatMoney`/`telegramMoney`/
-   `formatContractMoneyWithDisplay`/`formatNativeAmount` for consistent,
-   currency-aware money formatting, and `formatPaymentMethod`/
+   `formatContractMoneyWithDisplay`/`formatUserFacingMoney` for consistent,
+   single-display-currency money formatting, and `formatPaymentMethod`/
    `formatPaymentBreakdown` for payment-method wording. Never include a raw
    URL, DB id, or passport reference — enforced by
    `tests/telegram.guard.test.ts`'s "item 14" describe block.
@@ -23,7 +23,7 @@
 
 3. **Delivery** (`src/lib/telegram.ts` + `src/lib/telegram-delivery.ts` +
    `src/lib/server/notification-image.ts`) — `chooseTelegramDelivery({
-   imageUrl, caption })` picks `sendTelegramPhoto` when an image URL is
+imageUrl, caption })` picks `sendTelegramPhoto` when an image URL is
    available AND the caption fits Telegram's 1024-char photo-caption limit,
    otherwise falls back to `sendTelegramMessage`. Both methods use
    `parse_mode: 'HTML'`, including photo captions.
@@ -64,6 +64,19 @@ is replaced by a readable block:
 ```
 
 `deviceSoldMessage` does not currently receive a split-payment breakdown.
+
+## Currency display rule
+
+Telegram is shop-facing. Every money value must show exactly one currency:
+the shop's selected display currency (`Shop.preferredCurrency`). Internal
+accounting may store native contract currency, payment input currency,
+payment-time exchange rates, and UZS snapshots, but Telegram must not show
+mixed values such as `600 238 so‘m (~$50.00)` or `$50.00 (~600 238 so‘m)`.
+
+Historical payment confirmations use the payment's saved `paymentExchangeRate`
+when the original input amount must be converted for display. Current/live
+balances such as remaining debt and reminders use the app's normal current
+display conversion rule.
 
 ## Portal banner (not Telegram, but the other half of "reminders")
 

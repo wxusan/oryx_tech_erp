@@ -19,7 +19,7 @@ const base = {
 }
 
 describe('supplier payable Telegram messages read the contract-currency amount, not the legacy UZS snapshot', () => {
-  it('due-today: shows the native amount, with a display-currency hint when they differ', () => {
+  it('due-today: UZS display shows only UZS when the payable is USD-native', () => {
     const msg = supplierPayableDueTodayMessage({
       ...base,
       amount: 200,
@@ -27,11 +27,12 @@ describe('supplier payable Telegram messages read the contract-currency amount, 
       dueDate: new Date('2026-07-08'),
       currency: { currency: 'UZS', usdUzsRate: 12_500 },
     })
-    expect(msg).toContain('$200.00')
-    expect(msg).toMatch(/\(~2.?500.?000 so‘m\)/)
+    expect(msg).toMatch(/2.?500.?000 so‘m/)
+    expect(msg).not.toContain('$')
+    expect(msg).not.toContain('(~')
   })
 
-  it('overdue: same native-leads formatting', () => {
+  it('overdue: USD display shows only USD when the payable is UZS-native', () => {
     const msg = supplierPayableOverdueMessage({
       ...base,
       amount: 2_000_000,
@@ -40,11 +41,12 @@ describe('supplier payable Telegram messages read the contract-currency amount, 
       daysLate: 7,
       currency: { currency: 'USD', usdUzsRate: 12_500 },
     })
-    expect(msg).toMatch(/2.?000.?000 so‘m/)
-    expect(msg).toContain('(~$160.00)')
+    expect(msg).toContain('$160.00')
+    expect(msg).not.toContain('so‘m')
+    expect(msg).not.toContain('(~')
   })
 
-  it('early reminder: same native-leads formatting', () => {
+  it('early reminder: missing conversion rate does not leak the native currency', () => {
     const msg = supplierPayableEarlyReminderMessage({
       ...base,
       amount: 300,
@@ -53,11 +55,11 @@ describe('supplier payable Telegram messages read the contract-currency amount, 
       daysLeft: 3,
       currency: { currency: 'UZS', usdUzsRate: null },
     })
-    // No rate available client-side -> falls back to just the native figure.
-    expect(msg).toContain('$300.00')
+    expect(msg).toContain('To‘lov summasi: —')
+    expect(msg).not.toContain('$300.00')
   })
 
-  it('paid confirmation: shows the contract-currency total regardless of today\'s rate (same drift fix as nasiyaCompletedMessage)', () => {
+  it('paid confirmation: shows the selected display currency only', () => {
     const msg = supplierPayablePaidMessage({
       shopName: 'Test',
       ...base,
@@ -66,7 +68,8 @@ describe('supplier payable Telegram messages read the contract-currency amount, 
       paymentMethod: 'CASH',
       currency: { currency: 'UZS', usdUzsRate: 13_500 },
     })
-    expect(msg).toContain('$1000.00')
+    expect(msg).toMatch(/13.?500.?000 so‘m/)
+    expect(msg).not.toContain('$')
   })
 })
 
@@ -80,7 +83,7 @@ describe('cron reminders and olib-sotdim pay route read contractAmount/contractC
     expect(cron.split('contractCurrency: payable.contractCurrency').length - 1).toBe(3)
   })
 
-  it('the pay route\'s paid-confirmation message uses payable.contractAmount + payable.contractCurrency', () => {
+  it("the pay route's paid-confirmation message uses payable.contractAmount + payable.contractCurrency", () => {
     expect(payRoute).toContain('amount: Number(payable.contractAmount)')
     expect(payRoute).toContain('contractCurrency: payable.contractCurrency')
   })

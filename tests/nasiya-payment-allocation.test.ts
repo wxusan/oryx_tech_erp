@@ -45,7 +45,7 @@ describe('nasiyaPaymentMessage — overpayment allocation breakdown', () => {
     expect(msg).toMatch(/500.?000/)
     expect(msg).toContain('joriy oy uchun yopildi')
     expect(msg).toMatch(/100.?000/)
-    expect(msg).toContain("2-oyga oldindan qo‘llandi")
+    expect(msg).toContain('2-oyga oldindan qo‘llandi')
   })
 
   it('breaks down a payment spanning three schedules in order', () => {
@@ -68,7 +68,7 @@ describe('nasiyaPaymentMessage — overpayment allocation breakdown', () => {
     expect(idx3).toBeGreaterThan(idx2)
   })
 
-  it('leads with the contract-currency native amount even when the shop displays a different currency', () => {
+  it('shows only the shop display currency when the contract currency differs', () => {
     const msg = nasiyaPaymentMessage({
       ...baseData,
       month: 'MULTIPLE',
@@ -80,13 +80,11 @@ describe('nasiyaPaymentMessage — overpayment allocation breakdown', () => {
         { monthNumber: 2, amount: 100_000 },
       ],
     })
-    // This is a UZS contract (amounts are so‘m), viewed by a USD-display shop.
-    // The native contract figure always leads — it's the actual debt — with
-    // the display-currency conversion as a "(~...)" hint, never the reverse
-    // (see formatContractMoneyWithDisplay / docs/currency-accounting-model.md).
     expect(msg).toContain('$')
-    expect(msg).toMatch(/500.?000 so‘m \(~\$40\.00\) joriy oy uchun yopildi/)
-    expect(msg).toMatch(/100.?000 so‘m \(~\$8\.00\) 2-oyga oldindan qo‘llandi/)
+    expect(msg).not.toContain('so‘m')
+    expect(msg).not.toContain('(~')
+    expect(msg).toMatch(/\$40\.00 joriy oy uchun yopildi/)
+    expect(msg).toMatch(/\$8\.00 2-oyga oldindan qo‘llandi/)
   })
 })
 
@@ -130,18 +128,24 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
     // Completion is decided from the contract-currency ledger (source of
     // truth for debt) — see docs/currency-accounting-model.md.
     expect(source).toContain('const contractAllFullyPaid =')
-    expect(source).toContain('contractScheduleOutstanding(Number(s.contractExpectedAmount), Number(s.contractPaidAmount), contractCurrency) <= 0')
+    expect(source).toContain(
+      'contractScheduleOutstanding(Number(s.contractExpectedAmount), Number(s.contractPaidAmount), contractCurrency) <= 0',
+    )
   })
 
   it('passes the per-schedule allocation breakdown (in contract currency) into the Telegram message', () => {
-    expect(source).toContain('allocations: allocations.map((a) => ({ monthNumber: a.monthNumber, amount: a.contractAmount }))')
+    expect(source).toContain('allocations: allocations.map((a) => ({')
+    expect(source).toContain('monthNumber: a.monthNumber')
+    expect(source).toContain('amount: a.contractAmount')
   })
 })
 
 describe('cron reminders use per-schedule remaining amount (respects prepayment), not the flat monthly amount', () => {
-  it('due-today and overdue reminders compute amountDue from the deal\'s own contract-currency balance (contractScheduleOutstanding), not the legacy UZS snapshot', () => {
+  it("due-today and overdue reminders compute amountDue from the deal's own contract-currency balance (contractScheduleOutstanding), not the legacy UZS snapshot", () => {
     const cron = read('src/app/api/cron/reminders/route.ts')
-    expect(cron).toContain('contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency)')
+    expect(cron).toContain(
+      'contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency)',
+    )
     // A fully-prepaid schedule becomes PAID and is excluded from both queries below.
     expect(cron).toContain("status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] }")
   })

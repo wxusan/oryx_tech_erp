@@ -8,7 +8,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
-import { convertUsdToUzs, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
+import { currencyLabel } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, ImagePlus, Loader2, X } from 'lucide-react'
 
@@ -109,7 +109,7 @@ export default function NewDevicePage() {
     setLoading(true)
     setError('')
     if (currency.currency === 'USD' && !currency.usdUzsRate) {
-      setError('USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko\'ring.')
+      setError("USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko'ring.")
       setLoading(false)
       return
     }
@@ -157,16 +157,8 @@ export default function NewDevicePage() {
         <p className="text-sm text-zinc-500 mt-0.5">Omborga yangi qurilma kiriting</p>
       </div>
 
-      {error && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">
-          {error}
-        </div>
-      )}
-      {currencyError && (
-        <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-4 py-3">
-          {currencyError}
-        </div>
-      )}
+      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">{error}</div>}
+      {currencyError && <div className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded px-4 py-3">{currencyError}</div>}
 
       <form onSubmit={handleSubmit} className="space-y-4">
         <div className="border border-zinc-200 rounded overflow-hidden">
@@ -197,9 +189,7 @@ export default function NewDevicePage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Xotira (GB)
-              </label>
+              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Xotira (GB)</label>
               <Input
                 value={form.storage}
                 onChange={set('storage')}
@@ -208,9 +198,7 @@ export default function NewDevicePage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Akkumulyator %
-              </label>
+              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Akkumulyator %</label>
               <Input
                 type="number"
                 min="1"
@@ -232,11 +220,6 @@ export default function NewDevicePage() {
                 placeholder={currency.currency === 'USD' ? '600.00' : '7500000'}
                 className="h-9 text-sm border-zinc-200 rounded"
               />
-              {currency.currency === 'USD' && currency.usdUzsRate && Number(form.purchasePrice) > 0 && (
-                <p className="mt-1 text-xs text-zinc-500">
-                  Saqlanadi: {formatMoneyByCurrency(convertUsdToUzs(Number(form.purchasePrice), currency.usdUzsRate), 'UZS')}
-                </p>
-              )}
             </div>
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">
@@ -258,9 +241,7 @@ export default function NewDevicePage() {
           </div>
           <div className="p-4 grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Yetkazib beruvchi ismi
-              </label>
+              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Yetkazib beruvchi ismi</label>
               <Input
                 value={form.supplierName}
                 onChange={set('supplierName')}
@@ -269,9 +250,7 @@ export default function NewDevicePage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Yetkazib beruvchi tel
-              </label>
+              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Yetkazib beruvchi tel</label>
               <Input
                 value={form.supplierPhone}
                 onChange={set('supplierPhone')}
@@ -293,27 +272,17 @@ export default function NewDevicePage() {
                 <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50">
                   <ImagePlus size={14} />
                   Rasm tanlash
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    multiple
-                    onChange={handleImageChange}
-                    className="sr-only"
-                  />
+                  <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={handleImageChange} className="sr-only" />
                 </label>
               </div>
               {imagePreviews.length > 0 ? (
                 <div className="grid grid-cols-3 gap-3">
                   {imagePreviews.map((preview, index) => (
-                    <div key={`${preview}-${index}`} className="relative aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50">
-                      <Image
-                        src={preview}
-                        alt={`Qurilma rasmi ${index + 1}`}
-                        fill
-                        sizes="160px"
-                        unoptimized
-                        className="object-cover"
-                      />
+                    <div
+                      key={`${preview}-${index}`}
+                      className="relative aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50"
+                    >
+                      <Image src={preview} alt={`Qurilma rasmi ${index + 1}`} fill sizes="160px" unoptimized className="object-cover" />
                       <button
                         type="button"
                         aria-label="Rasmni olib tashlash"

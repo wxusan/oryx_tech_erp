@@ -16,18 +16,18 @@ business-friendly Uzbek system:
 
 ## Decisions applied
 
-| Area | Previous state | Current state |
-|---|---|---|
-| Titles | Plain text | One bold HTML title with a clear icon |
-| Body | Mixed label styles | Normal-weight grouped sections |
-| Apostrophes | Mostly ASCII `'` | Uzbek typography `‘/’` in visible copy |
-| Dynamic values | Not HTML-escaped | Escaped through `escapeTelegramHtml` |
-| Delivery | No parse mode | `parse_mode: 'HTML'` for messages, captions, and direct replies |
-| Split payment | Comma-separated inline text | Multi-line bullet list |
-| Due today | Repeated date | Clear `Muddat: Bugun` |
-| Notes | Mixed `Sabab`/`Izoh` | Consistent `Izoh` |
-| Device price | `Kelish narxi` | `Olingan narx` |
-| Sale price | `Sotuv narxi` | `Sotilish narxi` |
+| Area           | Previous state              | Current state                                                   |
+| -------------- | --------------------------- | --------------------------------------------------------------- |
+| Titles         | Plain text                  | One bold HTML title with a clear icon                           |
+| Body           | Mixed label styles          | Normal-weight grouped sections                                  |
+| Apostrophes    | Mostly ASCII `'`            | Uzbek typography `‘/’` in visible copy                          |
+| Dynamic values | Not HTML-escaped            | Escaped through `escapeTelegramHtml`                            |
+| Delivery       | No parse mode               | `parse_mode: 'HTML'` for messages, captions, and direct replies |
+| Split payment  | Comma-separated inline text | Multi-line bullet list                                          |
+| Due today      | Repeated date               | Clear `Muddat: Bugun`                                           |
+| Notes          | Mixed `Sabab`/`Izoh`        | Consistent `Izoh`                                               |
+| Device price   | `Kelish narxi`              | `Olingan narx`                                                  |
+| Sale price     | `Sotuv narxi`               | `Sotilish narxi`                                                |
 
 ## Business logic intentionally unchanged
 
@@ -44,7 +44,8 @@ business-friendly Uzbek system:
 - Full payment: `Qolgan qarz: To‘liq yopildi`
 - Partial payment: formatted remaining debt
 - Split payment: bullet list, one method per line
-- Cross-currency: native `To‘langan` plus `Shartnomaga qo‘llandi`
+- Cross-currency: user-facing message shows only the shop display currency;
+  internal applied contract amount is not shown as a second money line
 - Multi-month nasiya: separate allocation bullet block
 - Notes: included only when non-empty and HTML-escaped
 - Optional device fields: omitted cleanly

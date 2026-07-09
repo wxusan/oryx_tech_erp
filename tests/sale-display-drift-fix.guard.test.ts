@@ -37,9 +37,8 @@ describe('device detail page: no double-conversion drift for USD sales', () => {
   const page = read('src/app/(shop)/shop/qurilmalar/[id]/page.tsx')
 
   it('defines dfmtSale() converting from the sale\'s own contractCurrency, not a legacy UZS field', () => {
-    expect(page).toContain(
-      'latestSale ? formatDisplayMoneyFromContract(amount, latestSale.contractCurrency, currency.currency, currency.usdUzsRate) : fmt(amount, currency)',
-    )
+    expect(page).toContain('const dfmtSale = (amount: number) =>')
+    expect(page).toContain('formatDisplayMoneyFromContract(amount, latestSale.contractCurrency, currency.currency, currency.usdUzsRate)')
   })
 
   it('Sotuv narxi / To\'langan / Qolgan all use dfmtSale() + a contract* field', () => {
@@ -48,9 +47,9 @@ describe('device detail page: no double-conversion drift for USD sales', () => {
     expect(page).toContain('{dfmtSale(latestSale.contractRemainingAmount)}')
   })
 
-  it('shows a "Shartnoma: $X" reference line only when display currency differs from contract currency', () => {
-    expect(page).toContain('latestSale.contractCurrency !== currency.currency && (')
-    expect(page).toContain('Shartnoma: {formatContractMoney(latestSale.contractSalePrice, latestSale.contractCurrency)}')
+  it('does not show a secondary "Shartnoma: $X" reference line in shop-facing UI', () => {
+    expect(page).not.toContain('latestSale.contractCurrency !== currency.currency && (')
+    expect(page).not.toContain('Shartnoma: {formatContractMoney(latestSale.contractSalePrice, latestSale.contractCurrency)}')
   })
 
   it('profit uses computeSaleContractMargin (purchase-currency aware) via saleContractProfit, falling back to the legacy computation only when null', () => {
@@ -89,8 +88,10 @@ describe('Telegram: deviceSoldMessage / salePaymentMessage use the sale\'s own c
     expect(templates).toContain('contractMoney(amount, data.contractCurrency, data.currency)')
   })
 
-  it('salePaymentMessage compares payment currency against the sale\'s CONTRACT currency, not the shop display currency', () => {
-    expect(templates).toContain('data.paymentInput.currency !== data.contractCurrency')
+  it('salePaymentMessage renders payment input in the shop display currency only', () => {
+    expect(templates).toContain('formatUserFacingMoney({')
+    expect(templates).toContain('amountCurrency: data.paymentInput.currency')
+    expect(templates).not.toContain('data.paymentInput.currency !== data.contractCurrency')
   })
 
   it('olibSotdimCreatedMessage formats purchase/sale/profit via the shared contract currency', () => {

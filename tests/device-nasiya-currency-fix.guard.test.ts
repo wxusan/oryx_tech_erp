@@ -44,7 +44,8 @@ describe('device detail page: nasiya card uses contract-currency values, not the
   const source = read('src/app/(shop)/shop/qurilmalar/[id]/page.tsx')
 
   it('defines dfmtNasiya converting from the nasiya\'s own contractCurrency', () => {
-    expect(source).toMatch(/const dfmtNasiya = \(amount: number\) =>\s*\n\s*latestNasiya \? formatDisplayMoneyFromContract\(amount, latestNasiya\.contractCurrency, currency\.currency, currency\.usdUzsRate\)/)
+    expect(source).toContain('const dfmtNasiya = (amount: number) =>')
+    expect(source).toContain('formatDisplayMoneyFromContract(amount, latestNasiya.contractCurrency, currency.currency, currency.usdUzsRate)')
   })
 
   it('every nasiya-card money value reads a contract* field through dfmtNasiya, not a legacy field through fmt()', () => {

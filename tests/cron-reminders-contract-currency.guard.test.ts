@@ -25,7 +25,7 @@ describe('cron reminders use contract-currency remaining amounts', () => {
   })
 })
 
-describe('nasiya reminder Telegram templates format the contract-currency amount natively', () => {
+describe('nasiya reminder Telegram templates format the contract amount in the shop display currency only', () => {
   const templates = read('src/lib/telegram-templates.ts')
 
   it('nasiyaDueTodayMessage/nasiyaOverdueMessage/nasiyaEarlyReminderMessage require contractCurrency and use the shared contract-money wrapper', () => {
@@ -35,24 +35,21 @@ describe('nasiya reminder Telegram templates format the contract-currency amount
   })
 })
 
-describe('formatContractMoneyWithDisplay — native leads, display equivalent is a hint', () => {
-  it('same currency: just the native figure, no parenthetical', () => {
+describe('formatContractMoneyWithDisplay — user-facing single currency', () => {
+  it('same currency: just the display figure, no parenthetical', () => {
     expect(formatContractMoneyWithDisplay(200, 'USD', 'USD', 13_500)).toBe('$200.00')
   })
 
-  it('USD contract shown to a UZS-display shop: native $ leads, so\'m equivalent in parentheses', () => {
-    const text = formatContractMoneyWithDisplay(200, 'USD', 'UZS', 12_500)
-    expect(text.startsWith('$200.00')).toBe(true)
-    expect(text).toMatch(/\(~2.?500.?000 so'm\)/)
+  it('USD contract shown to a UZS-display shop: only UZS is shown', () => {
+    expect(formatContractMoneyWithDisplay(200, 'USD', 'UZS', 12_500)).toMatch(/2.?500.?000 so'm/)
+    expect(formatContractMoneyWithDisplay(200, 'USD', 'UZS', 12_500)).not.toContain('$')
   })
 
-  it('UZS contract shown to a USD-display shop: native so\'m leads, $ equivalent in parentheses', () => {
-    const text = formatContractMoneyWithDisplay(2_000_000, 'UZS', 'USD', 12_500)
-    expect(text).toMatch(/^2.?000.?000 so'm/)
-    expect(text).toContain('(~$160.00)')
+  it('UZS contract shown to a USD-display shop: only USD is shown', () => {
+    expect(formatContractMoneyWithDisplay(2_000_000, 'UZS', 'USD', 12_500)).toBe('$160.00')
   })
 
-  it('falls back to just the native figure when no rate is available', () => {
-    expect(formatContractMoneyWithDisplay(200, 'USD', 'UZS', null)).toBe('$200.00')
+  it('returns a dash instead of leaking another currency when no rate is available', () => {
+    expect(formatContractMoneyWithDisplay(200, 'USD', 'UZS', null)).toBe('—')
   })
 })

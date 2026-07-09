@@ -29,26 +29,39 @@ Use these Uzbek labels consistently:
 
 Use typographic Uzbek apostrophes: `o‘`, `g‘`, and `so‘m`.
 
+## Money display
+
+- Show exactly one money currency: the shop's selected display currency.
+- USD display: use `$...`; never show `so‘m`, `so'm`, or `(~...)`.
+- UZS display: use `... so‘m`; never show `$` or `(~...)`.
+- Do not show internal conversion text such as `Shartnomaga qo‘llandi` in
+  Telegram payment confirmations. Internal ledgers still store the applied
+  contract amount; Telegram shows the user-facing paid amount in display
+  currency only.
+- Historical payment messages convert with the payment's saved
+  `paymentExchangeRate`; live remaining balances/reminders use the app's
+  current display conversion rule.
+
 ## Standard icon mapping
 
-| Meaning | Icon |
-|---|---|
-| Shop | 🏪 |
-| Device | 📱 |
-| Storage | 💾 |
-| Color | 🎨 |
-| Battery | 🔋 |
-| IMEI | 🔢 |
-| Customer | 👤 |
-| Phone | 📞 |
-| Amount/price | 💵 |
-| Paid | 💰 |
-| Remaining/deadline | ⏳ |
-| Payment method | 💳 |
-| Date | 📅 / 🗓 |
-| Profit | 📊 |
-| Note | 📝 |
-| Admin | 👨‍💼 |
+| Meaning            | Icon   |
+| ------------------ | ------ |
+| Shop               | 🏪     |
+| Device             | 📱     |
+| Storage            | 💾     |
+| Color              | 🎨     |
+| Battery            | 🔋     |
+| IMEI               | 🔢     |
+| Customer           | 👤     |
+| Phone              | 📞     |
+| Amount/price       | 💵     |
+| Paid               | 💰     |
+| Remaining/deadline | ⏳     |
+| Payment method     | 💳     |
+| Date               | 📅 / 🗓 |
+| Profit             | 📊     |
+| Note               | 📝     |
+| Admin              | 👨‍💼     |
 
 ## Split payments
 
