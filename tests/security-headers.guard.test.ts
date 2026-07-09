@@ -8,9 +8,10 @@ function read(rel: string): string {
 
 /**
  * Production-readiness follow-up: safe security headers applied globally.
- * CSP is deliberately NOT added yet — see the comment in next.config.ts for
- * why (risk of breaking hydration scripts / Supabase-hosted images / inline
- * styles without a dedicated audit pass) and the documented next step.
+ * Item 6 (follow-up ticket) added a Content-Security-Policy in REPORT-ONLY
+ * mode — see the comment in next.config.ts for the enumerated origins and
+ * the concrete blocking issue (no nonce wired up yet) standing between this
+ * and a strictly enforcing policy.
  */
 describe('next.config.ts: security headers applied to every response', () => {
   const config = read('next.config.ts')
@@ -46,7 +47,17 @@ describe('next.config.ts: security headers applied to every response', () => {
     expect(config).toContain("key: 'Strict-Transport-Security'")
   })
 
-  it('documents why Content-Security-Policy is deferred, rather than silently omitting it', () => {
-    expect(config).toContain('Content-Security-Policy is intentionally NOT added yet')
+  it('ships a Content-Security-Policy in Report-Only mode (never blocking) and documents the concrete blocking issue for enforcing mode', () => {
+    expect(config).toContain("key: 'Content-Security-Policy-Report-Only'")
+    expect(config).not.toContain("key: 'Content-Security-Policy',")
+    expect(config).toContain("doesn't yet wire a nonce through middleware")
+  })
+
+  it('the policy covers script/style/img/font/connect/object/frame-ancestors, and allows the Supabase storage origin for signed-URL images', () => {
+    expect(config).toContain("script-src 'self' 'unsafe-inline'")
+    expect(config).toContain("style-src 'self' 'unsafe-inline'")
+    expect(config).toContain("object-src 'none'")
+    expect(config).toContain("frame-ancestors 'self'")
+    expect(config).toContain('process.env.SUPABASE_URL')
   })
 })

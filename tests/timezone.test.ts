@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { tashkentMonthRange, tashkentDayRange } from '@/lib/timezone'
+import { tashkentMonthRange, tashkentDayRange, tashkentMonthRangeFromKey, recentTashkentMonthKeys } from '@/lib/timezone'
 
 // Asia/Tashkent is UTC+5 (no DST). These tests prove month/day boundaries are
 // computed in Tashkent time, not the server's local/UTC time (req 8).
@@ -42,5 +42,44 @@ describe('tashkentDayRange', () => {
     const a = tashkentDayRange(new Date('2026-07-01T00:00:00Z')).dayKey // 05:00 Tashkent
     const b = tashkentDayRange(new Date('2026-07-01T18:00:00Z')).dayKey // 23:00 Tashkent
     expect(a).toBe(b)
+  })
+})
+
+describe('tashkentMonthRangeFromKey (item 8 — hisobot month selector)', () => {
+  it('produces the exact same range as tashkentMonthRange for that month', () => {
+    const fromNow = tashkentMonthRange(new Date('2026-03-15T08:00:00Z'))
+    const fromKey = tashkentMonthRangeFromKey('2026-03')
+    expect(fromKey.start.toISOString()).toBe(fromNow.start.toISOString())
+    expect(fromKey.end.toISOString()).toBe(fromNow.end.toISOString())
+    expect(fromKey.monthKey).toBe('2026-03')
+  })
+
+  it('rolls the year correctly for December/January boundaries', () => {
+    const { start, end, monthKey } = tashkentMonthRangeFromKey('2025-12')
+    expect(monthKey).toBe('2025-12')
+    expect(end.toISOString()).toBe('2025-12-31T19:00:00.000Z') // Jan 1 2026 Tashkent
+    expect(start.toISOString()).toBe('2025-11-30T19:00:00.000Z') // Dec 1 2025 Tashkent
+  })
+
+  it('falls back to the current month for a missing/invalid key rather than throwing', () => {
+    const now = new Date('2026-07-09T00:00:00Z')
+    expect(tashkentMonthRangeFromKey(null, now).monthKey).toBe(tashkentMonthRange(now).monthKey)
+    expect(tashkentMonthRangeFromKey(undefined, now).monthKey).toBe(tashkentMonthRange(now).monthKey)
+    expect(tashkentMonthRangeFromKey('not-a-month', now).monthKey).toBe(tashkentMonthRange(now).monthKey)
+    expect(tashkentMonthRangeFromKey('2026-13', now).monthKey).toBe(tashkentMonthRange(now).monthKey)
+  })
+})
+
+describe('recentTashkentMonthKeys (item 8 — month selector options)', () => {
+  it('returns the current month first, then walks backward, rolling the year', () => {
+    const keys = recentTashkentMonthKeys(4, new Date('2026-02-10T08:00:00Z'))
+    expect(keys).toEqual(['2026-02', '2026-01', '2025-12', '2025-11'])
+  })
+
+  it('every key round-trips through tashkentMonthRangeFromKey', () => {
+    const keys = recentTashkentMonthKeys(12, new Date('2026-07-09T00:00:00Z'))
+    for (const key of keys) {
+      expect(tashkentMonthRangeFromKey(key).monthKey).toBe(key)
+    }
   })
 })

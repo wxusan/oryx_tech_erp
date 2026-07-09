@@ -18,7 +18,7 @@ import {
 } from '@/components/ui/dialog'
 import { paymentMethodLabel } from '@/lib/labels'
 import { uzDate, uzDateTime } from '@/lib/dates'
-import { displayImei } from '@/lib/device-display'
+import { displayImei, deviceStatusLabel, deviceActionLabel } from '@/lib/device-display'
 import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import {
   formatDisplayMoneyFromContract,
@@ -139,15 +139,6 @@ interface Device {
   returns?: DeviceReturnInfo[]
 }
 
-const statusLabels: Record<string, string> = {
-  IN_STOCK: 'Omborda',
-  SOLD_CASH: 'Naqd sotildi',
-  SOLD_NASIYA: 'Nasiyada',
-  RESERVED: 'Band qilingan',
-  RETURNED: 'Qaytarilgan',
-  DELETED: "O'chirilgan",
-}
-
 interface DeviceLog {
   id: string
   action: string
@@ -155,17 +146,6 @@ interface DeviceLog {
   targetId: string
   targetType: string
   createdAt: string
-}
-
-function deviceActionLabel(action: string) {
-  if (action === 'CREATE') return "Qurilma qo'shildi"
-  if (action === 'SELL') return 'Naqd sotildi'
-  if (action === 'CREATE_NASIYA') return 'Nasiyaga berildi'
-  if (action === 'RETURN') return 'Qaytarildi'
-  if (action === 'RESTOCK') return 'Omborga qaytarildi'
-  if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
-  if (action === 'DELETE') return "O'chirildi"
-  return action
 }
 
 function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']) {
@@ -194,6 +174,14 @@ export default function QurilmaDetailPage() {
   const [salePayNote, setSalePayNote] = useState('')
   const [salePayError, setSalePayError] = useState('')
   const [salePayLoading, setSalePayLoading] = useState(false)
+  // Item 13 — split payment (e.g. half cash, half card). Mirrors the same
+  // pattern already built for the nasiya payment modal
+  // (src/components/shop/nasiya-payment-modal.tsx): `salePayMethod` above
+  // doubles as the first part's method; the second part's amount is always
+  // the remainder, so the user only ever types one side.
+  const [saleSplitPayment, setSaleSplitPayment] = useState(false)
+  const [saleSplitMethod2, setSaleSplitMethod2] = useState('')
+  const [saleSplitAmount1Input, setSaleSplitAmount1Input] = useState('')
   const [saleEditOpen, setSaleEditOpen] = useState(false)
   const [saleEditCustomerName, setSaleEditCustomerName] = useState('')
   const [saleEditCustomerPhone, setSaleEditCustomerPhone] = useState('')
@@ -359,8 +347,19 @@ export default function QurilmaDetailPage() {
     }
   }
 
+  // Item 13 — the second split part's amount is always the remainder, so
+  // the user only ever types one side of the split.
+  const saleSplitAmount2 = Math.round((Number(salePayAmount || 0) - Number(saleSplitAmount1Input || 0)) * 100) / 100
+  const saleSplitValid =
+    !saleSplitPayment ||
+    (saleSplitMethod2 &&
+      saleSplitAmount1Input.trim() &&
+      Number(saleSplitAmount1Input) > 0 &&
+      saleSplitAmount2 > 0 &&
+      saleSplitMethod2 !== salePayMethod)
+
   async function handleSalePayment() {
-    if (!latestSale || !salePayAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading) return
+    if (!latestSale || !salePayAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading || !saleSplitValid) return
     setSalePayLoading(true)
     setSalePayError('')
     try {
@@ -374,6 +373,12 @@ export default function QurilmaDetailPage() {
           amount: Number(salePayAmount),
           inputCurrency: currency.currency,
           paymentMethod: salePayMethod,
+          paymentBreakdown: saleSplitPayment
+            ? [
+                { method: salePayMethod, amount: Number(saleSplitAmount1Input) },
+                { method: saleSplitMethod2, amount: saleSplitAmount2 },
+              ]
+            : undefined,
           note: salePayNote.trim() || undefined,
         }),
       })
@@ -385,6 +390,9 @@ export default function QurilmaDetailPage() {
       setSalePayAmount('')
       setSalePayMethod('')
       setSalePayNote('')
+      setSaleSplitPayment(false)
+      setSaleSplitMethod2('')
+      setSaleSplitAmount1Input('')
       await fetchDevice()
     } catch (err) {
       setSalePayError(err instanceof Error ? err.message : "To'lovni saqlashda xatolik")
@@ -525,7 +533,7 @@ export default function QurilmaDetailPage() {
     { label: 'Yetkazib beruvchi', value: device.supplier?.name ?? '—' },
     { label: 'Tel raqam', value: device.supplier?.phone ?? '—' },
     { label: "Qo'shilgan sana", value: uzDate(device.createdAt) },
-    { label: 'Status', value: statusLabels[device.status] ?? device.status },
+    { label: 'Status', value: deviceStatusLabel(device.status) },
   ]
 
   const showSaleActions = device.status === 'IN_STOCK'
@@ -600,7 +608,7 @@ export default function QurilmaDetailPage() {
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold text-zinc-900">{device.model}</h1>
           <span className="inline-block px-2.5 py-1 bg-zinc-100 text-zinc-700 text-xs font-medium rounded">
-            {statusLabels[device.status] ?? device.status}
+            {deviceStatusLabel(device.status)}
           </span>
         </div>
         <div className="flex items-center gap-2">
@@ -1289,6 +1297,49 @@ export default function QurilmaDetailPage() {
               </select>
             </div>
             <div>
+              <label className="flex items-center gap-2 text-xs font-medium text-zinc-700">
+                <input
+                  type="checkbox"
+                  checked={saleSplitPayment}
+                  onChange={(e) => setSaleSplitPayment(e.target.checked)}
+                  className="h-4 w-4 rounded border-zinc-300"
+                />
+                Aralash to&apos;lov (masalan: yarmi naqd, yarmi karta)
+              </label>
+              {saleSplitPayment && (
+                <div className="mt-2 grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 sm:grid-cols-2">
+                  <div>
+                    <label className="block text-xs text-zinc-600 mb-1">
+                      {salePayMethod ? paymentMethodLabel(salePayMethod) : 'Birinchi usul'} summasi
+                    </label>
+                    <MoneyInput
+                      currency={currency.currency}
+                      value={saleSplitAmount1Input}
+                      onChange={setSaleSplitAmount1Input}
+                      className="h-9 text-sm border-zinc-200 rounded"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-zinc-600 mb-1">Ikkinchi usul</label>
+                    <select
+                      value={saleSplitMethod2}
+                      onChange={(e) => setSaleSplitMethod2(e.target.value)}
+                      className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded"
+                    >
+                      <option value="">Tanlang...</option>
+                      <option value="CASH">Naqd</option>
+                      <option value="CARD">Karta</option>
+                      <option value="TRANSFER">Bank</option>
+                      <option value="OTHER">Boshqa</option>
+                    </select>
+                  </div>
+                  <p className="text-xs text-zinc-500 sm:col-span-2">
+                    Ikkinchi usul summasi: {saleSplitAmount2 > 0 ? `${currencyLabel(currency.currency)} ${saleSplitAmount2}` : '—'} (avtomatik hisoblanadi)
+                  </p>
+                </div>
+              )}
+            </div>
+            <div>
               <label className="text-xs font-medium text-zinc-700 block mb-1.5">
                 Izoh <span className="text-red-500">*</span>
               </label>
@@ -1305,7 +1356,7 @@ export default function QurilmaDetailPage() {
               Bekor qilish
             </Button>
             <Button
-              disabled={!salePayAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading}
+              disabled={!salePayAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading || !saleSplitValid}
               onClick={handleSalePayment}
               className="bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
             >

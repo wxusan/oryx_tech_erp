@@ -669,3 +669,108 @@ See `tests/sold-device-detail-rate-crash-fix.test.ts` for the full
 regression suite: a worked example of the exact UZS-purchase/USD-sale
 scenario, direct tests of the now-hardened `rate` parameter, and the
 NaN-safety tests.
+
+## 24. Nasiya allocation rate-drift edge case — found real, fixed
+
+**Deferred status before this fix**: an earlier audit flagged "a schedule
+whose legacy UZS math says PAID could, after rate drift, still have a small
+real balance on the contract-currency side" as a low-probability, deferred
+edge case. On direct investigation this pass, the bug is real, reproducible,
+and — in one direction — actively user-facing (a live Telegram reminder bug),
+not just a bookkeeping nicety. It has now been fixed.
+
+**Root cause**: `POST /api/nasiya/[id]/payment`'s per-schedule allocation
+loop decided `isFullyPaid` (and therefore the schedule's `status`) purely
+from the LEGACY UZS ledger (`scheduleOutstanding(expectedAmount, paidAmount)`),
+even though the payment amount actually applied is dual-tracked in both
+ledgers. `expectedAmount` is a snapshot frozen at the nasiya's CREATION
+exchange rate; `paidAmount` accumulates from payments converted at EACH
+PAYMENT's OWN rate (`moneyInputToUzs`, today's rate at payment time — not
+the creation rate). Once a USD-native nasiya is paid across two or more
+payments at genuinely different exchange rates, the legacy UZS sum and the
+true contract-currency sum can disagree about whether one particular
+schedule is actually done:
+
+```
+Schedule: $100 owed, created when the rate was 12,000 -> legacy
+expectedAmount = 1,200,000 so'm (frozen forever).
+
+Payment 1: $60 paid @ rate 11,000 -> legacy applied 660,000.
+Payment 2: $40 paid @ rate 11,000 -> legacy applied 440,000.
+Legacy total: 1,100,000 (100,000 so'm SHORT of expectedAmount)
+  -> legacy math alone says: NOT fully paid.
+
+Contract total: $60 + $40 = $100 = contractExpectedAmount exactly
+  -> contract math says: FULLY paid.
+```
+
+Left legacy-driven, this schedule stays at status `PARTIAL`/`OVERDUE`
+forever, even though the customer's real (contract-currency) debt for it is
+$0. **This is not just cosmetic**: `src/app/api/cron/reminders/route.ts`
+selects schedules for a Telegram reminder purely by `NasiyaSchedule.status`
+(`{ in: ['PENDING', 'PARTIAL', 'DEFERRED', 'OVERDUE'] }`) and does not check
+whether the parent nasiya itself is `COMPLETED` — so this drift could send a
+live "you owe money" Telegram reminder for a schedule that is, in truth,
+already fully paid off.
+
+A second, opposite direction of the same root cause was also found: if the
+exchange rate moves the other way, the LEGACY ledger can close a schedule
+"for less than it should" relative to contract truth, silently absorbing a
+rate-driven excess with no functional harm (see the worked "reverse drift"
+example in `tests/nasiya-allocation-rate-drift.test.ts`) — this direction
+was already effectively harmless (nasiya-level completion was already
+contract-driven), but is now handled by the exact same fix for consistency.
+
+A third symptom of the same root cause: the payment route's "does this
+payment exceed the remaining debt" validation gate compared a today's-rate
+payment amount (`amountUzs`) against a **legacy-UZS-summed** total
+outstanding (frozen at each schedule's own creation rate). After enough
+rate movement, this legacy sum can differ from the real remaining contract
+debt — wrongly REJECTING a legitimate final payment ("To'lov qolgan nasiya
+summasidan oshib ketdi") when the legacy sum understates real debt, or
+wrongly ALLOWING a real overpayment through when it overstates it.
+
+**Fix**: the per-schedule allocation loop was extracted into a new pure,
+directly-unit-testable module, `src/lib/nasiya-payment-allocation.ts`
+(`allocateNasiyaPayment`/`totalContractOutstanding`), and the API route now
+calls it instead of the old inline loop:
+
+- `isFullyPaid` / schedule `status` is now decided ENTIRELY from the
+  contract-currency ledger (`contractScheduleOutstanding`), the same ledger
+  nasiya-level completion (`contractAllFullyPaid`) already trusted — never
+  the legacy UZS snapshot.
+- The legacy `paidAmount` is still updated (kept as a compatibility
+  snapshot for existing readers) but is SNAPPED to `expectedAmount` in
+  lockstep whenever the contract ledger says the schedule is done — the
+  exact same pattern already used at the nasiya level
+  (`remainingToStore = contractAllFullyPaid ? 0 : remaining`), just applied
+  one level down, to each schedule row.
+- The overpayment validation gate now compares
+  `appliedAmountInContractCurrency` against a CONTRACT-currency-summed
+  `totalContractOutstanding` across the eligible schedules — never a
+  legacy-UZS sum — eliminating both false-rejection and false-allowance
+  directions of the drift.
+- Historical payment display is untouched by this fix: `paymentInputAmount`/
+  `paymentInputCurrency`/`paymentExchangeRate`/`appliedAmountInContractCurrency`
+  on each `NasiyaPayment` row are frozen at write time exactly as before —
+  this fix only changes how the SCHEDULE's own running status is decided,
+  never re-derives a historical payment's own recorded figures.
+
+**Residual risk (data, not code)**: this fix only affects payments made
+AFTER it lands. Any nasiya schedule rows that ALREADY drifted in a
+production database before this fix (a schedule whose legacy `status`
+disagrees with its real contract-currency debt, from a past multi-rate
+payment history) are not retroactively corrected by this code change alone
+— a one-time backfill/audit script would be needed to reconcile existing
+rows, which was out of scope for this pass (no such drifted rows were
+identified or reported; this is a documented "if it turns out to matter"
+follow-up, not a known active problem).
+
+See `tests/nasiya-allocation-rate-drift.test.ts` for the full proof: the
+exact bug scenario reproduced and fixed, the reverse-direction case, the
+no-drift regression case (unchanged behavior), a UZS-native control case,
+overdue-still-due-date-driven regression, and multi-schedule allocation
+order. `tests/nasiya-payment-allocation.test.ts` and
+`tests/nasiya-payment-contract-currency.guard.test.ts` were updated to
+assert the new pure-function-based call sites instead of the removed
+inline loop.

@@ -106,3 +106,35 @@ conversion bug were found — see "Investigated and ruled out" below.
    turnover without inflating expected/receivable; USD-native turnover
    does not drift after a rate change; mixed-currency aggregates never
    raw-sum; active/overdue/completed exclusions are correct.
+
+## Follow-up pass: month + admin filter (item 8)
+
+The pure formula layer (`computeShopStatsFromRows` in
+`shop-stats-formulas.ts`) was **not changed** — `monthStart`/`monthEnd`/
+`now` were already parameters, so no arithmetic changed, only which rows
+feed into it.
+
+`src/lib/server/shop-stats.ts`'s `getShopStats(session, shopId, options?)`
+gained an optional `{ monthKey, adminId }`:
+- `monthKey` (`YYYY-MM`, Tashkent calendar month) replaces the previous
+  hardcoded `tashkentMonthRange(now)` via the new
+  `tashkentMonthRangeFromKey(monthKey, now)` (falls back to the current
+  month for a missing/invalid key).
+- `adminId`, when set, adds `createdBy: adminId` (or `actorId: adminId` for
+  the Log query) to the six queries that genuinely have a single
+  responsible admin: Sale, SalePayment, Nasiya, NasiyaPayment, DeviceReturn
+  (both the refund-sum and count queries), and recent-activity Log rows.
+
+**Explicitly NOT admin-filtered** (and the hisobot page shows a note when
+a filter is active, rather than silently mixing scopes):
+`totalDevices`, `activeNasiyalar`, `inventoryPurchaseCost`,
+`expectedThisMonth`, `overdueMoney`, `upcomingPayments`. These are
+current-state snapshots (what's in stock right now, what's currently
+overdue) — there is no single admin's action to attribute a device's
+current stock status to, so faking attribution would be worse than not
+filtering at all.
+
+Both parameters default to "no filter" (current month, all admins) —
+byte-identical to this function's pre-item-8 behavior — so the dashboard
+and `/api/stats/shop` (which call `getShopStats(session, shopId)` with no
+options) are unaffected.

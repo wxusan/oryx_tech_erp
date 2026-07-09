@@ -79,7 +79,13 @@ describe('debt/schedule math is untouched by this change (regression guard)', ()
   it('the payment route still uses amountUzs (not a native-currency figure) for allocation and debt math', () => {
     const route = read('src/app/api/nasiya/[id]/payment/route.ts')
     expect(route).toContain('const amountUzs = amountInput.amountUzs')
-    expect(route).toContain('let remainingPayment = amountUzs')
+    expect(route).toContain('amountUzs,')
+    // The per-schedule allocation loop itself (and its `remainingPayment`
+    // local) was extracted to src/lib/nasiya-payment-allocation.ts (item 4
+    // rate-drift fix) so it can be unit-tested directly — the route now
+    // just passes amountUzs into the pure allocator, unchanged in kind.
+    const allocation = read('src/lib/nasiya-payment-allocation.ts')
+    expect(allocation).toContain('let remainingPayment = params.amountUzs')
   })
 
   it('nasiya-utils.ts schedule/completion helpers are unchanged by this ticket (still UZS-based)', () => {

@@ -323,6 +323,11 @@ model Customer {
   additionalPhones String[] @default([])
   passportPhotoUrl String?
   note             String?
+  // Item 12 — optional admin override for the computed nasiya trust rating
+  // (src/lib/nasiya-customer-trust.ts). One of TrustTier ('NEW' | 'LOW' |
+  // 'MEDIUM' | 'HIGH' | 'VERY_HIGH'), null = use the computed tier. Never
+  // read by any automatic accounting logic — display/explainability only.
+  trustOverride    String?
   createdAt        DateTime  @default(now())
   deletedAt        DateTime?
   deletedBy        String?

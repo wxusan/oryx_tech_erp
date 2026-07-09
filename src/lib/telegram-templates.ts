@@ -185,6 +185,8 @@ export function deviceSoldMessage(data: {
   paymentMethod?: string | null
   adminName?: string | null
   currency?: CurrencyContext | null
+  /** Item 14 — sale margin in the same contract currency, when computable (see computeSaleContractMargin). Omitted rather than guessed when unavailable. */
+  profit?: number | null
 }): string {
   const contractMoney = (amount: number) =>
     formatContractMoneyWithDisplay(amount, data.contractCurrency, data.currency?.currency ?? 'UZS', data.currency?.usdUzsRate)
@@ -198,6 +200,7 @@ export function deviceSoldMessage(data: {
       `To'langan: ${contractMoney(data.paidAmount)}`,
       `Qolgan qarz: ${data.remaining <= 0 ? "Yo'q" : contractMoney(data.remaining)}`,
       optionalLine("To'lov usuli", formatPaymentMethod(data.paymentMethod)),
+      typeof data.profit === 'number' ? `Foyda: ${contractMoney(data.profit)}` : null,
     ),
     optionalLine('Admin', data.adminName),
   )

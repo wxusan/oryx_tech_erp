@@ -6,7 +6,8 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { normalizePhone } from '@/lib/phone'
 import { logger } from '@/lib/logger'
-import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
+import { rateLimitKey } from '@/lib/rate-limit'
+import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 
 const customerImportSchema = z.object({
   shopId: z.string().optional(),
@@ -34,7 +35,7 @@ export async function POST(req: NextRequest) {
     if (!resolved.ok) return resolved.response
 
     // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
-    const rate = checkRateLimit(rateLimitKey('customer-import', resolved.shopId, session.user.id), { windowMs: 60_000, max: 10 })
+    const rate = await checkRateLimitDistributed(rateLimitKey('customer-import', resolved.shopId, session.user.id), { windowMs: 60_000, max: 10 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {

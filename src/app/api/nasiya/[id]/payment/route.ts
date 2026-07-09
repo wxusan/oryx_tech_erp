@@ -12,13 +12,15 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
-import { calculateRemaining, scheduleOutstanding, isScheduleOverdue } from '@/lib/nasiya-utils'
+import { calculateRemaining, isScheduleOverdue } from '@/lib/nasiya-utils'
 import { convertPaymentToContractCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'
+import { allocateNasiyaPayment, totalContractOutstanding } from '@/lib/nasiya-payment-allocation'
 import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaPaymentMessage, nasiyaCompletedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
-import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
+import { rateLimitKey } from '@/lib/rate-limit'
+import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
@@ -71,7 +73,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const { shopId } = resolved
 
     // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
-    const rate = checkRateLimit(rateLimitKey('nasiya-payment', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    const rate = await checkRateLimitDistributed(rateLimitKey('nasiya-payment', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currency = await getShopCurrencyContext(shopId)
@@ -177,14 +179,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         }
       }
 
-      const unpaidSchedules = [...nasiya.schedules]
-        .filter((schedule) => {
-          if (schedule.status === 'PAID') return false
-          return scheduleOutstanding(Number(schedule.expectedAmount), Number(schedule.paidAmount)) > 0
-        })
-      const selectedOutstanding = scheduleOutstanding(
-        Number(selectedSchedule.expectedAmount),
-        Number(selectedSchedule.paidAmount),
+      // Eligibility filter: a schedule already marked PAID is skipped as a
+      // cheap short-circuit; every other schedule is still evaluated by the
+      // pure allocator below, which decides completion from the CONTRACT
+      // ledger, never the legacy one — see nasiya-payment-allocation.ts
+      // (item 4 rate-drift fix).
+      const unpaidSchedules = [...nasiya.schedules].filter((schedule) => schedule.status !== 'PAID')
+      const selectedOutstanding = contractScheduleOutstanding(
+        Number(selectedSchedule.contractExpectedAmount),
+        Number(selectedSchedule.contractPaidAmount),
+        contractCurrency,
       )
       const allocationRows = [
         ...unpaidSchedules.filter((schedule) => schedule.id === selectedSchedule.id),
@@ -232,62 +236,56 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         if (selectedOutstanding <= 0) {
           throw { status: 409, message: "Tanlangan oy to'lovi allaqachon yopilgan" }
         }
-        const totalOutstanding = allocationRows.reduce(
-          (sum, schedule) => sum + scheduleOutstanding(Number(schedule.expectedAmount), Number(schedule.paidAmount)),
-          0,
+        // Item 4 fix: compared in CONTRACT currency, not a legacy-UZS sum —
+        // a legacy sum frozen at each schedule's creation rate can drift
+        // from the real remaining contract debt after enough exchange-rate
+        // movement, wrongly rejecting (or wrongly allowing) a payment. See
+        // nasiya-payment-allocation.ts's totalContractOutstanding doc comment.
+        const totalOutstandingContract = totalContractOutstanding(
+          allocationRows.map((schedule) => ({
+            contractExpectedAmount: Number(schedule.contractExpectedAmount),
+            contractPaidAmount: Number(schedule.contractPaidAmount),
+          })),
+          contractCurrency,
         )
-        if (amountUzs > totalOutstanding) {
+        if (appliedAmountInContractCurrency > totalOutstandingContract) {
           throw { status: 409, message: "To'lov qolgan nasiya summasidan oshib ketdi" }
         }
 
-        let remainingPayment = amountUzs
-        let remainingContractPayment = appliedAmountInContractCurrency
-        for (const schedule of allocationRows) {
-          if (remainingPayment <= 0 && remainingContractPayment <= 0) break
-          const outstanding = scheduleOutstanding(Number(schedule.expectedAmount), Number(schedule.paidAmount))
-          const applied = Math.min(remainingPayment, outstanding)
-          const newPaidAmountRaw = Number(schedule.paidAmount) + applied
-          const isFullyPaid = scheduleOutstanding(Number(schedule.expectedAmount), newPaidAmountRaw) <= 0
-          // Within the rounding tolerance, snap the stored paidAmount up to the
-          // exact expectedAmount so the ledger never dangles a few hundred so'm
-          // short forever — see COMPLETION_ROUNDING_TOLERANCE_UZS.
-          const newPaidAmount = isFullyPaid ? Number(schedule.expectedAmount) : newPaidAmountRaw
-          const isPartial = !isFullyPaid && newPaidAmount > 0
-          const effectiveDueDate = schedule.delayedUntil ?? schedule.dueDate
-          const isPastDue = effectiveDueDate < new Date()
-          const nextStatus = isFullyPaid ? 'PAID' : isPastDue ? 'OVERDUE' : isPartial ? 'PARTIAL' : 'PENDING'
+        const scheduleUpdates = allocateNasiyaPayment({
+          schedules: allocationRows.map((schedule) => ({
+            id: schedule.id,
+            monthNumber: schedule.monthNumber,
+            dueDate: schedule.dueDate,
+            delayedUntil: schedule.delayedUntil,
+            expectedAmount: Number(schedule.expectedAmount),
+            paidAmount: Number(schedule.paidAmount),
+            contractExpectedAmount: Number(schedule.contractExpectedAmount),
+            contractPaidAmount: Number(schedule.contractPaidAmount),
+          })),
+          amountUzs,
+          appliedAmountInContractCurrency,
+          contractCurrency,
+          now: date,
+        })
 
-          // Native contract-currency mirror of the same allocation — see
-          // docs/currency-accounting-model.md. Proportional to the legacy
-          // allocation above (same payment, same schedule), just denominated
-          // in contractCurrency and tolerance-checked in that currency.
-          const contractOutstanding = contractScheduleOutstanding(
-            Number(schedule.contractExpectedAmount),
-            Number(schedule.contractPaidAmount),
-            contractCurrency,
-          )
-          const contractApplied = Math.min(remainingContractPayment, contractOutstanding)
-          const newContractPaidAmountRaw = Number(schedule.contractPaidAmount) + contractApplied
-          const isContractFullyPaid =
-            contractScheduleOutstanding(Number(schedule.contractExpectedAmount), newContractPaidAmountRaw, contractCurrency) <= 0
-          const newContractPaidAmount = isContractFullyPaid ? Number(schedule.contractExpectedAmount) : newContractPaidAmountRaw
-          const newContractRemainingAmount = Math.max(0, Number(schedule.contractExpectedAmount) - newContractPaidAmount)
-
+        for (const scheduleUpdate of scheduleUpdates) {
+          const original = allocationRows.find((s) => s.id === scheduleUpdate.scheduleId)!
           const updatedSchedule = await tx.nasiyaSchedule.updateMany({
             where: {
-              id: schedule.id,
+              id: scheduleUpdate.scheduleId,
               nasiyaId,
               shopId,
-              paidAmount: schedule.paidAmount,
+              paidAmount: original.paidAmount,
             },
             data: {
-              paidAmount: newPaidAmount,
-              status: nextStatus,
-              paidAt: isFullyPaid ? date : null,
+              paidAmount: scheduleUpdate.newPaidAmount,
+              status: scheduleUpdate.status,
+              paidAt: scheduleUpdate.markPaidAt ? date : null,
               paymentMethod: effectivePaymentMethod,
               note: auditNote,
-              contractPaidAmount: newContractPaidAmount,
-              contractRemainingAmount: newContractRemainingAmount,
+              contractPaidAmount: scheduleUpdate.newContractPaidAmount,
+              contractRemainingAmount: scheduleUpdate.newContractRemainingAmount,
             },
           })
           if (updatedSchedule.count !== 1) {
@@ -295,14 +293,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           }
 
           allocations.push({
-            scheduleId: schedule.id,
-            amount: applied,
-            paidAfter: newPaidAmount,
-            monthNumber: schedule.monthNumber,
-            contractAmount: contractApplied,
+            scheduleId: scheduleUpdate.scheduleId,
+            amount: scheduleUpdate.appliedUzs,
+            paidAfter: scheduleUpdate.newPaidAmount,
+            monthNumber: scheduleUpdate.monthNumber,
+            contractAmount: scheduleUpdate.appliedContract,
           })
-          remainingPayment -= applied
-          remainingContractPayment -= contractApplied
         }
 
         await tx.nasiyaPayment.create({

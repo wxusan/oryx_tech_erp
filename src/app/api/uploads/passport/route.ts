@@ -6,7 +6,8 @@ import { prisma } from '@/lib/prisma'
 import { hasValidImageSignature } from '@/lib/server/image-signature'
 import { getSupabaseAdminClient, PRIVATE_STORAGE_BUCKET } from '@/lib/supabase-admin'
 import { logger } from '@/lib/logger'
-import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
+import { rateLimitKey } from '@/lib/rate-limit'
+import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 
 export const runtime = 'nodejs'
 
@@ -72,7 +73,7 @@ export async function POST(request: Request) {
     if (!shopId) return badRequest("shopId talab qilinadi")
 
     // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
-    const rate = checkRateLimit(rateLimitKey('upload-passport', shopId, guarded.session.user.id), { windowMs: 60_000, max: 30 })
+    const rate = await checkRateLimitDistributed(rateLimitKey('upload-passport', shopId, guarded.session.user.id), { windowMs: 60_000, max: 30 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     if (!(file instanceof File)) return badRequest('Pasport rasmi tanlanmagan')

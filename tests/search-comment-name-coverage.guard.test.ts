@@ -27,7 +27,11 @@ describe('server-side search covers note/comment fields', () => {
   })
 
   it('GET /api/nasiya searches the nasiya note field', () => {
-    const source = read('src/app/api/nasiya/route.ts')
+    // GET /api/nasiya now delegates its query to getShopNasiyalarList in
+    // shop-lists.ts (shared with the nasiyalar list page's server-rendered
+    // first page, so the two never drift apart) — the search OR clause
+    // lives there, not inlined in the route file.
+    const source = read('src/lib/server/shop-lists.ts')
     expect(source).toMatch(/\{\s*note:\s*\{\s*contains:\s*search/)
   })
 
@@ -45,7 +49,8 @@ describe('server-side search covers customer name (item 14)', () => {
   })
 
   it('GET /api/nasiya already searched customer name before this pass (no regression)', () => {
-    const source = read('src/app/api/nasiya/route.ts')
+    // See the note-field test above — logic now lives in shop-lists.ts.
+    const source = read('src/lib/server/shop-lists.ts')
     expect(source).toMatch(/customer:\s*\{\s*name:\s*\{\s*contains:\s*search/)
   })
 })
@@ -62,7 +67,8 @@ describe('server-side search matches additional customer phones (item 4)', () =>
   })
 
   it('GET /api/nasiya matches additionalPhones on the customer', () => {
-    const source = read('src/app/api/nasiya/route.ts')
+    // See the note-field test above — logic now lives in shop-lists.ts.
+    const source = read('src/lib/server/shop-lists.ts')
     expect(source).toMatch(/customer:\s*\{\s*additionalPhones:\s*\{\s*has:\s*searchDigits/)
   })
 })

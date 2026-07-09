@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,11 +9,6 @@ import { uzDate } from '@/lib/dates'
 import { displayImei } from '@/lib/device-display'
 import { formatMoneyByCurrency, type CurrencyContext, type CurrencyCode } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
-import { matchesDeviceSearch } from '@/lib/search-match'
-
-// Mirrors SHOP_LIST_HARD_CAP in src/lib/server/shop-lists.ts (a client
-// component can't import that server-only module directly).
-const SHOP_LIST_DISPLAY_CAP = 500
 
 type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
 type DisplayStatus = 'Omborda' | 'Sotilgan' | 'Nasiyada' | 'Band qilingan' | 'Qaytarilgan' | "O'chirilgan"
@@ -47,6 +42,17 @@ interface Device {
   supplierName: string | null
   supplierPhone: string | null
   saleInfo: DeviceSaleInfo | null
+}
+
+interface ApiResponse<T> {
+  success: boolean
+  data?: T
+  error?: string
+}
+
+interface DevicesPayload {
+  items: Device[]
+  total: number
 }
 
 const statusMap: Record<DeviceStatus, DisplayStatus> = {
@@ -83,39 +89,109 @@ function StatusBadge({ status }: { status: DeviceStatus }) {
   )
 }
 
+/** Sold price — converts from the deal's own contract currency, never the
+ * legacy UZS snapshot re-derived through today's rate (see
+ * docs/currency-accounting-model.md). Shared by the desktop table and the
+ * mobile card view. */
+function SoldPriceValue({ d, currency }: { d: Device; currency: CurrencyContext }) {
+  if (!d.saleInfo) return <>—</>
+  return <>{formatDisplayMoneyFromContract(d.saleInfo.contractSoldPrice, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}</>
+}
+
+/** Profit ("Farq") — prefers contractProfit over the legacy UZS profit
+ * field, falling back only when a USD contract has no creation rate on
+ * record. Shared by the desktop table and the mobile card view. */
+function ProfitValue({ d, currency }: { d: Device; currency: CurrencyContext }) {
+  if (!d.saleInfo) return <>—</>
+  if (d.saleInfo.returned) return <span className="text-xs text-blue-700">Qaytarilgan</span>
+  if (d.saleInfo.contractProfit != null) {
+    return (
+      <span className={d.saleInfo.contractProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
+        {formatDisplayMoneyFromContract(d.saleInfo.contractProfit, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}
+      </span>
+    )
+  }
+  return (
+    <span className={d.saleInfo.profit != null && d.saleInfo.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
+      {formatMoneyByCurrency(d.saleInfo.profit ?? 0, currency.currency, currency.usdUzsRate)}
+    </span>
+  )
+}
+
+// Item — real page/skip/take pagination (matches /api/logs' established
+// envelope, and mijozlar/logs' client-fetch pattern) — replaces the old
+// single unbounded-in-spirit fetch capped at a fixed ceiling.
+const PER_PAGE = 25
+
+function buildRequestKey(search: string, status: DeviceStatus | 'Barchasi', page: number) {
+  const params = new URLSearchParams({ paginated: '1' })
+  if (search.trim()) params.set('search', search.trim())
+  if (status !== 'Barchasi') params.set('status', status)
+  params.set('skip', String((page - 1) * PER_PAGE))
+  params.set('take', String(PER_PAGE))
+  return params.toString()
+}
+
 export default function QurilmalarClient({
   initialDevices,
+  initialTotal,
   currency,
   initialStatus = 'Barchasi',
-  truncated = false,
 }: {
   initialDevices: Device[]
+  initialTotal: number
   currency: CurrencyContext
   initialStatus?: DeviceStatus | 'Barchasi'
-  /** True when the shop has more than the server's per-page cap — only the newest are shown. */
-  truncated?: boolean
 }) {
-  const [devices] = useState<Device[]>(initialDevices)
+  const [devices, setDevices] = useState<Device[]>(initialDevices)
+  const [total, setTotal] = useState(initialTotal)
+  const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [activeStatus, setActiveStatus] = useState<DeviceStatus | 'Barchasi'>(initialStatus)
+  const [error, setError] = useState('')
+  const [loadedKey, setLoadedKey] = useState(() => buildRequestKey('', initialStatus, 1))
 
-  const filtered = devices.filter((d) => {
-    const matchesStatus = activeStatus === 'Barchasi' || d.status === activeStatus
-    const matchesSearch = matchesDeviceSearch(
-      {
-        model: d.model,
-        imei: d.imei,
-        color: d.color,
-        storage: d.storage,
-        note: d.note,
-        supplierName: d.supplierName,
-        supplierPhone: d.supplierPhone,
-        customerName: d.saleInfo?.customerName,
-      },
-      search,
-    )
-    return matchesStatus && matchesSearch
-  })
+  // Debounce the free-text search so typing doesn't fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
+
+  const requestKey = useMemo(
+    () => buildRequestKey(debouncedSearch, activeStatus, page),
+    [debouncedSearch, activeStatus, page],
+  )
+
+  useEffect(() => {
+    if (loadedKey === requestKey) return
+
+    const controller = new AbortController()
+
+    fetch(`/api/devices?${requestKey}`, { signal: controller.signal })
+      .then((res) => res.json())
+      .then((json: ApiResponse<DevicesPayload>) => {
+        if (!json.success || !json.data) {
+          setError(json.error || 'Qurilmalar yuklanmadi')
+          setLoadedKey(requestKey)
+          return
+        }
+        setError('')
+        setDevices(json.data.items)
+        setTotal(json.data.total)
+        setLoadedKey(requestKey)
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setError('Qurilmalar yuklanmadi')
+        setLoadedKey(requestKey)
+      })
+
+    return () => controller.abort()
+  }, [loadedKey, requestKey])
+
+  const loading = loadedKey !== requestKey
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
 
   return (
     <div className="p-6 space-y-4">
@@ -142,18 +218,12 @@ export default function QurilmalarClient({
         </div>
       </div>
 
-      {truncated && (
-        <div className="border border-amber-200 bg-amber-50 rounded px-4 py-3 text-sm text-amber-800">
-          Qurilmalar soni {SHOP_LIST_DISPLAY_CAP} tadan oshib ketdi — faqat eng so'nggi {SHOP_LIST_DISPLAY_CAP} tasi ko'rsatilmoqda. Eski qurilmani topish uchun qidiruvdan foydalaning.
-        </div>
-      )}
-
       {/* Filter tabs */}
       <div className="flex gap-1 border-b border-zinc-200">
         {filterTabs.map((tab) => (
           <button
             key={tab.value}
-            onClick={() => setActiveStatus(tab.value)}
+            onClick={() => { setActiveStatus(tab.value); setPage(1) }}
             className={`px-3 py-2 text-sm transition-colors border-b-2 -mb-px ${
               activeStatus === tab.value
                 ? 'border-zinc-900 text-zinc-900 font-medium'
@@ -168,14 +238,15 @@ export default function QurilmalarClient({
       {/* Search */}
       <Input
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={(e) => { setSearch(e.target.value); setPage(1) }}
         placeholder="Model, IMEI, rang, xotira yoki yetkazib beruvchi bo'yicha qidirish..."
         className="max-w-md h-9 text-sm border-zinc-200 rounded"
       />
 
-      {/* Table — devices are server-fetched (initialDevices), so there is no
-          client-side loading/error state here. */}
-      <div className="border border-zinc-200 rounded overflow-x-auto">
+      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">{error}</div>}
+
+      {/* Desktop table — unchanged rendering, just gated to sm: and up. */}
+      <div className="hidden sm:block border border-zinc-200 rounded overflow-x-auto">
           <table className="min-w-[1180px] w-full text-sm">
             <thead className="bg-zinc-50 border-b border-zinc-200">
               <tr>
@@ -187,7 +258,20 @@ export default function QurilmalarClient({
               </tr>
             </thead>
             <tbody>
-              {filtered.map((d) => (
+              {loading ? (
+                <tr>
+                  <td colSpan={12} className="px-4 py-8 text-center text-zinc-400 text-sm">
+                    Yuklanmoqda...
+                  </td>
+                </tr>
+              ) : devices.length === 0 ? (
+                <tr>
+                  <td colSpan={12} className="px-4 py-8 text-center text-zinc-400 text-sm">
+                    Qurilma topilmadi
+                  </td>
+                </tr>
+              ) : (
+                devices.map((d) => (
                 <tr key={d.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                   <td className="px-4 py-3 font-medium text-zinc-900">{d.model}</td>
                   <td className="px-4 py-3 text-zinc-600">{d.color ?? '—'}</td>
@@ -239,17 +323,79 @@ export default function QurilmalarClient({
                     </Link>
                   </td>
                 </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-zinc-400 text-sm">
-                    Qurilma topilmadi
-                  </td>
-                </tr>
+                ))
               )}
             </tbody>
           </table>
       </div>
+
+      {/* Mobile card view — same data as the table, actions directly visible
+          (not hidden in an overflow menu). */}
+      <div className="sm:hidden space-y-3">
+        {loading ? (
+          <div className="border border-zinc-200 rounded px-4 py-8 text-center text-sm text-zinc-500">Yuklanmoqda...</div>
+        ) : devices.length === 0 ? (
+          <div className="border border-zinc-200 rounded px-4 py-8 text-center text-sm text-zinc-500">Qurilma topilmadi</div>
+        ) : (
+          devices.map((d) => (
+            <div key={d.id} className="border border-zinc-200 rounded p-3 space-y-2">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <div className="font-medium text-zinc-900">{d.model}</div>
+                  <div className="text-xs font-mono text-zinc-500 mt-0.5">{displayImei(d.imei)}</div>
+                </div>
+                <StatusBadge status={d.status} />
+              </div>
+              <div className="text-xs text-zinc-500">
+                {[d.color, d.storage, d.batteryHealth != null ? `${d.batteryHealth}%` : null].filter(Boolean).join(' · ') || '—'}
+              </div>
+              <div className="flex items-center justify-between text-xs text-zinc-600">
+                <span>Kelish: {formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate)}</span>
+                {d.saleInfo && <span>Sotuv: <SoldPriceValue d={d} currency={currency} /></span>}
+              </div>
+              {d.saleInfo && (
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-zinc-500">{d.saleInfo.customerName ?? '—'}</span>
+                  <ProfitValue d={d} currency={currency} />
+                </div>
+              )}
+              <div className="text-xs text-zinc-400">{uzDate(d.createdAt)}</div>
+              <Link href={`/shop/qurilmalar/${d.id}`} prefetch={false} className="block">
+                <Button variant="outline" className="h-8 w-full rounded border-zinc-200 text-xs">
+                  Ko&apos;rish
+                </Button>
+              </Link>
+            </div>
+          ))
+        )}
+      </div>
+
+      {total > 0 && (
+        <div className="flex items-center justify-between text-sm text-zinc-500">
+          <span>
+            {total} ta qurilmadan {Math.min((page - 1) * PER_PAGE + 1, total)}-{Math.min(page * PER_PAGE, total)} ko&apos;rsatilmoqda
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              disabled={page === 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="h-8 rounded border-zinc-200 px-3 text-xs disabled:opacity-40"
+            >
+              Oldingi
+            </Button>
+            <span className="text-xs">{page} / {totalPages}</span>
+            <Button
+              variant="outline"
+              disabled={page === totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="h-8 rounded border-zinc-200 px-3 text-xs disabled:opacity-40"
+            >
+              Keyingi
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

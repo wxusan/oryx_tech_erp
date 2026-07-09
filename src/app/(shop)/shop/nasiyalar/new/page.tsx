@@ -20,6 +20,7 @@ import { displayImei, deviceMatchesSearch } from '@/lib/device-display'
 import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { useShopCurrency } from '@/lib/use-shop-currency'
+import { TrustBadge, type TrustBadgeData } from '@/components/shop/trust-badge'
 
 interface Device {
   id: string
@@ -70,6 +71,9 @@ export default function NewNasiyaPage() {
   const [nameError, setNameError] = useState('')
   const [phoneError, setPhoneError] = useState('')
   const phoneRef = useRef<HTMLInputElement>(null)
+  // Item 12 — if the entered phone matches an existing customer, show their
+  // trust badge before the deal is even created.
+  const [existingCustomerTrust, setExistingCustomerTrust] = useState<TrustBadgeData | null>(null)
 
   // Step 3
   // null = untouched (show the device's price as a live currency-aware
@@ -195,6 +199,32 @@ export default function NewNasiyaPage() {
       ignore = true
     }
   }, [])
+
+  // Item 12 — debounced existing-customer trust lookup as the phone is
+  // typed in step 2. A brand-new phone (no match) just clears the badge.
+  useEffect(() => {
+    let ignore = false
+    const timer = setTimeout(() => {
+      if (!isValidPhone(customerPhone)) {
+        if (!ignore) setExistingCustomerTrust(null)
+        return
+      }
+      fetch(`/api/customers/by-phone?phone=${encodeURIComponent(customerPhone)}`)
+        .then((res) => res.json())
+        .then((json) => {
+          if (ignore) return
+          if (json.success && json.data?.found) setExistingCustomerTrust(json.data.trust)
+          else setExistingCustomerTrust(null)
+        })
+        .catch(() => {
+          if (!ignore) setExistingCustomerTrust(null)
+        })
+    }, 400)
+    return () => {
+      ignore = true
+      clearTimeout(timer)
+    }
+  }, [customerPhone])
 
   const filteredDevices = devices.filter((d) => deviceMatchesSearch(d, searchQuery))
 
@@ -506,6 +536,12 @@ export default function NewNasiyaPage() {
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
                 {phoneError && <p className="mt-1 text-xs text-red-600">{phoneError}</p>}
+                {existingCustomerTrust && (
+                  <div className="mt-1.5 flex items-center gap-1.5">
+                    <span className="text-xs text-zinc-500">Mavjud mijoz:</span>
+                    <TrustBadge trust={existingCustomerTrust} />
+                  </div>
+                )}
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">

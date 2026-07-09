@@ -23,16 +23,44 @@ const securityHeaders = [
   { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
 ]
 
-// Content-Security-Policy is intentionally NOT added yet. This app renders
-// Next.js's own inline hydration scripts, loads device/passport images from
-// Supabase storage via signed URLs, and the dashboard uses inline styles
-// from several UI primitives — a CSP tight enough to be meaningful risks
-// breaking one of those without a dedicated pass to audit every script/
-// style/image source and test each page manually. Next step: enumerate
-// every external origin actually used (Supabase storage domain, any font/
-// analytics origin) and add a `script-src`/`img-src`/`style-src` policy in
-// report-only mode first, verify no violations across a full manual pass,
-// then switch to enforcing.
+// Item 6 (docs/product-feature-fixes.md follow-up) — Content-Security-Policy,
+// shipped in REPORT-ONLY mode rather than enforcing. Enumerated the app's own
+// external origins: Next.js's inline hydration/RSC payload scripts and the
+// Tailwind/Radix-style UI primitives' inline styles both need
+// 'unsafe-inline' (this app doesn't yet wire a nonce through middleware —
+// that's the concrete blocking issue standing between this and a strictly
+// enforcing policy); device/passport photos are fetched by the browser
+// directly from Supabase Storage via short-lived signed URLs, so img-src
+// must allow that origin; next/font/google self-hosts fonts at build time
+// (no external font-src needed); there is no analytics/telemetry origin.
+// Report-Only means the browser sends violation reports to the console
+// without blocking anything, so this cannot break the app — it's here to
+// start surfacing what a future *enforcing* policy would need to allow.
+function buildCsp(): string {
+  let supabaseOrigin = ''
+  try {
+    supabaseOrigin = process.env.SUPABASE_URL ? new URL(process.env.SUPABASE_URL).origin : ''
+  } catch {
+    supabaseOrigin = ''
+  }
+  const directives = [
+    `default-src 'self'`,
+    // Blocking issue: Next.js injects inline hydration/RSC scripts with no
+    // nonce wired up yet — 'unsafe-inline' is required until that's added.
+    `script-src 'self' 'unsafe-inline'`,
+    // Blocking issue: several UI primitives (Radix/Base UI, Tailwind
+    // utilities) set inline styles — same nonce gap as script-src.
+    `style-src 'self' 'unsafe-inline'`,
+    `img-src 'self' data: blob:${supabaseOrigin ? ` ${supabaseOrigin}` : ''}`,
+    `font-src 'self' data:`,
+    `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ''}`,
+    `object-src 'none'`,
+    `base-uri 'self'`,
+    `frame-ancestors 'self'`,
+    `form-action 'self'`,
+  ]
+  return directives.join('; ')
+}
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
@@ -40,7 +68,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/:path*',
-        headers: securityHeaders,
+        headers: [...securityHeaders, { key: 'Content-Security-Policy-Report-Only', value: buildCsp() }],
       },
     ]
   },

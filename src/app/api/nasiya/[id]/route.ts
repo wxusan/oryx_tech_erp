@@ -20,6 +20,7 @@ import { normalizePhone } from '@/lib/phone'
 import { computeNasiyaPaymentScore } from '@/lib/nasiya-payment-score'
 import { deriveNasiyaOverdue } from '@/lib/nasiya-utils'
 import { getShopCurrencyContext } from '@/lib/server/currency'
+import { computeCustomerTrustRating, isValidTrustTier, type CustomerNasiyaInput } from '@/lib/nasiya-customer-trust'
 import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -100,6 +101,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             // Access is already shop-scoped (this nasiya is fetched only for its
             // owning shop) and the signed URL is separately per-shop authorized.
             passportPhotoUrl: true,
+            trustOverride: true,
           },
         },
         device: {
@@ -196,6 +198,40 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       )
     }
 
+    // Item 12 — customer trust rating, aggregated across ALL of this
+    // customer's nasiyas in this shop (not just this one deal).
+    const customerNasiyas = await prisma.nasiya.findMany({
+      where: { customerId: nasiya.customer.id, shopId: nasiya.shopId, deletedAt: null },
+      select: {
+        status: true,
+        contractCurrency: true,
+        schedules: {
+          select: {
+            status: true,
+            dueDate: true,
+            delayedUntil: true,
+            contractExpectedAmount: true,
+            contractPaidAmount: true,
+            paidAt: true,
+          },
+        },
+      },
+    })
+    const customerTrustInputs: CustomerNasiyaInput[] = customerNasiyas.map((n) => ({
+      status: n.status,
+      contractCurrency: n.contractCurrency,
+      schedules: n.schedules.map((s) => ({
+        status: s.status,
+        dueDate: s.dueDate,
+        delayedUntil: s.delayedUntil,
+        expectedAmount: Number(s.contractExpectedAmount),
+        paidAmount: Number(s.contractPaidAmount),
+        paidAt: s.paidAt,
+      })),
+    }))
+    const trustOverride = isValidTrustTier(nasiya.customer.trustOverride) ? nasiya.customer.trustOverride : null
+    const customerTrust = computeCustomerTrustRating(customerTrustInputs, new Date(), trustOverride)
+
     return ok(
       {
         ...nasiya,
@@ -203,6 +239,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         isOverdue: derived.isOverdue,
         overdueAmount: derived.overdueAmount,
         paymentScore,
+        customerTrust,
       },
       "Nasiya ma'lumotlari",
     )

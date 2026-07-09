@@ -7,61 +7,76 @@ function read(rel: string): string {
 }
 
 /**
- * Production-readiness follow-up: the server-rendered /shop/qurilmalar and
- * /shop/nasiyalar list pages used to hardcode `take: 500` with no signal to
- * the admin when a shop actually had more rows than that (older rows were
- * silently hidden). This doesn't build full skip/take pagination UI (a much
- * larger change against two pages with only client-side search) — instead
- * it fetches one extra row to detect the over-cap case and surfaces a
- * `truncated` flag through to a visible banner, so data loss is visible
- * instead of silent. Full paginated browsing of shops with 500+
- * devices/nasiyalar remains a documented follow-up
- * (docs/audits/full-production-audit.md).
+ * Production-readiness follow-up (superseding the earlier "hard cap +
+ * truncation banner" version of this guard): the server-rendered
+ * /shop/qurilmalar and /shop/nasiyalar list pages used to hardcode
+ * `take: 500` with only a banner to signal an over-cap shop — rows past the
+ * cap were still unreachable. Both pages now have REAL page/skip/take
+ * pagination (matching the /api/logs and /api/customers envelope), so a
+ * shop with any number of devices/nasiyalar can browse every row via
+ * Prev/Next, with an accurate `total` from `prisma.*.count()` run with the
+ * exact same `where` as the paginated `findMany`.
  */
-describe('shop-lists.ts caps devices/nasiyalar queries and reports truncation instead of hiding it silently', () => {
+describe('shop-lists.ts: getShopDevicesList/getShopNasiyalarList are real page/skip/take pagination', () => {
   const source = read('src/lib/server/shop-lists.ts')
 
-  it('defines a single named hard cap constant, not a magic number repeated at each call site', () => {
-    expect(source).toMatch(/export const SHOP_LIST_HARD_CAP\s*=\s*500/)
+  it('no more hard-cap-plus-one truncation-detection fetch', () => {
+    expect(source).not.toContain('SHOP_LIST_HARD_CAP')
     expect(source).not.toMatch(/take:\s*500\b/)
+    expect(source).not.toContain('truncated')
   })
 
-  it('both list queries fetch one row past the cap to detect truncation', () => {
-    const takeMatches = source.match(/take:\s*SHOP_LIST_HARD_CAP\s*\+\s*1/g) ?? []
-    expect(takeMatches.length).toBeGreaterThanOrEqual(2)
+  it('both getShopDevicesList and getShopNasiyalarList accept a query object and return {items, total, skip, take}', () => {
+    expect(source).toMatch(/export interface ShopListPage<T>/)
+    expect(source).toMatch(/total:\s*number/)
+    expect(source).toMatch(/getShopDevicesList\(shopId: string, query: ShopDevicesQuery = \{\}\): Promise<ShopListPage<ShopDeviceListItem>>/)
+    expect(source).toMatch(/getShopNasiyalarList\(shopId: string, query: ShopNasiyalarQuery = \{\}\): Promise<ShopListPage<ShopNasiyaListItem>>/)
   })
 
-  it('both getShopDevicesList and getShopNasiyalarList return a truncated flag', () => {
-    expect(source).toMatch(/export interface ShopListResult<T>/)
-    expect(source).toMatch(/truncated:\s*boolean/)
-    expect(source).toMatch(/getShopDevicesList\(shopId: string\): Promise<ShopListResult<ShopDeviceListItem>>/)
-    expect(source).toMatch(/getShopNasiyalarList\(shopId: string\): Promise<ShopListResult<ShopNasiyaListItem>>/)
+  it('both run count() with the exact same where clause as findMany, in parallel', () => {
+    expect(source).toContain('prisma.device.count({ where })')
+    expect(source).toContain('prisma.nasiya.count({ where })')
+    const promiseAllMatches = source.match(/Promise\.all\(\[/g) ?? []
+    expect(promiseAllMatches.length).toBeGreaterThanOrEqual(2)
+  })
+
+  it('page size is clamped to a real per-page size (default 25, max 100), not the old 500-row cap', () => {
+    expect(source).toContain('const LIST_DEFAULT_TAKE = 25')
+    expect(source).toContain('const LIST_MAX_TAKE = 100')
   })
 })
 
-describe('the truncation flag reaches the page and is rendered as a visible banner', () => {
-  it('qurilmalar page destructures truncated and forwards it to the client component', () => {
+describe('the qurilmalar/nasiyalar pages fetch only the first page server-side and hand off to client-fetch pagination', () => {
+  it('qurilmalar page passes initialDevices/initialTotal (not the old truncated flag) to the client component', () => {
     const source = read('src/app/(shop)/shop/qurilmalar/page.tsx')
-    expect(source).toMatch(/items:\s*devices,\s*truncated\s*}/)
-    expect(source).toContain('truncated={truncated}')
+    expect(source).toMatch(/items:\s*devices,\s*total\s*}/)
+    expect(source).toContain('initialDevices={devices}')
+    expect(source).toContain('initialTotal={total}')
+    expect(source).not.toContain('truncated')
   })
 
-  it('qurilmalar client renders a truncation banner', () => {
+  it('qurilmalar client has real Prev/Next pagination, not a truncation banner', () => {
     const source = read('src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx')
-    expect(source).toContain('truncated')
-    expect(source).toMatch(/tadan oshib ketdi/)
+    expect(source).not.toContain('truncated')
+    expect(source).not.toMatch(/tadan oshib ketdi/)
+    expect(source).toContain('disabled={page === 1}')
+    expect(source).toContain('disabled={page === totalPages}')
   })
 
-  it('nasiyalar page destructures truncated and forwards it to the client component', () => {
+  it('nasiyalar page passes initialNasiyalar/initialTotal (not the old truncated flag) to the client component', () => {
     const source = read('src/app/(shop)/shop/nasiyalar/page.tsx')
-    expect(source).toMatch(/items:\s*nasiyalar,\s*truncated\s*}/)
-    expect(source).toContain('truncated={truncated}')
+    expect(source).toMatch(/items:\s*nasiyalar,\s*total\s*}/)
+    expect(source).toContain('initialNasiyalar={nasiyalar}')
+    expect(source).toContain('initialTotal={total}')
+    expect(source).not.toContain('truncated')
   })
 
-  it('nasiyalar client renders a truncation banner', () => {
+  it('nasiyalar client has real Prev/Next pagination, not a truncation banner', () => {
     const source = read('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')
-    expect(source).toContain('truncated')
-    expect(source).toMatch(/tadan oshib ketdi/)
+    expect(source).not.toContain('truncated')
+    expect(source).not.toMatch(/tadan oshib ketdi/)
+    expect(source).toContain('disabled={page === 1}')
+    expect(source).toContain('disabled={page === totalPages}')
   })
 })
 

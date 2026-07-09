@@ -97,20 +97,21 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
     expect(source).toContain('leftDue.getTime() - rightDue.getTime() || left.monthNumber - right.monthNumber')
   })
 
-  it('rejects a payment greater than the total outstanding balance', () => {
-    expect(source).toContain('if (amountUzs > totalOutstanding)')
+  it('rejects a payment greater than the total outstanding balance — compared in CONTRACT currency (item 4 rate-drift fix), not a legacy-UZS sum', () => {
+    expect(source).toContain('if (appliedAmountInContractCurrency > totalOutstandingContract)')
     expect(source).toContain("To'lov qolgan nasiya summasidan oshib ketdi")
+    expect(source).toContain('totalContractOutstanding(')
   })
 
-  it('allocates across multiple schedules in a single loop until the payment is exhausted', () => {
-    expect(source).toContain('for (const schedule of allocationRows)')
-    expect(source).toContain('remainingPayment -= applied')
+  it('delegates the per-schedule allocation loop to the pure, unit-tested allocateNasiyaPayment (item 4 rate-drift fix)', () => {
+    expect(source).toContain("import { allocateNasiyaPayment, totalContractOutstanding } from '@/lib/nasiya-payment-allocation'")
+    expect(source).toContain('const scheduleUpdates = allocateNasiyaPayment({')
+    expect(source).toContain('for (const scheduleUpdate of scheduleUpdates)')
   })
 
-  it('marks a schedule PAID (with paidAt) only when fully covered (tolerance-aware), otherwise PARTIAL', () => {
-    expect(source).toContain('const isFullyPaid = scheduleOutstanding(Number(schedule.expectedAmount), newPaidAmountRaw) <= 0')
-    expect(source).toContain('paidAt: isFullyPaid ? date : null')
-    expect(source).toContain("isPartial ? 'PARTIAL'")
+  it('marks a schedule PAID (with paidAt) only when fully covered per the CONTRACT ledger (item 4 fix — never the legacy UZS ledger alone)', () => {
+    expect(source).toContain('paidAt: scheduleUpdate.markPaidAt ? date : null')
+    expect(source).toContain('status: scheduleUpdate.status')
   })
 
   it('is idempotent: a repeated request with the same Idempotency-Key returns the existing payment, no double-allocation', () => {
@@ -123,8 +124,8 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
     expect(source).toContain("const justCompleted = newStatus === 'COMPLETED'")
   })
 
-  it('uses the shared, tolerance-aware scheduleOutstanding/contractScheduleOutstanding helpers instead of duplicated inline math', () => {
-    expect(source).toContain("import { calculateRemaining, scheduleOutstanding, isScheduleOverdue } from '@/lib/nasiya-utils'")
+  it('uses the shared, tolerance-aware contractScheduleOutstanding helper instead of duplicated inline math', () => {
+    expect(source).toContain("import { calculateRemaining, isScheduleOverdue } from '@/lib/nasiya-utils'")
     expect(source).toContain("import { convertPaymentToContractCurrency, contractScheduleOutstanding } from '@/lib/nasiya-contract'")
     // Completion is decided from the contract-currency ledger (source of
     // truth for debt) — see docs/currency-accounting-model.md.

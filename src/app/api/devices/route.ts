@@ -18,6 +18,7 @@ import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { normalizePhone } from '@/lib/phone'
+import { getShopDevicesList, type DeviceStatusFilter } from '@/lib/server/shop-lists'
 import type { ZodError } from 'zod'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_NASIYA', 'RESERVED', 'RETURNED', 'DELETED'] as const
@@ -46,6 +47,27 @@ export async function GET(req: NextRequest) {
     const status = statusParam as (typeof deviceStatuses)[number] | undefined
     const search = searchParams.get('search') ?? undefined // IMEI / model / color / note / customer name/phone
     const searchDigits = search ? normalizePhone(search) : null
+
+    // Item — the qurilmalar list page opts into the real page/skip/take
+    // pagination envelope ({items, total, skip, take}, same shape /api/logs
+    // and /api/customers already use) via ?paginated=1. Every other existing
+    // consumer of this route (sotuv/new, nasiyalar/new, qurilmalar/new,
+    // qurilmalar/[id]) keeps getting the plain array it already expects —
+    // this branch changes nothing for them.
+    if (searchParams.get('paginated') === '1') {
+      const requestedTake = Number(searchParams.get('take') ?? 25)
+      const requestedSkip = Number(searchParams.get('skip') ?? 0)
+      const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 100)) : 25
+      const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
+      const { items, total } = await getShopDevicesList(shopId, {
+        search,
+        status: status as DeviceStatusFilter | undefined,
+        skip,
+        take,
+      })
+      return ok({ items, total, skip, take }, "Qurilmalar ro'yxati")
+    }
+
     const requestedTake = Number(searchParams.get('take') ?? 200)
     const requestedSkip = Number(searchParams.get('skip') ?? 0)
     const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 500)) : 200

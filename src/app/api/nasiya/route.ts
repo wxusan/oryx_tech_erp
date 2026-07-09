@@ -1,16 +1,24 @@
 /**
- * GET /api/nasiya?shopId=...&status=... — list nasiyalar
+ * GET /api/nasiya?shopId=...&status=...&search=...&skip=...&take=... — paginated nasiyalar list
  *
  * Auth: SHOP_ADMIN (scoped to their own shop) or SUPER_ADMIN (requires shopId param)
- * Returns nasiyalar with customer + device + the schedule fields needed by the list view.
+ * Returns { items, total, skip, take } (same envelope shape /api/logs and
+ * /api/customers already established) — this route has no consumers besides
+ * the nasiyalar list page itself, so the shape can change directly here
+ * without an opt-in flag (see /api/devices for the opt-in variant, which DOES
+ * have other consumers expecting a plain array).
+ *
+ * The actual query/derivation/scoring logic lives in
+ * `getShopNasiyalarList` (src/lib/server/shop-lists.ts) — reused as-is so the
+ * list page's server-rendered first page and this client-fetch route never
+ * drift apart.
  */
 
 import { NextRequest } from 'next/server'
-import { prisma } from '@/lib/prisma'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, serverError } from '@/lib/api-helpers'
-import { normalizePhone } from '@/lib/phone'
 import { logger } from '@/lib/logger'
+import { getShopNasiyalarList, type NasiyaStatusFilter } from '@/lib/server/shop-lists'
 
 const nasiyaStatuses = ['ACTIVE', 'COMPLETED', 'OVERDUE', 'CANCELLED'] as const
 
@@ -30,93 +38,16 @@ export async function GET(req: NextRequest) {
     if (statusParam && !nasiyaStatuses.includes(statusParam as (typeof nasiyaStatuses)[number])) {
       return badRequest("Nasiya statusi noto'g'ri")
     }
-    const status = statusParam as (typeof nasiyaStatuses)[number] | undefined
+    const status = statusParam as NasiyaStatusFilter | undefined
     const search = searchParams.get('search')?.trim()
-    const searchDigits = search ? normalizePhone(search) : null
-    const requestedTake = Number(searchParams.get('take') ?? 200)
+    const requestedTake = Number(searchParams.get('take') ?? 25)
     const requestedSkip = Number(searchParams.get('skip') ?? 0)
-    const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 500)) : 200
+    const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 100)) : 25
     const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
 
-    const nasiyalar = await prisma.nasiya.findMany({
-      where: {
-        shopId,
-        deletedAt: null,
-        ...(status ? { status } : {}),
-        ...(search
-          ? {
-              OR: [
-                { customer: { name: { contains: search, mode: 'insensitive' } } },
-                { customer: { phone: { contains: search, mode: 'insensitive' } } },
-                { device: { model: { contains: search, mode: 'insensitive' } } },
-                { device: { imei: { contains: search, mode: 'insensitive' } } },
-                { note: { contains: search, mode: 'insensitive' } },
-                ...(searchDigits ? [{ customer: { additionalPhones: { has: searchDigits } } }] : []),
-              ],
-            }
-          : {}),
-      },
-      select: {
-        id: true,
-        totalAmount: true,
-        remainingAmount: true,
-        baseRemainingAmount: true,
-        interestPercent: true,
-        interestAmount: true,
-        finalNasiyaAmount: true,
-        status: true,
-        createdAt: true,
-        customer: {
-          select: {
-            id: true,
-            name: true,
-            phone: true,
-          },
-        },
-        device: {
-          select: {
-            id: true,
-            model: true,
-            imei: true,
-          },
-        },
-        schedules: {
-          orderBy: { monthNumber: 'asc' },
-          select: {
-            id: true,
-            dueDate: true,
-            delayedUntil: true,
-            status: true,
-          },
-        },
-      },
-      take,
-      skip,
-    })
+    const { items, total } = await getShopNasiyalarList(shopId, { search, status, skip, take })
 
-    const sorted = nasiyalar.sort((a, b) => {
-      const nextA = a.schedules
-        .filter((s) => ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(s.status))
-        .sort((left, right) => {
-          const leftDue = left.delayedUntil ?? left.dueDate
-          const rightDue = right.delayedUntil ?? right.dueDate
-          return leftDue.getTime() - rightDue.getTime()
-        })[0]
-      const nextB = b.schedules
-        .filter((s) => ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(s.status))
-        .sort((left, right) => {
-          const leftDue = left.delayedUntil ?? left.dueDate
-          const rightDue = right.delayedUntil ?? right.dueDate
-          return leftDue.getTime() - rightDue.getTime()
-        })[0]
-
-      if (!nextA && !nextB) return b.createdAt.getTime() - a.createdAt.getTime()
-      if (!nextA) return 1
-      if (!nextB) return -1
-      return (nextA.delayedUntil ?? nextA.dueDate).getTime() - (nextB.delayedUntil ?? nextB.dueDate).getTime()
-    })
-
-    return ok(sorted, "Nasiyalar ro'yxati")
+    return ok({ items, total, skip, take }, "Nasiyalar ro'yxati")
   } catch (err) {
     logger.error('[GET /api/nasiya]', { event: 'api.route_error', error: err })
     return serverError()

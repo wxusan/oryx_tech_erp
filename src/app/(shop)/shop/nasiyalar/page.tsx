@@ -8,6 +8,11 @@ interface NasiyalarPageProps {
   searchParams?: Promise<{ status?: string | string[] }>
 }
 
+// Matches PER_PAGE in nasiyalar-client.tsx (first page is server-rendered
+// here for a fast initial paint with no loading flash; every subsequent
+// page/search/filter change is a client-side fetch to /api/nasiya).
+const PER_PAGE = 25
+
 export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps) {
   const guarded = await requireApiSession()
   if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
@@ -18,17 +23,21 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
   const initialFilter = validStatuses.includes(status as (typeof validStatuses)[number])
     ? (status as (typeof validStatuses)[number])
     : 'Barchasi'
-  const [{ items: nasiyalar, truncated }, currency] = await Promise.all([
-    getShopNasiyalarList(guarded.shopId),
+  const [{ items: nasiyalar, total }, currency] = await Promise.all([
+    getShopNasiyalarList(guarded.shopId, {
+      status: initialFilter === 'Barchasi' ? undefined : initialFilter,
+      skip: 0,
+      take: PER_PAGE,
+    }),
     getShopCurrencyContext(guarded.shopId),
   ])
 
   return (
     <NasiyalarClient
       initialNasiyalar={nasiyalar}
+      initialTotal={total}
       initialFilter={initialFilter}
       currency={currency}
-      truncated={truncated}
     />
   )
 }

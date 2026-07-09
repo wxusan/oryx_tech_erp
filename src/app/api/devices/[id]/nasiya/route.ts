@@ -16,7 +16,8 @@ import { created, badRequest, notFound, conflict, serverError, tooManyRequests }
 import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaCreatedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
-import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
+import { rateLimitKey } from '@/lib/rate-limit'
+import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const { shopId } = resolved
 
     // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
-    const rate = checkRateLimit(rateLimitKey('nasiya-create', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    const rate = await checkRateLimitDistributed(rateLimitKey('nasiya-create', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currency = await getShopCurrencyContext(shopId)

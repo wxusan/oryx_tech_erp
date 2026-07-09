@@ -32,7 +32,7 @@ describe('shop-stats.ts Prisma queries select the contract-currency fields the f
   })
 
   it('passes the raw query results through to computeShopStatsFromRows unchanged', () => {
-    expect(source).toContain('return computeShopStatsFromRows({')
+    expect(source).toContain('const computed = computeShopStatsFromRows({')
     expect(source).toContain('saleReceivedSum: saleReceivedAgg._sum.amount')
     expect(source).toContain('nasiyaReceivedSum: nasiyaReceivedAgg._sum.amount')
   })

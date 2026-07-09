@@ -79,3 +79,40 @@ headers, new guard tests) or a pure string/JSX-class change with zero
 observable behavior difference in the money/accounting/tenant-isolation
 paths. No existing test regressed; 852 tests pass (up from 787 before this
 pass).
+
+## Second follow-up pass (same-day ticket): P2-1, P2-2, P2-6 resolved; P2-4/P2-5 advanced
+
+A later same-day follow-up ticket picked several of these "deferred" items
+back up. See `docs/remaining-deferred-items-followup.md` for the full,
+item-by-item writeup (that doc's numbering follows the ticket's own 14-item
+list, not this doc's P2-N codes). Summary against this doc's table:
+
+- **P2-1 (nasiya allocation rate-drift) — RESOLVED.** The exact edge case
+  this doc flagged (legacy-UZS math says PAID while the contract-currency
+  side still has real debt) was confirmed real via worked numeric examples,
+  fixed by making contract-currency the sole source of truth for schedule
+  completion (`src/lib/nasiya-payment-allocation.ts`), and covered by 9 new
+  tests. See `docs/currency-accounting-model.md` §24 for the full writeup,
+  including the documented residual risk (pre-existing drifted rows are not
+  retroactively corrected).
+- **P2-2 (rate limiting) — the distributed half is now built.** A clean
+  adapter (`src/lib/rate-limit-adapter.ts`) picks Upstash Redis when
+  configured, falls back to the exact same in-process limiter otherwise. All
+  10 sensitive routes now go through it. See `docs/rate-limiting.md`.
+- **P2-4 (mobile) — the 3 previously-capped list pages now have real card
+  views.** Customers, devices, and nasiyalar lists all got a `sm:hidden`
+  mobile card view alongside their untouched desktop table/list, with every
+  action (view, quick-payment) directly visible rather than hidden in an
+  overflow menu. Other pages (nasiyalar/[id], sotuv/new, olib-sotdim/new,
+  hisobot, logs) were not converted to card views this pass.
+- **P2-5 (code quality) — advanced, not fully closed.** `deviceStatusLabel`/
+  `deviceActionLabel` extracted from `qurilmalar/[id]/page.tsx` into
+  `src/lib/device-display.ts` with dedicated unit tests. The file is still
+  large; a full split into separate modal components remains future work.
+- **P2-6 (pagination) — RESOLVED for all 3 list pages.** Customers, devices,
+  and nasiyalar all have real `page`/`skip`/`take`/`total` pagination
+  (25/page, Prev/Next, search resets to page 1) — see
+  `docs/remaining-deferred-items-followup.md` items 1/2 for the exact
+  API/data-layer changes.
+- **CSP — now shipped in Report-Only mode**, not fully deferred. See
+  `next.config.ts` and `tests/security-headers.guard.test.ts`.

@@ -67,7 +67,14 @@ describe('nasiyalar list payment action', () => {
   it('opens the shared modal for the selected nasiya and revalidates on success', () => {
     expect(src).toContain('onClick={() => setPayFor(n)}')
     expect(src).toContain('<NasiyaPaymentModal')
-    expect(src).toContain('onSuccess={() => router.refresh()}')
+    // The list is now a client-fetch-paginated component (owns its own
+    // nasiyalar/total state), so router.refresh() alone would no longer
+    // update what's on screen — handlePaymentSuccess both refreshes the
+    // server-rendered surfaces (router.refresh()) AND refetches the
+    // currently displayed page directly.
+    expect(src).toContain('onSuccess={handlePaymentSuccess}')
+    expect(src).toContain('function handlePaymentSuccess()')
+    expect(src).toContain('router.refresh()')
   })
 })
 

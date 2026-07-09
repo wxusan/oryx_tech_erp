@@ -14,12 +14,13 @@ import { created, badRequest, notFound, conflict, serverError, tooManyRequests }
 import { processPendingNotifications } from '@/lib/notification-service'
 import { deviceSoldMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
-import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
+import { rateLimitKey } from '@/lib/rate-limit'
+import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { roundContractMoney } from '@/lib/nasiya-contract'
+import { roundContractMoney, computeSaleContractMargin } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -53,7 +54,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const { shopId } = resolved
 
     // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
-    const rate = checkRateLimit(rateLimitKey('device-sell', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    const rate = await checkRateLimitDistributed(rateLimitKey('device-sell', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currency = await getShopCurrencyContext(shopId)
@@ -185,6 +186,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               paymentMethod,
               adminName: session.user.name,
               currency,
+              // Item 14 — sale margin, shown when computable (never guessed).
+              profit: computeSaleContractMargin(contractSalePrice, contractCurrency, salePriceInput.exchangeRateUsed, {
+                purchaseCurrency: device.purchaseCurrency,
+                purchaseInputAmount: Number(device.purchaseInputAmount),
+                purchaseAmountUzsSnapshot: Number(device.purchaseAmountUzsSnapshot),
+              }),
             }),
             telegramId: admin.telegramId!,
             scheduledAt: new Date(),

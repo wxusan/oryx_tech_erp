@@ -22,7 +22,8 @@ import { ok, created, badRequest, conflict, serverError, tooManyRequests } from 
 import { processPendingNotifications } from '@/lib/notification-service'
 import { olibSotdimCreatedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
-import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
+import { rateLimitKey } from '@/lib/rate-limit'
+import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
@@ -134,7 +135,7 @@ export async function POST(req: NextRequest) {
     const { shopId } = resolved
 
     // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
-    const rate = checkRateLimit(rateLimitKey('olib-sotdim-create', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    const rate = await checkRateLimitDistributed(rateLimitKey('olib-sotdim-create', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currency = await getShopCurrencyContext(shopId)

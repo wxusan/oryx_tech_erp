@@ -29,6 +29,7 @@ import { formatContractMoney, formatDisplayMoneyFromContract } from '@/lib/nasiy
 import { uzDate, uzDateTime } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
+import { TrustBadge } from '@/components/shop/trust-badge'
 import { ArrowLeft, Pencil } from 'lucide-react'
 
 interface NasiyaSchedule {
@@ -127,6 +128,12 @@ interface Nasiya {
       maxDaysLate: number
       historyConfidence: string
     }
+  }
+  customerTrust?: {
+    tier: 'NEW' | 'LOW' | 'MEDIUM' | 'HIGH' | 'VERY_HIGH'
+    label: string
+    color: 'gray' | 'red' | 'yellow' | 'green' | 'emerald'
+    reasons: string[]
   }
 }
 
@@ -451,13 +458,17 @@ export default function NasiyaDetailPage() {
 
       <div className="flex items-start justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-bold text-zinc-900">{nasiya.customer.name}</h1>
             <span className={`inline-block px-2.5 py-1 rounded text-xs font-medium ${statusBadgeStyles[displayStatus]}`}>
               {statusBadgeLabels[displayStatus]}
             </span>
+            {nasiya.customerTrust && <TrustBadge trust={nasiya.customerTrust} />}
           </div>
           <p className="text-sm text-zinc-500 mt-0.5">{nasiya.device.model} · {nasiya.customer.phone}</p>
+          {nasiya.customerTrust && nasiya.customerTrust.reasons.length > 0 && (
+            <p className="text-xs text-zinc-400 mt-1">{nasiya.customerTrust.reasons.join(' · ')}</p>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <Button

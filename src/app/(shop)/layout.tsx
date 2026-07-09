@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, ScrollText, Settings } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
+import { DueOverdueBanner } from '@/components/shop/due-overdue-banner'
 
 const navLinks = [
   { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard },
@@ -78,6 +79,8 @@ export default function ShopLayout({ children }: { children: React.ReactNode }) 
             <SessionControls callbackUrl="/shop/login" />
           </div>
         </header>
+
+        <DueOverdueBanner />
 
         {/* Content */}
         <main className="flex-1 overflow-auto bg-zinc-50">

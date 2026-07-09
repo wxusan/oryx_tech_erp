@@ -1,14 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { uzDate } from '@/lib/dates'
 import type { CurrencyContext } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
-import { matchesNasiyaSearch } from '@/lib/search-match'
 import type { PaymentScoreColor, PaymentScoreLabel } from '@/lib/nasiya-payment-score'
 
 type NasiyaStatus = 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
@@ -55,6 +55,17 @@ interface Nasiya {
   customer: { name: string; phone: string }
   schedules: NasiyaSchedule[]
   paymentScore: PaymentScore
+}
+
+interface ApiResponse<T> {
+  success: boolean
+  data?: T
+  error?: string
+}
+
+interface NasiyalarPayload {
+  items: Nasiya[]
+  total: number
 }
 
 const statusMap: Record<NasiyaStatus, DisplayStatus> = {
@@ -105,58 +116,97 @@ function PaymentScoreBadge({ score }: { score: PaymentScore }) {
   )
 }
 
-// Mirrors SHOP_LIST_HARD_CAP in src/lib/server/shop-lists.ts (a client
-// component can't import that server-only module directly).
-const SHOP_LIST_DISPLAY_CAP = 500
+// Item — real page/skip/take pagination (matches /api/logs' established
+// envelope, and mijozlar/logs' client-fetch pattern) — replaces the old
+// single unbounded-in-spirit fetch capped at a fixed ceiling.
+const PER_PAGE = 25
+
+function buildRequestKey(search: string, filter: NasiyaStatus | 'Barchasi', page: number) {
+  const params = new URLSearchParams()
+  if (search.trim()) params.set('search', search.trim())
+  // Filtering happens server-side (GET /api/nasiya), on the stored parent
+  // `status` column — not a client-side check against the lagging `n.status`
+  // field. The derived `n.displayStatus`/`n.isOverdue` are still used for
+  // the badge/highlight below, matching the dashboard.
+  if (filter !== 'Barchasi') params.set('status', filter)
+  params.set('skip', String((page - 1) * PER_PAGE))
+  params.set('take', String(PER_PAGE))
+  return params.toString()
+}
 
 export default function NasiyalarClient({
   initialNasiyalar,
+  initialTotal,
   initialFilter = 'Barchasi',
   currency,
-  truncated = false,
 }: {
   initialNasiyalar: Nasiya[]
+  initialTotal: number
   initialFilter?: NasiyaStatus | 'Barchasi'
   currency: CurrencyContext
-  /** True when the shop has more than the server's per-page cap — only the newest are shown. */
-  truncated?: boolean
 }) {
-  // Read straight from props (not useState) so router.refresh() after a payment
-  // re-renders the list with fresh server data.
-  const nasiyalar = initialNasiyalar
-  const loading = false
-  const error = ''
   const router = useRouter()
-  const [payFor, setPayFor] = useState<Nasiya | null>(null)
-  const [activeFilter, setActiveFilter] = useState<NasiyaStatus | 'Barchasi'>(initialFilter)
+  const [nasiyalar, setNasiyalar] = useState<Nasiya[]>(initialNasiyalar)
+  const [total, setTotal] = useState(initialTotal)
+  const [page, setPage] = useState(1)
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [activeFilter, setActiveFilter] = useState<NasiyaStatus | 'Barchasi'>(initialFilter)
+  const [error, setError] = useState('')
+  const [loadedKey, setLoadedKey] = useState(() => buildRequestKey('', initialFilter, 1))
+  const [payFor, setPayFor] = useState<Nasiya | null>(null)
 
-  // Filter on the derived display status so overdue contracts land under
-  // "Muddati o'tgan" (and out of "Faol"), matching the dashboard.
-  const filtered = nasiyalar
-    .filter((n) => activeFilter === 'Barchasi' || n.displayStatus === activeFilter)
-    .filter((n) =>
-      matchesNasiyaSearch(
-        {
-          customerName: n.customer.name,
-          customerPhone: n.customer.phone,
-          deviceModel: n.device.model,
-          imei: n.device.imei,
-          note: n.note,
-          statusLabel: statusMap[n.displayStatus],
-        },
-        search,
-      ),
-    )
-    .sort((a, b) => {
-      if (a.isOverdue !== b.isOverdue) return a.isOverdue ? -1 : 1
+  // Debounce the free-text search so typing doesn't fire a request per keystroke.
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300)
+    return () => clearTimeout(t)
+  }, [search])
 
-      const nextA = a.nextPaymentDate ? new Date(a.nextPaymentDate).getTime() : Number.POSITIVE_INFINITY
-      const nextB = b.nextPaymentDate ? new Date(b.nextPaymentDate).getTime() : Number.POSITIVE_INFINITY
-      if (nextA !== nextB) return nextA - nextB
+  const requestKey = useMemo(
+    () => buildRequestKey(debouncedSearch, activeFilter, page),
+    [debouncedSearch, activeFilter, page],
+  )
 
-      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    })
+  function loadNasiyalar(key: string) {
+    const controller = new AbortController()
+    fetch(`/api/nasiya?${key}`, { signal: controller.signal })
+      .then((res) => res.json())
+      .then((json: ApiResponse<NasiyalarPayload>) => {
+        if (!json.success || !json.data) {
+          setError(json.error || 'Nasiyalar yuklanmadi')
+          setLoadedKey(key)
+          return
+        }
+        setError('')
+        setNasiyalar(json.data.items)
+        setTotal(json.data.total)
+        setLoadedKey(key)
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === 'AbortError') return
+        setError('Nasiyalar yuklanmadi')
+        setLoadedKey(key)
+      })
+    return controller
+  }
+
+  useEffect(() => {
+    if (loadedKey === requestKey) return
+    const controller = loadNasiyalar(requestKey)
+    return () => controller.abort()
+  }, [loadedKey, requestKey])
+
+  // A payment doesn't change page/filter/search, so the requestKey-based
+  // effect above never refires on its own — refetch the current page
+  // directly, and keep router.refresh() so any other server-rendered
+  // surface (e.g. dashboard) that reads this shop's nasiya data also updates.
+  function handlePaymentSuccess() {
+    router.refresh()
+    loadNasiyalar(requestKey)
+  }
+
+  const loading = loadedKey !== requestKey
+  const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
 
   return (
     <div className="p-6 space-y-4">
@@ -185,18 +235,12 @@ export default function NasiyalarClient({
         </div>
       </div>
 
-      {truncated && (
-        <div className="border border-amber-200 bg-amber-50 rounded px-4 py-3 text-sm text-amber-800">
-          Nasiyalar soni {SHOP_LIST_DISPLAY_CAP} tadan oshib ketdi — faqat eng so'nggi {SHOP_LIST_DISPLAY_CAP} tasi ko'rsatilmoqda. Eski nasiyani topish uchun qidiruvdan foydalaning.
-        </div>
-      )}
-
       {/* Filter tabs */}
       <div className="flex gap-1 border-b border-zinc-200">
         {filterTabs.map((tab) => (
           <button
             key={tab.value}
-            onClick={() => setActiveFilter(tab.value)}
+            onClick={() => { setActiveFilter(tab.value); setPage(1) }}
             className={`px-3 py-2 text-sm transition-colors border-b-2 -mb-px ${
               activeFilter === tab.value
                 ? 'border-zinc-900 text-zinc-900 font-medium'
@@ -211,7 +255,7 @@ export default function NasiyalarClient({
       {/* Search */}
       <Input
         value={search}
-        onChange={(e) => setSearch(e.target.value)}
+        onChange={(e) => { setSearch(e.target.value); setPage(1) }}
         placeholder="Mijoz, telefon, qurilma yoki IMEI bo'yicha qidirish..."
         className="max-w-md h-9 text-sm border-zinc-200 rounded"
       />
@@ -225,92 +269,181 @@ export default function NasiyalarClient({
       {loading ? (
         <div className="text-sm text-zinc-400 py-8 text-center">Yuklanmoqda...</div>
       ) : (
-        /* List */
-        <div className="space-y-2">
-          {filtered.map((n) => {
-            const paidAmount = n.finalNasiyaAmount - n.remainingAmount
-            const pct = n.finalNasiyaAmount > 0 ? Math.round((paidAmount / n.finalNasiyaAmount) * 100) : 0
-            // Money TEXT must convert from the deal's own contract currency via
-            // today's rate — never reconvert the legacy UZS snapshot (frozen at
-            // creation rate), which drifts for a USD contract as the rate moves.
-            // See docs/currency-accounting-model.md.
-            const dfmt = (amount: number) => formatDisplayMoneyFromContract(amount, n.contractCurrency, currency.currency, currency.usdUzsRate)
-            const contractPaidAmount = n.contractFinalAmount - n.contractRemainingAmount
-            const isOverdue = n.isOverdue
-            const canPay = (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
-            return (
-              <div
-                key={n.id}
-                className={`border border-zinc-200 rounded p-4 hover:bg-zinc-50 transition-colors ${
-                  isOverdue ? 'border-l-2 border-l-red-500 pl-4' : ''
-                }`}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <Link href={`/shop/nasiyalar/${n.id}`} prefetch={false} className="flex-1 min-w-0 block">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 mb-1">
-                        <span className="font-medium text-sm text-zinc-900">{n.customer.name}</span>
-                        <StatusBadge status={n.displayStatus} />
-                        <PaymentScoreBadge score={n.paymentScore} />
-                        {n.isImported && (
-                          <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
-                            Eski nasiya
-                          </span>
-                        )}
-                      </div>
-                      <div className="text-xs text-zinc-500 mb-2">
-                        {n.device.model} · {n.customer.phone}
-                        {n.nextPaymentDate && (
-                          <> · Keyingi to'lov: {uzDate(n.nextPaymentDate)}</>
-                        )}
-                      </div>
-
-                      {/* Progress */}
-                      <div className="flex items-center gap-2">
-                        <div className="flex-1 w-full bg-zinc-100 h-1.5 rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-zinc-900 rounded-full"
-                            style={{ width: `${pct}%` }}
-                          />
+        <>
+          {/* Desktop list — unchanged rendering, just gated to sm: and up. */}
+          <div className="hidden sm:block space-y-2">
+            {nasiyalar.map((n) => {
+              const paidAmount = n.finalNasiyaAmount - n.remainingAmount
+              const pct = n.finalNasiyaAmount > 0 ? Math.round((paidAmount / n.finalNasiyaAmount) * 100) : 0
+              // Money TEXT must convert from the deal's own contract currency via
+              // today's rate — never reconvert the legacy UZS snapshot (frozen at
+              // creation rate), which drifts for a USD contract as the rate moves.
+              // See docs/currency-accounting-model.md.
+              const dfmt = (amount: number) => formatDisplayMoneyFromContract(amount, n.contractCurrency, currency.currency, currency.usdUzsRate)
+              const contractPaidAmount = n.contractFinalAmount - n.contractRemainingAmount
+              const isOverdue = n.isOverdue
+              const canPay = (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              return (
+                <div
+                  key={n.id}
+                  className={`border border-zinc-200 rounded p-4 hover:bg-zinc-50 transition-colors ${
+                    isOverdue ? 'border-l-2 border-l-red-500 pl-4' : ''
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <Link href={`/shop/nasiyalar/${n.id}`} prefetch={false} className="flex-1 min-w-0 block">
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="font-medium text-sm text-zinc-900">{n.customer.name}</span>
+                          <StatusBadge status={n.displayStatus} />
+                          <PaymentScoreBadge score={n.paymentScore} />
+                          {n.isImported && (
+                            <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
+                              Eski nasiya
+                            </span>
+                          )}
                         </div>
-                        <span className="text-xs text-zinc-500 whitespace-nowrap">{pct}%</span>
-                      </div>
-                      <div className="flex gap-3 mt-1 text-xs text-zinc-500">
-                        <span>To'langan: {dfmt(contractPaidAmount)}</span>
-                        <span>·</span>
-                        <span>Nasiya jami: {dfmt(n.contractFinalAmount)}</span>
-                        {n.contractInterestAmount > 0 && (
-                          <>
-                            <span>·</span>
-                            <span>Foiz: {dfmt(n.contractInterestAmount)}</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  </Link>
+                        <div className="text-xs text-zinc-500 mb-2">
+                          {n.device.model} · {n.customer.phone}
+                          {n.nextPaymentDate && (
+                            <> · Keyingi to'lov: {uzDate(n.nextPaymentDate)}</>
+                          )}
+                        </div>
 
-                  <div className="text-right flex-shrink-0 space-y-2">
-                    <div>
-                      <div className="text-sm font-bold text-zinc-900">{dfmt(n.contractRemainingAmount)}</div>
-                      <div className="text-xs text-zinc-400 mt-0.5">qolgan</div>
+                        {/* Progress */}
+                        <div className="flex items-center gap-2">
+                          <div className="flex-1 w-full bg-zinc-100 h-1.5 rounded-full overflow-hidden">
+                            <div
+                              className="h-full bg-zinc-900 rounded-full"
+                              style={{ width: `${pct}%` }}
+                            />
+                          </div>
+                          <span className="text-xs text-zinc-500 whitespace-nowrap">{pct}%</span>
+                        </div>
+                        <div className="flex gap-3 mt-1 text-xs text-zinc-500">
+                          <span>To'langan: {dfmt(contractPaidAmount)}</span>
+                          <span>·</span>
+                          <span>Nasiya jami: {dfmt(n.contractFinalAmount)}</span>
+                          {n.contractInterestAmount > 0 && (
+                            <>
+                              <span>·</span>
+                              <span>Foiz: {dfmt(n.contractInterestAmount)}</span>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </Link>
+
+                    <div className="text-right flex-shrink-0 space-y-2">
+                      <div>
+                        <div className="text-sm font-bold text-zinc-900">{dfmt(n.contractRemainingAmount)}</div>
+                        <div className="text-xs text-zinc-400 mt-0.5">qolgan</div>
+                      </div>
+                      {canPay && (
+                        <button
+                          type="button"
+                          onClick={() => setPayFor(n)}
+                          className="w-full rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 whitespace-nowrap"
+                        >
+                          To&apos;lov qabul qilish
+                        </button>
+                      )}
                     </div>
+                  </div>
+                </div>
+              )
+            })}
+            {nasiyalar.length === 0 && (
+              <div className="text-center py-12 text-zinc-400 text-sm">Nasiya topilmadi</div>
+            )}
+          </div>
+
+          {/* Mobile card view — same key facts as the desktop list, actions
+              (payment + Ko'rish) directly visible, not in an overflow menu. */}
+          <div className="sm:hidden space-y-3">
+            {nasiyalar.map((n) => {
+              const dfmt = (amount: number) => formatDisplayMoneyFromContract(amount, n.contractCurrency, currency.currency, currency.usdUzsRate)
+              const canPay = (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              return (
+                <div
+                  key={n.id}
+                  className={`border border-zinc-200 rounded p-3 space-y-2 ${n.isOverdue ? 'border-l-2 border-l-red-500' : ''}`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div>
+                      <div className="font-medium text-zinc-900">{n.customer.name}</div>
+                      <div className="text-xs font-mono text-zinc-500 mt-0.5">{n.customer.phone}</div>
+                    </div>
+                    <StatusBadge status={n.displayStatus} />
+                  </div>
+                  <div className="text-xs text-zinc-500">{n.device.model}</div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <PaymentScoreBadge score={n.paymentScore} />
+                    {n.isImported && (
+                      <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
+                        Eski nasiya
+                      </span>
+                    )}
+                    {n.isOverdue && (
+                      <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
+                        Muddati o&apos;tgan
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center justify-between text-xs text-zinc-500">
+                    <span>{n.nextPaymentDate ? `Keyingi to'lov: ${uzDate(n.nextPaymentDate)}` : '—'}</span>
+                    <span className="font-bold text-sm text-zinc-900">{dfmt(n.contractRemainingAmount)} qolgan</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Link href={`/shop/nasiyalar/${n.id}`} prefetch={false} className="flex-1">
+                      <Button variant="outline" className="h-8 w-full rounded border-zinc-200 text-xs">
+                        Ko&apos;rish
+                      </Button>
+                    </Link>
                     {canPay && (
                       <button
                         type="button"
                         onClick={() => setPayFor(n)}
-                        className="w-full rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 whitespace-nowrap"
+                        className="flex-1 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 whitespace-nowrap"
                       >
                         To&apos;lov qabul qilish
                       </button>
                     )}
                   </div>
                 </div>
-              </div>
-            )
-          })}
-          {filtered.length === 0 && (
-            <div className="text-center py-12 text-zinc-400 text-sm">Nasiya topilmadi</div>
-          )}
+              )
+            })}
+            {nasiyalar.length === 0 && (
+              <div className="text-center py-12 text-zinc-400 text-sm">Nasiya topilmadi</div>
+            )}
+          </div>
+        </>
+      )}
+
+      {total > 0 && (
+        <div className="flex items-center justify-between text-sm text-zinc-500">
+          <span>
+            {total} ta nasiyadan {Math.min((page - 1) * PER_PAGE + 1, total)}-{Math.min(page * PER_PAGE, total)} ko&apos;rsatilmoqda
+          </span>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              disabled={page === 1}
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              className="h-8 rounded border-zinc-200 px-3 text-xs disabled:opacity-40"
+            >
+              Oldingi
+            </Button>
+            <span className="text-xs">{page} / {totalPages}</span>
+            <Button
+              variant="outline"
+              disabled={page === totalPages}
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              className="h-8 rounded border-zinc-200 px-3 text-xs disabled:opacity-40"
+            >
+              Keyingi
+            </Button>
+          </div>
         </div>
       )}
 
@@ -320,7 +453,7 @@ export default function NasiyalarClient({
         onOpenChange={(o) => { if (!o) setPayFor(null) }}
         customerName={payFor?.customer.name}
         deviceName={payFor?.device.model}
-        onSuccess={() => router.refresh()}
+        onSuccess={handlePaymentSuccess}
       />
     </div>
   )

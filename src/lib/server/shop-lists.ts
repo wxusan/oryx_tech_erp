@@ -1,31 +1,41 @@
 import 'server-only'
 
-import { unstable_cache } from 'next/cache'
 import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
-import { shopCacheTag } from '@/lib/server/cache-tags'
 import { enrichLogsWithActors } from '@/lib/server/log-actors'
 import { deriveNasiyaOverdue, type NasiyaDisplayStatus } from '@/lib/nasiya-utils'
 import { computeNasiyaPaymentScore, type NasiyaPaymentScore } from '@/lib/nasiya-payment-score'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { computeSaleContractMargin, type PurchaseCostLike } from '@/lib/nasiya-contract'
 import type { CurrencyCode } from '@/lib/currency'
+import { normalizePhone } from '@/lib/phone'
 
 /**
- * Hard per-shop cap on the server-rendered devices/nasiyalar list pages.
- * These pages have no pagination UI (client-side search only searches
- * whatever is loaded) — see docs/audits/full-production-audit.md's
- * pagination follow-up. Rather than silently truncating with no signal,
- * `getShopDevicesList`/`getShopNasiyalarList` fetch one extra row to detect
- * an over-the-cap shop and surface `truncated: true` so the page can show a
- * banner instead of quietly hiding data.
+ * Real page/skip/take pagination envelope for the devices/nasiyalar list
+ * pages — replaces the old "fetch up to a hard cap, show a truncation
+ * banner" pattern. A shop with any number of devices/nasiyalar can now be
+ * browsed page by page instead of having rows past a fixed cap silently
+ * invisible (see docs/audits/full-production-audit.md's pagination
+ * follow-up, now resolved).
  */
-export const SHOP_LIST_HARD_CAP = 500
-
-export interface ShopListResult<T> {
+export interface ShopListPage<T> {
   items: T[]
-  /** True when the shop has more rows than SHOP_LIST_HARD_CAP — only the newest are shown. */
-  truncated: boolean
+  total: number
+  skip: number
+  take: number
+}
+
+const LIST_DEFAULT_TAKE = 25
+const LIST_MAX_TAKE = 100
+
+function clampTake(take?: number): number {
+  if (take == null || !Number.isFinite(take)) return LIST_DEFAULT_TAKE
+  return Math.trunc(Math.min(Math.max(take, 1), LIST_MAX_TAKE))
+}
+
+function clampSkip(skip?: number): number {
+  if (skip == null || !Number.isFinite(skip)) return 0
+  return Math.trunc(Math.max(skip, 0))
 }
 
 /**
@@ -132,15 +142,13 @@ export function initialLogsRequestKey() {
   return new URLSearchParams({ skip: '0', take: '10' }).toString()
 }
 
-export async function getShopDevicesList(shopId: string): Promise<ShopListResult<ShopDeviceListItem>> {
-  return unstable_cache(
-    () => getShopDevicesListFresh(shopId),
-    ['shop-devices:list:v2', shopId],
-    {
-      revalidate: 30,
-      tags: [shopCacheTag.devices(shopId)],
-    },
-  )()
+export type DeviceStatusFilter = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
+
+export interface ShopDevicesQuery {
+  search?: string
+  status?: DeviceStatusFilter
+  skip?: number
+  take?: number
 }
 
 /** Pick whichever of the device's latest sale/nasiya is more recent and build its profit summary. */
@@ -230,67 +238,110 @@ function buildDeviceSaleInfo(device: {
   }
 }
 
-async function getShopDevicesListFresh(shopId: string): Promise<ShopListResult<ShopDeviceListItem>> {
-  const rows = await prisma.device.findMany({
-    where: { shopId, deletedAt: null },
-    orderBy: { createdAt: 'desc' },
-    take: SHOP_LIST_HARD_CAP + 1,
-    select: {
-      id: true,
-      model: true,
-      color: true,
-      storage: true,
-      batteryHealth: true,
-      purchasePrice: true,
-      purchaseCurrency: true,
-      purchaseInputAmount: true,
-      purchaseAmountUzsSnapshot: true,
-      imei: true,
-      status: true,
-      createdAt: true,
-      note: true,
-      supplierPhone: true,
-      supplier: { select: { name: true } },
-      sales: {
-        where: { deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-        select: {
-          salePrice: true,
-          createdAt: true,
-          customer: { select: { name: true } },
-          contractCurrency: true,
-          contractSalePrice: true,
-          contractExchangeRateAtCreation: true,
-        },
-      },
-      nasiya: {
-        where: { deletedAt: null },
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-        select: {
-          totalAmount: true,
-          interestAmount: true,
-          createdAt: true,
-          customer: { select: { name: true } },
-          contractCurrency: true,
-          contractTotalAmount: true,
-          contractExchangeRateAtCreation: true,
-        },
-      },
-      returns: {
-        orderBy: { createdAt: 'desc' },
-        take: 1,
-        select: { refundAmount: true, createdAt: true },
-      },
-    },
-  })
+/**
+ * Real page/skip/take pagination for the devices list — search/status are
+ * applied server-side (via a Prisma `where`, run through `count()` with the
+ * exact same clause as `findMany` so `total` always matches what could be
+ * paged through). `search` mirrors the OR clause already used by
+ * GET /api/devices (IMEI / model / color / storage / note / supplier phone /
+ * customer name+phone).
+ */
+export async function getShopDevicesList(shopId: string, query: ShopDevicesQuery = {}): Promise<ShopListPage<ShopDeviceListItem>> {
+  const search = query.search?.trim() || undefined
+  const searchDigits = search ? normalizePhone(search) : null
+  const take = clampTake(query.take)
+  const skip = clampSkip(query.skip)
 
-  const truncated = rows.length > SHOP_LIST_HARD_CAP
-  const devices = truncated ? rows.slice(0, SHOP_LIST_HARD_CAP) : rows
+  const where: Prisma.DeviceWhereInput = {
+    shopId,
+    deletedAt: null,
+    ...(query.status ? { status: query.status } : {}),
+    ...(search
+      ? {
+          OR: [
+            { imei: { contains: search, mode: 'insensitive' as const } },
+            { model: { contains: search, mode: 'insensitive' as const } },
+            { color: { contains: search, mode: 'insensitive' as const } },
+            { storage: { contains: search, mode: 'insensitive' as const } },
+            { note: { contains: search, mode: 'insensitive' as const } },
+            { supplierPhone: { contains: search, mode: 'insensitive' as const } },
+            { supplier: { phone: { contains: search, mode: 'insensitive' as const } } },
+            { sales: { some: { customer: { phone: { contains: search, mode: 'insensitive' as const } } } } },
+            { sales: { some: { customer: { name: { contains: search, mode: 'insensitive' as const } } } } },
+            { nasiya: { some: { customer: { phone: { contains: search, mode: 'insensitive' as const } } } } },
+            { nasiya: { some: { customer: { name: { contains: search, mode: 'insensitive' as const } } } } },
+            ...(searchDigits
+              ? [
+                  { sales: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
+                  { nasiya: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
+                ]
+              : []),
+          ],
+        }
+      : {}),
+  }
+
+  const [rows, total] = await Promise.all([
+    prisma.device.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      skip,
+      take,
+      select: {
+        id: true,
+        model: true,
+        color: true,
+        storage: true,
+        batteryHealth: true,
+        purchasePrice: true,
+        purchaseCurrency: true,
+        purchaseInputAmount: true,
+        purchaseAmountUzsSnapshot: true,
+        imei: true,
+        status: true,
+        createdAt: true,
+        note: true,
+        supplierPhone: true,
+        supplier: { select: { name: true } },
+        sales: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            salePrice: true,
+            createdAt: true,
+            customer: { select: { name: true } },
+            contractCurrency: true,
+            contractSalePrice: true,
+            contractExchangeRateAtCreation: true,
+          },
+        },
+        nasiya: {
+          where: { deletedAt: null },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            totalAmount: true,
+            interestAmount: true,
+            createdAt: true,
+            customer: { select: { name: true } },
+            contractCurrency: true,
+            contractTotalAmount: true,
+            contractExchangeRateAtCreation: true,
+          },
+        },
+        returns: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: { refundAmount: true, createdAt: true },
+        },
+      },
+    }),
+    prisma.device.count({ where }),
+  ])
 
   return {
-    items: devices.map((device) => ({
+    items: rows.map((device) => ({
       id: device.id,
       model: device.model,
       color: device.color,
@@ -305,32 +356,72 @@ async function getShopDevicesListFresh(shopId: string): Promise<ShopListResult<S
       supplierPhone: device.supplierPhone,
       saleInfo: buildDeviceSaleInfo(device),
     })),
-    truncated,
+    total,
+    skip,
+    take,
   }
 }
 
-export async function getShopNasiyalarList(shopId: string): Promise<ShopListResult<ShopNasiyaListItem>> {
-  return unstable_cache(
-    () => getShopNasiyalarListFresh(shopId),
-    ['shop-nasiyalar:list:v2', shopId],
-    {
-      revalidate: 15,
-      tags: [
-        shopCacheTag.nasiyalar(shopId),
-        shopCacheTag.nasiyaSchedules(shopId),
-        shopCacheTag.customers(shopId),
-      ],
-    },
-  )()
+export type NasiyaStatusFilter = 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
+
+export interface ShopNasiyalarQuery {
+  search?: string
+  /**
+   * Filters on the stored parent `status` column (same convention already
+   * used by GET /api/nasiya) — not the derived `displayStatus`. The cron
+   * (see invalidateShopOverdueCron) keeps `status` in sync with the derived
+   * overdue state, so this only lags the derived value for the (short)
+   * window between a schedule going overdue and the next cron run.
+   */
+  status?: NasiyaStatusFilter
+  skip?: number
+  take?: number
 }
 
-async function getShopNasiyalarListFresh(shopId: string): Promise<ShopListResult<ShopNasiyaListItem>> {
+/**
+ * Real page/skip/take pagination for the nasiyalar list. `search` mirrors
+ * the OR clause already used by GET /api/nasiya (customer name/phone,
+ * device model/IMEI, note). Rows are ordered `createdAt desc` at the
+ * database level (required for `total`/`skip`/`take` to mean anything
+ * across pages); the overdue-first / earliest-next-payment secondary sort
+ * that used to run across the whole shop's data is preserved but now only
+ * reorders the current page — see docs/currency-accounting-model.md for the
+ * money fields and nasiya-payment-scoring.md for `paymentScore`.
+ */
+export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQuery = {}): Promise<ShopListPage<ShopNasiyaListItem>> {
   // Payment-score reason text must reflect the shop's selected display
   // currency (never hardcode UZS) — see docs/nasiya-payment-scoring.md.
   const currency = await getShopCurrencyContext(shopId)
-  const rows = await prisma.nasiya.findMany({
-    where: { shopId, deletedAt: null },
-    take: SHOP_LIST_HARD_CAP + 1,
+
+  const search = query.search?.trim() || undefined
+  const searchDigits = search ? normalizePhone(search) : null
+  const take = clampTake(query.take)
+  const skip = clampSkip(query.skip)
+
+  const where: Prisma.NasiyaWhereInput = {
+    shopId,
+    deletedAt: null,
+    ...(query.status ? { status: query.status } : {}),
+    ...(search
+      ? {
+          OR: [
+            { customer: { name: { contains: search, mode: 'insensitive' as const } } },
+            { customer: { phone: { contains: search, mode: 'insensitive' as const } } },
+            { device: { model: { contains: search, mode: 'insensitive' as const } } },
+            { device: { imei: { contains: search, mode: 'insensitive' as const } } },
+            { note: { contains: search, mode: 'insensitive' as const } },
+            ...(searchDigits ? [{ customer: { additionalPhones: { has: searchDigits } } }] : []),
+          ],
+        }
+      : {}),
+  }
+
+  const [rows, total] = await Promise.all([
+    prisma.nasiya.findMany({
+    where,
+    orderBy: { createdAt: 'desc' },
+    skip,
+    take,
     select: {
       id: true,
       totalAmount: true,
@@ -377,16 +468,14 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopListResult
         },
       },
     },
-  })
+    }),
+    prisma.nasiya.count({ where }),
+  ])
 
-  // Single `now` for the whole batch so all rows are judged against the same
-  // instant (and it stays stable for the cached snapshot's lifetime).
+  // Single `now` for the whole batch so all rows are judged against the same instant.
   const now = new Date()
 
-  const truncated = rows.length > SHOP_LIST_HARD_CAP
-  const nasiyalar = truncated ? rows.slice(0, SHOP_LIST_HARD_CAP) : rows
-
-  const items = nasiyalar
+  const items = rows
     .map((nasiya) => {
       const scheduleInputs = nasiya.schedules.map((s) => ({
         status: s.status,
@@ -461,7 +550,7 @@ async function getShopNasiyalarListFresh(shopId: string): Promise<ShopListResult
       return nextLeft - nextRight
     })
 
-  return { items, truncated }
+  return { items, total, skip, take }
 }
 
 export async function getShopLogsInitial(shopId: string): Promise<ShopLogsPayload> {

@@ -40,3 +40,30 @@ export function deviceMatchesSearch(
     device.imei.toLowerCase().includes(q)
   )
 }
+
+/** Item 3 — extracted from the device detail page (was an inline object literal). */
+export const DEVICE_STATUS_LABELS: Record<string, string> = {
+  IN_STOCK: 'Omborda',
+  SOLD_CASH: 'Naqd sotildi',
+  SOLD_NASIYA: 'Nasiyada',
+  RESERVED: 'Band qilingan',
+  RETURNED: 'Qaytarilgan',
+  DELETED: "O'chirilgan",
+}
+
+/** Uzbek label for a device status, falling back to the raw status if unknown rather than showing nothing. */
+export function deviceStatusLabel(status: string): string {
+  return DEVICE_STATUS_LABELS[status] ?? status
+}
+
+/** Item 3 — extracted from the device detail page (was an inline function). Uzbek label for a device history log action. */
+export function deviceActionLabel(action: string): string {
+  if (action === 'CREATE') return "Qurilma qo'shildi"
+  if (action === 'SELL') return 'Naqd sotildi'
+  if (action === 'CREATE_NASIYA') return 'Nasiyaga berildi'
+  if (action === 'RETURN') return 'Qaytarildi'
+  if (action === 'RESTOCK') return 'Omborga qaytarildi'
+  if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
+  if (action === 'DELETE') return "O'chirildi"
+  return action
+}

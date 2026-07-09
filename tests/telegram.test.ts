@@ -182,6 +182,33 @@ describe('device messages', () => {
     expect(msg).toContain("To'lov usuli: Naqd")
   })
 
+  it('device sold shows Foyda (profit) when provided, omitted when not (item 14)', () => {
+    const withProfit = deviceSoldMessage({
+      shopName: 'Malika',
+      device: fullDevice,
+      customerName: 'Ali',
+      salePrice: 8_500_000,
+      paidAmount: 8_500_000,
+      remaining: 0,
+      contractCurrency: 'UZS',
+      paymentMethod: 'CASH',
+      profit: 1_500_000,
+    })
+    expect(withProfit).toMatch(/Foyda: 1.?500.?000 so'm/)
+
+    const withoutProfit = deviceSoldMessage({
+      shopName: 'Malika',
+      device: fullDevice,
+      customerName: 'Ali',
+      salePrice: 8_500_000,
+      paidAmount: 8_500_000,
+      remaining: 0,
+      contractCurrency: 'UZS',
+      paymentMethod: 'CASH',
+    })
+    expect(withoutProfit).not.toContain('Foyda')
+  })
+
   it('device sold for a UZS contract shows the native so\'m amount with a USD hint when display currency differs', () => {
     const msg = deviceSoldMessage({
       shopName: 'Malika',

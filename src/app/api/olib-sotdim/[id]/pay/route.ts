@@ -16,7 +16,8 @@ import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from
 import { processPendingNotifications } from '@/lib/notification-service'
 import { supplierPayablePaidMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
-import { checkRateLimit, rateLimitKey } from '@/lib/rate-limit'
+import { rateLimitKey } from '@/lib/rate-limit'
+import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
@@ -42,7 +43,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const { shopId } = resolved
 
     // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
-    const rate = checkRateLimit(rateLimitKey('supplier-payable-pay', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    const rate = await checkRateLimitDistributed(rateLimitKey('supplier-payable-pay', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currency = await getShopCurrencyContext(shopId)

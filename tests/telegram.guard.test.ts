@@ -127,3 +127,28 @@ describe('device restock notification guard', () => {
     expect(src).toContain('after(() => processPendingNotifications()')
   })
 })
+
+describe('item 14 — Telegram message design polish', () => {
+  const templates = read('src/lib/telegram-templates.ts')
+
+  it('no template ever embeds a raw URL (passport/storage links must never leak into a message)', () => {
+    expect(templates).not.toMatch(/https?:\/\//)
+    expect(templates).not.toContain('passportPhotoUrl')
+    expect(templates).not.toContain('supabase')
+  })
+
+  it('every message-building function formats money through the shared helpers, never a raw toLocaleString', () => {
+    // formatMoney/telegramMoney/formatContractMoneyWithDisplay/formatNativeAmount
+    // are the only money formatters in this file — the single occurrence of
+    // `.toLocaleString('ru-RU')` must be formatMoney's own implementation;
+    // no other template should bypass it with an ad-hoc copy.
+    const occurrences = templates.split(".toLocaleString('ru-RU')").length - 1
+    expect(occurrences).toBe(1)
+  })
+
+  it('deviceSoldMessage shows Foyda (profit) when the sell route can compute it', () => {
+    const route = read('src/app/api/devices/[id]/sell/route.ts')
+    expect(route).toContain('computeSaleContractMargin(contractSalePrice, contractCurrency, salePriceInput.exchangeRateUsed,')
+    expect(templates).toContain("typeof data.profit === 'number' ? `Foyda: ${contractMoney(data.profit)}` : null")
+  })
+})

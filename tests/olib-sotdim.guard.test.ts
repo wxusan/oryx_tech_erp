@@ -102,8 +102,10 @@ describe('supplier payable reminders: cron + jitter + idempotency', () => {
   })
 
   it('early reminder is skipped once its date has passed (no backfill) — same day-math as nasiya/sale', () => {
+    // Extracted to matchesEarlyReminderDay (item 9) — see
+    // tests/telegram-3day-reminder.test.ts for the direct unit tests.
     const block = cron.slice(cron.indexOf('supplierPayableEarlyCandidates'), cron.indexOf('supplierPayableEarlyCandidates') + 1500)
-    expect(block).toContain('daysUntil !== payable.earlyReminderDays')
+    expect(block).toContain('matchesEarlyReminderDay(daysUntil, payable.earlyReminderDays)')
   })
 
   it('upsert-by-dedupeKey guarantees no duplicates across repeated cron runs', () => {

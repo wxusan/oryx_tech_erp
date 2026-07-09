@@ -19,14 +19,20 @@ describe('nasiya payment route allocates in native contract currency alongside t
     expect(route).toContain('contractRate = await getUsdUzsRate()')
   })
 
-  it('tracks a parallel remainingContractPayment alongside the legacy remainingPayment in the allocation loop', () => {
-    expect(route).toContain('let remainingContractPayment = appliedAmountInContractCurrency')
-    expect(route).toContain('contractApplied = Math.min(remainingContractPayment, contractOutstanding)')
-    expect(route).toContain('remainingContractPayment -= contractApplied')
+  it('the pure allocateNasiyaPayment (called by this route) tracks a parallel contract-currency remaining amount alongside the legacy one', () => {
+    // The per-schedule allocation loop itself was extracted to
+    // src/lib/nasiya-payment-allocation.ts (item 4 rate-drift fix) so it
+    // can be unit-tested directly — see tests/nasiya-allocation-rate-drift.test.ts.
+    const allocation = read('src/lib/nasiya-payment-allocation.ts')
+    expect(allocation).toContain('let remainingContractPayment = params.appliedAmountInContractCurrency')
+    expect(allocation).toContain('const contractApplied = Math.min(remainingContractPayment, contractOutstanding)')
+    expect(allocation).toContain('remainingContractPayment -= contractApplied')
   })
 
   it('uses contractScheduleOutstanding (currency-aware tolerance), not the UZS-only scheduleOutstanding, for the contract ledger', () => {
     expect(route).toContain('contractScheduleOutstanding(')
+    const allocation = read('src/lib/nasiya-payment-allocation.ts')
+    expect(allocation).toContain('contractScheduleOutstanding(')
   })
 
   it('updates contractPaidAmount/contractRemainingAmount on every allocated schedule row', () => {
@@ -35,8 +41,8 @@ describe('nasiya payment route allocates in native contract currency alongside t
     const firstIdx = route.indexOf('await tx.nasiyaSchedule.updateMany')
     const secondIdx = route.indexOf('await tx.nasiyaSchedule.updateMany', firstIdx + 1)
     const block = route.slice(secondIdx, secondIdx + 700)
-    expect(block).toContain('contractPaidAmount: newContractPaidAmount')
-    expect(block).toContain('contractRemainingAmount: newContractRemainingAmount')
+    expect(block).toContain('contractPaidAmount: scheduleUpdate.newContractPaidAmount')
+    expect(block).toContain('contractRemainingAmount: scheduleUpdate.newContractRemainingAmount')
   })
 
   it('stores appliedAmountInContractCurrency on the created NasiyaPayment row', () => {

@@ -4,18 +4,40 @@ import { unstable_cache } from 'next/cache'
 import type { Session } from 'next-auth'
 import { prisma } from '@/lib/prisma'
 import { shopCacheTag } from '@/lib/server/cache-tags'
-import { tashkentMonthRange } from '@/lib/timezone'
+import { tashkentMonthRangeFromKey } from '@/lib/timezone'
 import { getUsdUzsRate } from '@/lib/server/currency'
 import { computeShopStatsFromRows } from '@/lib/shop-stats-formulas'
 
 type StatsRole = Session['user']['role']
 
-export async function getShopStats(session: Session, shopId: string) {
+/**
+ * Item 8 — optional month + admin filter for the hisobot page. Both default
+ * to "no filter" (current month, all admins), which is byte-identical to
+ * this function's pre-item-8 behavior — existing callers (dashboard,
+ * /api/stats/shop) that don't pass `options` are unaffected.
+ *
+ * `adminId` only narrows the flow stats that genuinely have a `createdBy`/
+ * `actorId` (Sale, SalePayment, Nasiya, NasiyaPayment, DeviceReturn, Log).
+ * Current-state stats with no single admin to attribute them to (device
+ * stock value, currently-active nasiya count, currently-outstanding
+ * schedules) are deliberately left shop-wide rather than faking attribution
+ * — see docs/audits/dashboard-stat-formulas.md.
+ */
+export interface ShopStatsOptions {
+  /** `YYYY-MM`, Tashkent calendar month. Defaults to the current month. */
+  monthKey?: string | null
+  /** Shop admin id to filter admin-attributable stats by. Null/omitted = all admins. */
+  adminId?: string | null
+}
+
+export async function getShopStats(session: Session, shopId: string, options: ShopStatsOptions = {}) {
   const role = session.user.role
+  const monthKey = options.monthKey ?? null
+  const adminId = options.adminId ?? null
 
   return unstable_cache(
-    () => getShopStatsFresh(role, shopId),
-    ['shop-stats:v1', shopId, role],
+    () => getShopStatsFresh(role, shopId, monthKey, adminId),
+    ['shop-stats:v2', shopId, role, monthKey ?? 'current', adminId ?? 'all'],
     {
       // Money/overdue figures are high-churn. Keep the TTL short and expire
       // these tags immediately after sale/payment/return mutations.
@@ -35,9 +57,10 @@ export async function getShopStats(session: Session, shopId: string) {
   )()
 }
 
-async function getShopStatsFresh(role: StatsRole, shopId: string) {
+async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: string | null, adminId: string | null) {
   const now = new Date()
-  const { start: monthStart, end: monthEnd } = tashkentMonthRange(now)
+  const { start: monthStart, end: monthEnd } = tashkentMonthRangeFromKey(monthKey, now)
+  const attributedTo = adminId ? { createdBy: adminId } : {}
   // Single rate fetch for the whole batch, matching every other "live view"
   // conversion in this codebase — best-effort, never blocks the dashboard.
   const usdUzsRate = await getUsdUzsRate().catch(() => null)
@@ -68,6 +91,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
         shopId,
         deletedAt: null,
         createdAt: { gte: monthStart, lt: monthEnd },
+        ...attributedTo,
       },
       select: {
         salePrice: true,
@@ -81,6 +105,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
         shopId,
         deletedAt: null,
         paidAt: { gte: monthStart, lt: monthEnd },
+        ...attributedTo,
       },
     }),
 
@@ -93,6 +118,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
         // sales. Their originalTotalAmount / interest / device cost must NEVER
         // enter this month's gross, interest or profit.
         isImported: false,
+        ...attributedTo,
       },
       select: {
         totalAmount: true,
@@ -107,6 +133,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
         shopId,
         deletedAt: null,
         paidAt: { gte: monthStart, lt: monthEnd },
+        ...attributedTo,
       },
     }),
 
@@ -161,6 +188,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
       where: {
         shopId,
         createdAt: { gte: monthStart, lt: monthEnd },
+        ...attributedTo,
       },
     }),
 
@@ -168,6 +196,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
       where: {
         shopId,
         createdAt: { gte: monthStart, lt: monthEnd },
+        ...attributedTo,
       },
     }),
 
@@ -175,6 +204,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
       where: {
         shopId,
         ...(role === 'SHOP_ADMIN' ? { actorType: 'SHOP_ADMIN' as const } : {}),
+        ...(adminId ? { actorId: adminId } : {}),
       },
       orderBy: { createdAt: 'desc' },
       take: 5,
@@ -215,7 +245,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
     }),
   ])
 
-  return computeShopStatsFromRows({
+  const computed = computeShopStatsFromRows({
     now,
     monthStart,
     monthEnd,
@@ -234,4 +264,15 @@ async function getShopStatsFresh(role: StatsRole, shopId: string) {
     recentActivity,
     upcomingPayments,
   })
+
+  // Item 8 — echo back which month/admin this snapshot reflects, and which
+  // fields are NOT admin-attributable, so the UI never fakes attribution for
+  // current-state figures (device stock value, currently-active nasiyalar,
+  // currently-outstanding schedules) that have no single admin to blame/credit.
+  return {
+    ...computed,
+    monthKey: tashkentMonthRangeFromKey(monthKey, now).monthKey,
+    filteredByAdmin: adminId,
+    nonAttributableFields: ['totalDevices', 'activeNasiyalar', 'inventoryPurchaseCost', 'expectedThisMonth', 'overdueMoney', 'upcomingPayments'] as const,
+  }
 }

@@ -26,9 +26,13 @@ describe('cron generates early reminders in addition to due-day reminders', () =
   })
 
   it('computes days-until-due from the due date, not the schedule creation date', () => {
+    // The inline day-math was extracted to tashkentDaysUntil (item 9 — see
+    // docs/product-feature-fixes.md) so it can be unit-tested directly (see
+    // tests/telegram-3day-reminder.test.ts); the cron route now just calls it.
     expect(cron).toContain('daysUntil')
-    expect(cron).toContain('tashkentDayRange(effectiveDue)')
-    expect(cron).toContain('tashkentDayRange(sale.dueDate)')
+    expect(cron).toContain('tashkentDaysUntil(effectiveDue, today)')
+    expect(cron).toContain('tashkentDaysUntil(sale.dueDate, today)')
+    expect(cron).toContain("import { tashkentDayRange, tashkentDaysUntil, matchesEarlyReminderDay } from '@/lib/timezone'")
   })
 
   it('never generates a due-day reminder and early reminder from the same code path (additive, not replacing)', () => {

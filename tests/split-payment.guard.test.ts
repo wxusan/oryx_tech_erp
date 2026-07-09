@@ -118,3 +118,40 @@ describe('nasiya payment modal: split-payment UI', () => {
     expect(source).toContain('!carryOver && splitPayment')
   })
 })
+
+/**
+ * Item 13 — mirrors the nasiya split-payment modal pattern (above) into the
+ * sale payment modal on the device detail page. Backend/history/Telegram
+ * support already existed from item 12; this only adds the missing UI.
+ */
+describe('sale payment modal: split-payment UI', () => {
+  const source = read('src/app/(shop)/shop/qurilmalar/[id]/page.tsx')
+
+  it('has a split-payment checkbox toggle', () => {
+    expect(source).toContain('checked={saleSplitPayment}')
+  })
+
+  it("the second part's amount is always the remainder (user only types one side)", () => {
+    expect(source).toContain('const saleSplitAmount2 = Math.round((Number(salePayAmount || 0) - Number(saleSplitAmount1Input || 0))')
+  })
+
+  it('cannot submit an incomplete or same-method split', () => {
+    expect(source).toContain('saleSplitMethod2 !== salePayMethod')
+  })
+
+  it('blocks submission when the split is invalid (guard in the handler, not just the button)', () => {
+    const handlerStart = source.indexOf('function handleSalePayment')
+    const handlerBlock = source.slice(handlerStart, handlerStart + 600)
+    expect(handlerBlock).toContain('!saleSplitValid')
+  })
+
+  it('submits paymentBreakdown only when the split toggle is on', () => {
+    expect(source).toContain('paymentBreakdown: saleSplitPayment')
+  })
+
+  it('resets split state after a successful payment', () => {
+    expect(source).toContain('setSaleSplitPayment(false)')
+    expect(source).toContain('setSaleSplitMethod2(\'\')')
+    expect(source).toContain('setSaleSplitAmount1Input(\'\')')
+  })
+})

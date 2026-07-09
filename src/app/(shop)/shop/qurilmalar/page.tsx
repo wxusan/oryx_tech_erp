@@ -8,6 +8,11 @@ interface QurilmalarPageProps {
   searchParams?: Promise<{ status?: string | string[] }>
 }
 
+// Matches PER_PAGE in qurilmalar-client.tsx (first page is server-rendered
+// here for a fast initial paint with no loading flash; every subsequent
+// page/search/status change is a client-side fetch to /api/devices?paginated=1).
+const PER_PAGE = 25
+
 export default async function QurilmalarPage({ searchParams }: QurilmalarPageProps) {
   const guarded = await requireApiSession()
   if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
@@ -20,17 +25,21 @@ export default async function QurilmalarPage({ searchParams }: QurilmalarPagePro
     ? (status as (typeof validStatuses)[number])
     : 'Barchasi'
 
-  const [{ items: devices, truncated }, currency] = await Promise.all([
-    getShopDevicesList(guarded.shopId),
+  const [{ items: devices, total }, currency] = await Promise.all([
+    getShopDevicesList(guarded.shopId, {
+      status: initialStatus === 'Barchasi' ? undefined : initialStatus,
+      skip: 0,
+      take: PER_PAGE,
+    }),
     getShopCurrencyContext(guarded.shopId),
   ])
 
   return (
     <QurilmalarClient
       initialDevices={devices}
+      initialTotal={total}
       currency={currency}
       initialStatus={initialStatus}
-      truncated={truncated}
     />
   )
 }

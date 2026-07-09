@@ -21,7 +21,10 @@ import { requireApiSession } from '@/lib/api-auth'
 import { getShopStats } from '@/lib/server/shop-stats'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { formatMoneyByCurrency, formatMoneyWithBase, type CurrencyContext } from '@/lib/currency'
+import { recentTashkentMonthKeys, tashkentMonthRangeFromKey } from '@/lib/timezone'
+import { prisma } from '@/lib/prisma'
 import HisobotChartsLoader from './hisobot-charts-loader'
+import HisobotFilters from './hisobot-filters'
 
 function fmt(value: number, currency: CurrencyContext) {
   return formatMoneyByCurrency(value, currency.currency, currency.usdUzsRate)
@@ -31,34 +34,56 @@ function fmtBase(value: number, currency: CurrencyContext) {
   return formatMoneyWithBase(value, currency.currency, currency.usdUzsRate)
 }
 
-function uzMonthLabel(date: Date) {
-  const months = [
-    'Yanvar',
-    'Fevral',
-    'Mart',
-    'Aprel',
-    'May',
-    'Iyun',
-    'Iyul',
-    'Avgust',
-    'Sentabr',
-    'Oktabr',
-    'Noyabr',
-    'Dekabr',
-  ]
-  return `${months[date.getMonth()]} ${date.getFullYear()}`
+const UZ_MONTHS = [
+  'Yanvar',
+  'Fevral',
+  'Mart',
+  'Aprel',
+  'May',
+  'Iyun',
+  'Iyul',
+  'Avgust',
+  'Sentabr',
+  'Oktabr',
+  'Noyabr',
+  'Dekabr',
+]
+
+/** Item 8 — parses a `YYYY-MM` key directly (never a Date's local-timezone getters, which would drift from Tashkent on a non-Tashkent server). */
+function uzMonthLabelFromKey(monthKey: string) {
+  const [year, month] = monthKey.split('-').map(Number)
+  return `${UZ_MONTHS[(month ?? 1) - 1] ?? ''} ${year ?? ''}`.trim()
 }
 
-export default async function ShopReportPage() {
+interface ShopReportPageProps {
+  searchParams?: Promise<{ month?: string | string[]; admin?: string | string[] }>
+}
+
+export default async function ShopReportPage({ searchParams }: ShopReportPageProps) {
   const guarded = await requireApiSession()
   if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
 
-  const [stats, currency] = await Promise.all([
-    getShopStats(guarded.session, guarded.shopId),
+  const params = await searchParams
+  const monthParam = Array.isArray(params?.month) ? params?.month[0] : params?.month
+  const adminParam = Array.isArray(params?.admin) ? params?.admin[0] : params?.admin
+  // Falls back to the current month for a missing/invalid key — same
+  // guarantee as tashkentMonthRangeFromKey itself, so an old/garbled link
+  // never breaks the page.
+  const monthKey = monthParam ? tashkentMonthRangeFromKey(monthParam).monthKey : null
+  const adminId = adminParam && adminParam.length > 0 ? adminParam : null
+
+  const [stats, currency, shopAdmins] = await Promise.all([
+    getShopStats(guarded.session, guarded.shopId, { monthKey, adminId }),
     getShopCurrencyContext(guarded.shopId),
+    prisma.shopAdmin.findMany({
+      where: { shopId: guarded.shopId, deletedAt: null },
+      orderBy: { name: 'asc' },
+      select: { id: true, name: true },
+    }),
   ])
 
-  const monthLabel = uzMonthLabel(new Date())
+  const monthOptions = recentTashkentMonthKeys(12).map((key) => ({ value: key, label: uzMonthLabelFromKey(key) }))
+  const monthLabel = uzMonthLabelFromKey(stats.monthKey)
   const collected = stats.grossCashInThisMonth ?? stats.cashCollectedThisMonth ?? stats.cashReceivedThisMonth
   const netCash = stats.netCashFlowThisMonth ?? stats.netCashAfterReturnsThisMonth
   const expected = stats.expectedThisMonth
@@ -112,13 +137,28 @@ export default async function ShopReportPage() {
             Umumiy aylanma/sof tushum, qarzdorlik, ombor tannarxi va sotuv foydasi ko'rsatkichlari
           </p>
         </div>
-        <div className="grid grid-cols-1 gap-2 rounded-lg border border-zinc-200 bg-white p-2 text-xs text-zinc-500 sm:flex">
-          <div className="rounded-md bg-zinc-50 px-3 py-2">
-            <div>Yig'ish darajasi</div>
-            <div className="mt-0.5 text-sm font-semibold text-zinc-900">{collectionRate}%</div>
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <HisobotFilters
+            monthOptions={monthOptions}
+            selectedMonth={stats.monthKey}
+            admins={shopAdmins}
+            selectedAdmin={stats.filteredByAdmin}
+          />
+          <div className="grid grid-cols-1 gap-2 rounded-lg border border-zinc-200 bg-white p-2 text-xs text-zinc-500 sm:flex">
+            <div className="rounded-md bg-zinc-50 px-3 py-2">
+              <div>Yig'ish darajasi</div>
+              <div className="mt-0.5 text-sm font-semibold text-zinc-900">{collectionRate}%</div>
+            </div>
           </div>
         </div>
       </div>
+
+      {stats.filteredByAdmin && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
+          Admin filtri faqat u amalga oshirgan sotuv/nasiya/to'lov/qaytarish va faoliyat jurnaliga taalluqli.
+          Ombordagi tannarx, joriy faol nasiyalar, kutilayotgan va kechikkan qarzdorlik — bularni bitta adminga bog'lab bo'lmaydi, shuning uchun ular barcha adminlar bo'yicha ko'rsatiladi.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
             <Card className="rounded-lg">

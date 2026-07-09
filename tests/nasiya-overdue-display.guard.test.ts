@@ -30,8 +30,12 @@ describe('nasiyalar list loader derives overdue server-side', () => {
 describe('nasiyalar list client renders the derived display status', () => {
   const src = read('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')
 
-  it('filters tabs by displayStatus, not the lagging parent status', () => {
-    expect(src).toContain('n.displayStatus === activeFilter')
+  it('status filtering is real server-side pagination (GET /api/nasiya?status=...), not a client-side check against the lagging n.status', () => {
+    // The list is now server-paginated (true skip/take/total, not a
+    // load-everything-then-filter-in-JS array), so the status filter has to
+    // travel to the server as a query param instead of running as a
+    // client-side .filter() — see getShopNasiyalarList in shop-lists.ts.
+    expect(src).toContain("params.set('status', filter)")
     expect(src).not.toContain('n.status === activeFilter')
   })
 

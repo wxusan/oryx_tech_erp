@@ -39,7 +39,7 @@ import { hasValidInternalSecret, internalSecret } from '@/lib/api-auth'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { scheduledReminderSendAt } from '@/lib/notification-schedule'
 import { invalidateShopOverdueCron } from '@/lib/server/cache-tags'
-import { tashkentDayRange } from '@/lib/timezone'
+import { tashkentDayRange, tashkentDaysUntil, matchesEarlyReminderDay } from '@/lib/timezone'
 import { recordOpsEvent } from '@/lib/server/ops-events'
 import { getUsdUzsRate } from '@/lib/server/currency'
 import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
@@ -304,10 +304,9 @@ export async function GET(request: NextRequest): Promise<Response> {
   let earlyReminderCount = 0
   for (const schedule of earlyCandidates) {
     const { nasiya } = schedule
-    if (!nasiya.earlyReminderDays) continue
     const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
-    const daysUntil = Math.round((tashkentDayRange(effectiveDue).start.getTime() - today.getTime()) / 86400000)
-    if (daysUntil !== nasiya.earlyReminderDays) continue
+    const daysUntil = tashkentDaysUntil(effectiveDue, today)
+    if (!matchesEarlyReminderDay(daysUntil, nasiya.earlyReminderDays)) continue
     earlyReminderCount++
     const msg = nasiyaEarlyReminderMessage({
       customerName: nasiya.customer.name,
@@ -480,9 +479,9 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   let saleEarlyReminderCount = 0
   for (const sale of saleEarlyCandidates) {
-    if (!sale.earlyReminderDays || !sale.dueDate) continue
-    const daysUntil = Math.round((tashkentDayRange(sale.dueDate).start.getTime() - today.getTime()) / 86400000)
-    if (daysUntil !== sale.earlyReminderDays) continue
+    if (!sale.dueDate) continue
+    const daysUntil = tashkentDaysUntil(sale.dueDate, today)
+    if (!matchesEarlyReminderDay(daysUntil, sale.earlyReminderDays)) continue
     saleEarlyReminderCount++
     const msg = saleEarlyReminderMessage({
       customerName: sale.customer.name,
@@ -658,9 +657,8 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   let supplierPayableEarlyReminderCount = 0
   for (const payable of supplierPayableEarlyCandidates) {
-    if (!payable.earlyReminderDays) continue
-    const daysUntil = Math.round((tashkentDayRange(payable.dueDate).start.getTime() - today.getTime()) / 86400000)
-    if (daysUntil !== payable.earlyReminderDays) continue
+    const daysUntil = tashkentDaysUntil(payable.dueDate, today)
+    if (!matchesEarlyReminderDay(daysUntil, payable.earlyReminderDays)) continue
     supplierPayableEarlyReminderCount++
     const msg = supplierPayableEarlyReminderMessage({
       device: {
