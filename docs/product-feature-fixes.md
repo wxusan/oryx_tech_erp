@@ -52,6 +52,41 @@ silently skipped or faked, per the ticket's explicit instruction.
 > **Split payment means each payment method has its own amount. Total
 > payment is calculated as the sum of all payment parts.**
 
+> **Update (split-payment remaining-amount UX fix)**: after the amount-entry
+> fix above, the split UI was still confusing in a different way — the
+> second amount field kept whatever stale value it last held (e.g. a
+> leftover `40.00`) instead of reflecting how much of the suggested/target
+> amount was still left after the first amount. A user typing `$3.00` into
+> "To'lov usuli 1" against a `$6.00` suggested amount would see an unrelated
+> `$40.00` sitting in "To'lov usuli 2" and a `Jami to'lov` of only `$3.00` —
+> confusing and easy to submit by mistake. **Fixed**: both the nasiya and
+> sale payment modals now track whether the second amount was manually
+> edited (`splitAmount2Touched` / `saleSplitAmount2Touched`). While
+> untouched, it auto-fills from `max(0, suggestedAmount - firstAmount)` on
+> every change to the first amount; once the user types into it directly,
+> auto-fill stops overwriting their input. A "Qolganini qo'yish" button
+> refills it on demand and resumes auto-following. The card now also shows
+> a live "Qolgan: {amount}" (when the split total is below the suggested
+> amount) or "Ortiqcha: {amount}" (when above it) line, hidden when the
+> difference is within the existing currency dust tolerance
+> (`isContractCurrencyDust`/`getCompletionToleranceForCurrency` — $0.01 for
+> USD, 500 so'm for UZS — the same tolerance already used elsewhere in the
+> codebase, not a new threshold). All split fields (including the touched
+> flag) are reset both when a payment modal is freshly opened and whenever
+> split mode is toggled on or off, so stale values never carry over between
+> sessions. The total is still always the sum of the two parts
+> (`splitTotal = part1 + part2`) — the auto-fill only pre-populates part 2's
+> starting value, it never makes the field read-only or changes how the
+> total is computed. **Split payment fields represent real payment parts.
+> The total payment is calculated from the parts. The second payment amount
+> can be auto-filled from the remaining suggested amount.** Files:
+> `src/components/shop/nasiya-payment-modal.tsx`,
+> `src/app/(shop)/shop/qurilmalar/[id]/page.tsx`. Tests:
+> `tests/split-payment.guard.test.ts` (+19 tests: auto-fill wiring, touched
+> tracking, reset-on-open/reset-on-toggle, Qolgan/Ortiqcha display, worked-
+> example arithmetic), `tests/device-detail-crash-fix.test.ts` (updated
+> `.toFixed()` guard to allow the new `formatSaleAmountForInput` helper).
+
 ## Item-by-item table
 
 | Item | Requirement | What was implemented | Files changed | Tests | Status |

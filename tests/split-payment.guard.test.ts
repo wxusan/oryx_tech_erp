@@ -269,3 +269,165 @@ describe('single (non-split) payment mode is unaffected by the split-mode fix', 
     expect(source).toContain('const saleHasEffectiveAmount = saleSplitPayment ? saleSplitTotal > 0 : salePayAmount.trim().length > 0')
   })
 })
+
+/**
+ * REMAINING-AMOUNT UX FIX (docs/product-feature-fixes.md's split-payment
+ * remaining-amount fix): after the amount-entry fix above, the split UI
+ * still showed a stale/confusing second-amount value (e.g. a leftover
+ * "40.00" default) instead of automatically reflecting how much is left of
+ * the suggested amount. Fixed so part 2 auto-fills from
+ * `suggestedAmount - part1` while untouched, freezes once the user edits it
+ * directly, and a "Qolganini qo'yish" button can refill it on demand — and
+ * so every split-mode entry point (modal open, split-mode toggle) starts
+ * from a clean slate rather than carrying over stale values.
+ */
+describe('nasiya payment modal: remaining-amount auto-fill UX', () => {
+  const source = read('src/components/shop/nasiya-payment-modal.tsx')
+
+  it('tracks whether the second amount was manually edited', () => {
+    expect(source).toContain("const [splitAmount2Touched, setSplitAmount2Touched] = useState(false)")
+  })
+
+  it('resets the touched flag (and all split fields) when the modal opens for a fresh load', () => {
+    const loadIndex = source.indexOf('const load = async () => {')
+    const loadBlock = source.slice(loadIndex, loadIndex + 700)
+    expect(loadBlock).toContain("setSplitAmount1Input('')")
+    expect(loadBlock).toContain("setSplitAmount2Input('')")
+    expect(loadBlock).toContain('setSplitAmount2Touched(false)')
+  })
+
+  it('resets all split fields (including the touched flag) when split mode is toggled in either direction', () => {
+    const toggleIndex = source.indexOf('checked={splitPayment}')
+    const toggleBlock = source.slice(toggleIndex, toggleIndex + 600)
+    expect(toggleBlock).toContain('setSplitPayment(e.target.checked)')
+    expect(toggleBlock).toContain("setSplitAmount1Input('')")
+    expect(toggleBlock).toContain("setSplitAmount2Input('')")
+    expect(toggleBlock).toContain('setSplitAmount2Touched(false)')
+  })
+
+  it('computes a shared suggested/target amount for the split card', () => {
+    expect(source).toContain('const suggestedAmountNumber: number | null =')
+  })
+
+  it('auto-fills the second amount from suggestedAmount - firstAmount when untouched, on every first-amount change', () => {
+    const idx = source.indexOf('value={splitAmount1Input}')
+    const block = source.slice(idx, idx + 600)
+    expect(block).toContain('if (!splitAmount2Touched && suggestedAmountNumber != null)')
+    expect(block).toContain('Math.max(0, roundDisplayAmount(suggestedAmountNumber) - Number(v || 0))')
+  })
+
+  it('marks the second amount as touched as soon as the user edits it directly, so auto-fill stops overwriting it', () => {
+    const idx = source.indexOf('value={splitAmount2Input}')
+    const block = source.slice(idx, idx + 300)
+    expect(block).toContain('setSplitAmount2Touched(true)')
+  })
+
+  it('has a "Qolganini qo\'yish" button that refills the second amount from the remaining suggested amount and resumes auto-follow', () => {
+    const idx = source.indexOf("Qolganini qo&apos;yish")
+    expect(idx).toBeGreaterThan(-1)
+    const block = source.slice(Math.max(0, idx - 900), idx)
+    expect(block).toContain('Math.max(0, roundDisplayAmount(suggestedAmountNumber) - Number(splitAmount1Input || 0))')
+    expect(block).toContain('setSplitAmount2Touched(false)')
+  })
+
+  it('shows "Qolgan"/"Ortiqcha" against the suggested amount, hidden when within currency dust tolerance', () => {
+    expect(source).toContain('isContractCurrencyDust(splitTotal - roundDisplayAmount(suggestedAmountNumber), currency.currency)')
+    expect(source).toContain('Qolgan: {currencyLabel(currency.currency)}')
+    expect(source).toContain('Ortiqcha: {currencyLabel(currency.currency)}')
+  })
+})
+
+describe('sale payment modal: remaining-amount auto-fill UX (mirrors the nasiya modal fix)', () => {
+  const source = read('src/app/(shop)/shop/qurilmalar/[id]/page.tsx')
+
+  it('tracks whether the second amount was manually edited', () => {
+    expect(source).toContain('const [saleSplitAmount2Touched, setSaleSplitAmount2Touched] = useState(false)')
+  })
+
+  it('resets all split fields (including the touched flag) when opening the modal and after a successful payment', () => {
+    expect(source).toContain('setSaleSplitAmount2Touched(false)')
+    const successIdx = source.indexOf("setSalePaymentOpen(false)")
+    const successBlock = source.slice(successIdx, successIdx + 300)
+    expect(successBlock).toContain('setSaleSplitAmount2Touched(false)')
+  })
+
+  it('resets all split fields (including the touched flag) when split mode is toggled in either direction', () => {
+    const toggleIndex = source.indexOf('checked={saleSplitPayment}')
+    const toggleBlock = source.slice(toggleIndex, toggleIndex + 500)
+    expect(toggleBlock).toContain('setSaleSplitPayment(e.target.checked)')
+    expect(toggleBlock).toContain("setSaleSplitAmount1Input('')")
+    expect(toggleBlock).toContain("setSaleSplitAmount2Input('')")
+    expect(toggleBlock).toContain('setSaleSplitAmount2Touched(false)')
+  })
+
+  it('computes a shared suggested/target amount mirroring the "Qolgan to\'lovni qabul qilish" button\'s own suggestion formula', () => {
+    expect(source).toContain('const saleSuggestedAmountNumber: number | null =')
+  })
+
+  it('auto-fills the second amount from suggestedAmount - firstAmount when untouched', () => {
+    const idx = source.indexOf('value={saleSplitAmount1Input}')
+    const block = source.slice(idx, idx + 600)
+    expect(block).toContain('if (!saleSplitAmount2Touched && saleSuggestedAmountNumber != null)')
+    expect(block).toContain('Math.max(0, roundSaleDisplayAmount(saleSuggestedAmountNumber) - Number(v || 0))')
+  })
+
+  it('marks the second amount as touched as soon as the user edits it directly', () => {
+    const idx = source.indexOf('value={saleSplitAmount2Input}')
+    const block = source.slice(idx, idx + 300)
+    expect(block).toContain('setSaleSplitAmount2Touched(true)')
+  })
+
+  it('has a "Qolganini qo\'yish" button that refills the second amount and resumes auto-follow', () => {
+    const idx = source.indexOf("Qolganini qo&apos;yish")
+    expect(idx).toBeGreaterThan(-1)
+    const block = source.slice(Math.max(0, idx - 900), idx)
+    expect(block).toContain(
+      'Math.max(\n                            0,\n                            roundSaleDisplayAmount(saleSuggestedAmountNumber) - Number(saleSplitAmount1Input || 0),\n                          )',
+    )
+    expect(block).toContain('setSaleSplitAmount2Touched(false)')
+  })
+
+  it('shows "Qolgan"/"Ortiqcha" against the suggested amount, hidden when within currency dust tolerance', () => {
+    expect(source).toContain(
+      'isContractCurrencyDust(saleSplitTotal - roundSaleDisplayAmount(saleSuggestedAmountNumber), currency.currency)',
+    )
+    expect(source).toContain('Qolgan: {currencyLabel(currency.currency)}')
+    expect(source).toContain('Ortiqcha: {currencyLabel(currency.currency)}')
+  })
+})
+
+describe('split payment worked example (suggested=$6, part1=$3): auto-fill and remaining/overpayment arithmetic', () => {
+  // Pure re-implementation of the auto-fill/remaining formulas used by both
+  // modals, to lock in the exact worked example from the ticket without
+  // needing a jsdom/RTL render harness (this codebase's guard tests assert
+  // wiring via source strings; this test asserts the formula's arithmetic).
+  const roundDisplayAmount = (n: number) => Math.round(n * 100) / 100
+  const computeAutoFill = (suggested: number, amount1: number) => Math.max(0, roundDisplayAmount(suggested) - amount1)
+  const splitTotal = (a1: number, a2: number) => Math.round((a1 + a2) * 100) / 100
+
+  it('typing part1=$3 against a $6 suggestion auto-fills part2=$3, total=$6, no remaining/overpayment', () => {
+    const part2 = computeAutoFill(6, 3)
+    expect(part2).toBe(3)
+    const total = splitTotal(3, part2)
+    expect(total).toBe(6)
+    expect(Math.abs(total - 6)).toBeLessThan(0.01)
+  })
+
+  it('manually changing part2 to $2 gives total=$5, remaining=$1', () => {
+    const total = splitTotal(3, 2)
+    expect(total).toBe(5)
+    expect(6 - total).toBe(1)
+  })
+
+  it('manually changing part2 to $4 gives total=$7, overpayment=$1', () => {
+    const total = splitTotal(3, 4)
+    expect(total).toBe(7)
+    expect(total - 6).toBe(1)
+  })
+
+  it('clicking "Qolganini qo\'yish" after part2 was edited restores part2=$3, total=$6', () => {
+    const part2 = computeAutoFill(6, 3)
+    expect(part2).toBe(3)
+    expect(splitTotal(3, part2)).toBe(6)
+  })
+})

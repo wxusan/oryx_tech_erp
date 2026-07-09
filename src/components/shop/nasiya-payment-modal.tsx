@@ -109,6 +109,13 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   const [splitMethod2, setSplitMethod2] = useState('')
   const [splitAmount1Input, setSplitAmount1Input] = useState('')
   const [splitAmount2Input, setSplitAmount2Input] = useState('')
+  // Whether the user has directly typed into the second amount field. While
+  // untouched, it auto-fills from `suggestedAmount - firstAmount` whenever
+  // the first amount changes; once the user edits it directly, auto-fill
+  // stops overwriting their input. The "Qolganini qo'yish" button resets
+  // this back to false, so it resumes auto-following. See
+  // docs/product-feature-fixes.md's split-payment remaining-amount fix.
+  const [splitAmount2Touched, setSplitAmount2Touched] = useState(false)
   const [selectedScheduleId, setSelectedScheduleId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [payError, setPayError] = useState('')
@@ -136,6 +143,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
       setSplitMethod2('')
       setSplitAmount1Input('')
       setSplitAmount2Input('')
+      setSplitAmount2Touched(false)
       try {
         const r = await fetch(`/api/nasiya/${nasiyaId}`)
         const json = await r.json()
@@ -176,6 +184,25 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   const selectedScheduleOutstanding = selectedSchedule ? scheduleBalance(selectedSchedule) : 0
   // Native contract-currency outstanding balance — DISPLAY only (see dfmt).
   const selectedScheduleContractOutstanding = selectedSchedule ? contractScheduleBalance(selectedSchedule, contractCurrency) : 0
+
+  // The "suggested"/"target" amount — the selected schedule's own
+  // outstanding balance, converted into whatever currency the user is
+  // typing in. Shared by BOTH the single-mode and split-mode "Tavsiya
+  // etilgan summa" buttons and by split mode's auto-fill-the-remainder
+  // calculation, so they can never disagree on what "the recommended
+  // amount" means. `null` when there's nothing to recommend (no schedule
+  // outstanding balance, or a USD contract with no rate to convert with).
+  const suggestedAmountNumber: number | null =
+    selectedScheduleOutstanding > 0
+      ? contractCurrency !== currency.currency && !currency.usdUzsRate
+        ? selectedScheduleOutstanding
+        : convertPaymentToContractCurrency(selectedScheduleContractOutstanding, contractCurrency, currency.currency, currency.usdUzsRate)
+      : null
+
+  // Round/format a display-currency amount consistently with how the user
+  // types it — whole so'm, or cents for USD.
+  const roundDisplayAmount = (n: number) => (currency.currency === 'USD' ? Math.round(n * 100) / 100 : Math.round(n))
+  const formatAmountForInput = (n: number) => (currency.currency === 'USD' ? n.toFixed(2) : String(Math.round(n)))
 
   // Split payment: each part has its OWN amount; the total the customer is
   // paying is the SUM of the parts — never a total-minus-second-part
@@ -370,7 +397,16 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                   <input
                     type="checkbox"
                     checked={splitPayment}
-                    onChange={(e) => setSplitPayment(e.target.checked)}
+                    onChange={(e) => {
+                      // Toggling split mode (either direction) always starts
+                      // from a clean slate — never carries a stale amount
+                      // over from before the toggle.
+                      setSplitPayment(e.target.checked)
+                      setSplitMethod2('')
+                      setSplitAmount1Input('')
+                      setSplitAmount2Input('')
+                      setSplitAmount2Touched(false)
+                    }}
                     className="h-4 w-4 rounded border-zinc-300"
                   />
                   Aralash to&apos;lov (masalan: yarmi naqd, yarmi karta)
@@ -456,7 +492,16 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                       <MoneyInput
                         currency={currency.currency}
                         value={splitAmount1Input}
-                        onChange={setSplitAmount1Input}
+                        onChange={(v) => {
+                          setSplitAmount1Input(v)
+                          // Auto-fill the second amount from the remaining
+                          // suggested amount — but only while the user hasn't
+                          // directly edited it themselves.
+                          if (!splitAmount2Touched && suggestedAmountNumber != null) {
+                            const remaining = Math.max(0, roundDisplayAmount(suggestedAmountNumber) - Number(v || 0))
+                            setSplitAmount2Input(remaining > 0 ? formatAmountForInput(remaining) : '')
+                          }
+                        }}
                         placeholder={currency.currency === 'USD' ? '60.00' : '600000'}
                         className="h-10 rounded-lg border-zinc-200 text-sm"
                       />
@@ -468,6 +513,9 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                           // Option A: fill part 1 with the recommended amount,
                           // leave part 2 empty — never put the recommendation
                           // into a "total" while a second amount is still required.
+                          // Untouch part 2 so it resumes auto-filling from
+                          // this new part 1 value.
+                          setSplitAmount2Touched(false)
                           if (contractCurrency !== currency.currency && !currency.usdUzsRate) {
                             setSplitAmount1Input(String(selectedScheduleOutstanding))
                             setSplitAmount2Input('')
@@ -490,9 +538,28 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                   </div>
 
                   <div className="space-y-1.5">
-                    <label className="block text-xs font-medium text-zinc-700">
-                      To&apos;lov usuli 2 <span className="text-red-500">*</span>
-                    </label>
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-medium text-zinc-700">
+                        To&apos;lov usuli 2 <span className="text-red-500">*</span>
+                      </label>
+                      {suggestedAmountNumber != null && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const remaining = Math.max(0, roundDisplayAmount(suggestedAmountNumber) - Number(splitAmount1Input || 0))
+                            setSplitAmount2Input(remaining > 0 ? formatAmountForInput(remaining) : '')
+                            // Resuming auto-follow — the button IS the
+                            // auto-fill action, so further edits to part 1
+                            // should keep updating part 2 again until the
+                            // user types into it directly.
+                            setSplitAmount2Touched(false)
+                          }}
+                          className="text-xs font-medium text-zinc-600 underline hover:text-zinc-900"
+                        >
+                          Qolganini qo&apos;yish
+                        </button>
+                      )}
+                    </div>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <Select value={splitMethod2} onValueChange={(v) => v && setSplitMethod2(v)}>
                         <SelectTrigger className="h-10 w-full rounded-lg border-zinc-200 text-sm">
@@ -508,7 +575,10 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                       <MoneyInput
                         currency={currency.currency}
                         value={splitAmount2Input}
-                        onChange={setSplitAmount2Input}
+                        onChange={(v) => {
+                          setSplitAmount2Touched(true)
+                          setSplitAmount2Input(v)
+                        }}
                         placeholder={currency.currency === 'USD' ? '40.00' : '400000'}
                         className="h-10 rounded-lg border-zinc-200 text-sm"
                       />
@@ -525,6 +595,26 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                       {currencyLabel(currency.currency)} {splitTotal.toLocaleString('ru-RU')}
                     </span>
                   </div>
+
+                  {/* Real-time comparison against the suggested/target amount
+                      — independent of the "Jami qolgan qarz"/overpay block
+                      below, which compares against the WHOLE remaining
+                      contract debt. Hidden when the split total already
+                      matches the suggested amount (within currency dust
+                      tolerance) — "normal state", nothing to flag. */}
+                  {suggestedAmountNumber != null &&
+                    !isContractCurrencyDust(splitTotal - roundDisplayAmount(suggestedAmountNumber), currency.currency) &&
+                    (splitTotal < roundDisplayAmount(suggestedAmountNumber) ? (
+                      <p className="text-xs text-zinc-600">
+                        Qolgan: {currencyLabel(currency.currency)}{' '}
+                        {(roundDisplayAmount(suggestedAmountNumber) - splitTotal).toLocaleString('ru-RU')}
+                      </p>
+                    ) : (
+                      <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                        Ortiqcha: {currencyLabel(currency.currency)}{' '}
+                        {(splitTotal - roundDisplayAmount(suggestedAmountNumber)).toLocaleString('ru-RU')}
+                      </p>
+                    ))}
                 </div>
               )}
 

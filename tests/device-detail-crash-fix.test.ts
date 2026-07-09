@@ -110,12 +110,15 @@ describe('device detail page: renders every sale/payment/purchase figure through
   const page = read('src/app/(shop)/shop/qurilmalar/[id]/page.tsx')
 
   it('never calls .toFixed() directly on a raw API field — only on the output of a hardened conversion helper', () => {
-    // The only two .toFixed() call sites in this file must be fed by
+    // .toFixed() call sites in this file must be fed by
     // convertUzsToUsd/convertPaymentToContractCurrency (both hardened to
-    // coerce string input), never a bare device/sale/payment field.
+    // coerce string input) or formatSaleAmountForInput (a local split-payment
+    // display-rounding helper whose `n` parameter is always a plain already-
+    // numeric JS value — never a bare device/sale/payment field), never a
+    // bare device/sale/payment field.
     const toFixedLines = page.split('\n').filter((l) => l.includes('.toFixed('))
     for (const line of toFixedLines) {
-      expect(line).toMatch(/convertUzsToUsd\(|suggestion\.toFixed/)
+      expect(line).toMatch(/convertUzsToUsd\(|suggestion\.toFixed|formatSaleAmountForInput/)
     }
   })
 

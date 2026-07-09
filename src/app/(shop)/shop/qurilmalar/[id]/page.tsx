@@ -18,6 +18,7 @@ import {
   computeSaleContractMargin,
   convertPaymentToContractCurrency,
   salePaymentAmountDisplay,
+  isContractCurrencyDust,
   type SalePaymentLike,
 } from '@/lib/nasiya-contract'
 import { useShopCurrency } from '@/lib/use-shop-currency'
@@ -176,6 +177,10 @@ export default function QurilmaDetailPage() {
   const [saleSplitMethod2, setSaleSplitMethod2] = useState('')
   const [saleSplitAmount1Input, setSaleSplitAmount1Input] = useState('')
   const [saleSplitAmount2Input, setSaleSplitAmount2Input] = useState('')
+  // Whether the user has directly typed into the second amount field — see
+  // the identical pattern (and full rationale) in
+  // src/components/shop/nasiya-payment-modal.tsx.
+  const [saleSplitAmount2Touched, setSaleSplitAmount2Touched] = useState(false)
   const [saleEditOpen, setSaleEditOpen] = useState(false)
   const [saleEditCustomerName, setSaleEditCustomerName] = useState('')
   const [saleEditCustomerPhone, setSaleEditCustomerPhone] = useState('')
@@ -341,6 +346,26 @@ export default function QurilmaDetailPage() {
     }
   }
 
+  // The "suggested"/"target" amount for the sale — the sale's own remaining
+  // balance, converted into whatever currency the user is typing in. Mirrors
+  // the "Qolgan to'lovni qabul qilish" button's own suggestion formula below,
+  // so the split card's auto-fill/remaining math never disagrees with it.
+  // `null` when there's no sale yet, or a USD contract with no rate to
+  // convert with.
+  const saleForSuggestion = device?.sales?.[0]
+  const saleSuggestedAmountNumber: number | null = saleForSuggestion
+    ? saleForSuggestion.contractCurrency !== currency.currency && !currency.usdUzsRate
+      ? saleForSuggestion.remainingAmount
+      : convertPaymentToContractCurrency(
+          saleForSuggestion.contractRemainingAmount,
+          saleForSuggestion.contractCurrency,
+          currency.currency,
+          currency.usdUzsRate,
+        )
+    : null
+  const roundSaleDisplayAmount = (n: number) => (currency.currency === 'USD' ? Math.round(n * 100) / 100 : Math.round(n))
+  const formatSaleAmountForInput = (n: number) => (currency.currency === 'USD' ? n.toFixed(2) : String(Math.round(n)))
+
   // Split payment: each part has its OWN amount; the total is the SUM of
   // the parts — never a total-minus-second-part subtraction.
   const saleSplitTotal = Math.round((Number(saleSplitAmount1Input || 0) + Number(saleSplitAmount2Input || 0)) * 100) / 100
@@ -398,6 +423,7 @@ export default function QurilmaDetailPage() {
       setSaleSplitMethod2('')
       setSaleSplitAmount1Input('')
       setSaleSplitAmount2Input('')
+      setSaleSplitAmount2Touched(false)
       await fetchDevice()
     } catch (err) {
       setSalePayError(err instanceof Error ? err.message : "To'lovni saqlashda xatolik")
@@ -796,6 +822,16 @@ export default function QurilmaDetailPage() {
             {saleHasDebt && (
               <Button
                 onClick={() => {
+                  // Every open starts from a clean slate — never carries a
+                  // stale amount/method/split state over from a previous
+                  // open of this same modal.
+                  setSalePayMethod('')
+                  setSalePayNote('')
+                  setSaleSplitPayment(false)
+                  setSaleSplitMethod2('')
+                  setSaleSplitAmount1Input('')
+                  setSaleSplitAmount2Input('')
+                  setSaleSplitAmount2Touched(false)
                   // Suggest an amount that, once submitted, actually pays off
                   // the sale exactly — computed from the sale's own
                   // contract-currency balance, not the legacy UZS snapshot.
@@ -1272,7 +1308,15 @@ export default function QurilmaDetailPage() {
               <input
                 type="checkbox"
                 checked={saleSplitPayment}
-                onChange={(e) => setSaleSplitPayment(e.target.checked)}
+                onChange={(e) => {
+                  // Toggling split mode (either direction) always starts from
+                  // a clean slate — never carries a stale amount over.
+                  setSaleSplitPayment(e.target.checked)
+                  setSaleSplitMethod2('')
+                  setSaleSplitAmount1Input('')
+                  setSaleSplitAmount2Input('')
+                  setSaleSplitAmount2Touched(false)
+                }}
                 className="h-4 w-4 rounded border-zinc-300"
               />
               Aralash to&apos;lov (masalan: yarmi naqd, yarmi karta)
@@ -1327,13 +1371,40 @@ export default function QurilmaDetailPage() {
                     <MoneyInput
                       currency={currency.currency}
                       value={saleSplitAmount1Input}
-                      onChange={setSaleSplitAmount1Input}
+                      onChange={(v) => {
+                        setSaleSplitAmount1Input(v)
+                        // Auto-fill the second amount from the remaining
+                        // suggested amount — but only while the user hasn't
+                        // directly edited it themselves.
+                        if (!saleSplitAmount2Touched && saleSuggestedAmountNumber != null) {
+                          const remaining = Math.max(0, roundSaleDisplayAmount(saleSuggestedAmountNumber) - Number(v || 0))
+                          setSaleSplitAmount2Input(remaining > 0 ? formatSaleAmountForInput(remaining) : '')
+                        }
+                      }}
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-zinc-700 mb-1">To&apos;lov usuli 2</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-xs font-medium text-zinc-700">To&apos;lov usuli 2</label>
+                    {saleSuggestedAmountNumber != null && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const remaining = Math.max(
+                            0,
+                            roundSaleDisplayAmount(saleSuggestedAmountNumber) - Number(saleSplitAmount1Input || 0),
+                          )
+                          setSaleSplitAmount2Input(remaining > 0 ? formatSaleAmountForInput(remaining) : '')
+                          setSaleSplitAmount2Touched(false)
+                        }}
+                        className="text-xs font-medium text-zinc-600 underline hover:text-zinc-900"
+                      >
+                        Qolganini qo&apos;yish
+                      </button>
+                    )}
+                  </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <select
                       value={saleSplitMethod2}
@@ -1349,7 +1420,10 @@ export default function QurilmaDetailPage() {
                     <MoneyInput
                       currency={currency.currency}
                       value={saleSplitAmount2Input}
-                      onChange={setSaleSplitAmount2Input}
+                      onChange={(v) => {
+                        setSaleSplitAmount2Touched(true)
+                        setSaleSplitAmount2Input(v)
+                      }}
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
                   </div>
@@ -1363,6 +1437,19 @@ export default function QurilmaDetailPage() {
                     {currencyLabel(currency.currency)} {saleSplitTotal.toLocaleString('ru-RU')}
                   </span>
                 </div>
+                {saleSuggestedAmountNumber != null &&
+                  !isContractCurrencyDust(saleSplitTotal - roundSaleDisplayAmount(saleSuggestedAmountNumber), currency.currency) &&
+                  (saleSplitTotal < roundSaleDisplayAmount(saleSuggestedAmountNumber) ? (
+                    <p className="text-xs text-zinc-600">
+                      Qolgan: {currencyLabel(currency.currency)}{' '}
+                      {(roundSaleDisplayAmount(saleSuggestedAmountNumber) - saleSplitTotal).toLocaleString('ru-RU')}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                      Ortiqcha: {currencyLabel(currency.currency)}{' '}
+                      {(saleSplitTotal - roundSaleDisplayAmount(saleSuggestedAmountNumber)).toLocaleString('ru-RU')}
+                    </p>
+                  ))}
               </div>
             )}
 
