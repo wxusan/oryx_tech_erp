@@ -3,6 +3,7 @@ import {
   validatePaymentBreakdown,
   representativePaymentMethod,
   paymentBreakdownTotal,
+  type PaymentBreakdownPart,
 } from '@/lib/payment-breakdown'
 
 describe('validatePaymentBreakdown (item 12 — split payment)', () => {
@@ -80,6 +81,51 @@ describe('validatePaymentBreakdown (item 12 — split payment)', () => {
         1_000_000,
       ),
     ).toBeNull()
+  })
+
+  it('rejects duplicate methods across parts (a split between the same method twice is not a split)', () => {
+    expect(
+      validatePaymentBreakdown(
+        [
+          { method: 'CASH', amount: 500_000 },
+          { method: 'CASH', amount: 500_000 },
+        ],
+        1_000_000,
+      ),
+    ).toMatch(/har xil usul/)
+  })
+
+  it('rejects a missing/blank method on any part', () => {
+    expect(
+      validatePaymentBreakdown(
+        [
+          { method: '' as PaymentBreakdownPart['method'], amount: 500_000 },
+          { method: 'CARD', amount: 500_000 },
+        ],
+        1_000_000,
+      ),
+    ).toMatch(/to'lov usuli/)
+  })
+
+  it('the submitted total must equal the sum of the parts — a "total" that disagrees with the parts is rejected (regression for the total-minus-second-part bug)', () => {
+    expect(
+      validatePaymentBreakdown(
+        [
+          { method: 'CASH', amount: 60 },
+          { method: 'CARD', amount: 40 },
+        ],
+        100,
+      ),
+    ).toBeNull()
+    expect(
+      validatePaymentBreakdown(
+        [
+          { method: 'CASH', amount: 60 },
+          { method: 'CARD', amount: 40 },
+        ],
+        60, // disagrees with the true sum (100) — must be rejected
+      ),
+    ).toMatch(/yig'indisi/)
   })
 })
 

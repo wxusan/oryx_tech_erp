@@ -6,12 +6,17 @@ export interface PaymentBreakdownPart {
 }
 
 /**
- * Item 12 — split payment (e.g. half cash, half card). Validates that a
- * breakdown is well-formed: at least 2 parts (a single part is just a
- * normal payment, not a "split"), every part a positive amount, and the
- * parts summing to the payment total (a 0.01 tolerance absorbs float
+ * Split payment (e.g. half cash, half card). Validates that a breakdown is
+ * well-formed: at least 2 parts (a single part is just a normal payment,
+ * not a "split"), every part has a real method and a positive amount, no
+ * two parts use the same method (a "split" between the same method twice
+ * isn't a split — reject it rather than silently allowing it), and the
+ * parts sum to the submitted payment total (a 0.01 tolerance absorbs float
  * rounding across currencies — matches the cent/so'm precision already used
- * throughout this codebase's money math).
+ * throughout this codebase's money math). The frontend already prevents a
+ * duplicate-method split and a total that disagrees with the parts, but
+ * this is the backend's own source of truth — it must reject the same
+ * cases independently, not just trust the client.
  *
  * Returns an error message string, or `null` when valid.
  */
@@ -20,9 +25,16 @@ export function validatePaymentBreakdown(parts: PaymentBreakdownPart[], total: n
     return "Aralash to'lov kamida 2 ta usulni o'z ichiga olishi kerak"
   }
   for (const part of parts) {
+    if (!part.method) {
+      return "Har bir qism uchun to'lov usuli tanlanishi kerak"
+    }
     if (!Number.isFinite(part.amount) || part.amount <= 0) {
       return "Har bir qism musbat summa bo'lishi kerak"
     }
+  }
+  const methods = parts.map((p) => p.method)
+  if (new Set(methods).size !== methods.length) {
+    return "Aralash to'lov qismlari har xil usullardan iborat bo'lishi kerak"
   }
   const sum = parts.reduce((s, p) => s + p.amount, 0)
   if (Math.abs(sum - total) > 0.01) {

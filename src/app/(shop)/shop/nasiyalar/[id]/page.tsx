@@ -683,9 +683,21 @@ export default function NasiyaDetailPage() {
                     </td>
                     <td className="px-4 py-3 text-zinc-700">
                       {payment.paymentBreakdown?.length ? (
-                        <span title={payment.paymentBreakdown.map((p) => `${paymentMethodLabel(p.method)}: ${p.amount}`).join(', ')}>
-                          {payment.paymentBreakdown.map((p) => paymentMethodLabel(p.method)).join(' + ')}
-                        </span>
+                        <div className="space-y-0.5">
+                          {payment.paymentBreakdown.map((p, i) => (
+                            <div key={i}>
+                              {paymentMethodLabel(p.method)}:{' '}
+                              <span className="font-medium text-zinc-900">
+                                {formatUserFacingMoney({
+                                  amount: p.amount,
+                                  amountCurrency: payment.paymentInputCurrency ?? 'UZS',
+                                  displayCurrency: currency.currency,
+                                  rate: payment.paymentExchangeRate ?? currency.usdUzsRate,
+                                })}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       ) : (
                         paymentMethodLabel(payment.paymentMethod)
                       )}

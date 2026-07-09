@@ -20,7 +20,6 @@ import {
 import { uzDate, uzMonthYear } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { tashkentTodayInputValue } from '@/lib/timezone'
-import { paymentMethodLabel } from '@/lib/labels'
 
 /**
  * The single receive-payment modal used by BOTH the nasiya detail page and the
@@ -100,15 +99,16 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   const [payDate, setPayDate] = useState('')
   const [carryOver, setCarryOver] = useState(false)
   const [payNote, setPayNote] = useState('')
-  // Item 12 — split payment (e.g. half cash, half card). `payMethod` above
-  // doubles as the FIRST part's method; `splitMethod2`/`splitAmount1Input`
-  // only matter when `splitPayment` is on. The second part's amount is
-  // always `payAmount - splitAmount1Input` — the user only ever types one
-  // side, matching the common "half X half Y" use case without a full
-  // dynamic-row builder.
+  // Split payment (e.g. half cash, half card). `payMethod` above doubles as
+  // the FIRST part's method; `splitMethod2` is the second part's method.
+  // Each part has its OWN amount input — `splitAmount1Input`/
+  // `splitAmount2Input` — the total is always the SUM of the two parts,
+  // never a "total minus second part" subtraction. See
+  // docs/product-feature-fixes.md's split-payment amount-entry fix.
   const [splitPayment, setSplitPayment] = useState(false)
   const [splitMethod2, setSplitMethod2] = useState('')
   const [splitAmount1Input, setSplitAmount1Input] = useState('')
+  const [splitAmount2Input, setSplitAmount2Input] = useState('')
   const [selectedScheduleId, setSelectedScheduleId] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [payError, setPayError] = useState('')
@@ -135,6 +135,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
       setSplitPayment(false)
       setSplitMethod2('')
       setSplitAmount1Input('')
+      setSplitAmount2Input('')
       try {
         const r = await fetch(`/api/nasiya/${nasiyaId}`)
         const json = await r.json()
@@ -176,14 +177,37 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   // Native contract-currency outstanding balance — DISPLAY only (see dfmt).
   const selectedScheduleContractOutstanding = selectedSchedule ? contractScheduleBalance(selectedSchedule, contractCurrency) : 0
 
+  // Split payment: each part has its OWN amount; the total the customer is
+  // paying is the SUM of the parts — never a total-minus-second-part
+  // subtraction. `splitValid` requires both parts present, both positive,
+  // and distinct methods (a "split" between the same method twice is
+  // rejected — that's just one payment, not a split).
+  const splitTotal = Math.round((Number(splitAmount1Input || 0) + Number(splitAmount2Input || 0)) * 100) / 100
+  const splitValid =
+    !splitPayment ||
+    (Boolean(payMethod) &&
+      Boolean(splitMethod2) &&
+      splitAmount1Input.trim().length > 0 &&
+      Number(splitAmount1Input) > 0 &&
+      splitAmount2Input.trim().length > 0 &&
+      Number(splitAmount2Input) > 0 &&
+      splitMethod2 !== payMethod)
+
+  // The amount actually being submitted: the split total when split mode is
+  // on, otherwise the single "Miqdor" field. Every downstream currency/
+  // validation calculation below reads from this ONE number so single and
+  // split mode always agree on what "the amount" means.
+  const effectiveAmountNumber = splitPayment ? splitTotal : Number(payAmount || 0)
+  const hasEffectiveAmount = splitPayment ? splitTotal > 0 : payAmount.trim().length > 0
+
   // Convert the typed amount to UZS (the allocation/validation source of truth)
   // so the overpayment explanation and the "exceeds remaining debt" guard work
   // the same regardless of the shop's selected display currency.
   const payAmountUzs =
-    !carryOver && payAmount.trim()
+    !carryOver && hasEffectiveAmount
       ? currency.currency === 'USD' && currency.usdUzsRate
-        ? convertUsdToUzs(Number(payAmount), currency.usdUzsRate)
-        : Number(payAmount)
+        ? convertUsdToUzs(effectiveAmountNumber, currency.usdUzsRate)
+        : effectiveAmountNumber
       : 0
   const exceedsRemaining = !carryOver && payAmountUzs > nasiyaRemainingAmount
 
@@ -196,32 +220,25 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   // fetched when its display currency is USD). See
   // docs/currency-accounting-model.md.
   const contractPreviewAmount =
-    !carryOver && payAmount.trim() && contractCurrency !== currency.currency && currency.usdUzsRate
-      ? convertPaymentToContractCurrency(Number(payAmount) || 0, currency.currency, contractCurrency, currency.usdUzsRate)
+    !carryOver && hasEffectiveAmount && contractCurrency !== currency.currency && currency.usdUzsRate
+      ? convertPaymentToContractCurrency(effectiveAmountNumber, currency.currency, contractCurrency, currency.usdUzsRate)
       : null
 
   // Contract-currency view of the same typed amount, used for the overpay
   // explanation below — same-currency case needs no rate at all.
   const payAmountContract =
-    !carryOver && payAmount.trim() ? (contractCurrency === currency.currency ? Number(payAmount) || 0 : (contractPreviewAmount ?? 0)) : 0
+    !carryOver && hasEffectiveAmount ? (contractCurrency === currency.currency ? effectiveAmountNumber : (contractPreviewAmount ?? 0)) : 0
   const rawOverpayExtraContract = Math.max(0, payAmountContract - selectedScheduleContractOutstanding)
   const overpayExtraContract = isContractCurrencyDust(rawOverpayExtraContract, contractCurrency)
     ? 0
     : roundContractMoney(rawOverpayExtraContract, contractCurrency)
-
-  // Item 12 — the second split part's amount is always the remainder, so
-  // the user only ever types one side of the split.
-  const splitAmount2 = Math.round((Number(payAmount || 0) - Number(splitAmount1Input || 0)) * 100) / 100
-  const splitValid =
-    !splitPayment ||
-    (splitMethod2 && splitAmount1Input.trim() && Number(splitAmount1Input) > 0 && splitAmount2 > 0 && splitMethod2 !== payMethod)
 
   // "Izoh" is optional for a regular payment — only the carry-over/defer flow
   // ("Mijoz bu oy to'lamadi, muddatni uzaytirish") still requires a reason,
   // since that's a debt-schedule change, not a routine payment note.
   const canSubmit = carryOver
     ? Boolean(payDate.trim() && selectedScheduleId && payNote.trim().length >= 5)
-    : Boolean(payAmount.trim() && payMethod && payDate.trim() && selectedScheduleId && !exceedsRemaining && splitValid)
+    : Boolean(hasEffectiveAmount && payMethod && payDate.trim() && selectedScheduleId && !exceedsRemaining && splitValid)
 
   async function handleSubmit() {
     if (!canSubmit || submitting) return
@@ -241,14 +258,16 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
         },
         body: JSON.stringify({
           nasiyaScheduleId: selectedScheduleId,
-          amount: carryOver ? 0 : Number(payAmount),
+          // Split mode: the submitted total is always the SUM of the two
+          // parts (never a total-minus-second-part subtraction).
+          amount: carryOver ? 0 : splitPayment ? splitTotal : Number(payAmount),
           inputCurrency: currency.currency,
           paymentMethod: carryOver ? undefined : payMethod,
           paymentBreakdown:
             !carryOver && splitPayment
               ? [
                   { method: payMethod, amount: Number(splitAmount1Input) },
-                  { method: splitMethod2, amount: splitAmount2 },
+                  { method: splitMethod2, amount: Number(splitAmount2Input) },
                 ]
               : undefined,
           date: new Date(payDate).toISOString(),
@@ -347,6 +366,18 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
               </label>
 
               {!carryOver && (
+                <label className="flex items-center gap-2 text-xs font-medium text-zinc-700">
+                  <input
+                    type="checkbox"
+                    checked={splitPayment}
+                    onChange={(e) => setSplitPayment(e.target.checked)}
+                    className="h-4 w-4 rounded border-zinc-300"
+                  />
+                  Aralash to&apos;lov (masalan: yarmi naqd, yarmi karta)
+                </label>
+              )}
+
+              {!carryOver && !splitPayment && (
                 <div className="space-y-2">
                   <label className="block text-xs font-medium text-zinc-700">
                     Miqdor ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
@@ -397,6 +428,108 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                       Tavsiya etilgan summa: {dfmt(selectedScheduleContractOutstanding)}
                     </button>
                   )}
+                </div>
+              )}
+
+              {/* Split payment: each method has its OWN "To'lov usuli N" block
+                  with its own method select + amount input — never a single
+                  total field re-purposed as "first part". The total below is
+                  ALWAYS the sum of the two parts and is never itself editable. */}
+              {!carryOver && splitPayment && (
+                <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-zinc-700">
+                      To&apos;lov usuli 1 <span className="text-red-500">*</span>
+                    </label>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Select value={payMethod} onValueChange={(v) => v && setPayMethod(v)}>
+                        <SelectTrigger className="h-10 w-full rounded-lg border-zinc-200 text-sm">
+                          <SelectValue placeholder="Usulni tanlang" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="CASH">Naqd</SelectItem>
+                          <SelectItem value="CARD">Karta</SelectItem>
+                          <SelectItem value="TRANSFER">Bank o&apos;tkazmasi</SelectItem>
+                          <SelectItem value="OTHER">Boshqa</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <MoneyInput
+                        currency={currency.currency}
+                        value={splitAmount1Input}
+                        onChange={setSplitAmount1Input}
+                        placeholder={currency.currency === 'USD' ? '60.00' : '600000'}
+                        className="h-10 rounded-lg border-zinc-200 text-sm"
+                      />
+                    </div>
+                    {selectedScheduleOutstanding > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          // Option A: fill part 1 with the recommended amount,
+                          // leave part 2 empty — never put the recommendation
+                          // into a "total" while a second amount is still required.
+                          if (contractCurrency !== currency.currency && !currency.usdUzsRate) {
+                            setSplitAmount1Input(String(selectedScheduleOutstanding))
+                            setSplitAmount2Input('')
+                            return
+                          }
+                          const suggestion = convertPaymentToContractCurrency(
+                            selectedScheduleContractOutstanding,
+                            contractCurrency,
+                            currency.currency,
+                            currency.usdUzsRate,
+                          )
+                          setSplitAmount1Input(currency.currency === 'USD' ? suggestion.toFixed(2) : String(Math.round(suggestion)))
+                          setSplitAmount2Input('')
+                        }}
+                        className="inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-800 hover:border-zinc-400 hover:bg-zinc-100"
+                      >
+                        Tavsiya etilgan summa: {dfmt(selectedScheduleContractOutstanding)}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-medium text-zinc-700">
+                      To&apos;lov usuli 2 <span className="text-red-500">*</span>
+                    </label>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <Select value={splitMethod2} onValueChange={(v) => v && setSplitMethod2(v)}>
+                        <SelectTrigger className="h-10 w-full rounded-lg border-zinc-200 text-sm">
+                          <SelectValue placeholder="Usulni tanlang" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="CASH">Naqd</SelectItem>
+                          <SelectItem value="CARD">Karta</SelectItem>
+                          <SelectItem value="TRANSFER">Bank o&apos;tkazmasi</SelectItem>
+                          <SelectItem value="OTHER">Boshqa</SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <MoneyInput
+                        currency={currency.currency}
+                        value={splitAmount2Input}
+                        onChange={setSplitAmount2Input}
+                        placeholder={currency.currency === 'USD' ? '40.00' : '400000'}
+                        className="h-10 rounded-lg border-zinc-200 text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  {splitMethod2 && payMethod && splitMethod2 === payMethod && (
+                    <p className="text-xs text-red-600">Ikkala usul bir xil bo&apos;lmasligi kerak.</p>
+                  )}
+
+                  <div className="flex items-center justify-between border-t border-zinc-200 pt-2.5 text-sm">
+                    <span className="font-medium text-zinc-700">Jami to&apos;lov</span>
+                    <span className="font-semibold text-zinc-900">
+                      {currencyLabel(currency.currency)} {splitTotal.toLocaleString('ru-RU')}
+                    </span>
+                  </div>
+                </div>
+              )}
+
+              {!carryOver && hasEffectiveAmount && (
+                <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs text-zinc-500">
                     <span>Jami qolgan qarz</span>
                     <span className="font-medium text-zinc-700">{dfmt(nasiyaContractRemainingAmount)}</span>
@@ -415,7 +548,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
               )}
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {!carryOver && (
+                {!carryOver && !splitPayment && (
                   <div className="space-y-2">
                     <label className="block text-xs font-medium text-zinc-700">
                       To&apos;lov usuli <span className="text-red-500">*</span>
@@ -433,7 +566,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                     </Select>
                   </div>
                 )}
-                <div className={carryOver ? 'space-y-2 sm:col-span-2' : 'space-y-2'}>
+                <div className={carryOver || splitPayment ? 'space-y-2 sm:col-span-2' : 'space-y-2'}>
                   <label className="block text-xs font-medium text-zinc-700">
                     {carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"} <span className="text-red-500">*</span>
                   </label>
@@ -445,54 +578,6 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                   />
                 </div>
               </div>
-
-              {!carryOver && (
-                <div className="space-y-2">
-                  <label className="flex items-center gap-2 text-xs font-medium text-zinc-700">
-                    <input
-                      type="checkbox"
-                      checked={splitPayment}
-                      onChange={(e) => setSplitPayment(e.target.checked)}
-                      className="h-4 w-4 rounded border-zinc-300"
-                    />
-                    Aralash to&apos;lov (masalan: yarmi naqd, yarmi karta)
-                  </label>
-                  {splitPayment && (
-                    <div className="grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 sm:grid-cols-2">
-                      <div className="space-y-1.5">
-                        <label className="block text-xs text-zinc-600">
-                          {payMethod ? paymentMethodLabel(payMethod) : 'Birinchi usul'} summasi
-                        </label>
-                        <MoneyInput
-                          currency={currency.currency}
-                          value={splitAmount1Input}
-                          onChange={setSplitAmount1Input}
-                          placeholder={currency.currency === 'USD' ? '250.00' : '2500000'}
-                          className="h-9 rounded-lg border-zinc-200 text-sm"
-                        />
-                      </div>
-                      <div className="space-y-1.5">
-                        <label className="block text-xs text-zinc-600">Ikkinchi usul</label>
-                        <Select value={splitMethod2} onValueChange={(v) => v && setSplitMethod2(v)}>
-                          <SelectTrigger className="h-9 w-full rounded-lg border-zinc-200 text-sm">
-                            <SelectValue placeholder="Usulni tanlang" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="CASH">Naqd</SelectItem>
-                            <SelectItem value="CARD">Karta</SelectItem>
-                            <SelectItem value="TRANSFER">Bank o&apos;tkazmasi</SelectItem>
-                            <SelectItem value="OTHER">Boshqa</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <p className="text-xs text-zinc-500 sm:col-span-2">
-                        Ikkinchi usul summasi: {splitAmount2 > 0 ? currencyLabel(currency.currency) + ' ' + splitAmount2 : '—'} (avtomatik
-                        hisoblanadi)
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
 
               <div className="space-y-2">
                 <label className="block text-xs font-medium text-zinc-700">

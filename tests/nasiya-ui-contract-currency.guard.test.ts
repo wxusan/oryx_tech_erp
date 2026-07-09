@@ -48,8 +48,11 @@ describe('nasiya payment modal previews the applied amount without leaking a sec
 
   it('shows a "Shartnomaga qo\'llanadi" preview only when payment currency differs from contract currency, formatted through dfmt', () => {
     expect(modal).toContain('contractCurrency !== currency.currency && currency.usdUzsRate')
+    // Reads from `effectiveAmountNumber` (the single field in non-split
+    // mode, or the split total in split mode) — see
+    // docs/product-feature-fixes.md's split-payment amount-entry fix.
     expect(modal).toContain(
-      'convertPaymentToContractCurrency(Number(payAmount) || 0, currency.currency, contractCurrency, currency.usdUzsRate)',
+      'convertPaymentToContractCurrency(effectiveAmountNumber, currency.currency, contractCurrency, currency.usdUzsRate)',
     )
     expect(modal).toContain('Shartnomaga qo&apos;llanadi: {dfmt(contractPreviewAmount)}')
   })

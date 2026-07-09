@@ -12,7 +12,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { paymentMethodLabel } from '@/lib/labels'
 import { uzDate, uzDateTime } from '@/lib/dates'
 import { displayImei, deviceStatusLabel, deviceActionLabel } from '@/lib/device-display'
-import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
+import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency, formatUserFacingMoney } from '@/lib/currency'
 import {
   formatDisplayMoneyFromContract,
   computeSaleContractMargin,
@@ -166,14 +166,16 @@ export default function QurilmaDetailPage() {
   const [salePayNote, setSalePayNote] = useState('')
   const [salePayError, setSalePayError] = useState('')
   const [salePayLoading, setSalePayLoading] = useState(false)
-  // Item 13 — split payment (e.g. half cash, half card). Mirrors the same
-  // pattern already built for the nasiya payment modal
-  // (src/components/shop/nasiya-payment-modal.tsx): `salePayMethod` above
-  // doubles as the first part's method; the second part's amount is always
-  // the remainder, so the user only ever types one side.
+  // Split payment (e.g. half cash, half card). Mirrors the nasiya payment
+  // modal (src/components/shop/nasiya-payment-modal.tsx): `salePayMethod`
+  // above doubles as the first part's method; each part has its OWN amount
+  // input — the total is always the SUM of the two parts, never a
+  // total-minus-second-part subtraction. See docs/product-feature-fixes.md's
+  // split-payment amount-entry fix.
   const [saleSplitPayment, setSaleSplitPayment] = useState(false)
   const [saleSplitMethod2, setSaleSplitMethod2] = useState('')
   const [saleSplitAmount1Input, setSaleSplitAmount1Input] = useState('')
+  const [saleSplitAmount2Input, setSaleSplitAmount2Input] = useState('')
   const [saleEditOpen, setSaleEditOpen] = useState(false)
   const [saleEditCustomerName, setSaleEditCustomerName] = useState('')
   const [saleEditCustomerPhone, setSaleEditCustomerPhone] = useState('')
@@ -339,19 +341,26 @@ export default function QurilmaDetailPage() {
     }
   }
 
-  // Item 13 — the second split part's amount is always the remainder, so
-  // the user only ever types one side of the split.
-  const saleSplitAmount2 = Math.round((Number(salePayAmount || 0) - Number(saleSplitAmount1Input || 0)) * 100) / 100
+  // Split payment: each part has its OWN amount; the total is the SUM of
+  // the parts — never a total-minus-second-part subtraction.
+  const saleSplitTotal = Math.round((Number(saleSplitAmount1Input || 0) + Number(saleSplitAmount2Input || 0)) * 100) / 100
   const saleSplitValid =
     !saleSplitPayment ||
-    (saleSplitMethod2 &&
-      saleSplitAmount1Input.trim() &&
+    (Boolean(salePayMethod) &&
+      Boolean(saleSplitMethod2) &&
+      saleSplitAmount1Input.trim().length > 0 &&
       Number(saleSplitAmount1Input) > 0 &&
-      saleSplitAmount2 > 0 &&
+      saleSplitAmount2Input.trim().length > 0 &&
+      Number(saleSplitAmount2Input) > 0 &&
       saleSplitMethod2 !== salePayMethod)
+  // The amount actually being submitted: the split total when split mode is
+  // on, otherwise the single "Miqdor" field.
+  const saleEffectiveAmount = saleSplitPayment ? saleSplitTotal : Number(salePayAmount || 0)
+  const saleHasEffectiveAmount = saleSplitPayment ? saleSplitTotal > 0 : salePayAmount.trim().length > 0
 
   async function handleSalePayment() {
-    if (!latestSale || !salePayAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading || !saleSplitValid) return
+    if (!latestSale || !saleHasEffectiveAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading || !saleSplitValid)
+      return
     setSalePayLoading(true)
     setSalePayError('')
     try {
@@ -362,7 +371,7 @@ export default function QurilmaDetailPage() {
           'Idempotency-Key': crypto.randomUUID(),
         },
         body: JSON.stringify({
-          amount: Number(salePayAmount),
+          amount: saleEffectiveAmount,
           inputCurrency: currency.currency,
           paymentMethod: salePayMethod,
           paymentBreakdown: saleSplitPayment
@@ -371,7 +380,7 @@ export default function QurilmaDetailPage() {
                   method: salePayMethod,
                   amount: Number(saleSplitAmount1Input),
                 },
-                { method: saleSplitMethod2, amount: saleSplitAmount2 },
+                { method: saleSplitMethod2, amount: Number(saleSplitAmount2Input) },
               ]
             : undefined,
           note: salePayNote.trim() || undefined,
@@ -388,6 +397,7 @@ export default function QurilmaDetailPage() {
       setSaleSplitPayment(false)
       setSaleSplitMethod2('')
       setSaleSplitAmount1Input('')
+      setSaleSplitAmount2Input('')
       await fetchDevice()
     } catch (err) {
       setSalePayError(err instanceof Error ? err.message : "To'lovni saqlashda xatolik")
@@ -842,9 +852,21 @@ export default function QurilmaDetailPage() {
                       </td>
                       <td className="px-4 py-3 text-zinc-700">
                         {payment.paymentBreakdown?.length ? (
-                          <span title={payment.paymentBreakdown.map((p) => `${paymentMethodLabel(p.method)}: ${p.amount}`).join(', ')}>
-                            {payment.paymentBreakdown.map((p) => paymentMethodLabel(p.method)).join(' + ')}
-                          </span>
+                          <div className="space-y-0.5">
+                            {payment.paymentBreakdown.map((p, i) => (
+                              <div key={i}>
+                                {paymentMethodLabel(p.method)}:{' '}
+                                <span className="font-medium text-zinc-900">
+                                  {formatUserFacingMoney({
+                                    amount: p.amount,
+                                    amountCurrency: payment.paymentInputCurrency ?? 'UZS',
+                                    displayCurrency: currency.currency,
+                                    rate: payment.paymentExchangeRate ?? currency.usdUzsRate,
+                                  })}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
                         ) : (
                           paymentMethodLabel(payment.paymentMethod)
                         )}
@@ -1245,45 +1267,63 @@ export default function QurilmaDetailPage() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             {salePayError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{salePayError}</div>}
-            <div>
-              <label className="text-xs font-medium text-zinc-700 block mb-1.5">Miqdor ({currencyLabel(currency.currency)})</label>
-              <MoneyInput
-                currency={currency.currency}
-                value={salePayAmount}
-                onChange={setSalePayAmount}
-                className="h-9 text-sm border-zinc-200 rounded"
+
+            <label className="flex items-center gap-2 text-xs font-medium text-zinc-700">
+              <input
+                type="checkbox"
+                checked={saleSplitPayment}
+                onChange={(e) => setSaleSplitPayment(e.target.checked)}
+                className="h-4 w-4 rounded border-zinc-300"
               />
-            </div>
-            <div>
-              <label className="text-xs font-medium text-zinc-700 block mb-1.5">To'lov usuli</label>
-              <select
-                value={salePayMethod}
-                onChange={(e) => setSalePayMethod(e.target.value)}
-                className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded"
-              >
-                <option value="">Tanlang...</option>
-                <option value="CASH">Naqd</option>
-                <option value="CARD">Karta</option>
-                <option value="TRANSFER">Bank</option>
-                <option value="OTHER">Boshqa</option>
-              </select>
-            </div>
-            <div>
-              <label className="flex items-center gap-2 text-xs font-medium text-zinc-700">
-                <input
-                  type="checkbox"
-                  checked={saleSplitPayment}
-                  onChange={(e) => setSaleSplitPayment(e.target.checked)}
-                  className="h-4 w-4 rounded border-zinc-300"
-                />
-                Aralash to&apos;lov (masalan: yarmi naqd, yarmi karta)
-              </label>
-              {saleSplitPayment && (
-                <div className="mt-2 grid grid-cols-1 gap-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3 sm:grid-cols-2">
-                  <div>
-                    <label className="block text-xs text-zinc-600 mb-1">
-                      {salePayMethod ? paymentMethodLabel(salePayMethod) : 'Birinchi usul'} summasi
-                    </label>
+              Aralash to&apos;lov (masalan: yarmi naqd, yarmi karta)
+            </label>
+
+            {!saleSplitPayment ? (
+              <>
+                <div>
+                  <label className="text-xs font-medium text-zinc-700 block mb-1.5">Miqdor ({currencyLabel(currency.currency)})</label>
+                  <MoneyInput
+                    currency={currency.currency}
+                    value={salePayAmount}
+                    onChange={setSalePayAmount}
+                    className="h-9 text-sm border-zinc-200 rounded"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-zinc-700 block mb-1.5">To'lov usuli</label>
+                  <select
+                    value={salePayMethod}
+                    onChange={(e) => setSalePayMethod(e.target.value)}
+                    className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded"
+                  >
+                    <option value="">Tanlang...</option>
+                    <option value="CASH">Naqd</option>
+                    <option value="CARD">Karta</option>
+                    <option value="TRANSFER">Bank</option>
+                    <option value="OTHER">Boshqa</option>
+                  </select>
+                </div>
+              </>
+            ) : (
+              // Split payment: each method has its OWN "To'lov usuli N" block
+              // with its own method select + amount input — never a single
+              // total field re-purposed as "first part". The total below is
+              // ALWAYS the sum of the two parts and is never itself editable.
+              <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                <div>
+                  <label className="block text-xs font-medium text-zinc-700 mb-1">To&apos;lov usuli 1</label>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <select
+                      value={salePayMethod}
+                      onChange={(e) => setSalePayMethod(e.target.value)}
+                      className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded"
+                    >
+                      <option value="">Tanlang...</option>
+                      <option value="CASH">Naqd</option>
+                      <option value="CARD">Karta</option>
+                      <option value="TRANSFER">Bank</option>
+                      <option value="OTHER">Boshqa</option>
+                    </select>
                     <MoneyInput
                       currency={currency.currency}
                       value={saleSplitAmount1Input}
@@ -1291,8 +1331,10 @@ export default function QurilmaDetailPage() {
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
                   </div>
-                  <div>
-                    <label className="block text-xs text-zinc-600 mb-1">Ikkinchi usul</label>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-zinc-700 mb-1">To&apos;lov usuli 2</label>
+                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                     <select
                       value={saleSplitMethod2}
                       onChange={(e) => setSaleSplitMethod2(e.target.value)}
@@ -1304,14 +1346,26 @@ export default function QurilmaDetailPage() {
                       <option value="TRANSFER">Bank</option>
                       <option value="OTHER">Boshqa</option>
                     </select>
+                    <MoneyInput
+                      currency={currency.currency}
+                      value={saleSplitAmount2Input}
+                      onChange={setSaleSplitAmount2Input}
+                      className="h-9 text-sm border-zinc-200 rounded"
+                    />
                   </div>
-                  <p className="text-xs text-zinc-500 sm:col-span-2">
-                    Ikkinchi usul summasi: {saleSplitAmount2 > 0 ? `${currencyLabel(currency.currency)} ${saleSplitAmount2}` : '—'}{' '}
-                    (avtomatik hisoblanadi)
-                  </p>
                 </div>
-              )}
-            </div>
+                {saleSplitMethod2 && salePayMethod && saleSplitMethod2 === salePayMethod && (
+                  <p className="text-xs text-red-600">Ikkala usul bir xil bo&apos;lmasligi kerak.</p>
+                )}
+                <div className="flex items-center justify-between border-t border-zinc-200 pt-2.5 text-sm">
+                  <span className="font-medium text-zinc-700">Jami to&apos;lov</span>
+                  <span className="font-semibold text-zinc-900">
+                    {currencyLabel(currency.currency)} {saleSplitTotal.toLocaleString('ru-RU')}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="text-xs font-medium text-zinc-700 block mb-1.5">
                 Izoh <span className="text-red-500">*</span>
@@ -1329,7 +1383,7 @@ export default function QurilmaDetailPage() {
               Bekor qilish
             </Button>
             <Button
-              disabled={!salePayAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading || !saleSplitValid}
+              disabled={!saleHasEffectiveAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading || !saleSplitValid}
               onClick={handleSalePayment}
               className="bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
             >

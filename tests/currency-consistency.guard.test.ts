@@ -76,8 +76,12 @@ describe('nasiya payment modal: overpayment explanation and validation use the s
   const source = read('src/components/shop/nasiya-payment-modal.tsx')
 
   it('computes payAmountUzs regardless of display currency (source of truth for validation)', () => {
+    // Reads from `effectiveAmountNumber` (the single "Miqdor" field in
+    // non-split mode, or the split total in split mode — see
+    // docs/product-feature-fixes.md's split-payment amount-entry fix), not
+    // straight from `payAmount`, so single and split mode validate identically.
     expect(source).toContain('const payAmountUzs =')
-    expect(source).toContain('convertUsdToUzs(Number(payAmount), currency.usdUzsRate)')
+    expect(source).toContain('convertUsdToUzs(effectiveAmountNumber, currency.usdUzsRate)')
   })
 
   it('shows the overpayment explanation and total-remaining line via dfmt() (contract-currency-aware formatter)', () => {
