@@ -10,20 +10,17 @@ describe('nasiya completion: status transition, log, and Telegram message', () =
   const route = read('src/app/api/nasiya/[id]/payment/route.ts')
 
   it('marks the nasiya COMPLETED in the same transaction when fully paid (contract-currency ledger decides, see docs/currency-accounting-model.md)', () => {
-    expect(route).toContain("contractAllFullyPaid || contractRemaining <= 0 ? 'COMPLETED'")
+    expect(route).toContain('const derivedAfterPayment = deriveContractNasiyaStatus({')
+    expect(route).toContain('const newStatus = derivedAfterPayment.displayStatus')
   })
 
-  it('only treats it as a fresh completion on the actual ACTIVE/OVERDUE -> COMPLETED transition', () => {
-    // A request against an already-COMPLETED nasiya is rejected before this
-    // point (see the "blocks payment" test below), so reaching the
-    // newStatus/justCompleted computation always means the nasiya started
-    // ACTIVE/OVERDUE — no separate "!== COMPLETED" re-check is needed (and
-    // TypeScript flags it as redundant once narrowed by the early guard).
-    expect(route).toContain("if (nasiya.status === 'COMPLETED') throw { status: 409")
-    expect(route).toContain('const justCompleted = newStatus === \'COMPLETED\'')
+  it('only treats it as a fresh completion when contract status actually crosses to COMPLETED', () => {
+    expect(route).toContain("if (currentContractStatus.displayStatus === 'COMPLETED')")
+    expect(route).toContain("const justCompleted = newStatus === 'COMPLETED'")
   })
 
-  it('blocks a payment attempt against an already-completed nasiya with a clear message', () => {
+  it('blocks a payment attempt only against a contract-complete nasiya with a clear message', () => {
+    expect(route).toContain("if (currentContractStatus.displayStatus === 'COMPLETED')")
     expect(route).toContain("message: 'Bu nasiya yakunlangan'")
   })
 
@@ -53,8 +50,10 @@ describe('nasiyalar list surfaces the Yakunlangan tab and excludes completed nas
     expect(cron).toContain("status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'")
   })
 
-  it('dashboard/report active-debt stats exclude COMPLETED nasiyas', () => {
+  it('dashboard/report active-debt stats correct a raw COMPLETED parent when an unpaid native schedule remains', () => {
     const stats = read('src/lib/server/shop-stats.ts')
     expect(stats).toContain("status: { in: ['ACTIVE', 'OVERDUE'] }")
+    expect(stats).toContain('const falseCompletedNasiyaIds = new Set(')
+    expect(stats).toContain('activeNasiyalar: activeNasiyalar + falseCompletedNasiyaIds.size')
   })
 })

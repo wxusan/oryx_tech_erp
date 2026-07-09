@@ -117,22 +117,18 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
     expect(source).toContain('duplicate: true')
   })
 
-  it('marks the nasiya COMPLETED only on the real transition, guarded by an early block on already-completed nasiyas', () => {
-    expect(source).toContain("if (nasiya.status === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }")
+  it('marks the nasiya COMPLETED only on the real contract-status transition, not a raw stored parent label', () => {
+    expect(source).toContain("if (currentContractStatus.displayStatus === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }")
     expect(source).toContain("const justCompleted = newStatus === 'COMPLETED'")
   })
 
   it('uses the shared, tolerance-aware contractScheduleOutstanding helper instead of duplicated inline math', () => {
-    expect(source).toContain("import { calculateRemaining, isScheduleOverdue } from '@/lib/nasiya-utils'")
+    expect(source).toContain("import { calculateRemaining } from '@/lib/nasiya-utils'")
     expect(source).toContain(
       "import { convertPaymentToContractCurrency, contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'",
     )
-    // Completion is decided from the contract-currency ledger (source of
-    // truth for debt) — see docs/currency-accounting-model.md.
-    expect(source).toContain('const contractAllFullyPaid =')
-    expect(source).toContain(
-      'contractScheduleOutstanding(Number(s.contractExpectedAmount), Number(s.contractPaidAmount), contractCurrency) <= 0',
-    )
+    expect(source).toContain("import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'")
+    expect(source).toContain('const derivedAfterPayment = deriveContractNasiyaStatus({')
   })
 
   it('passes the per-schedule allocation breakdown (in contract currency) into the Telegram message', () => {

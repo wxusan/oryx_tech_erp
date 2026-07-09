@@ -138,8 +138,8 @@ describe('contractOutstandingAsUzs — report aggregates must convert per-row, n
     expect(contractOutstandingAsUzs('1000', '400', 'USD', null)).toBe(600)
   })
 
-  it("snaps to 0 within the currency-aware tolerance (USD cents, not UZS so'm)", () => {
-    expect(contractOutstandingAsUzs('1000', '999.99', 'USD', 12_500)).toBe(0)
+  it("keeps one exact USD cent meaningful when converting the native outstanding balance", () => {
+    expect(contractOutstandingAsUzs('1000', '999.99', 'USD', 12_500)).toBe(125)
   })
 })
 

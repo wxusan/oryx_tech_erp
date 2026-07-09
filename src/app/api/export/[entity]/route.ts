@@ -6,7 +6,7 @@ import { formatMoneyByCurrency } from '@/lib/currency'
 import { displayImei } from '@/lib/device-display'
 import { prisma } from '@/lib/prisma'
 import { deviceStatusLabel, nasiyaStatusLabel, paymentMethodLabel } from '@/lib/labels'
-import { deriveNasiyaOverdue } from '@/lib/nasiya-utils'
+import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { logger } from '@/lib/logger'
 
@@ -264,6 +264,9 @@ async function exportData(entity: string, shopId: string, role: string): Promise
           remainingAmount: true,
           months: true,
           status: true,
+          contractCurrency: true,
+          contractFinalAmount: true,
+          contractRemainingAmount: true,
           createdAt: true,
           isImported: true,
           importSource: true,
@@ -281,13 +284,15 @@ async function exportData(entity: string, shopId: string, role: string): Promise
               delayedUntil: true,
               expectedAmount: true,
               paidAmount: true,
+              contractExpectedAmount: true,
+              contractPaidAmount: true,
             },
           },
         },
       }),
     )
-    // Export the live display status (schedule-derived) so the sheet agrees
-    // with the list/dashboard instead of the lagging parent status.
+    // Export the live contract-derived status so the sheet agrees with the
+    // list/detail even when legacy UZS mirrors drift after an FX movement.
     const exportNow = new Date()
     return {
       headers: [
@@ -337,15 +342,20 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         formatMoneyByCurrency(Number(n.remainingAmount), currency.currency, currency.usdUzsRate),
         n.months,
         nasiyaStatusLabel(
-          deriveNasiyaOverdue(
+          deriveContractNasiyaStatus(
             {
               status: n.status,
+              contractCurrency: n.contractCurrency,
+              contractFinalAmount: Number(n.contractFinalAmount),
+              contractRemainingAmount: Number(n.contractRemainingAmount),
               schedules: n.schedules.map((s) => ({
                 status: s.status,
                 dueDate: s.dueDate,
                 delayedUntil: s.delayedUntil,
                 expectedAmount: Number(s.expectedAmount),
                 paidAmount: Number(s.paidAmount),
+                contractExpectedAmount: Number(s.contractExpectedAmount),
+                contractPaidAmount: Number(s.contractPaidAmount),
               })),
             },
             exportNow,

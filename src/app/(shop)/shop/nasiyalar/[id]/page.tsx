@@ -10,7 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { paymentMethodLabel } from '@/lib/labels'
-import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
+import { deriveContractScheduleStatus } from '@/lib/nasiya-contract-status'
 import { formatMoneyByCurrency, formatUserFacingMoney } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { uzDate, uzDateTime } from '@/lib/dates'
@@ -232,8 +232,8 @@ function nasiyaLogDetail(log: NasiyaLog): string | null {
  * due date reads as OVERDUE even before cron flips the stored status, so the
  * detail page agrees with the list and dashboard.
  */
-function rowDisplayStatus(row: NasiyaSchedule): RowStatus {
-  return scheduleDisplayStatus(row) as RowStatus
+function rowDisplayStatus(row: NasiyaSchedule, contractCurrency: 'UZS' | 'USD'): RowStatus {
+  return deriveContractScheduleStatus(row, contractCurrency).displayStatus
 }
 
 export default function NasiyaDetailPage() {
@@ -396,8 +396,10 @@ export default function NasiyaDetailPage() {
     )
   }
 
-  const paidAmount = nasiya.finalNasiyaAmount - nasiya.remainingAmount
-  const pct = nasiya.finalNasiyaAmount > 0 ? Math.round((paidAmount / nasiya.finalNasiyaAmount) * 100) : 0
+  // Progress must use the contract ledger too. Legacy UZS paid/remaining can
+  // reach their apparent endpoint at a different FX rate while contract debt
+  // still exists, which would otherwise render a misleading 100% bar.
+  const pct = nasiya.contractFinalAmount > 0 ? Math.min(100, Math.round((nasiya.contractPaidAmount / nasiya.contractFinalAmount) * 100)) : 0
   // Contract-currency figures for the summary cards below — a nasiya's
   // "current state" (jami/qoldiq/to'langan/oylik) must convert from its OWN
   // contract currency using TODAY's rate, never reconvert the frozen-rate
@@ -408,7 +410,7 @@ export default function NasiyaDetailPage() {
 
   const sortedSchedules = [...(nasiya.schedules ?? [])].sort((a, b) => a.monthNumber - b.monthNumber)
 
-  // Server-derived (src/lib/nasiya-utils.ts deriveNasiyaOverdue) so this page
+  // Server-derived (src/lib/nasiya-contract-status.ts) so this page
   // can never disagree with the nasiyalar list about completed/overdue state
   // — falls back to the raw stored status only if an older API response
   // didn't include it yet.
@@ -651,7 +653,7 @@ export default function NasiyaDetailPage() {
                   <td className="px-4 py-3 font-medium text-zinc-900">{dfmt(row.contractExpectedAmount)}</td>
                   <td className="px-4 py-3 text-zinc-700">{dfmt(row.contractPaidAmount)}</td>
                   <td className="px-4 py-3">
-                    <RowBadge status={rowDisplayStatus(row)} />
+                    <RowBadge status={rowDisplayStatus(row, nasiya.contractCurrency)} />
                   </td>
                 </tr>
               ))}

@@ -124,10 +124,8 @@ const PER_PAGE = 25
 function buildRequestKey(search: string, filter: NasiyaStatus | 'Barchasi', page: number) {
   const params = new URLSearchParams()
   if (search.trim()) params.set('search', search.trim())
-  // Filtering happens server-side (GET /api/nasiya), on the stored parent
-  // `status` column — not a client-side check against the lagging `n.status`
-  // field. The derived `n.displayStatus`/`n.isOverdue` are still used for
-  // the badge/highlight below, matching the dashboard.
+  // Filtering happens server-side (GET /api/nasiya) on the native
+  // contract-derived display status, never the lagging raw parent column.
   if (filter !== 'Barchasi') params.set('status', filter)
   params.set('skip', String((page - 1) * PER_PAGE))
   params.set('take', String(PER_PAGE))

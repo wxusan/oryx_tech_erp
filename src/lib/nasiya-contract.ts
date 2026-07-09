@@ -57,7 +57,8 @@ export function isContractCurrencyDust(amount: number | string, currency: Curren
 
 /**
  * Outstanding (unpaid) balance of a schedule in its OWN contract currency,
- * never negative, snapped to 0 within that currency's tolerance. Mirrors
+ * never negative, snapped to 0 only when it is strictly below that currency's
+ * tolerance. Mirrors
  * `scheduleOutstanding` in nasiya-utils.ts (which stays UZS-only, untouched,
  * for the legacy ledger) — this is the contract-currency-aware counterpart
  * used by the payment route's new native allocation loop. Accepts
@@ -65,8 +66,14 @@ export function isContractCurrencyDust(amount: number | string, currency: Curren
  * reason as `roundContractMoney` above.
  */
 export function contractScheduleOutstanding(expectedAmount: number | string, paidAmount: number | string, currency: CurrencyCode): number {
-  const raw = Math.max(0, Number(expectedAmount) - Number(paidAmount))
-  return raw <= getCompletionToleranceForCurrency(currency) ? 0 : raw
+  // Contract amounts are stored at their currency's smallest real unit. Round
+  // the subtraction too: IEEE-754 otherwise turns $100 - $99.99 into
+  // 0.010000000000005116 and makes the tolerance boundary non-deterministic.
+  const raw = Math.max(0, roundContractMoney(Number(expectedAmount) - Number(paidAmount), currency))
+  // Strict by design: $0.009 / 499 so'm are dust; $0.01 / 500 so'm are
+  // meaningful debt. This matches isContractCurrencyDust and prevents a
+  // visible cent/500-so'm balance from being silently forgiven.
+  return raw < getCompletionToleranceForCurrency(currency) ? 0 : raw
 }
 
 /**
@@ -121,7 +128,6 @@ export function contractOutstandingAsUzs(
  * ones) — see docs/currency-accounting-model.md.
  */
 export function isContractScheduleOverdue(schedule: OverdueScheduleInput, currency: CurrencyCode, now: Date = new Date()): boolean {
-  if (schedule.status === 'PAID') return false
   if (contractScheduleOutstanding(schedule.expectedAmount, schedule.paidAmount, currency) <= 0) return false
   return scheduleEffectiveDueTime(schedule) < now.getTime()
 }

@@ -10,7 +10,7 @@
  * Auth: SHOP_ADMIN (scoped to their own shop) or SUPER_ADMIN
  */
 
-import { NextRequest, after } from 'next/server'
+import { NextRequest } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireApiSession } from '@/lib/api-auth'
@@ -18,7 +18,7 @@ import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { computeNasiyaPaymentScore } from '@/lib/nasiya-payment-score'
-import { deriveNasiyaOverdue } from '@/lib/nasiya-utils'
+import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { computeCustomerTrustRating, isValidTrustTier, type CustomerNasiyaInput } from '@/lib/nasiya-customer-trust'
 import { logger } from '@/lib/logger'
@@ -153,13 +153,19 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       delayedUntil: s.delayedUntil,
       expectedAmount: Number(s.expectedAmount),
       paidAmount: Number(s.paidAmount),
+      contractExpectedAmount: Number(s.contractExpectedAmount),
+      contractPaidAmount: Number(s.contractPaidAmount),
     }))
-    // Same derivation the nasiyalar list uses (src/lib/server/shop-lists.ts) —
-    // a single source of truth so the detail page's badge/buttons/score can
-    // never disagree with the list. This also self-heals a nasiya whose
-    // schedules are effectively fully paid (within COMPLETION_ROUNDING_TOLERANCE_UZS)
-    // but whose stored `status` hasn't been flipped to COMPLETED yet.
-    const derived = deriveNasiyaOverdue({ status: nasiya.status, schedules: scheduleInputs })
+    // Same contract-authoritative derivation the nasiya list uses. The legacy
+    // UZS schedule mirror can diverge when exchange rates move, so it must
+    // never decide this badge or whether a final payment remains possible.
+    const derived = deriveContractNasiyaStatus({
+      status: nasiya.status,
+      contractCurrency: nasiya.contractCurrency,
+      contractFinalAmount: Number(nasiya.contractFinalAmount),
+      contractRemainingAmount: Number(nasiya.contractRemainingAmount),
+      schedules: scheduleInputs,
+    })
 
     // Reason text must respect the shop's selected display currency, not
     // hardcode UZS — see docs/nasiya-payment-scoring.md. The score itself
@@ -181,22 +187,6 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       currency,
       nasiya.contractCurrency,
     )
-
-    // Best-effort self-heal: persist the COMPLETED status now that we know
-    // it's true, so the raw DB column stops disagreeing with the derived
-    // display (dashboard active-nasiya counts read the raw column directly).
-    // Never blocks the response; a failure here just means the next payment
-    // attempt (which re-derives the same way) tries again.
-    if (derived.displayStatus === 'COMPLETED' && nasiya.status !== 'COMPLETED') {
-      after(() =>
-        prisma.nasiya
-          .updateMany({
-            where: { id: nasiya.id, status: { in: ['ACTIVE', 'OVERDUE'] } },
-            data: { remainingAmount: 0, status: 'COMPLETED' },
-          })
-          .catch((e) => logger.warn('nasiya completion self-heal failed', { event: 'nasiya.self_heal_failed', error: e }))
-      )
-    }
 
     // Item 12 — customer trust rating, aggregated across ALL of this
     // customer's nasiyas in this shop (not just this one deal).

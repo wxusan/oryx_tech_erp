@@ -831,3 +831,33 @@ Regression coverage:
   `tests/nasiya-payment-contract-currency.guard.test.ts`: API/allocation
   source guards verify the shared helper remains wired into the route and
   pure allocator.
+
+## 26. Nasiya status is contract-authoritative — P0-01 fixed
+
+**Invariant:** a Nasiya schedule or parent is paid/completed only from its
+native contract-currency balance. The historic UZS `expectedAmount`,
+`paidAmount`, and parent `remainingAmount` fields are compatibility mirrors;
+they may diverge when a payment is converted at a different USD/UZS rate and
+must never decide financial state.
+
+`src/lib/nasiya-contract-status.ts` is the shared read-path derivation:
+
+- a schedule is `PAID` only when
+  `contractExpectedAmount - contractPaidAmount` is below the strict native
+  dust threshold; `$0.01` / `500 so'm` remain meaningful debt;
+- otherwise the schedule is `OVERDUE` after
+  `delayedUntil ?? dueDate`, `PARTIAL` after a native partial payment, and
+  `PENDING`/`DEFERRED` otherwise;
+- a parent is `COMPLETED` only when every native schedule is paid. A stored
+  `COMPLETED` parent is not trusted if a native schedule still owes money.
+
+The Nasiya list, detail API, CSV/XLSX export, dashboard active-count
+correction, and payment route use this derivation. The detail GET endpoint is
+read-only: it no longer writes a best-effort `COMPLETED` status based on a
+legacy UZS read. The payment endpoint rejects only a **contract-complete**
+parent, so a stale raw `COMPLETED` row can still receive its real final
+payment.
+
+Historical records are not automatically rewritten during reads. See
+`docs/nasiya-contract-status-repair-plan.md` for the approved dry-run,
+reconciliation, audit, and verification procedure.

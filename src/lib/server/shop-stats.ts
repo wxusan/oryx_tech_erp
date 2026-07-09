@@ -7,6 +7,7 @@ import { shopCacheTag } from '@/lib/server/cache-tags'
 import { tashkentMonthRangeFromKey } from '@/lib/timezone'
 import { getUsdUzsRate } from '@/lib/server/currency'
 import { computeShopStatsFromRows } from '@/lib/shop-stats-formulas'
+import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
 
 type StatsRole = Session['user']['role']
 
@@ -155,7 +156,13 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
         status: true,
         contractExpectedAmount: true,
         contractPaidAmount: true,
-        nasiya: { select: { contractCurrency: true } },
+        nasiya: {
+          select: {
+            id: true,
+            status: true,
+            contractCurrency: true,
+          },
+        },
       },
     }),
 
@@ -245,6 +252,25 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     }),
   ])
 
+  // Parent status is normally maintained by the payment transaction. Older
+  // rows can however be marked COMPLETED by legacy-UZS status derivation
+  // while a PARTIAL/OVERDUE native schedule still owes money after FX drift.
+  // Include those contracts in the active count without writing historical
+  // data during a dashboard read; the repair plan covers persistent cleanup.
+  const falseCompletedNasiyaIds = new Set(
+    nasiyaSchedulesForStats
+      .filter(
+        (schedule) =>
+          schedule.nasiya.status === 'COMPLETED' &&
+          contractScheduleOutstanding(
+            Number(schedule.contractExpectedAmount),
+            Number(schedule.contractPaidAmount),
+            schedule.nasiya.contractCurrency,
+          ) > 0,
+      )
+      .map((schedule) => schedule.nasiya.id),
+  )
+
   const computed = computeShopStatsFromRows({
     now,
     monthStart,
@@ -255,7 +281,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     saleReceivedSum: saleReceivedAgg._sum.amount,
     nasiyaSoldThisMonth,
     nasiyaReceivedSum: nasiyaReceivedAgg._sum.amount,
-    activeNasiyalar,
+    activeNasiyalar: activeNasiyalar + falseCompletedNasiyaIds.size,
     nasiyaSchedulesForStats,
     unpaidSales,
     inventoryPurchaseCostSum: inventoryAgg._sum.purchasePrice,

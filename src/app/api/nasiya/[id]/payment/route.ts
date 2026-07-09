@@ -12,8 +12,9 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
-import { calculateRemaining, isScheduleOverdue } from '@/lib/nasiya-utils'
+import { calculateRemaining } from '@/lib/nasiya-utils'
 import { convertPaymentToContractCurrency, contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'
+import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { allocateNasiyaPayment, totalContractOutstanding } from '@/lib/nasiya-payment-allocation'
 import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -129,7 +130,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             },
           })
           if (!nasiya) throw { status: 404, message: 'Nasiya topilmadi' }
-          if (nasiya.status === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }
+          const currentContractStatus = deriveContractNasiyaStatus({
+            status: nasiya.status,
+            contractCurrency: nasiya.contractCurrency,
+            contractFinalAmount: Number(nasiya.contractFinalAmount),
+            contractRemainingAmount: Number(nasiya.contractRemainingAmount),
+            schedules: nasiya.schedules.map((schedule) => ({
+              status: schedule.status,
+              dueDate: schedule.dueDate,
+              delayedUntil: schedule.delayedUntil,
+              expectedAmount: Number(schedule.expectedAmount),
+              paidAmount: Number(schedule.paidAmount),
+              contractExpectedAmount: Number(schedule.contractExpectedAmount),
+              contractPaidAmount: Number(schedule.contractPaidAmount),
+            })),
+          })
+          // A raw COMPLETED parent can be stale after legacy-UZS/contract FX
+          // drift. Reject only a contract-complete nasiya so its real final
+          // payment remains possible.
+          if (currentContractStatus.displayStatus === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }
 
           if (deferredToNext && idempotencyKey) {
             const existingDeferral = await tx.nasiyaDeferral.findUnique({
@@ -188,12 +207,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             }
           }
 
-          // Eligibility filter: a schedule already marked PAID is skipped as a
-          // cheap short-circuit; every other schedule is still evaluated by the
-          // pure allocator below, which decides completion from the CONTRACT
-          // ledger, never the legacy one — see nasiya-payment-allocation.ts
-          // (item 4 rate-drift fix).
-          const unpaidSchedules = [...nasiya.schedules].filter((schedule) => schedule.status !== 'PAID')
+          // Eligibility is contract-ledger-based, not a stored schedule label:
+          // a legacy-derived PAID label must not prevent settling native debt.
+          const unpaidSchedules = [...nasiya.schedules].filter(
+            (schedule) =>
+              contractScheduleOutstanding(
+                Number(schedule.contractExpectedAmount),
+                Number(schedule.contractPaidAmount),
+                contractCurrency,
+              ) > 0,
+          )
           const selectedOutstanding = contractScheduleOutstanding(
             Number(selectedSchedule.contractExpectedAmount),
             Number(selectedSchedule.contractPaidAmount),
@@ -363,6 +386,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             delayedUntil: s.delayedUntil,
             expectedAmount: Number(s.expectedAmount),
             paidAmount: Number(s.paidAmount),
+            contractExpectedAmount: Number(s.contractExpectedAmount),
+            contractPaidAmount: Number(s.contractPaidAmount),
           }))
           const totalPaid = allSchedules.reduce((sum: number, s: { paidAmount: unknown }) => sum + Number(s.paidAmount), 0)
           const remaining = calculateRemaining(Number(nasiya.finalNasiyaAmount), totalPaid)
@@ -372,30 +397,22 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           const contractTotalPaid = allSchedules.reduce((sum, s) => sum + Number(s.contractPaidAmount), 0)
           const contractRemaining = Math.max(0, Number(nasiya.contractFinalAmount) - contractTotalPaid)
 
-          // Completion is decided from the contract ledger — currency-aware
-          // tolerance (500 so'm / $0.01), never the legacy UZS remainder, so a
-          // USD contract never gets stuck "Faol" over UZS-sized rounding dust
-          // (or the reverse: closed early by a UZS tolerance too loose for cents).
-          const contractAllFullyPaid =
-            allSchedules.length > 0 &&
-            allSchedules.every(
-              (s) => contractScheduleOutstanding(Number(s.contractExpectedAmount), Number(s.contractPaidAmount), contractCurrency) <= 0,
-            )
-          // Overdue-ness is due-date-driven (schedule.status/dueDate), not an
-          // amount comparison, so it stays on the existing currency-agnostic check.
-          const hasOverdue = scheduleInputs.some((s) => isScheduleOverdue(s))
-
-          const newStatus = contractAllFullyPaid || contractRemaining <= 0 ? 'COMPLETED' : hasOverdue ? 'OVERDUE' : 'ACTIVE'
-          // Only true the instant a nasiya crosses into COMPLETED — the guard at
-          // the top of this transaction already rejects a request against a
-          // nasiya whose stored status is COMPLETED, so reaching this line always
-          // means the nasiya started as ACTIVE/OVERDUE; this can never fire twice.
+          const derivedAfterPayment = deriveContractNasiyaStatus({
+            status: nasiya.status,
+            contractCurrency,
+            contractFinalAmount: Number(nasiya.contractFinalAmount),
+            contractRemainingAmount: contractRemaining,
+            schedules: scheduleInputs,
+          })
+          const newStatus = derivedAfterPayment.displayStatus
+          // The contract-complete guard above excludes an already-complete
+          // contract, so reaching COMPLETED here is a real transition.
           const justCompleted = newStatus === 'COMPLETED'
-          // Snap the stored remaining debt to exactly 0 once effectively complete
-          // in contract-currency terms — clean bookkeeping instead of a lingering
-          // rounding-dust remainder, kept in lockstep across both ledgers.
-          const remainingToStore = contractAllFullyPaid ? 0 : remaining
-          const contractRemainingToStore = contractAllFullyPaid ? 0 : contractRemaining
+          // The legacy UZS fields stay compatibility snapshots. Both parent
+          // status and contract remainder above are decided only by native
+          // contract schedule amounts, so an FX-rate move cannot close debt.
+          const remainingToStore = newStatus === 'COMPLETED' ? 0 : remaining
+          const contractRemainingToStore = newStatus === 'COMPLETED' ? 0 : contractRemaining
 
           await tx.nasiya.update({
             where: { id: nasiyaId },

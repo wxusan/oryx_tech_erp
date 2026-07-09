@@ -18,8 +18,10 @@ describe('nasiyalar list loader derives overdue server-side', () => {
     expect(src).toContain('paidAmount: true')
   })
 
-  it('uses the shared canonical derivation and exposes display fields', () => {
-    expect(src).toContain('deriveNasiyaOverdue')
+  it('uses the shared contract-authoritative derivation and exposes display fields', () => {
+    expect(src).toContain('deriveContractNasiyaStatus')
+    expect(src).toContain('contractExpectedAmount: true')
+    expect(src).toContain('contractPaidAmount: true')
     expect(src).toContain('displayStatus')
     expect(src).toContain('isOverdue')
     expect(src).toContain('overdueAmount')
@@ -30,11 +32,7 @@ describe('nasiyalar list loader derives overdue server-side', () => {
 describe('nasiyalar list client renders the derived display status', () => {
   const src = read('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')
 
-  it('status filtering is real server-side pagination (GET /api/nasiya?status=...), not a client-side check against the lagging n.status', () => {
-    // The list is now server-paginated (true skip/take/total, not a
-    // load-everything-then-filter-in-JS array), so the status filter has to
-    // travel to the server as a query param instead of running as a
-    // client-side .filter() — see getShopNasiyalarList in shop-lists.ts.
+  it('status filtering requests the server’s contract-derived status, not a client-side raw status check', () => {
     expect(src).toContain("params.set('status', filter)")
     expect(src).not.toContain('n.status === activeFilter')
   })
@@ -45,12 +43,12 @@ describe('nasiyalar list client renders the derived display status', () => {
   })
 })
 
-describe('nasiya detail page derives per-row overdue', () => {
+describe('nasiya detail page derives each schedule from contract currency', () => {
   const src = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
 
-  it('uses scheduleDisplayStatus for the row badge instead of the raw status', () => {
-    expect(src).toContain('rowDisplayStatus(row)')
-    expect(src).toContain('scheduleDisplayStatus')
+  it('uses deriveContractScheduleStatus for the row badge instead of the raw status', () => {
+    expect(src).toContain('rowDisplayStatus(row, nasiya.contractCurrency)')
+    expect(src).toContain('deriveContractScheduleStatus')
     expect(src).not.toContain('status={row.status as RowStatus}')
   })
 })

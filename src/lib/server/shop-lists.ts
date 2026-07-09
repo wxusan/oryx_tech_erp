@@ -3,7 +3,8 @@ import 'server-only'
 import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { enrichLogsWithActors } from '@/lib/server/log-actors'
-import { deriveNasiyaOverdue, type NasiyaDisplayStatus } from '@/lib/nasiya-utils'
+import type { NasiyaDisplayStatus } from '@/lib/nasiya-utils'
+import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { computeNasiyaPaymentScore, type NasiyaPaymentScore } from '@/lib/nasiya-payment-score'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { computeSaleContractMargin, type PurchaseCostLike } from '@/lib/nasiya-contract'
@@ -367,11 +368,9 @@ export type NasiyaStatusFilter = 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED
 export interface ShopNasiyalarQuery {
   search?: string
   /**
-   * Filters on the stored parent `status` column (same convention already
-   * used by GET /api/nasiya) — not the derived `displayStatus`. The cron
-   * (see invalidateShopOverdueCron) keeps `status` in sync with the derived
-   * overdue state, so this only lags the derived value for the (short)
-   * window between a schedule going overdue and the next cron run.
+   * Filters on the contract-derived display status. A status predicate cannot
+   * be pushed to the raw parent column: an FX-drifted parent may be stored
+   * COMPLETED while its native schedule still owes money.
    */
   status?: NasiyaStatusFilter
   skip?: number
@@ -401,7 +400,6 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
   const where: Prisma.NasiyaWhereInput = {
     shopId,
     deletedAt: null,
-    ...(query.status ? { status: query.status } : {}),
     ...(search
       ? {
           OR: [
@@ -416,12 +414,14 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
       : {}),
   }
 
-  const [rows, total] = await Promise.all([
+  const [rows, rawTotal] = await Promise.all([
     prisma.nasiya.findMany({
     where,
     orderBy: { createdAt: 'desc' },
-    skip,
-    take,
+    // A requested status is itself derived from contract schedules. Fetch
+    // matching search candidates first, then filter/paginate the derived
+    // status below; raw status filtering here would hide P0-01 debt.
+    ...(query.status ? {} : { skip, take }),
     select: {
       id: true,
       totalAmount: true,
@@ -475,7 +475,7 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
   // Single `now` for the whole batch so all rows are judged against the same instant.
   const now = new Date()
 
-  const items = rows
+  const derivedItems = rows
     .map((nasiya) => {
       const scheduleInputs = nasiya.schedules.map((s) => ({
         status: s.status,
@@ -483,8 +483,19 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
         delayedUntil: s.delayedUntil,
         expectedAmount: Number(s.expectedAmount),
         paidAmount: Number(s.paidAmount),
+        contractExpectedAmount: Number(s.contractExpectedAmount),
+        contractPaidAmount: Number(s.contractPaidAmount),
       }))
-      const derived = deriveNasiyaOverdue({ status: nasiya.status, schedules: scheduleInputs }, now)
+      const derived = deriveContractNasiyaStatus(
+        {
+          status: nasiya.status,
+          contractCurrency: nasiya.contractCurrency,
+          contractFinalAmount: Number(nasiya.contractFinalAmount),
+          contractRemainingAmount: Number(nasiya.contractRemainingAmount),
+          schedules: scheduleInputs,
+        },
+        now,
+      )
       // Payment score must read the deal's own contract-currency amounts —
       // see docs/currency-accounting-model.md — never the legacy UZS
       // snapshot, which would misjudge overdue tolerance for a USD contract.
@@ -549,6 +560,10 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
       if (nextRight == null) return -1
       return nextLeft - nextRight
     })
+
+  const matchingItems = query.status ? derivedItems.filter((item) => item.displayStatus === query.status) : derivedItems
+  const items = query.status ? matchingItems.slice(skip, skip + take) : matchingItems
+  const total = query.status ? matchingItems.length : rawTotal
 
   return { items, total, skip, take }
 }

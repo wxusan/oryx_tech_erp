@@ -32,10 +32,10 @@ describe('computeNasiyaPaymentScore — currency-aware overdue tolerance', () =>
     expect(score.color).toBe('red')
   })
 
-  it('USD contract: a genuine 1-cent rounding dust is forgiven (not overdue)', () => {
+  it('USD contract: one exact cent remains meaningful and overdue when past due', () => {
     const s = schedule({ expectedAmount: 200, paidAmount: 199.99, status: 'PARTIAL', dueDate: '2020-01-01T00:00:00.000Z' })
     const score = computeNasiyaPaymentScore({ schedules: [s] }, now, usdDisplay, 'USD')
-    expect(score.factors.overdueScheduleCount).toBe(0)
+    expect(score.factors.overdueScheduleCount).toBe(1)
   })
 
   it('USD contract overdue reason shows the native $ amount, not a UZS-misread figure', () => {

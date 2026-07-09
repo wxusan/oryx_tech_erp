@@ -60,7 +60,7 @@ describe('nasiya-contract.ts money helpers accept serialized-Decimal strings wit
 
   it('roundContractMoney, contractScheduleOutstanding, convertContractAmountToUzs, convertPaymentToContractCurrency all coerce string inputs', () => {
     expect(roundContractMoney('500.005' as unknown as number, 'USD')).toBe(500.01)
-    expect(contractScheduleOutstanding('500.00' as unknown as number, '499.99' as unknown as number, 'USD')).toBe(0)
+    expect(contractScheduleOutstanding('500.00' as unknown as number, '499.99' as unknown as number, 'USD')).toBe(0.01)
     expect(convertContractAmountToUzs('500' as unknown as number, 'USD', 12_500)).toBe(6_250_000)
     expect(convertPaymentToContractCurrency('500' as unknown as number, 'USD', 'USD', null)).toBe(500)
   })
