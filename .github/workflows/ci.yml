@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: oryx
+          POSTGRES_PASSWORD: oryx_test_password
+          POSTGRES_DB: oryx_integration
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U oryx -d oryx_integration"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgresql://oryx:oryx_test_password@127.0.0.1:5432/oryx_integration
+      DATABASE_URL: postgresql://oryx:oryx_test_password@127.0.0.1:5432/oryx_integration
+      DIRECT_URL: postgresql://oryx:oryx_test_password@127.0.0.1:5432/oryx_integration
+      NEXTAUTH_SECRET: integration-only-secret-that-is-long-enough-for-ci
+      NEXTAUTH_URL: http://127.0.0.1:3000
+      INTEGRATION_DB_RESET: 'yes'
+      TEST_DATABASE_CONFIRM: reset-disposable-integration-database
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+      - run: npm ci
+      - run: npm run prisma:generate
+      - run: npm run prisma:validate
+      - run: npm test
+      - run: npm run test:integration
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - run: git diff --check
