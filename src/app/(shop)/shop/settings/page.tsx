@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { uzDateTime } from '@/lib/dates'
+import { useShopCurrency } from '@/lib/use-shop-currency'
 import type { ApiResponse } from '@/types'
 
 interface ShopAdminProfile {
@@ -45,6 +46,7 @@ interface ShopProfile {
   status: string
   subscriptionDue: string
   preferredCurrency: 'UZS' | 'USD'
+  usdUzsRate: number | null
 }
 
 interface PasswordForm {
@@ -73,6 +75,7 @@ function formatDate(value: string | null | undefined) {
 }
 
 export default function ShopSettingsPage() {
+  const { setCurrency } = useShopCurrency()
   const [profile, setProfile] = useState<ShopAdminProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -221,7 +224,10 @@ export default function ShopSettingsPage() {
       })
       if (!response.ok) throw new Error(await readApiError(response))
       const json: ApiResponse<ShopProfile> = await response.json()
-      if (json.data) setShop(json.data)
+      if (json.data) {
+        setShop(json.data)
+        setCurrency({ currency: json.data.preferredCurrency, usdUzsRate: json.data.usdUzsRate })
+      }
       setShopSuccess("Do'kon ma'lumotlari yangilandi.")
     } catch (err) {
       setShopError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
