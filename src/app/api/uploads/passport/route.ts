@@ -8,46 +8,16 @@ import { getSupabaseAdminClient, PRIVATE_STORAGE_BUCKET } from '@/lib/supabase-a
 import { logger } from '@/lib/logger'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
+import { ensurePrivateStorageBucket, PRIVATE_UPLOAD_MAX_FILE_SIZE } from '@/lib/server/private-storage-bucket'
 
 export const runtime = 'nodejs'
 
-const MAX_FILE_SIZE = 5 * 1024 * 1024
+const MAX_FILE_SIZE = PRIVATE_UPLOAD_MAX_FILE_SIZE
 const ALLOWED_MIME_TYPES = new Map([
   ['image/jpeg', 'jpg'],
   ['image/png', 'png'],
   ['image/webp', 'webp'],
 ])
-
-async function ensurePrivateBucket() {
-  const supabase = getSupabaseAdminClient()
-  const { data: buckets, error: listError } = await supabase.storage.listBuckets()
-
-  if (listError) throw listError
-  const existingBucket = buckets.find((bucket) => bucket.name === PRIVATE_STORAGE_BUCKET)
-  if (existingBucket) {
-    if (existingBucket.public) {
-      const { error: updateError } = await supabase.storage.updateBucket(PRIVATE_STORAGE_BUCKET, {
-        public: false,
-        fileSizeLimit: `${MAX_FILE_SIZE}`,
-        allowedMimeTypes: [...ALLOWED_MIME_TYPES.keys()],
-      })
-      if (updateError) throw updateError
-    }
-    return supabase
-  }
-
-  const { error: createError } = await supabase.storage.createBucket(PRIVATE_STORAGE_BUCKET, {
-    public: false,
-    fileSizeLimit: `${MAX_FILE_SIZE}`,
-    allowedMimeTypes: [...ALLOWED_MIME_TYPES.keys()],
-  })
-
-  if (createError && !createError.message.toLowerCase().includes('already exists')) {
-    throw createError
-  }
-
-  return supabase
-}
 
 function isAuthorizedForKey(role: string, sessionShopId: string | null | undefined, key: string) {
   if (role === 'SUPER_ADMIN') return true
@@ -89,7 +59,7 @@ export async function POST(request: Request) {
     })
     if (!shop) return forbidden("Do'kon faol emas yoki topilmadi")
 
-    const supabase = await ensurePrivateBucket()
+    const supabase = await ensurePrivateStorageBucket()
     const key = `shops/${shopId}/passports/${Date.now()}-${randomUUID()}.${extension}`
     const bytes = Buffer.from(await file.arrayBuffer())
     if (!hasValidImageSignature(bytes, file.type)) {

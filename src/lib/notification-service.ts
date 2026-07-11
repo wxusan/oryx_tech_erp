@@ -19,6 +19,8 @@ import { logger } from '@/lib/logger'
 import { recordOpsEvent } from '@/lib/server/ops-events'
 
 const MAX_NOTIFICATION_ATTEMPTS = 5
+const NOTIFICATION_BATCH_SIZE = 100
+const NOTIFICATION_SEND_CONCURRENCY = 5
 
 // How long a row may sit in PROCESSING before it is considered stale and
 // reclaimed. Guards against rows stuck forever if the process crashes between
@@ -43,6 +45,11 @@ interface QueueNotificationParams {
   relatedType?: string
 }
 
+interface QueueNotificationOptions {
+  /** Broadcast callers enqueue every recipient first, then trigger one drain. */
+  processImmediately?: boolean
+}
+
 // ---------------------------------------------------------------------------
 // queueNotification
 // ---------------------------------------------------------------------------
@@ -55,6 +62,7 @@ interface QueueNotificationParams {
  */
 export async function queueNotification(
   params: QueueNotificationParams,
+  options: QueueNotificationOptions = {},
 ): Promise<void> {
   try {
     const scheduledAt = params.scheduledAt ?? new Date()
@@ -83,7 +91,7 @@ export async function queueNotification(
     // Attempt immediate delivery for notifications scheduled now or in the past.
     // Use the queue processor so the PROCESSING claim remains atomic with
     // every other worker that may be draining notifications at the same time.
-    if (scheduledAt <= new Date()) {
+    if (options.processImmediately !== false && scheduledAt <= new Date()) {
       await processPendingNotifications()
     }
   } catch (error) {
@@ -162,11 +170,16 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
         ],
       },
       orderBy: { scheduledAt: 'asc' },
-      take: 100,
+      take: NOTIFICATION_BATCH_SIZE,
     })
 
-    for (const notification of pending) {
-      try {
+    // Telegram/network latency dominates this path. Process small concurrent
+    // batches so a 100-row drain is not 100 sequential round trips, while the
+    // per-row atomic claim still prevents duplicate delivery across workers.
+    for (let offset = 0; offset < pending.length; offset += NOTIFICATION_SEND_CONCURRENCY) {
+      const batch = pending.slice(offset, offset + NOTIFICATION_SEND_CONCURRENCY)
+      await Promise.all(batch.map(async (notification) => {
+        try {
         const claim = await prisma.notification.updateMany({
           where: {
             id: notification.id,
@@ -181,7 +194,7 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
             lastAttemptAt: new Date(),
           },
         })
-        if (claim.count !== 1) continue
+        if (claim.count !== 1) return
         attempted++
 
         // Attach the related device photo (short-lived signed URL) when one
@@ -245,7 +258,7 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
             })
           }
         }
-      } catch (innerError) {
+        } catch (innerError) {
         const attemptCount = notification.attemptCount + 1
         const exhausted = attemptCount >= MAX_NOTIFICATION_ATTEMPTS
         if (exhausted) cancelled++
@@ -268,7 +281,8 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
           status: notification.type,
           metadata: { attempts: attemptCount, error: innerError instanceof Error ? innerError.message : String(innerError) },
         })
-      }
+        }
+      }))
     }
 
     if (attempted > 0) {
@@ -333,16 +347,23 @@ export async function notifyShopAdmins(
 
     await Promise.all(
       targets.map((admin) =>
-        queueNotification({
-          shopId,
-          type,
-          message,
-          telegramId: admin.telegramId,
-          relatedId,
-          relatedType,
-        }),
+        queueNotification(
+          {
+            shopId,
+            type,
+            message,
+            telegramId: admin.telegramId,
+            relatedId,
+            relatedType,
+          },
+          { processImmediately: false },
+        ),
       ),
     )
+
+    // All recipients are now durable. One bounded-concurrency drain handles
+    // the broadcast instead of starting one competing drain per admin.
+    await processPendingNotifications()
 
     logger.info('queued notification for shop admins', {
       event: 'notification.broadcast',
