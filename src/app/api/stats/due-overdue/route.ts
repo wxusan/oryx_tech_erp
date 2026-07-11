@@ -22,12 +22,17 @@ export async function GET() {
     const resolved = await resolveActiveShopId(guarded.session, null)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const now = new Date()
 
     const [overdueSchedules, overdueSales, currency] = await Promise.all([
       prisma.nasiyaSchedule.findMany({
         where: {
           shopId,
           status: { in: ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'] },
+          OR: [
+            { delayedUntil: { lt: now } },
+            { delayedUntil: null, dueDate: { lt: now } },
+          ],
           nasiya: { is: { deletedAt: null, status: { not: 'CANCELLED' } } },
         },
         select: {
@@ -40,13 +45,18 @@ export async function GET() {
         },
       }),
       prisma.sale.findMany({
-        where: { shopId, deletedAt: null, paidFully: false, remainingAmount: { gt: 0 } },
+        where: {
+          shopId,
+          deletedAt: null,
+          paidFully: false,
+          remainingAmount: { gt: 0 },
+          dueDate: { lt: now },
+        },
         select: { id: true, dueDate: true, contractCurrency: true, contractRemainingAmount: true },
       }),
       getShopCurrencyContext(shopId),
     ])
 
-    const now = new Date()
     const overdueNasiyaSchedules = overdueSchedules.filter((s) =>
       isContractScheduleOverdue(
         { status: s.status, dueDate: s.dueDate, delayedUntil: s.delayedUntil, expectedAmount: Number(s.contractExpectedAmount), paidAmount: Number(s.contractPaidAmount) },

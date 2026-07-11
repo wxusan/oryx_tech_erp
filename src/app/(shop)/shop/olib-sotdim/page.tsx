@@ -46,6 +46,7 @@ const statusStyles: Record<PayableStatus, string> = {
 interface OlibSotdimRow {
   id: string
   amount: number
+  contractCurrency: 'UZS' | 'USD'
   status: PayableStatus
   dueDate: string
   paidAt: string | null
@@ -53,8 +54,8 @@ interface OlibSotdimRow {
   supplierPhone: string
   supplierLocation: string | null
   createdAt: string
-  device: { id: string; model: string; imei: string; color: string | null; storage: string | null; purchasePrice: number }
-  sale: { id: string; salePrice: number; customer: { name: string; phone: string } }
+  device: { id: string; model: string; imei: string; color: string | null; storage: string | null; purchasePrice: number; purchaseCurrency: 'UZS' | 'USD' }
+  sale: { id: string; salePrice: number; contractCurrency: 'UZS' | 'USD'; customer: { name: string; phone: string } }
   profit: number
 }
 
@@ -62,6 +63,8 @@ export default function OlibSotdimPage() {
   const { currency } = useShopCurrency()
   const [rows, setRows] = useState<OlibSotdimRow[]>([])
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [payFor, setPayFor] = useState<OlibSotdimRow | null>(null)
@@ -71,16 +74,24 @@ export default function OlibSotdimPage() {
   const [payError, setPayError] = useState('')
   const [paySubmitting, setPaySubmitting] = useState(false)
 
-  function fmt(n: number) {
-    return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
+  function fmt(n: number, valueCurrency: 'UZS' | 'USD' = currency.currency) {
+    return formatMoneyByCurrency(n, valueCurrency, currency.usdUzsRate)
   }
 
-  function load(query = search) {
+  const pageSize = 25
+
+  function load(query = search, nextPage = page) {
     setLoading(true)
-    fetch(`/api/olib-sotdim?search=${encodeURIComponent(query)}`)
+    setError('')
+    const params = new URLSearchParams({ search: query, skip: String(nextPage * pageSize), take: String(pageSize) })
+    fetch(`/api/olib-sotdim?${params.toString()}`)
       .then((res) => res.json())
       .then((json) => {
-        if (json.success) setRows(json.data)
+        if (json.success) {
+          setRows(json.data.items)
+          setTotal(json.data.total)
+          setPage(nextPage)
+        }
         else setError(json.error || "Ro'yxat yuklanmadi")
       })
       .catch(() => setError("Ro'yxat yuklanmadi"))
@@ -93,7 +104,10 @@ export default function OlibSotdimPage() {
       .then((res) => res.json())
       .then((json) => {
         if (ignore) return
-        if (json.success) setRows(json.data)
+        if (json.success) {
+          setRows(json.data.items)
+          setTotal(json.data.total)
+        }
         else setError(json.error || "Ro'yxat yuklanmadi")
       })
       .catch(() => {
@@ -161,9 +175,22 @@ export default function OlibSotdimPage() {
           placeholder="Yetkazib beruvchi, mijoz, model yoki IMEI bo'yicha qidirish..."
           className="h-9 text-sm border-zinc-200 rounded"
         />
-        <Button onClick={() => load()} className="h-9 rounded bg-zinc-900 px-4 text-sm text-white">
+        <Button onClick={() => load(search, 0)} className="h-9 rounded bg-zinc-900 px-4 text-sm text-white">
           Qidirish
         </Button>
+      </div>
+
+      <div className="flex items-center justify-between text-xs text-zinc-500">
+        <span>{total} ta operatsiya</span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" disabled={loading || page === 0} onClick={() => load(search, page - 1)}>
+            Oldingi
+          </Button>
+          <span>{page + 1} / {Math.max(1, Math.ceil(total / pageSize))}</span>
+          <Button variant="outline" size="sm" disabled={loading || (page + 1) * pageSize >= total} onClick={() => load(search, page + 1)}>
+            Keyingi
+          </Button>
+        </div>
       </div>
 
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">{error}</div>}
@@ -200,10 +227,10 @@ export default function OlibSotdimPage() {
                     <div className="text-zinc-900">{row.sale.customer.name}</div>
                     <div className="text-xs text-zinc-500">{formatUzPhoneDisplay(row.sale.customer.phone)}</div>
                   </td>
-                  <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.device.purchasePrice)}</td>
-                  <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.sale.salePrice)}</td>
+                  <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.device.purchasePrice, row.device.purchaseCurrency)}</td>
+                  <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.sale.salePrice, row.sale.contractCurrency)}</td>
                   <td className="px-4 py-3">
-                    <span className={row.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>{fmt(row.profit)}</span>
+                    <span className={row.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>{fmt(row.profit, row.contractCurrency)}</span>
                     {row.status !== 'PAID' && <div className="text-[10px] text-amber-600 mt-0.5">Kutilayotgan</div>}
                   </td>
                   <td className="px-4 py-3">
@@ -237,7 +264,7 @@ export default function OlibSotdimPage() {
           {payFor && (
             <div className="space-y-3">
               <div className="text-sm text-zinc-600">
-                {payFor.supplierName} · {fmt(payFor.amount)}
+                {payFor.supplierName} · {fmt(payFor.amount, payFor.contractCurrency)}
               </div>
               {payError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{payError}</div>}
               <div>

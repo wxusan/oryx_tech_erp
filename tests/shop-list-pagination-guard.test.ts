@@ -80,9 +80,11 @@ describe('the qurilmalar/nasiyalar pages fetch only the first page server-side a
   })
 })
 
-describe('the one genuinely unbounded query found by audit (super-admin shop list) now has a safety cap', () => {
-  it('/api/stats/admin caps its Shop.findMany instead of leaving it unbounded', () => {
+describe('admin expected revenue remains bounded without truncating the aggregate', () => {
+  it('/api/stats/admin aggregates latest payments in SQL instead of loading a capped shop list', () => {
     const source = read('src/app/api/stats/admin/route.ts')
-    expect(source).toMatch(/prisma\.shop\.findMany\(\{\s*\n\s*where:\s*\{[^}]*\},\s*\n\s*take:\s*\d+/)
+    expect(source).not.toContain('prisma.shop.findMany')
+    expect(source).toContain('LEFT JOIN LATERAL')
+    expect(source).toContain('expectedRevenueRows')
   })
 })

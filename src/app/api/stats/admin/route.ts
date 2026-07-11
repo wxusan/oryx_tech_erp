@@ -6,7 +6,6 @@
 import { prisma } from '@/lib/prisma'
 import { ok, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
-import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { tashkentMonthRange } from '@/lib/timezone'
 import { addDays } from 'date-fns'
 import { logger } from '@/lib/logger'
@@ -20,7 +19,7 @@ export async function GET() {
     const { start: monthStart, end: monthEnd } = tashkentMonthRange(now)
     const dueSoonCutoff = addDays(now, 7)
 
-    const [thisMonthResult, totalRevenueResult, totalShops, activeShops, suspendedShops, dueSoon, overdue, shops] =
+    const [thisMonthResult, totalRevenueResult, totalShops, activeShops, suspendedShops, dueSoon, overdue, expectedRevenueRows] =
       await Promise.all([
       // This month's total revenue
       prisma.shopPayment.aggregate({
@@ -64,37 +63,32 @@ export async function GET() {
         },
       }),
 
-      // All shops ordered by subscriptionDue for the table. `expectedRevenue`
-      // below is a real aggregate over every ACTIVE shop, so this can't be
-      // paginated without breaking that number — the cap here is purely a
-      // safety net against unbounded growth (this is the platform operator's
-      // own shop count, not user-generated data), not a page size.
-      prisma.shop.findMany({
-        where: { deletedAt: null },
-        take: 2000,
-        include: {
-          admins: { where: { deletedAt: null, isActive: true }, select: shopAdminPublicSelect },
-          payments: { where: { deletedAt: null }, orderBy: { paidAt: 'desc' }, take: 1 },
-          _count: {
-            select: {
-              devices: { where: { deletedAt: null } },
-              nasiya: { where: { deletedAt: null, status: { not: 'CANCELLED' } } },
-            },
-          },
-        },
-        orderBy: { subscriptionDue: 'asc' },
-      }),
+      // Aggregate over every active shop without loading a capped shop/admin/
+      // payment payload into the function. The dashboard already requests the
+      // separately paginated /api/shops list for its table.
+      prisma.$queryRaw<Array<{ expectedRevenue: number }>>`
+        SELECT COALESCE(
+          SUM(latest.amount / GREATEST(latest.months, 1)),
+          0
+        )::double precision AS "expectedRevenue"
+        FROM "Shop" shop
+        LEFT JOIN LATERAL (
+          SELECT payment.amount, payment.months
+          FROM "ShopPayment" payment
+          WHERE payment."shopId" = shop.id
+            AND payment."deletedAt" IS NULL
+          ORDER BY payment."paidAt" DESC
+          LIMIT 1
+        ) latest ON true
+        WHERE shop.status = 'ACTIVE'::"ShopStatus"
+          AND shop."deletedAt" IS NULL
+      `,
     ])
 
     const thisMonthRevenue = Number(thisMonthResult._sum.amount ?? 0)
     const totalRevenue = Number(totalRevenueResult._sum.amount ?? 0)
     const totalPayments = totalRevenueResult._count.id
-    const expectedRevenue = shops.reduce((sum, shop) => {
-      if (shop.status !== 'ACTIVE') return sum
-      const latestPayment = shop.payments[0]
-      if (!latestPayment) return sum
-      return sum + Number(latestPayment.amount) / Math.max(1, latestPayment.months)
-    }, 0)
+    const expectedRevenue = Number(expectedRevenueRows[0]?.expectedRevenue ?? 0)
 
     return ok({
       thisMonthRevenue,
@@ -106,7 +100,6 @@ export async function GET() {
       suspendedShops,
       dueSoon,
       overdue,
-      shops,
     })
   } catch (err) {
     logger.error('[GET /api/stats/admin]', { event: 'api.route_error', error: err })

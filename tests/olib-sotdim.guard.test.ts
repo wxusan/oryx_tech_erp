@@ -177,7 +177,7 @@ describe('search: olib-sotdim list is searchable by supplier/customer/device/IME
   const route = read('src/app/api/olib-sotdim/route.ts')
 
   it('the GET query is scoped to the resolved shopId', () => {
-    const whereBlock = route.slice(route.indexOf('const payables = await prisma.supplierPayable.findMany'), route.indexOf('orderBy'))
+    const whereBlock = route.slice(route.indexOf('const where: Prisma.SupplierPayableWhereInput'), route.indexOf('const [payables, total]'))
     expect(whereBlock).toContain('shopId,')
   })
 

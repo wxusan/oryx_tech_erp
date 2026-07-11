@@ -1,5 +1,6 @@
 import 'server-only'
 
+import { cache } from 'react'
 import { prisma } from '@/lib/prisma'
 import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
 
@@ -18,7 +19,7 @@ export class CurrencyRateUnavailableError extends Error {
   }
 }
 
-export async function getShopCurrencyContext(shopId: string): Promise<CurrencyContext> {
+export const getShopCurrencyContext = cache(async function getShopCurrencyContext(shopId: string): Promise<CurrencyContext> {
   const shop = await prisma.shop.findUnique({
     where: { id: shopId },
     select: { preferredCurrency: true },
@@ -31,7 +32,7 @@ export async function getShopCurrencyContext(shopId: string): Promise<CurrencyCo
   } catch {
     return { currency, usdUzsRate: null }
   }
-}
+})
 
 export async function getUsdUzsRate(): Promise<number> {
   const latestCbu = await latestStoredUsdRate('CBU')
