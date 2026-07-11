@@ -27,6 +27,7 @@ import { useShopCurrency } from '@/lib/use-shop-currency'
 import { getDeviceImageSrc } from '@/lib/device-image'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
+import { markFinancialDataChanged } from '@/lib/client-events'
 
 interface Supplier {
   name: string
@@ -417,6 +418,7 @@ export default function QurilmaDetailPage() {
       if (!res.ok || !json.success) {
         throw new Error(json.error || "To'lovni saqlashda xatolik")
       }
+      markFinancialDataChanged()
       setSalePaymentOpen(false)
       setSalePayAmount('')
       setSalePayMethod('')

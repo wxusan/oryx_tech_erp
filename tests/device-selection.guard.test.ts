@@ -9,6 +9,7 @@ function read(rel: string): string {
 
 const SOTUV = 'src/app/(shop)/shop/sotuv/new/page.tsx'
 const NASIYA = 'src/app/(shop)/shop/nasiyalar/new/page.tsx'
+const PICKER = 'src/components/shop/in-stock-device-picker.tsx'
 
 // ── Behavioural: the shared search predicate the pickers use ──────────────────
 describe('deviceMatchesSearch (device picker search)', () => {
@@ -34,7 +35,7 @@ describe('deviceMatchesSearch (device picker search)', () => {
   })
 })
 
-// ── Source guards: selection wiring on both pickers ──────────────────────────
+// ── Source guards: selection wiring on both picker consumers ─────────────────
 for (const [name, file] of [
   ['sotuv/new', SOTUV],
   ['nasiyalar/new', NASIYA],
@@ -42,16 +43,15 @@ for (const [name, file] of [
   describe(`device picker wiring — ${name}`, () => {
     const src = read(file)
 
-    it('only fetches sellable IN_STOCK stock', () => {
-      expect(src).toContain("fetch('/api/devices?status=IN_STOCK')")
+    it('uses the shared bounded server-search picker', () => {
+      expect(src).toContain('<InStockDevicePicker')
+      expect(src).toContain('onSelect={selectDevice}')
     })
 
-    it('rows are real buttons that select (not auto-advance) with visible selected state', () => {
-      expect(src).toContain('type="button"')
-      expect(src).toContain('onClick={() => selectDevice(d)}')
-      expect(src).toContain('const isSelected = selectedDevice?.id === d.id')
-      expect(src).toContain('aria-pressed={isSelected}')
-      expect(src).toContain('Tanlandi')
+    it('keeps normal selection separate from deep-link auto-advance', () => {
+      expect(src).toContain('onSelect={selectDevice}')
+      expect(src).toContain('onDeepLinkSelect={(device) => {')
+      expect(src).toContain('selectDevice(device)')
     })
 
     it('selectDevice sets the device but does NOT change the step', () => {
@@ -65,13 +65,44 @@ for (const [name, file] of [
       expect(src).toContain('Keyingi bosqich')
     })
 
-    it('the loader does not depend on currency-bound values (no reload-on-currency)', () => {
-      // The device-loading effect must end with an empty dependency array.
-      expect(src).toMatch(/loadDevices\(\)\s*return \(\) => \{\s*ignore = true\s*\}\s*\}, \[\]\)/)
-      expect(src).not.toContain('}, [handleSelectDevice])')
+    it('currency only formats prices and is not a device-query dependency', () => {
+      expect(src).toContain('formatPrice={(price) => fmt(price, currency)}')
+      expect(src).not.toContain("fetch('/api/devices")
     })
   })
 }
+
+describe('bounded server-side device picker', () => {
+  const src = read(PICKER)
+
+  it('requests only IN_STOCK rows in 25-row paginated pages', () => {
+    expect(src).toContain("status: 'IN_STOCK'")
+    expect(src).toContain("view: 'picker'")
+    expect(src).toContain("paginated: '1'")
+    expect(src).toContain('const PAGE_SIZE = 25')
+    expect(src).toContain("skip: String(devices.length)")
+  })
+
+  it('debounces search and cancels stale first-page requests', () => {
+    expect(src).toContain('const SEARCH_DEBOUNCE_MS = 250')
+    expect(src).toContain('new AbortController()')
+    expect(src).toContain("params.set('search', debouncedQuery)")
+    expect(src).toContain('return () => controller.abort()')
+  })
+
+  it('renders accessible selectable rows, skeletons, errors and load-more', () => {
+    expect(src).toContain('onClick={() => onSelect(device)}')
+    expect(src).toContain('aria-pressed={isSelected}')
+    expect(src).toContain('aria-busy={loading || loadingMore}')
+    expect(src).toContain('role="alert"')
+    expect(src).toContain('Yana ko‘rsatish')
+  })
+
+  it('resolves deep links through the minimal picker projection', () => {
+    expect(src).toContain('?view=picker')
+    expect(src).toContain("json.data.status !== 'IN_STOCK'")
+  })
+})
 
 describe('submit payloads still carry the selected device id', () => {
   it('sale + nasiya submit include the selected device id', () => {

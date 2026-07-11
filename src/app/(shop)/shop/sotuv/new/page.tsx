@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,20 +15,14 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
-import { displayImei, deviceMatchesSearch } from '@/lib/device-display'
+import { displayImei } from '@/lib/device-display'
 import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, Check } from 'lucide-react'
+import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
+import { markFinancialDataChanged } from '@/lib/client-events'
 
-interface Device {
-  id: string
-  model: string
-  color: string | null
-  storage: string | null
-  batteryHealth: number | null
-  purchasePrice: number
-  imei: string
-}
+type Device = InStockPickerDevice
 
 type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
 
@@ -51,10 +45,6 @@ export default function NewSotuvPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
   const [step, setStep] = useState<1 | 2>(1)
-  const [devices, setDevices] = useState<Device[]>([])
-  const [loading, setLoading] = useState(true)
-  const [loadError, setLoadError] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
 
   // Step 2 form
@@ -100,57 +90,6 @@ export default function NewSotuvPage() {
     if (step > 1) setStep((step - 1) as 1 | 2)
     else router.push('/shop/yangi-operatsiya')
   }
-
-  // Load sellable stock once on mount. Must NOT depend on currency-bound values,
-  // otherwise the list reloads (and drops the user's selection) when the shop
-  // currency resolves.
-  useEffect(() => {
-    let ignore = false
-
-    async function loadDevices() {
-      setLoading(true)
-      setLoadError('')
-
-      try {
-        const res = await fetch('/api/devices?status=IN_STOCK')
-        const json = await res.json()
-        if (!res.ok || !json.success) {
-          throw new Error(json.error || "Qurilmalarni yuklashda xatolik")
-        }
-
-        if (ignore) return
-
-        const nextDevices = json.data as Device[]
-        setDevices(nextDevices)
-
-        // Deep-link from a device page (?deviceId=…): the device is already
-        // chosen, so select it and jump straight to the sale form.
-        const deviceId = new URLSearchParams(window.location.search).get('deviceId')
-        if (deviceId) {
-          const device = nextDevices.find((d) => d.id === deviceId)
-          if (device) {
-            setSelectedDevice(device)
-            setStep(2)
-          } else {
-            setLoadError('Tanlangan qurilma omborda topilmadi')
-          }
-        }
-      } catch (err) {
-        if (!ignore) {
-          setLoadError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
-        }
-      } finally {
-        if (!ignore) setLoading(false)
-      }
-    }
-
-    loadDevices()
-    return () => {
-      ignore = true
-    }
-  }, [])
-
-  const filteredDevices = devices.filter((d) => deviceMatchesSearch(d, searchQuery))
 
   const canSubmit =
     !!selectedDevice &&
@@ -203,6 +142,7 @@ export default function NewSotuvPage() {
       if (!res.ok || !json.success) {
         throw new Error(json.error || 'Sotuvni saqlashda xatolik')
       }
+      markFinancialDataChanged()
       router.push(`/shop/qurilmalar/${selectedDevice.id}`)
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Sotuvni saqlashda xatolik')
@@ -263,64 +203,15 @@ export default function NewSotuvPage() {
 
       {step === 1 && (
         <div className="space-y-3">
-          <Input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Qurilmani qidiring (model, IMEI, rang)..."
-            className="h-9 text-sm border-zinc-200 rounded"
-            autoFocus
+          <InStockDevicePicker
+            selectedDevice={selectedDevice}
+            onSelect={selectDevice}
+            onDeepLinkSelect={(device) => {
+              selectDevice(device)
+              setStep(2)
+            }}
+            formatPrice={(price) => fmt(price, currency)}
           />
-          {loadError && (
-            <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">
-              {loadError}
-            </div>
-          )}
-          <div className="border border-zinc-200 rounded overflow-hidden">
-            {loading ? (
-              <div className="px-4 py-6 text-center text-zinc-400 text-sm">Yuklanmoqda...</div>
-            ) : filteredDevices.length === 0 ? (
-              <div className="px-4 py-6 text-center text-zinc-400 text-sm">Qurilma topilmadi</div>
-            ) : (
-              filteredDevices.map((d, i) => {
-                const isSelected = selectedDevice?.id === d.id
-                return (
-                  <button
-                    key={d.id}
-                    type="button"
-                    onClick={() => selectDevice(d)}
-                    aria-pressed={isSelected}
-                    className={`w-full text-left px-4 py-3 cursor-pointer transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-inset ${
-                      isSelected ? 'bg-zinc-900/[0.03] ring-2 ring-inset ring-zinc-900' : 'hover:bg-zinc-50'
-                    } ${i < filteredDevices.length - 1 ? 'border-b border-zinc-100' : ''}`}
-                  >
-                    <div className="flex items-center justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`flex size-5 shrink-0 items-center justify-center rounded-full border ${
-                            isSelected ? 'border-zinc-900 bg-zinc-900 text-white' : 'border-zinc-300'
-                          }`}
-                        >
-                          {isSelected && <Check size={12} />}
-                        </span>
-                        <div>
-                          <div className="font-medium text-sm text-zinc-900">{d.model}</div>
-                          <div className="text-xs text-zinc-500 mt-0.5">{deviceMeta(d)}</div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {isSelected && (
-                          <span className="rounded bg-zinc-900 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                            Tanlandi
-                          </span>
-                        )}
-                        <div className="text-sm font-bold text-zinc-900">{fmt(d.purchasePrice, currency)}</div>
-                      </div>
-                    </div>
-                  </button>
-                )
-              })
-            )}
-          </div>
           <Button
             type="button"
             disabled={!selectedDevice}

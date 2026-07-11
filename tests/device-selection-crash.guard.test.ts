@@ -9,17 +9,15 @@ function read(rel: string): string {
 const SOTUV = 'src/app/(shop)/shop/sotuv/new/page.tsx'
 const NASIYA = 'src/app/(shop)/shop/nasiyalar/new/page.tsx'
 const DETAIL = 'src/app/(shop)/shop/qurilmalar/[id]/page.tsx'
+const PICKER = 'src/components/shop/in-stock-device-picker.tsx'
 
 describe('device selection is crash-safe', () => {
   for (const file of [SOTUV, NASIYA]) {
     const src = read(file)
 
-    it(`${file}: device rows are type="button" and select (no navigate/submit)`, () => {
-      expect(src).toContain('onClick={() => selectDevice(d)}')
-      // The row button must not be a submit button or navigate away.
-      const rowBlock = src.slice(src.indexOf('onClick={() => selectDevice(d)}') - 120, src.indexOf('onClick={() => selectDevice(d)}') + 40)
-      expect(rowBlock).toContain('type="button"')
-      expect(rowBlock).not.toContain('type="submit"')
+    it(`${file}: device selection is delegated without navigation`, () => {
+      expect(src).toContain('onSelect={selectDevice}')
+      expect(src).toContain('<InStockDevicePicker')
     })
 
     it(`${file}: selecting a device never routes away`, () => {
@@ -30,6 +28,14 @@ describe('device selection is crash-safe', () => {
     })
 
   }
+
+  it('the shared picker rows are non-submit buttons and never navigate', () => {
+    const src = read(PICKER)
+    const rowBlock = src.slice(src.indexOf('onClick={() => onSelect(device)}') - 160, src.indexOf('onClick={() => onSelect(device)}') + 80)
+    expect(rowBlock).toContain('type="button"')
+    expect(rowBlock).not.toContain('type="submit"')
+    expect(rowBlock).not.toContain('router')
+  })
 
   // Nasiya still shows a read-only "Kelish narxi" (purchase price) reference
   // via the same string-safe convert helper — item 5 removed the

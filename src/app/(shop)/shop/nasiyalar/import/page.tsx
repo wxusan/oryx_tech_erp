@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { convertUsdToUzs, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { uzDate } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
+import { markFinancialDataChanged } from '@/lib/client-events'
 
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
   if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
@@ -127,6 +128,7 @@ export default function ImportNasiyaPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Import qilishda xatolik')
+      markFinancialDataChanged()
       router.push(`/shop/nasiyalar/${json.data.nasiyaId}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Import qilishda xatolik')

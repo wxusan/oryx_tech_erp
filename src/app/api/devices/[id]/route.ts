@@ -48,13 +48,40 @@ const deleteDeviceSchema = z.object({
 // GET /api/devices/[id]
 // ---------------------------------------------------------------------------
 
-export async function GET(_req: NextRequest, ctx: RouteContext) {
+export async function GET(req: NextRequest, ctx: RouteContext) {
   try {
     const guarded = await requireApiSession()
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
     const { id: deviceId } = await ctx.params
+
+    if (req.nextUrl.searchParams.get('view') === 'picker') {
+      const pickerDevice = await prisma.device.findFirst({
+        where: {
+          id: deviceId,
+          deletedAt: null,
+          shop: { status: 'ACTIVE', deletedAt: null },
+          ...(session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}),
+        },
+        select: {
+          id: true,
+          model: true,
+          color: true,
+          storage: true,
+          batteryHealth: true,
+          purchasePrice: true,
+          imei: true,
+          status: true,
+        },
+      })
+
+      if (!pickerDevice) return notFound("Qurilma topilmadi")
+      return ok(
+        { ...pickerDevice, purchasePrice: Number(pickerDevice.purchasePrice) },
+        "Qurilma ma'lumotlari",
+      )
+    }
 
     const device = await prisma.device.findFirst({
       where: {

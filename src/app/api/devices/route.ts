@@ -48,6 +48,61 @@ export async function GET(req: NextRequest) {
     const search = searchParams.get('search') ?? undefined // IMEI / model / color / note / customer name/phone
     const searchDigits = search ? normalizePhone(search) : null
 
+    // Sale and nasiya forms need only a tiny searchable stock projection.
+    // Keeping this separate from the full device-list projection avoids joins
+    // to sales, nasiyas, returns and suppliers for every keystroke.
+    if (searchParams.get('view') === 'picker') {
+      const requestedTake = Number(searchParams.get('take') ?? 25)
+      const requestedSkip = Number(searchParams.get('skip') ?? 0)
+      const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 50)) : 25
+      const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
+      const pickerWhere = {
+        shopId,
+        deletedAt: null,
+        status: 'IN_STOCK' as const,
+        ...(search
+          ? {
+              OR: [
+                { imei: { contains: search, mode: 'insensitive' as const } },
+                { model: { contains: search, mode: 'insensitive' as const } },
+                { color: { contains: search, mode: 'insensitive' as const } },
+                { storage: { contains: search, mode: 'insensitive' as const } },
+              ],
+            }
+          : {}),
+      }
+
+      const [rows, total] = await Promise.all([
+        prisma.device.findMany({
+          where: pickerWhere,
+          orderBy: { createdAt: 'desc' },
+          skip,
+          take,
+          select: {
+            id: true,
+            model: true,
+            color: true,
+            storage: true,
+            batteryHealth: true,
+            purchasePrice: true,
+            imei: true,
+            status: true,
+          },
+        }),
+        prisma.device.count({ where: pickerWhere }),
+      ])
+
+      return ok(
+        {
+          items: rows.map((device) => ({ ...device, purchasePrice: Number(device.purchasePrice) })),
+          total,
+          skip,
+          take,
+        },
+        "Qurilmalar ro'yxati",
+      )
+    }
+
     // Item — the qurilmalar list page opts into the real page/skip/take
     // pagination envelope ({items, total, skip, take}, same shape /api/logs
     // and /api/customers already use) via ?paginated=1. Every other existing
