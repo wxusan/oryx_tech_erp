@@ -18,6 +18,7 @@ import { requireApiSession } from '@/lib/api-auth'
 import { invalidateShopProfileMutation } from '@/lib/server/cache-tags'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { logger } from '@/lib/logger'
+import { phoneSchema } from '@/lib/validations'
 
 function shopProfileSelect() {
   return {
@@ -37,7 +38,7 @@ function shopProfileSelect() {
 const updateShopProfileSchema = z.object({
   name: z.string().trim().min(2, "Do'kon nomi kamida 2 ta harfdan iborat bo'lishi kerak").optional(),
   ownerName: z.string().trim().min(2, "Egasi ismi kamida 2 ta harfdan iborat bo'lishi kerak").optional(),
-  ownerPhone: z.string().trim().min(9, "Telefon raqam kamida 9 ta raqam bo'lishi kerak").optional(),
+  ownerPhone: phoneSchema.optional(),
   address: z.string().trim().optional(),
   note: z.string().trim().optional(),
   preferredCurrency: z.enum(['UZS', 'USD']).optional(),

@@ -18,8 +18,9 @@ describe('quick action: Olib-sotdim card on /shop/yangi-operatsiya', () => {
 describe('olib-sotdim device lifecycle: never IN_STOCK, never normal-sale-available', () => {
   const route = read('src/app/api/olib-sotdim/route.ts')
 
-  it('creates the device directly as SOLD_CASH, flagged isExternalSourced', () => {
-    expect(route).toContain("status: 'SOLD_CASH'")
+  it('creates the device directly as SOLD_CASH or SOLD_DEBT, flagged isExternalSourced', () => {
+    expect(route).toContain("const deviceStatus = contractRemaining > 0 ? 'SOLD_DEBT' : 'SOLD_CASH'")
+    expect(route).toContain('status: deviceStatus')
     expect(route).toContain('isExternalSourced: true')
     expect(route).not.toContain("status: 'IN_STOCK'")
   })
@@ -163,8 +164,8 @@ describe('money/currency: MoneyInput used, server converts and stores UZS', () =
 describe('reports: no double-counted inventory cost', () => {
   const stats = read('src/lib/server/shop-stats.ts')
 
-  it('inventoryPurchaseCost still only sums IN_STOCK/RESERVED devices — SOLD_CASH olib-sotdim devices never enter it', () => {
-    expect(stats).toContain("status: { in: ['IN_STOCK', 'RESERVED'] }")
+  it('inventoryPurchaseCost only sums IN_STOCK devices — SOLD_CASH olib-sotdim devices never enter it', () => {
+    expect(stats).toContain("status: 'IN_STOCK'")
   })
 
   it('this month\'s sale revenue/profit scan already joins Sale -> device.purchasePrice, so olib-sotdim sales count for free', () => {

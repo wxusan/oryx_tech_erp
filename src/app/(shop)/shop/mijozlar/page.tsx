@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
+import { formatUzPhoneDisplay } from '@/lib/phone'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -202,7 +203,7 @@ export default function CustomersPage() {
               customers.map((customer) => (
                 <tr key={customer.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                   <td className="px-4 py-3 font-medium text-zinc-900">{customer.name}</td>
-                  <td className="px-4 py-3 font-mono text-zinc-600">{customer.phone}</td>
+                  <td className="px-4 py-3 font-mono text-zinc-600">{formatUzPhoneDisplay(customer.phone)}</td>
                   <td className="px-4 py-3">{customer.trust && <TrustBadge trust={customer.trust} />}</td>
                   <td className="px-4 py-3 text-zinc-600">{customer._count?.sales ?? 0}</td>
                   <td className="px-4 py-3 text-zinc-600">{customer._count?.nasiya ?? 0}</td>
@@ -231,7 +232,7 @@ export default function CustomersPage() {
               <div className="flex items-start justify-between gap-2">
                 <div>
                   <div className="font-medium text-zinc-900">{customer.name}</div>
-                  <div className="text-xs font-mono text-zinc-500 mt-0.5">{customer.phone}</div>
+                  <div className="text-xs font-mono text-zinc-500 mt-0.5">{formatUzPhoneDisplay(customer.phone)}</div>
                 </div>
                 {customer.trust && <TrustBadge trust={customer.trust} />}
               </div>

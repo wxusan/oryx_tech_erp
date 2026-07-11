@@ -12,6 +12,7 @@ import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { z, ZodError } from 'zod'
 import { logger } from '@/lib/logger'
+import { phoneSchema } from '@/lib/validations'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -61,7 +62,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 const updateShopSchema = z.object({
   name: z.string().min(2).optional(),
   ownerName: z.string().min(2).optional(),
-  ownerPhone: z.string().min(9).optional(),
+  ownerPhone: phoneSchema.optional(),
   shopNumber: z.string().min(1).optional(),
   address: z.string().optional(),
   note: z.string().optional(),

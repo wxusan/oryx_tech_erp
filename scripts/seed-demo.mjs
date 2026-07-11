@@ -393,7 +393,7 @@ const shops = [
       { model: 'iPhone 15 Pro', color: 'Natural Titanium', storage: '256GB', batteryHealth: 100, purchasePrice: 11800000, status: 'SOLD_CASH', imageUrls: [], note: 'Demo cash sale', createdDays: -34 },
       { model: 'Samsung Galaxy S24 Ultra', color: 'Black', storage: '512GB', batteryHealth: 100, purchasePrice: 10900000, status: 'SOLD_NASIYA', imageUrls: [], note: 'Demo installment sale', createdDays: -31 },
       { model: 'iPhone 14 Pro Max', color: 'Deep Purple', storage: '256GB', batteryHealth: 91, purchasePrice: 8200000, status: 'IN_STOCK', imageUrls: [], note: 'Used, clean condition', createdDays: -12 },
-      { model: 'MacBook Air M2', color: 'Midnight', storage: '512GB', batteryHealth: 98, purchasePrice: 10400000, status: 'RESERVED', imageUrls: [], note: 'Reserved until Friday', createdDays: -8 },
+      { model: 'MacBook Air M2', color: 'Midnight', storage: '512GB', batteryHealth: 98, purchasePrice: 10400000, status: 'IN_STOCK', imageUrls: [], note: 'Demo inventory device', createdDays: -8 },
       { model: 'iPhone 13', color: 'Blue', storage: '128GB', batteryHealth: 87, purchasePrice: 5200000, status: 'RETURNED', imageUrls: [], note: 'Demo returned device', createdDays: -20 },
     ],
     sales: [

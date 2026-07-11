@@ -19,8 +19,7 @@ export default async function QurilmalarPage({ searchParams }: QurilmalarPagePro
 
   const params = await searchParams
   const status = Array.isArray(params?.status) ? params?.status[0] : params?.status
-  // "Band"/RESERVED is intentionally NOT a supported filter.
-  const validStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_NASIYA', 'RETURNED'] as const
+  const validStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED'] as const
   const initialStatus = validStatuses.includes(status as (typeof validStatuses)[number])
     ? (status as (typeof validStatuses)[number])
     : 'Barchasi'

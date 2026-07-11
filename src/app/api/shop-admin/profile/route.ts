@@ -7,6 +7,7 @@ import { badRequest, conflict, forbidden, notFound, ok, serverError } from '@/li
 import { requireApiSession } from '@/lib/api-auth'
 import { isTelegramIdTaken, nextTelegramVerifiedAt, normalizeTelegramId } from '@/lib/telegram-id'
 import { logger } from '@/lib/logger'
+import { phoneSchema } from '@/lib/validations'
 
 const changePasswordSchema = z.object({
   currentPassword: z.string({ error: 'Joriy parol kiritilishi shart' }).min(1, 'Joriy parol kiritilishi shart'),
@@ -26,7 +27,7 @@ const updateTelegramSchema = z.object({
 
 const updateProfileSchema = z.object({
   name: z.string().trim().min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak").optional(),
-  phone: z.string().trim().min(9, "Telefon raqam kamida 9 ta raqam bo'lishi kerak").optional(),
+  phone: phoneSchema.optional(),
 })
 
 function profileSelect() {

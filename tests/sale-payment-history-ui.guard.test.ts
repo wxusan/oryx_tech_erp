@@ -34,8 +34,8 @@ describe('GET /api/devices/[id]: fetches SalePayment rows for the sale payment h
 describe('Device detail page: "To\'lov tarixi" section for Sale payments', () => {
   const page = read('src/app/(shop)/shop/qurilmalar/[id]/page.tsx')
 
-  it('renders a payment history table for SOLD_CASH devices, using salePaymentAmountDisplay per row', () => {
-    expect(page).toContain("device.status === 'SOLD_CASH' && latestSale && (")
+  it('renders a payment history table for fully paid and debt simple-sales, using salePaymentAmountDisplay per row', () => {
+    expect(page).toContain("['SOLD_CASH', 'SOLD_DEBT'].includes(device.status) && latestSale && (")
     expect(page).toContain("To'lov tarixi")
     expect(page).toContain('salePaymentAmountDisplay(payment, latestSale.contractCurrency, currency)')
   })

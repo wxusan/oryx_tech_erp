@@ -17,6 +17,7 @@ import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { Prisma } from '@/generated/prisma/client'
 import type { ZodError } from 'zod'
 import { logger } from '@/lib/logger'
+import { phoneSchema } from '@/lib/validations'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -34,7 +35,7 @@ const updateDeviceSchema = z.object({
   // USD is converted to UZS server-side — UZS remains the stored value.
   inputCurrency: z.enum(['UZS', 'USD']).optional(),
   imei: z.string().trim().min(1, 'IMEI kiritilishi shart').optional(),
-  supplierPhone: z.string().trim().optional(),
+  supplierPhone: phoneSchema.or(z.literal('')).optional(),
   note: z.string().optional(),
   reason: z.string().optional(),
 })
@@ -211,7 +212,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       prisma.nasiya.count({ where: { deviceId, deletedAt: null } }),
     ])
     const isFinanciallyLinked =
-      ['SOLD_CASH', 'SOLD_NASIYA'].includes(existing.status) || saleCount > 0 || nasiyaCount > 0
+      ['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(existing.status) || saleCount > 0 || nasiyaCount > 0
 
     // Money is locked once a device is sold / nasiya'd — the purchase price feeds
     // profit reporting and must not be silently rewritten after the fact.
@@ -348,7 +349,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
     })
 
     if (!existing) return notFound("Qurilma topilmadi")
-    if (['SOLD_CASH', 'SOLD_NASIYA'].includes(existing.status)) {
+    if (['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(existing.status)) {
       return badRequest(
         "Sotilgan yoki nasiya qilingan qurilmani bevosita o'chirib bo'lmaydi. Qaytarish yoki bekor qilish jarayonidan foydalaning.",
       )

@@ -45,9 +45,9 @@ export function deviceMatchesSearch(
 export const DEVICE_STATUS_LABELS: Record<string, string> = {
   IN_STOCK: 'Omborda',
   SOLD_CASH: 'Naqd sotildi',
+  SOLD_DEBT: 'Qarzga sotilgan',
   SOLD_NASIYA: 'Nasiyada',
-  RESERVED: 'Band qilingan',
-  RETURNED: 'Qaytarilgan',
+  RETURNED: 'Qaytarilgan (eski holat)',
   DELETED: "O'chirilgan",
 }
 

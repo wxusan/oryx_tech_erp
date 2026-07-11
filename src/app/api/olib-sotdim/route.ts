@@ -3,7 +3,8 @@
  * POST /api/olib-sotdim — create a new olib-sotdim operation
  *
  * "Olib-sotdim": we source a device from another shop/person and sell it to
- * our customer in the same operation. Creates a Device (status SOLD_CASH
+ * our customer in the same operation. Creates a Device (status SOLD_CASH or
+ * SOLD_DEBT when the customer still owes money)
  * directly — never IN_STOCK, never available for a later normal sale/nasiya),
  * a Customer (lookup-or-create, same as the normal sale/nasiya flow), a Sale
  * (so it counts in existing reports/profit exactly like a normal cash sale —
@@ -165,6 +166,11 @@ export async function POST(req: NextRequest) {
     const contractSalePrice = roundContractMoney(d.salePrice, contractCurrency)
     const contractPurchasePrice = roundContractMoney(d.purchasePrice, contractCurrency)
     const contractAmountPaidInput = d.amountPaid !== undefined ? roundContractMoney(d.amountPaid, contractCurrency) : undefined
+    const paid = d.paidFully ? salePriceUzs : amountPaidUzs ?? 0
+    const remaining = salePriceUzs - paid
+    const contractPaid = d.paidFully ? contractSalePrice : contractAmountPaidInput ?? 0
+    const contractRemaining = contractSalePrice - contractPaid
+    const deviceStatus = contractRemaining > 0 ? 'SOLD_DEBT' : 'SOLD_CASH'
 
     // IMEI: reuse the existing active-only uniqueness rule. Missing IMEI gets a
     // NOIMEI- placeholder — same idea as the pre-existing IMPORT- convention,
@@ -199,7 +205,7 @@ export async function POST(req: NextRequest) {
           imei: storedImei,
           supplierPhone: d.supplierPhone,
           imageUrls: d.imageUrls ?? [],
-          status: 'SOLD_CASH',
+          status: deviceStatus,
           addedBy: session.user.id,
           note: d.deviceNote,
           condition: d.condition,
@@ -225,11 +231,6 @@ export async function POST(req: NextRequest) {
         : await tx.customer.create({
             data: { shopId, name: d.customerName, phone: d.customerPhone, normalizedPhone: normalizedCustomerPhone },
           })
-
-      const paid = d.paidFully ? salePriceUzs : (amountPaidUzs ?? 0)
-      const remaining = salePriceUzs - paid
-      const contractPaid = d.paidFully ? contractSalePrice : (contractAmountPaidInput ?? 0)
-      const contractRemaining = contractSalePrice - contractPaid
 
       const sale = await tx.sale.create({
         data: {
@@ -349,6 +350,7 @@ export async function POST(req: NextRequest) {
             supplierName: d.supplierName,
             supplierPaidNow,
             customerName: d.customerName,
+            deviceStatus,
             ...moneyInputMeta(purchaseInput),
           },
         },

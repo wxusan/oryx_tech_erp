@@ -109,9 +109,9 @@ describe('payment modal is the single shared implementation', () => {
   })
 })
 
-describe('no "Band"/RESERVED user-facing filter', () => {
+describe('retired device statuses are not exposed as filters', () => {
   const src = read(QURILMALAR_CLIENT)
-  it('qurilmalar filter tabs have no Band / RESERVED filter', () => {
+  it('qurilmalar filter tabs do not include RESERVED', () => {
     const tabs = src.slice(src.indexOf('const filterTabs'), src.indexOf('const filterTabs') + 400)
     expect(tabs).not.toContain("value: 'RESERVED'")
     expect(tabs).not.toContain("label: 'Band'")

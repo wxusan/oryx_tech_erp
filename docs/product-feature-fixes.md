@@ -1,5 +1,16 @@
 # Product feature fixes — batch pass
 
+> **Update (device lifecycle status model, 2026-07-11):** simple sales now
+> have an explicit `SOLD_DEBT` (Qarz) state whenever their native
+> contract-currency balance is still positive. Fully paid simple sales,
+> including fully covered split payments, use `SOLD_CASH`; the final debt
+> payment transitions `SOLD_DEBT` to `SOLD_CASH`. New returns move straight
+> to `IN_STOCK`, while `RETURNED` remains visible only as a legacy repair
+> state. Nasiya stays `SOLD_NASIYA`. See
+> `docs/device-lifecycle-status-model.md` and
+> `docs/device-status-repair-plan.md` for the model and the separately
+> approved historic-data procedure.
+
 Date: 2026-07-09. Scope: 17-item product/UX/reminder/search/logs/payment
 batch requested before client demo/onboarding. This is a large batch —
 several items are fully implemented, several are implemented with a

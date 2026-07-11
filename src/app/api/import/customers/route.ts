@@ -5,6 +5,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { normalizePhone } from '@/lib/phone'
+import { phoneSchema } from '@/lib/validations'
 import { logger } from '@/lib/logger'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
@@ -13,7 +14,7 @@ const customerImportSchema = z.object({
   shopId: z.string().optional(),
   customers: z.array(z.object({
     name: z.string().min(2),
-    phone: z.string().min(9),
+    phone: phoneSchema,
     note: z.string().optional(),
   })).min(1).max(500),
 })

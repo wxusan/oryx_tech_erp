@@ -5,6 +5,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { badRequest, notFound, ok, serverError } from '@/lib/api-helpers'
 import { prisma } from '@/lib/prisma'
 import { normalizePhone } from '@/lib/phone'
+import { phoneSchema } from '@/lib/validations'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { logger } from '@/lib/logger'
 
@@ -14,7 +15,7 @@ const forbiddenMoneyFields = ['salePrice', 'amountPaid', 'remainingAmount', 'pai
 
 const updateSaleSchema = z.object({
   customerName: z.string().trim().min(2, "Mijoz ismi kamida 2 ta harfdan iborat bo'lishi kerak").max(100).optional(),
-  customerPhone: z.string().trim().min(9, "Telefon raqam kamida 9 ta raqam bo'lishi kerak").max(20).optional(),
+  customerPhone: phoneSchema.optional(),
   note: z.string().trim().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
   dueDate: z.coerce.date().nullable().optional(),
   reminderEnabled: z.boolean().optional(),

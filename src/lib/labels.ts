@@ -8,9 +8,9 @@ export const paymentMethodLabels: Record<string, string> = {
 export const deviceStatusLabels: Record<string, string> = {
   IN_STOCK: 'Omborda',
   SOLD_CASH: 'Naqd sotildi',
+  SOLD_DEBT: 'Qarzga sotilgan',
   SOLD_NASIYA: 'Nasiyaga sotildi',
-  RESERVED: 'Band qilingan',
-  RETURNED: 'Qaytarilgan',
+  RETURNED: 'Qaytarilgan (eski holat)',
   DELETED: "O'chirilgan",
 }
 

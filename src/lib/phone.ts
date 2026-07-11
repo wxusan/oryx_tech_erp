@@ -7,47 +7,73 @@ export function normalizePhone(phone: string) {
 // future server message stay in sync.
 export const PHONE_ERROR = "Telefon raqam noto'g'ri. Masalan: +998 90 123 45 67"
 
-// Client-side phone validity, kept consistent with the server `phoneSchema`
-// (min 9 / max 20 chars). We validate on the normalized digit count so garbage
-// like "abc" or "123" is rejected up front, while every value this accepts also
-// satisfies the server rule (digits ⇒ length ≥ 9, and ≤ 20 chars). Accepts the
-// shop's real formats: "+998 90 000 00 00", "+998900000000", "998900000000",
-// and local "900000000".
-export function isValidPhone(phone: string): boolean {
-  const trimmed = phone.trim()
-  if (trimmed.length < 9 || trimmed.length > 20) return false
-  const digits = normalizePhone(trimmed)
-  return !!digits && digits.length >= 9 && digits.length <= 15
-}
-
 const UZ_COUNTRY_CODE = '998'
-// A local Uzbek mobile number is 9 digits (e.g. "90 123 45 67"); with the
-// country code prepended that's 12 digits total.
-const MAX_PHONE_DIGITS = 12
+const UZ_LOCAL_PHONE_LENGTH = 9
 
-/**
- * Auto-prefixes a phone input with the Uzbekistan country code as the user
- * types or pastes, so "90 123 45 67", "998901234567", and "+998901234567"
- * all converge on the same digit string instead of requiring the user to
- * type "998" themselves. Returns a `+`-prefixed display string (or `''` for
- * an empty field) — never mutates a value that already starts with the
- * country code, and collapses an accidental double "998998..." prefix
- * (e.g. pasting "+998..." into a field that already had "998..." typed).
- */
-export function applyPhonePrefix(raw: string): string {
+function uzLocalDigits(raw: string) {
   let digits = raw.replace(/\D/g, '')
   if (!digits) return ''
 
   while (digits.startsWith(UZ_COUNTRY_CODE + UZ_COUNTRY_CODE)) {
     digits = digits.slice(UZ_COUNTRY_CODE.length)
   }
-
-  if (!digits.startsWith(UZ_COUNTRY_CODE)) {
-    digits = UZ_COUNTRY_CODE + digits
+  if (digits.startsWith(UZ_COUNTRY_CODE)) {
+    digits = digits.slice(UZ_COUNTRY_CODE.length)
   }
 
-  digits = digits.slice(0, MAX_PHONE_DIGITS)
-  return `+${digits}`
+  // Some users still begin a full local number with the legacy trunk prefix
+  // "8". Only remove it once there are ten local digits, so valid prefixes
+  // such as 88 remain editable while the number is incomplete.
+  if (digits.length === UZ_LOCAL_PHONE_LENGTH + 1 && digits.startsWith('8')) {
+    digits = digits.slice(1)
+  }
+
+  return digits
+}
+
+/**
+ * Converts a user edit or paste to the canonical value sent to APIs. The
+ * display component formats this value separately, so form state and storage
+ * never contain spaces or a duplicated country code.
+ */
+export function normalizeUzPhoneInput(raw: string): string {
+  const local = uzLocalDigits(raw)
+  return local ? `+${UZ_COUNTRY_CODE}${local}` : ''
+}
+
+/** Returns a canonical Uzbek phone only when it is complete and valid. */
+export function normalizeUzPhone(raw: string): string | null {
+  const local = uzLocalDigits(raw)
+  return local.length === UZ_LOCAL_PHONE_LENGTH ? `+${UZ_COUNTRY_CODE}${local}` : null
+}
+
+/** Formats canonical and legacy saved Uzbek phone values for display. */
+export function formatUzPhoneDisplay(raw: string | null | undefined): string {
+  if (!raw) return ''
+  const normalized = normalizeUzPhoneInput(raw)
+  if (!normalized) return ''
+
+  const local = normalized.slice(UZ_COUNTRY_CODE.length + 1)
+  const groups = [local.slice(0, 2), local.slice(2, 5), local.slice(5, 7), local.slice(7, 9), local.slice(9)].filter(Boolean)
+  return `+${UZ_COUNTRY_CODE}${groups.length ? ` ${groups.join(' ')}` : ''}`
+}
+
+// Client and server use the same exact Uzbek-number rule. Optional fields
+// should test for empty input before calling this helper.
+export function isValidPhone(phone: string): boolean {
+  return normalizeUzPhone(phone) !== null
+}
+
+/**
+ * Auto-prefixes a phone input with the Uzbekistan country code as the user
+ * types or pastes, so "90 123 45 67", "998901234567", and "+998901234567"
+ * all converge on the same canonical submitted value instead of requiring the
+ * user to type "998" themselves. Returns `''` for an empty field, never
+ * duplicates an existing country code, and collapses an accidental "998998..." prefix
+ * (e.g. pasting "+998..." into a field that already had "998..." typed).
+ */
+export function applyPhonePrefix(raw: string): string {
+  return normalizeUzPhoneInput(raw)
 }
 
 /**

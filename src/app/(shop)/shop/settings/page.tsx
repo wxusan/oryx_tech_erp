@@ -14,6 +14,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { uzDateTime } from '@/lib/dates'
@@ -367,10 +368,10 @@ export default function ShopSettingsPage() {
                     <Label htmlFor="account-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">
                       Telefon
                     </Label>
-                    <Input
+                    <PhoneInput
                       id="account-phone"
                       value={accountPhone}
-                      onChange={(event) => setAccountPhone(event.target.value)}
+                      onChange={setAccountPhone}
                       className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                     />
                   </div>
@@ -445,10 +446,10 @@ export default function ShopSettingsPage() {
                       <Label htmlFor="shop-owner-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">
                         Egasi telefoni
                       </Label>
-                      <Input
+                      <PhoneInput
                         id="shop-owner-phone"
                         value={shopForm.ownerPhone}
-                        onChange={(e) => setShopForm((f) => ({ ...f, ownerPhone: e.target.value }))}
+                        onChange={(ownerPhone) => setShopForm((f) => ({ ...f, ownerPhone }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                       />
                     </div>

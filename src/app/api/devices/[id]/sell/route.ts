@@ -76,6 +76,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const contractCurrency = salePriceInput.inputCurrency
     const contractSalePrice = roundContractMoney(salePrice, contractCurrency)
     const contractAmountPaidInput = amountPaid !== undefined ? roundContractMoney(amountPaid, contractCurrency) : undefined
+    const paid = paidFully ? salePriceUzs : amountPaidUzs ?? 0
+    const remaining = salePriceUzs - paid
+    const contractPaid = paidFully ? contractSalePrice : contractAmountPaidInput ?? 0
+    const contractRemaining = contractSalePrice - contractPaid
+    const nextDeviceStatus = contractRemaining > 0 ? 'SOLD_DEBT' : 'SOLD_CASH'
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
@@ -88,7 +93,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       const reserved = await tx.device.updateMany({
         where: { id: deviceId, shopId, deletedAt: null, status: 'IN_STOCK' },
-        data: { status: 'SOLD_CASH', updatedAt: new Date() },
+        data: { status: nextDeviceStatus, updatedAt: new Date() },
       })
       if (reserved.count !== 1) throw { status: 409, message: "Qurilma allaqachon sotilgan" }
 
@@ -110,11 +115,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         : await tx.customer.create({
             data: { shopId, name: customerName, phone: customerPhone, normalizedPhone },
           })
-
-      const paid = paidFully ? salePriceUzs : amountPaidUzs ?? 0
-      const remaining = salePriceUzs - paid
-      const contractPaid = paidFully ? contractSalePrice : contractAmountPaidInput ?? 0
-      const contractRemaining = contractSalePrice - contractPaid
 
       const sale = await tx.sale.create({
         data: {
@@ -218,6 +218,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             remainingAmount: remaining,
             dueDate,
             paidFully: remaining <= 0,
+            deviceStatus: nextDeviceStatus,
             ...moneyInputMeta(salePriceInput),
           },
         },

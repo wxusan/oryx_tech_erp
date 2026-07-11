@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
+import { formatUzPhoneDisplay } from '@/lib/phone'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
@@ -446,7 +448,7 @@ export default function NasiyaDetailPage() {
             {nasiya.customerTrust && <TrustBadge trust={nasiya.customerTrust} />}
           </div>
           <p className="text-sm text-zinc-500 mt-0.5">
-            {nasiya.device.model} · {nasiya.customer.phone}
+            {nasiya.device.model} · {formatUzPhoneDisplay(nasiya.customer.phone)}
           </p>
           {nasiya.customerTrust && nasiya.customerTrust.reasons.length > 0 && (
             <p className="text-xs text-zinc-400 mt-1">{nasiya.customerTrust.reasons.join(' · ')}</p>
@@ -771,9 +773,9 @@ export default function NasiyaDetailPage() {
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-zinc-700">Telefon</label>
-                <Input
+                <PhoneInput
                   value={editCustomerPhone}
-                  onChange={(e) => setEditCustomerPhone(e.target.value)}
+                  onChange={setEditCustomerPhone}
                   className="h-9 rounded-lg border-zinc-200 text-sm"
                 />
               </div>

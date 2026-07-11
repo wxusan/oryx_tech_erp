@@ -1,7 +1,8 @@
 /**
- * POST /api/devices/[id]/restock — return a RETURNED device back into stock.
+ * POST /api/devices/[id]/restock — repair a legacy RETURNED device back into stock.
  *
- * Lifecycle: IN_STOCK -> SOLD_CASH/SOLD_NASIYA -> RETURNED -> IN_STOCK (here).
+ * New returns go directly to IN_STOCK. This endpoint remains only for legacy
+ * records created before that lifecycle change.
  *
  * Only a device that is currently RETURNED (and belongs to the caller's shop,
  * not soft-deleted) can be restocked. The status flip is guarded atomically so

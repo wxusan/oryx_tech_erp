@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import { currencyLabel } from '@/lib/currency'
@@ -251,10 +252,9 @@ export default function NewDevicePage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">Yetkazib beruvchi tel</label>
-              <Input
+              <PhoneInput
                 value={form.supplierPhone}
-                onChange={set('supplierPhone')}
-                placeholder="+998 90 000 00 00"
+                onChange={(supplierPhone) => setForm((prev) => ({ ...prev, supplierPhone }))}
                 className="h-9 text-sm border-zinc-200 rounded"
               />
             </div>
