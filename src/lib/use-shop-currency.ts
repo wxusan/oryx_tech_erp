@@ -1,38 +1,25 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { createContext, createElement, useContext, useState } from 'react'
+import type { Dispatch, ReactNode, SetStateAction } from 'react'
 import type { CurrencyContext } from '@/lib/currency'
-import type { ApiResponse } from '@/types'
 
-interface ShopCurrencyPayload {
-  preferredCurrency: 'UZS' | 'USD'
-  usdUzsRate: number | null
+interface ShopCurrencyValue {
+  currency: CurrencyContext
+  currencyError: string
+  setCurrency: Dispatch<SetStateAction<CurrencyContext>>
 }
 
-const DEFAULT_CURRENCY: CurrencyContext = { currency: 'UZS', usdUzsRate: null }
+const ShopCurrencyContext = createContext<ShopCurrencyValue | null>(null)
+
+export function ShopCurrencyProvider({ initialCurrency, children }: { initialCurrency: CurrencyContext; children?: ReactNode }) {
+  const [currency, setCurrency] = useState<CurrencyContext>(initialCurrency)
+
+  return createElement(ShopCurrencyContext.Provider, { value: { currency, currencyError: '', setCurrency } }, children)
+}
 
 export function useShopCurrency() {
-  const [currency, setCurrency] = useState<CurrencyContext>(DEFAULT_CURRENCY)
-  const [currencyError, setCurrencyError] = useState('')
-
-  useEffect(() => {
-    let cancelled = false
-    fetch('/api/shop/profile')
-      .then((response) => response.json())
-      .then((json: ApiResponse<ShopCurrencyPayload>) => {
-        if (cancelled || !json.success || !json.data) return
-        setCurrency({
-          currency: json.data.preferredCurrency ?? 'UZS',
-          usdUzsRate: json.data.usdUzsRate ?? null,
-        })
-      })
-      .catch(() => {
-        if (!cancelled) setCurrencyError('Valyuta sozlamasi yuklanmadi')
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
-
-  return { currency, currencyError }
+  const value = useContext(ShopCurrencyContext)
+  if (!value) throw new Error('useShopCurrency must be used within ShopCurrencyProvider')
+  return value
 }

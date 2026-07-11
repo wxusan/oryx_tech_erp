@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest'
-import { normalizePhone, isValidPhone, applyPhonePrefix, normalizeAdditionalPhones } from '@/lib/phone'
+import {
+  normalizePhone,
+  isValidPhone,
+  applyPhonePrefix,
+  normalizeAdditionalPhones,
+  formatUzPhoneDisplay,
+  normalizeUzPhone,
+} from '@/lib/phone'
 
 // normalizePhone underpins active-per-shop customer phone uniqueness (req 10).
 describe('normalizePhone (req 10)', () => {
@@ -19,9 +26,9 @@ describe('normalizePhone (req 10)', () => {
   })
 })
 
-// isValidPhone is the client-side gate used on the sale/nasiya customer step so
-// a bad phone is caught inline instead of only at final save. It must accept the
-// shop's real formats and stay within the server phoneSchema (min 9 / max 20).
+// isValidPhone is the client-side and server-side gate used by every Uzbek
+// phone field. It accepts common local/full formats but requires exactly nine
+// local digits before an API may persist the number.
 describe('isValidPhone (client customer-step gate)', () => {
   it('accepts the supported Uzbek formats', () => {
     expect(isValidPhone('+998 90 000 00 00')).toBe(true)
@@ -38,15 +45,9 @@ describe('isValidPhone (client customer-step gate)', () => {
     expect(isValidPhone('12345678')).toBe(false) // 8 digits
   })
 
-  it('never accepts a value the server phoneSchema (min 9 / max 20 chars) would reject', () => {
-    const samples = ['+998 90 000 00 00', '900000000', '998 90 123 45 67']
-    for (const s of samples) {
-      if (isValidPhone(s)) {
-        const len = s.trim().length
-        expect(len).toBeGreaterThanOrEqual(9)
-        expect(len).toBeLessThanOrEqual(20)
-      }
-    }
+  it('rejects too-long input instead of silently accepting it', () => {
+    expect(isValidPhone('+9989012345678')).toBe(false)
+    expect(isValidPhone('9012345678')).toBe(false)
   })
 })
 
@@ -83,14 +84,41 @@ describe('applyPhonePrefix (auto 998 prefix)', () => {
     expect(applyPhonePrefix('')).toBe('')
   })
 
-  it('caps the local number at 9 digits (12 total with the country code)', () => {
-    expect(applyPhonePrefix('9012345671234')).toBe('+998901234567')
+  it('preserves excess digits for correction, and the shared validator rejects them', () => {
+    expect(applyPhonePrefix('9012345671234')).toBe('+9989012345671234')
+    expect(isValidPhone(applyPhonePrefix('9012345671234'))).toBe(false)
   })
 
   it('every output stays a valid phone by the existing isValidPhone gate', () => {
     for (const raw of ['901234567', '+998901234567', '998901234567', '90 123 45 67']) {
       expect(isValidPhone(applyPhonePrefix(raw))).toBe(true)
     }
+  })
+})
+
+describe('canonical Uzbek phone display and storage', () => {
+  it('formats a canonical, local, or pasted phone consistently for display', () => {
+    expect(formatUzPhoneDisplay('+998901234567')).toBe('+998 90 123 45 67')
+    expect(formatUzPhoneDisplay('901234567')).toBe('+998 90 123 45 67')
+    expect(formatUzPhoneDisplay('+998 90 123 45 67')).toBe('+998 90 123 45 67')
+  })
+
+  it('normalizes all supported entry formats to one submitted value', () => {
+    expect(normalizeUzPhone('901234567')).toBe('+998901234567')
+    expect(normalizeUzPhone('998901234567')).toBe('+998901234567')
+    expect(normalizeUzPhone('+998901234567')).toBe('+998901234567')
+    expect(normalizeUzPhone('+998 90 123 45 67')).toBe('+998901234567')
+  })
+
+  it('accepts the legacy leading 8 only when it prefixes a complete local number', () => {
+    expect(normalizeUzPhone('8901234567')).toBe('+998901234567')
+    expect(normalizeUzPhone('88')).toBeNull()
+  })
+
+  it('keeps optional empty input empty and rejects an incomplete prefix', () => {
+    expect(normalizeUzPhone('')).toBeNull()
+    expect(applyPhonePrefix('')).toBe('')
+    expect(normalizeUzPhone('+998')).toBeNull()
   })
 })
 

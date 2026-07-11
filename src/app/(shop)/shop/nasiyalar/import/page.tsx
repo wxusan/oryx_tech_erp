@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import { convertUsdToUzs, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
@@ -160,7 +161,7 @@ export default function ImportNasiyaPage() {
           <Input value={form.customerName} onChange={(e) => set('customerName')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
         </Field>
         <Field label="Telefon" required>
-          <Input value={form.customerPhone} onChange={(e) => set('customerPhone')(e.target.value)} placeholder="+998..." className="h-10 rounded-lg border-zinc-200" />
+          <PhoneInput value={form.customerPhone} onChange={set('customerPhone')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
       </Section>
 

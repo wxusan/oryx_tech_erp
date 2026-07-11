@@ -27,14 +27,12 @@ describe('sold device profit computation (src/lib/server/shop-lists.ts)', () => 
 describe('qurilmalar list: sold tab, columns, and IMEI privacy', () => {
   const client = read('src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx')
 
-  it('has exactly the required 5 tabs, no Band qilingan tab', () => {
+  it('has the required status tabs, including the explicit Qarz state', () => {
     const tabsBlock = client.slice(client.indexOf('filterTabs'), client.indexOf('filterTabs') + 400)
-    for (const tab of ["'Barchasi'", "'Omborda'", "'Sotilgan'", "'Nasiyada'", "'Qaytarilgan'"]) {
+    for (const tab of ["'Barchasi'", "'Omborda'", "'Sotilgan'", "'Qarz'", "'Nasiyada'", "'Qaytarilgan (eski)'"]) {
       expect(tabsBlock).toContain(tab)
     }
-    // RESERVED still has a status label (for legacy data shown on a device's own
-    // page) but must never be offered as a filter tab.
-    expect(tabsBlock).not.toContain('Band qilingan')
+    expect(tabsBlock).not.toContain('RESERVED')
   })
 
   it('shows sold price, profit, and customer columns', () => {
@@ -74,7 +72,7 @@ describe('device detail page shows purchase/sold/profit for cash and nasiya sale
   })
 
   it('returned devices show a dedicated return section instead of profit', () => {
-    expect(detail).toContain("device.status === 'RETURNED' && latestReturn")
+    expect(detail).toContain("['IN_STOCK', 'RETURNED'].includes(device.status) && latestReturn")
     expect(detail).toContain('Qaytarish ma')
   })
 })

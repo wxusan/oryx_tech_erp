@@ -24,8 +24,8 @@ A normal sale is two separate steps: add the device to stock
 (`POST /api/olib-sotdim`) that creates the `Device` **directly as
 `SOLD_CASH`** — it never passes through `IN_STOCK`, so it:
 - never shows up in the "Naqd sotish" / "Nasiyaga berish" device pickers,
-- never enters `inventoryPurchaseCost` (that stat only sums
-  `IN_STOCK`/`RESERVED` devices — see `shop-stats.ts`),
+- never enters `inventoryPurchaseCost` (that stat only sums `IN_STOCK`
+  devices — see `shop-stats.ts`),
 - can only return to stock through the existing, explicit
   Return → Restock flow (same as any other sold device) — never implicitly.
 

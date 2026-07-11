@@ -5,15 +5,17 @@
 
 import { z } from 'zod'
 import { MAX_NASIYA_INTEREST_PERCENT } from '@/lib/nasiya-utils'
+import { isValidPhone, normalizeUzPhone, PHONE_ERROR } from '@/lib/phone'
 
 // ---------------------------------------------------------------------------
 // Shared field schemas
 // ---------------------------------------------------------------------------
 
-const phoneSchema = z
+export const phoneSchema = z
   .string({ error: "Telefon raqam kiritilishi shart" })
-  .min(9, "Telefon raqam kamida 9 ta raqam bo'lishi kerak")
-  .max(20, "Telefon raqam 20 ta belgidan oshmasligi kerak")
+  .trim()
+  .refine(isValidPhone, PHONE_ERROR)
+  .transform((phone) => normalizeUzPhone(phone)!)
 
 const passwordSchema = z
   .string({ error: "Parol kiritilishi shart" })

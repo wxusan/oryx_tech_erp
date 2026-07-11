@@ -103,13 +103,13 @@ describe('invalid/missing amount never crashes — shows "—" instead of "$NaN"
 describe('device detail page: fallback card for a sold device with a missing sale relation', () => {
   const page = read('src/app/(shop)/shop/qurilmalar/[id]/page.tsx')
 
-  it('shows a clear warning instead of silently rendering nothing when SOLD_CASH but latestSale is missing', () => {
-    expect(page).toContain("device.status === 'SOLD_CASH' && !latestSale && (")
+  it('shows a clear warning instead of silently rendering nothing when a simple-sale device is missing its sale relation', () => {
+    expect(page).toContain("['SOLD_CASH', 'SOLD_DEBT'].includes(device.status) && !latestSale && (")
     expect(page).toContain('Bu qurilma sotilgan deb belgilangan, lekin savdo yozuvi topilmadi.')
   })
 
   it('the sale info card and payment history table both require latestSale to be truthy (never render on missing data)', () => {
-    expect(page).toContain("device.status === 'SOLD_CASH' && latestSale && (")
+    expect(page).toContain("['SOLD_CASH', 'SOLD_DEBT'].includes(device.status) && latestSale && (")
   })
 })
 

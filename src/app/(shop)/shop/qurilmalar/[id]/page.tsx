@@ -6,6 +6,8 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
+import { formatUzPhoneDisplay } from '@/lib/phone'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -124,7 +126,7 @@ interface Device {
   imei: string
   supplierPhone: string | null
   supplier: Supplier | null
-  status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
+  status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA' | 'RETURNED' | 'DELETED'
   imageUrls: string[]
   createdAt: string
   sales?: Sale[]
@@ -571,7 +573,7 @@ export default function QurilmaDetailPage() {
 
   const showSaleActions = device.status === 'IN_STOCK'
   const latestSale = device.sales?.[0]
-  const saleHasDebt = latestSale ? Number(latestSale.remainingAmount) > 0 && !latestSale.paidFully : false
+  const saleHasDebt = latestSale ? Number(latestSale.contractRemainingAmount) > 0 && !latestSale.paidFully : false
   const saleProfit = latestSale ? latestSale.salePrice - device.purchasePrice : null
   // Native contract-currency margin — stable, never re-derived from today's
   // rate (see computeSaleContractMargin). When the sale and the device's own
@@ -670,7 +672,7 @@ export default function QurilmaDetailPage() {
               Sotuvga qo&apos;yish
             </Button>
           )}
-          {!['SOLD_CASH', 'SOLD_NASIYA'].includes(device.status) && (
+          {!['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(device.status) && (
             <Button
               variant="outline"
               aria-label="Qurilmani o'chirish"
@@ -680,7 +682,7 @@ export default function QurilmaDetailPage() {
               <Trash2 size={15} />
             </Button>
           )}
-          {['SOLD_CASH', 'SOLD_NASIYA'].includes(device.status) && (
+          {['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(device.status) && (
             <Button
               variant="outline"
               onClick={() => setReturnModalOpen(true)}
@@ -746,14 +748,14 @@ export default function QurilmaDetailPage() {
       {/* Inconsistent-data fallback: device is marked sold but the sale
           relation itself is missing (should not happen, but must never
           crash the page — surface it as a clear, honest warning instead). */}
-      {device.status === 'SOLD_CASH' && !latestSale && (
+      {['SOLD_CASH', 'SOLD_DEBT'].includes(device.status) && !latestSale && (
         <div className="border border-amber-200 bg-amber-50 rounded px-4 py-3 text-sm text-amber-800">
           Bu qurilma sotilgan deb belgilangan, lekin savdo yozuvi topilmadi.
         </div>
       )}
 
       {/* Sale info section */}
-      {device.status === 'SOLD_CASH' && latestSale && (
+      {['SOLD_CASH', 'SOLD_DEBT'].includes(device.status) && latestSale && (
         <div className="border border-zinc-200 rounded overflow-hidden">
           <div className="flex items-center justify-between gap-3 px-4 py-3 bg-zinc-50 border-b border-zinc-200">
             <span className="text-sm font-semibold text-zinc-900">Sotuv ma'lumotlari</span>
@@ -864,7 +866,7 @@ export default function QurilmaDetailPage() {
           history lives here. Mirrors the nasiya detail page's "To'lov tarixi"
           table; uses salePaymentAmountDisplay so historical rows show
           payment-time context, never a live reconversion at today's rate. */}
-      {device.status === 'SOLD_CASH' && latestSale && (
+      {['SOLD_CASH', 'SOLD_DEBT'].includes(device.status) && latestSale && (
         <div className="border border-zinc-200 rounded overflow-hidden">
           <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">To'lov tarixi</div>
           {latestSale.payments?.length ? (
@@ -933,7 +935,7 @@ export default function QurilmaDetailPage() {
               </div>
               <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Tel raqam</span>
-                <span className="text-zinc-900 font-medium">{latestNasiya.customer.phone}</span>
+                <span className="text-zinc-900 font-medium">{formatUzPhoneDisplay(latestNasiya.customer.phone)}</span>
               </div>
               <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Sotilish narxi</span>
@@ -1009,7 +1011,7 @@ export default function QurilmaDetailPage() {
       )}
 
       {/* Return info section — no profit shown here, the sale was reversed */}
-      {device.status === 'RETURNED' && latestReturn && (
+      {['IN_STOCK', 'RETURNED'].includes(device.status) && latestReturn && (
         <div className="border border-zinc-200 rounded overflow-hidden">
           <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
             <span className="text-sm font-semibold text-zinc-900">Qaytarish ma&apos;lumotlari</span>
@@ -1017,7 +1019,7 @@ export default function QurilmaDetailPage() {
           <div className="p-4 space-y-2">
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">Holat</span>
-              <span className="text-blue-700 font-medium">Qaytarilgan</span>
+              <span className="text-blue-700 font-medium">{device.status === 'IN_STOCK' ? 'Omborga qaytarildi' : 'Qaytarilgan (eski holat)'}</span>
             </div>
             {latestReturn.refundAmount > 0 && (
               <div className="flex gap-4 text-sm">
@@ -1065,7 +1067,7 @@ export default function QurilmaDetailPage() {
         )}
       </div>
 
-      {/* Edit Dialog (IN_STOCK / RETURNED only) */}
+      {/* Edit dialog is available only while the device is sellable or awaiting legacy restock. */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="w-[calc(100vw-2rem)] max-w-lg gap-0 overflow-hidden rounded-xl p-0 sm:w-full">
           <DialogHeader className="border-b border-zinc-100 px-5 py-4">
@@ -1140,9 +1142,9 @@ export default function QurilmaDetailPage() {
             </div>
             <div className="space-y-1.5">
               <label className="block text-xs font-medium text-zinc-700">Yetkazib beruvchi tel</label>
-              <Input
+              <PhoneInput
                 value={editForm.supplierPhone}
-                onChange={(e) => setEditForm((f) => ({ ...f, supplierPhone: e.target.value }))}
+                onChange={(supplierPhone) => setEditForm((f) => ({ ...f, supplierPhone }))}
                 className="h-10 rounded-lg border-zinc-200 text-sm"
               />
             </div>
@@ -1238,9 +1240,9 @@ export default function QurilmaDetailPage() {
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-zinc-700">Telefon</label>
-                <Input
+                <PhoneInput
                   value={saleEditCustomerPhone}
-                  onChange={(e) => setSaleEditCustomerPhone(e.target.value)}
+                  onChange={setSaleEditCustomerPhone}
                   className="h-9 rounded border-zinc-200 text-sm"
                 />
               </div>
@@ -1487,7 +1489,7 @@ export default function QurilmaDetailPage() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <p className="text-sm text-zinc-600">
-              Bu amal bog'langan sotuv yoki nasiyani bekor qiladi va qurilmani qaytarilgan holatiga o'tkazadi.
+              Bu amal bog'langan sotuv yoki nasiyani bekor qiladi va qurilmani omborga qaytaradi.
             </p>
             {returnError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{returnError}</div>}
             <div>

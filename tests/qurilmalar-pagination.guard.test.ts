@@ -79,7 +79,7 @@ describe('qurilmalar client: mobile card view alongside the desktop table', () =
   it('a separate card list is shown only below sm:, with a directly-visible Ko\'rish link (not an overflow menu)', () => {
     expect(client).toContain('sm:hidden space-y-3')
     const mobileBlockStart = client.indexOf('sm:hidden space-y-3')
-    const mobileBlock = client.slice(mobileBlockStart, mobileBlockStart + 2000)
+    const mobileBlock = client.slice(mobileBlockStart, mobileBlockStart + 4000)
     expect(mobileBlock).toContain("Ko&apos;rish")
     expect(mobileBlock).toContain('displayImei(d.imei)')
   })

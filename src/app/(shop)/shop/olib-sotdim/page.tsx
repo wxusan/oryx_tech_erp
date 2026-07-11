@@ -23,6 +23,7 @@ import { displayImei } from '@/lib/device-display'
 import { uzDate } from '@/lib/dates'
 import { formatMoneyByCurrency } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
+import { formatUzPhoneDisplay } from '@/lib/phone'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 
 type PayableStatus = 'PENDING' | 'PAID' | 'CANCELLED' | 'OVERDUE'
@@ -193,11 +194,11 @@ export default function OlibSotdimPage() {
                   </td>
                   <td className="px-4 py-3">
                     <div className="text-zinc-900">{row.supplierName}</div>
-                    <div className="text-xs text-zinc-500">{row.supplierPhone}</div>
+                    <div className="text-xs text-zinc-500">{formatUzPhoneDisplay(row.supplierPhone)}</div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="text-zinc-900">{row.sale.customer.name}</div>
-                    <div className="text-xs text-zinc-500">{row.sale.customer.phone}</div>
+                    <div className="text-xs text-zinc-500">{formatUzPhoneDisplay(row.sale.customer.phone)}</div>
                   </td>
                   <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.device.purchasePrice)}</td>
                   <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.sale.salePrice)}</td>

@@ -12,6 +12,8 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
+import { formatUzPhoneDisplay } from '@/lib/phone'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
@@ -575,7 +577,7 @@ export default function ShopDetailPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
           <InfoRow label="Egasi" value={shop.ownerName} />
           <InfoRow label="Shop ID" value={shop.id} mono />
-          <InfoRow label="Tel" value={shop.ownerPhone} mono />
+          <InfoRow label="Tel" value={formatUzPhoneDisplay(shop.ownerPhone)} mono />
           <InfoRow label="Do'kon raqami" value={shop.shopNumber} />
           <InfoRow label="Manzil" value={shop.address} />
           <InfoRow label="Izoh" value={shop.note ?? ''} />
@@ -620,7 +622,7 @@ export default function ShopDetailPage() {
                 <TableRow key={admin.id} className="border-zinc-100 hover:bg-zinc-50">
                   <TableCell className="pl-5 text-sm font-medium text-zinc-900">{admin.name}</TableCell>
                   <TableCell className="text-sm text-zinc-500 font-mono">{admin.login}</TableCell>
-                  <TableCell className="text-sm text-zinc-500 font-mono">{admin.phone}</TableCell>
+                  <TableCell className="text-sm text-zinc-500 font-mono">{formatUzPhoneDisplay(admin.phone)}</TableCell>
                   <TableCell className="text-sm text-zinc-500">
                     {admin.telegramVerifiedAt ? (
                       <span className="text-emerald-700">Ulangan</span>
@@ -832,9 +834,9 @@ export default function ShopDetailPage() {
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                 Tel <span className="text-red-500">*</span>
               </label>
-              <Input
+              <PhoneInput
                 value={editOwnerPhone}
-                onChange={(e) => setEditOwnerPhone(e.target.value)}
+                onChange={setEditOwnerPhone}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
             </div>
@@ -1001,10 +1003,9 @@ export default function ShopDetailPage() {
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                 Tel <span className="text-red-500">*</span>
               </label>
-              <Input
-                placeholder="+998 90 000 00 00"
+              <PhoneInput
                 value={adminPhone}
-                onChange={(e) => setAdminPhone(e.target.value)}
+                onChange={setAdminPhone}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
             </div>

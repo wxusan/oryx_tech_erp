@@ -192,6 +192,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             },
           })
 
+          const nextDeviceStatus =
+            contractPayment.isFullyPaid && sale.device.status === 'SOLD_DEBT'
+              ? 'SOLD_CASH'
+              : sale.device.status
+          if (nextDeviceStatus !== sale.device.status) {
+            await tx.device.update({
+              where: { id: sale.deviceId },
+              data: { status: nextDeviceStatus, updatedAt: new Date() },
+            })
+          }
+
           await tx.log.create({
             data: {
               shopId,
@@ -205,6 +216,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 remainingAmount: sale.remainingAmount,
                 paidFully: sale.paidFully,
                 dueDate: sale.dueDate,
+                deviceStatus: sale.device.status,
               },
               newValue: {
                 paymentId: payment.id,
@@ -218,6 +230,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 contractRemainingAmount: updatedSale.contractRemainingAmount,
                 appliedAmountInContractCurrency: contractPayment.appliedAmountInContractCurrency,
                 dueDate: updatedSale.dueDate,
+                deviceStatus: nextDeviceStatus,
                 auditReason: auditNote,
                 inputAmount: parsed.data.amount,
                 ...moneyInputMeta(amountInput),

@@ -6,6 +6,7 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { invalidateShopCustomerMutation } from '@/lib/server/cache-tags'
 import { normalizePhone, normalizeAdditionalPhones } from '@/lib/phone'
+import { phoneSchema } from '@/lib/validations'
 import { logger } from '@/lib/logger'
 import { computeCustomerTrustRating, isValidTrustTier, type CustomerNasiyaInput } from '@/lib/nasiya-customer-trust'
 
@@ -13,7 +14,7 @@ type RouteContext = { params: Promise<{ id: string }> }
 
 const updateCustomerSchema = z.object({
   name: z.string().min(2).optional(),
-  phone: z.string().min(9).optional(),
+  phone: phoneSchema.optional(),
   additionalPhones: z.array(z.string()).optional(),
   note: z.string().optional(),
   reason: z.string().optional(),

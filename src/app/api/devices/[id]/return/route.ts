@@ -62,7 +62,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       })
       if (!device) throw { status: 404, message: 'Qurilma topilmadi' }
-      if (!['SOLD_CASH', 'SOLD_NASIYA'].includes(device.status)) {
+      if (!['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(device.status)) {
         throw { status: 409, message: 'Faqat sotilgan qurilmani qaytarish mumkin' }
       }
 
@@ -86,8 +86,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }
 
       const guardedReturn = await tx.device.updateMany({
-        where: { id: deviceId, shopId, deletedAt: null, status: { in: ['SOLD_CASH', 'SOLD_NASIYA'] } },
-        data: { status: 'RETURNED', updatedAt: new Date(), note: parsed.data.note },
+        where: { id: deviceId, shopId, deletedAt: null, status: { in: ['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'] } },
+        data: { status: 'IN_STOCK', updatedAt: new Date(), note: parsed.data.note },
       })
       if (guardedReturn.count !== 1) {
         throw { status: 409, message: 'Qurilma qaytarish amali allaqachon bajarilgan' }
@@ -143,7 +143,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           targetId: deviceId,
           oldValue: { status: device.status, saleId: sale?.id, nasiyaId: nasiya?.id },
           newValue: {
-            status: 'RETURNED',
+            status: 'IN_STOCK',
             returnId: returnRecord.id,
             refundAmount: refundAmountUzs,
             inputRefundAmount: parsed.data.refundAmount,
@@ -156,7 +156,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
 
       // Notify the shop's verified Telegram admins. Rows are committed with the
-      // transaction (behind the atomic RETURNED guard above, so a double-click
+      // transaction (behind the atomic return-to-stock guard above, so a double-click
       // that 409s never reaches here) and flushed after the response.
       const shopAdmins = await tx.shopAdmin.findMany({
         where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
@@ -202,7 +202,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // Rows are already committed, so cron is the backstop if this misses.
     after(() => processPendingNotifications().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
 
-    return ok(result, 'Qurilma qaytarildi va bog\'langan sotuv/nasiya bekor qilindi')
+    return ok(result, 'Qurilma qaytarildi, omborga joylandi va bog\'langan sotuv/nasiya bekor qilindi')
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }

@@ -10,8 +10,8 @@ import { displayImei } from '@/lib/device-display'
 import { formatMoneyByCurrency, type CurrencyContext, type CurrencyCode } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 
-type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
-type DisplayStatus = 'Omborda' | 'Sotilgan' | 'Nasiyada' | 'Band qilingan' | 'Qaytarilgan' | "O'chirilgan"
+type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA' | 'RETURNED' | 'DELETED'
+type DisplayStatus = 'Omborda' | 'Sotilgan' | 'Qarz' | 'Nasiyada' | 'Qaytarilgan (eski holat)' | "O'chirilgan"
 
 interface DeviceSaleInfo {
   saleType: 'CASH' | 'NASIYA'
@@ -21,6 +21,7 @@ interface DeviceSaleInfo {
   // Native contract-currency ledger — see docs/currency-accounting-model.md.
   contractCurrency: CurrencyCode
   contractSoldPrice: number
+  contractRemainingAmount: number | null
   contractProfit: number | null
   customerName: string | null
   soldAt: string
@@ -58,9 +59,9 @@ interface DevicesPayload {
 const statusMap: Record<DeviceStatus, DisplayStatus> = {
   IN_STOCK: 'Omborda',
   SOLD_CASH: 'Sotilgan',
+  SOLD_DEBT: 'Qarz',
   SOLD_NASIYA: 'Nasiyada',
-  RESERVED: 'Band qilingan',
-  RETURNED: 'Qaytarilgan',
+  RETURNED: 'Qaytarilgan (eski holat)',
   DELETED: "O'chirilgan",
 }
 
@@ -68,8 +69,9 @@ const filterTabs: { label: string; value: DeviceStatus | 'Barchasi' }[] = [
   { label: 'Barchasi', value: 'Barchasi' },
   { label: 'Omborda', value: 'IN_STOCK' },
   { label: 'Sotilgan', value: 'SOLD_CASH' },
+  { label: 'Qarz', value: 'SOLD_DEBT' },
   { label: 'Nasiyada', value: 'SOLD_NASIYA' },
-  { label: 'Qaytarilgan', value: 'RETURNED' },
+  { label: 'Qaytarilgan (eski)', value: 'RETURNED' },
 ]
 
 function StatusBadge({ status }: { status: DeviceStatus }) {
@@ -77,9 +79,9 @@ function StatusBadge({ status }: { status: DeviceStatus }) {
   const styles: Record<DisplayStatus, string> = {
     'Omborda': 'bg-zinc-100 text-zinc-700',
     'Sotilgan': 'bg-zinc-900 text-white',
+    'Qarz': 'bg-amber-100 text-amber-800',
     'Nasiyada': 'bg-zinc-800 text-zinc-100',
-    'Band qilingan': 'bg-amber-100 text-amber-700',
-    'Qaytarilgan': 'bg-blue-100 text-blue-700',
+    'Qaytarilgan (eski holat)': 'bg-blue-100 text-blue-700',
     "O'chirilgan": 'bg-zinc-200 text-zinc-500',
   }
   return (
@@ -289,9 +291,16 @@ export default function QurilmalarClient({
                         legacy UZS snapshot re-derived through today's rate — a
                         USD-native sale must stay $500, not drift to $480.76
                         (see docs/currency-accounting-model.md). */}
-                    {d.saleInfo
-                      ? formatDisplayMoneyFromContract(d.saleInfo.contractSoldPrice, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)
-                      : '—'}
+                    {d.saleInfo ? (
+                      <>
+                        <div>{formatDisplayMoneyFromContract(d.saleInfo.contractSoldPrice, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}</div>
+                        {d.status === 'SOLD_DEBT' && d.saleInfo.contractRemainingAmount != null && (
+                          <div className="mt-0.5 text-xs font-medium text-amber-800">
+                            Qarz: {formatDisplayMoneyFromContract(d.saleInfo.contractRemainingAmount, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}
+                          </div>
+                        )}
+                      </>
+                    ) : '—'}
                   </td>
                   <td className="px-4 py-3">
                     {!d.saleInfo ? (
@@ -353,6 +362,11 @@ export default function QurilmalarClient({
                 <span>Kelish: {formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate)}</span>
                 {d.saleInfo && <span>Sotuv: <SoldPriceValue d={d} currency={currency} /></span>}
               </div>
+              {d.status === 'SOLD_DEBT' && d.saleInfo?.contractRemainingAmount != null && (
+                <div className="text-xs font-medium text-amber-800">
+                  Qarz: {formatDisplayMoneyFromContract(d.saleInfo.contractRemainingAmount, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}
+                </div>
+              )}
               {d.saleInfo && (
                 <div className="flex items-center justify-between text-xs">
                   <span className="text-zinc-500">{d.saleInfo.customerName ?? '—'}</span>

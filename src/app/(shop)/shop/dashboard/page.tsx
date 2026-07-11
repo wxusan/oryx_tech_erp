@@ -136,7 +136,7 @@ export default async function DashboardPage() {
             <CardContent>
               <div className="text-2xl font-bold text-zinc-900">{fmt(stats.accrualGrossProfitThisMonth, currency)}</div>
               <p className="mt-2 text-xs text-zinc-500">
-                Sotilgan qurilmalar narxidan tannarx ayirilgan · sotuv amalga oshirilgan zahoti hisoblanadi, to'lov holatidan qat'iy nazar
+                Sotuv narxidan tannarx ayiriladi
                 {stats.nasiyaInterestThisMonth > 0 ? ` · Nasiya foizi: ${fmt(stats.nasiyaInterestThisMonth, currency)}` : ''}
               </p>
               <KoLink href="/shop/hisobot" />
@@ -152,7 +152,7 @@ export default async function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-zinc-900">{fmt(stats.inventoryPurchaseCost, currency)}</div>
-              <p className="mt-2 text-xs text-zinc-500">Sotilmagan va band qilingan qurilmalar</p>
+              <p className="mt-2 text-xs text-zinc-500">Omborda turgan qurilmalar tannarxi</p>
               <KoLink href="/shop/qurilmalar?status=IN_STOCK" />
             </CardContent>
           </Card>
@@ -196,7 +196,7 @@ export default async function DashboardPage() {
               </div>
               <ReceiptText className="size-5 text-zinc-400" />
             </div>
-            <KoLink href="/shop/qurilmalar?status=SOLD_CASH" />
+            <KoLink href="/shop/qurilmalar" />
           </CardContent>
         </Card>
         <Card className="rounded-lg" size="sm">

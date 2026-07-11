@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { uzDate } from '@/lib/dates'
+import { formatUzPhoneDisplay } from '@/lib/phone'
 import type { CurrencyContext } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
@@ -302,7 +303,7 @@ export default function NasiyalarClient({
                           )}
                         </div>
                         <div className="text-xs text-zinc-500 mb-2">
-                          {n.device.model} · {n.customer.phone}
+                          {n.device.model} · {formatUzPhoneDisplay(n.customer.phone)}
                           {n.nextPaymentDate && (
                             <> · Keyingi to'lov: {uzDate(n.nextPaymentDate)}</>
                           )}
@@ -370,7 +371,7 @@ export default function NasiyalarClient({
                   <div className="flex items-start justify-between gap-2">
                     <div>
                       <div className="font-medium text-zinc-900">{n.customer.name}</div>
-                      <div className="text-xs font-mono text-zinc-500 mt-0.5">{n.customer.phone}</div>
+                      <div className="text-xs font-mono text-zinc-500 mt-0.5">{formatUzPhoneDisplay(n.customer.phone)}</div>
                     </div>
                     <StatusBadge status={n.displayStatus} />
                   </div>

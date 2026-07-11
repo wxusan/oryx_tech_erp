@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
 import { Textarea } from '@/components/ui/textarea'
 
 interface AdminForm {
@@ -191,10 +192,9 @@ export default function NewShopPage() {
               />
             </Field>
             <Field label="Tel raqami" required error={err(ownerPhone)}>
-              <Input
-                placeholder="+998 90 000 00 00"
+              <PhoneInput
                 value={ownerPhone}
-                onChange={(e) => setOwnerPhone(e.target.value)}
+                onChange={setOwnerPhone}
                 className={[
                   'h-8 text-sm rounded-none border-zinc-200',
                   err(ownerPhone) ? 'border-red-400' : '',
@@ -279,10 +279,9 @@ export default function NewShopPage() {
                     />
                   </Field>
                   <Field label="Tel" required error={err(admin.phone)}>
-                    <Input
-                      placeholder="+998 90 000 00 00"
+                    <PhoneInput
                       value={admin.phone}
-                      onChange={(e) => updateAdmin(admin.id, 'phone', e.target.value)}
+                      onChange={(phone) => updateAdmin(admin.id, 'phone', phone)}
                       className={[
                         'h-8 text-sm rounded-none border-zinc-200',
                         err(admin.phone) ? 'border-red-400' : '',

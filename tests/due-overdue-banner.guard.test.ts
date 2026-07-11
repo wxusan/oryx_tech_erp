@@ -69,11 +69,13 @@ describe('DueOverdueBanner: persistent, non-spammy, links to the right place', (
 
 describe('shop layout: banner shown on every shop page, not just the dashboard', () => {
   const layout = read('src/app/(shop)/layout.tsx')
+  const shell = read('src/app/(shop)/shop-layout-client.tsx')
 
   it('renders DueOverdueBanner once, outside the page-specific <main> content', () => {
-    expect(layout).toContain('<DueOverdueBanner />')
-    const bannerIndex = layout.indexOf('<DueOverdueBanner />')
-    const mainIndex = layout.indexOf('<main')
+    expect(layout).toContain('<ShopLayoutClient>{children}</ShopLayoutClient>')
+    expect(shell).toContain('<DueOverdueBanner />')
+    const bannerIndex = shell.indexOf('<DueOverdueBanner />')
+    const mainIndex = shell.indexOf('<main')
     expect(bannerIndex).toBeGreaterThan(-1)
     expect(bannerIndex).toBeLessThan(mainIndex)
   })

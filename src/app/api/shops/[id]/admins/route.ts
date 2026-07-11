@@ -14,6 +14,7 @@ import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 import { z, ZodError } from 'zod'
 import { logger } from '@/lib/logger'
+import { phoneSchema } from '@/lib/validations'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -25,9 +26,7 @@ const addAdminSchema = z.object({
   name: z
     .string({ error: "Admin ismi kiritilishi shart" })
     .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
-  phone: z
-    .string({ error: "Telefon raqam kiritilishi shart" })
-    .min(9, "Telefon raqam kamida 9 ta raqam bo'lishi kerak"),
+  phone: phoneSchema,
   telegramId: z
     .string()
     .trim()

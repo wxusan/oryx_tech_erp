@@ -14,6 +14,7 @@ import {
 import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { uzMonthYear } from '@/lib/dates'
+import { formatUzPhoneDisplay } from '@/lib/phone'
 import {
   Table,
   TableBody,
@@ -242,7 +243,7 @@ export default function DashboardPage() {
                 <TableRow key={shop.id} className="border-zinc-100 hover:bg-zinc-50">
                   <TableCell className="pl-5 text-sm font-medium text-zinc-900">{shop.name}</TableCell>
                   <TableCell className="text-sm text-zinc-600">{shop.ownerName}</TableCell>
-                  <TableCell className="text-sm text-zinc-500 font-mono">{shop.ownerPhone}</TableCell>
+                  <TableCell className="text-sm text-zinc-500 font-mono">{formatUzPhoneDisplay(shop.ownerPhone)}</TableCell>
                   <TableCell className="text-sm text-zinc-500">{shop.shopNumber}</TableCell>
                   <TableCell>
                     <StatusBadge status={shop.status} />

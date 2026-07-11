@@ -21,7 +21,7 @@ import { normalizePhone } from '@/lib/phone'
 import { getShopDevicesList, type DeviceStatusFilter } from '@/lib/server/shop-lists'
 import type { ZodError } from 'zod'
 
-const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_NASIYA', 'RESERVED', 'RETURNED', 'DELETED'] as const
+const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED', 'DELETED'] as const
 
 // ---------------------------------------------------------------------------
 // GET /api/devices

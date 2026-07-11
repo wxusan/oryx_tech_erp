@@ -14,9 +14,11 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
+import { PhoneInput } from '@/components/ui/phone-input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { uzDateTime } from '@/lib/dates'
+import { useShopCurrency } from '@/lib/use-shop-currency'
 import type { ApiResponse } from '@/types'
 
 interface ShopAdminProfile {
@@ -45,6 +47,7 @@ interface ShopProfile {
   status: string
   subscriptionDue: string
   preferredCurrency: 'UZS' | 'USD'
+  usdUzsRate: number | null
 }
 
 interface PasswordForm {
@@ -73,6 +76,7 @@ function formatDate(value: string | null | undefined) {
 }
 
 export default function ShopSettingsPage() {
+  const { setCurrency } = useShopCurrency()
   const [profile, setProfile] = useState<ShopAdminProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -221,7 +225,10 @@ export default function ShopSettingsPage() {
       })
       if (!response.ok) throw new Error(await readApiError(response))
       const json: ApiResponse<ShopProfile> = await response.json()
-      if (json.data) setShop(json.data)
+      if (json.data) {
+        setShop(json.data)
+        setCurrency({ currency: json.data.preferredCurrency, usdUzsRate: json.data.usdUzsRate })
+      }
       setShopSuccess("Do'kon ma'lumotlari yangilandi.")
     } catch (err) {
       setShopError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
@@ -361,10 +368,10 @@ export default function ShopSettingsPage() {
                     <Label htmlFor="account-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">
                       Telefon
                     </Label>
-                    <Input
+                    <PhoneInput
                       id="account-phone"
                       value={accountPhone}
-                      onChange={(event) => setAccountPhone(event.target.value)}
+                      onChange={setAccountPhone}
                       className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                     />
                   </div>
@@ -439,10 +446,10 @@ export default function ShopSettingsPage() {
                       <Label htmlFor="shop-owner-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">
                         Egasi telefoni
                       </Label>
-                      <Input
+                      <PhoneInput
                         id="shop-owner-phone"
                         value={shopForm.ownerPhone}
-                        onChange={(e) => setShopForm((f) => ({ ...f, ownerPhone: e.target.value }))}
+                        onChange={(ownerPhone) => setShopForm((f) => ({ ...f, ownerPhone }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                       />
                     </div>

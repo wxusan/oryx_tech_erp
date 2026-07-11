@@ -186,7 +186,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
       where: {
         shopId,
         deletedAt: null,
-        status: { in: ['IN_STOCK', 'RESERVED'] },
+        status: 'IN_STOCK',
       },
     }),
 

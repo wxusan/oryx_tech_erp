@@ -106,7 +106,7 @@ describe('Naqd sotuvlar (cash sale count) and Ombordagi tannarx (inventory cost)
     expect(stats.soldThisMonth).toBe(2)
   })
 
-  it('inventory purchase cost only sums IN_STOCK/RESERVED devices (a sold device already left this figure by construction of the query)', () => {
+  it('inventory purchase cost only sums IN_STOCK devices (a sold device already left this figure by construction of the query)', () => {
     const stats = computeShopStatsFromRows(baseRows({ inventoryPurchaseCostSum: 12_000_000 }))
     expect(stats.inventoryPurchaseCost).toBe(12_000_000)
   })

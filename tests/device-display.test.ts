@@ -58,9 +58,9 @@ describe('deviceStatusLabel', () => {
   it('maps every known device status to its Uzbek label', () => {
     expect(deviceStatusLabel('IN_STOCK')).toBe('Omborda')
     expect(deviceStatusLabel('SOLD_CASH')).toBe('Naqd sotildi')
+    expect(deviceStatusLabel('SOLD_DEBT')).toBe('Qarzga sotilgan')
     expect(deviceStatusLabel('SOLD_NASIYA')).toBe('Nasiyada')
-    expect(deviceStatusLabel('RESERVED')).toBe('Band qilingan')
-    expect(deviceStatusLabel('RETURNED')).toBe('Qaytarilgan')
+    expect(deviceStatusLabel('RETURNED')).toBe('Qaytarilgan (eski holat)')
     expect(deviceStatusLabel('DELETED')).toBe("O'chirilgan")
   })
 

@@ -27,8 +27,8 @@ enum ShopStatus {
 enum DeviceStatus {
   IN_STOCK
   SOLD_CASH
+  SOLD_DEBT
   SOLD_NASIYA
-  RESERVED
   RETURNED
   DELETED
 }
@@ -277,7 +277,7 @@ model Device {
   // "Olib-sotdim": sourced from another shop/person and sold to our customer in
   // the same operation. Created directly as SOLD_CASH (never IN_STOCK), so it
   // never becomes available for a later normal sale/nasiya and never enters
-  // inventoryPurchaseCost (that stat only sums IN_STOCK/RESERVED devices).
+  // inventoryPurchaseCost (that stat only sums IN_STOCK devices).
   // purchasePrice IS real (what we paid the external supplier) — unlike
   // isImported, this does count toward this month's cost/profit normally.
   isExternalSourced              Boolean      @default(false)

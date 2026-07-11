@@ -60,6 +60,7 @@ export interface ShopDeviceSaleInfo {
   profit: number | null
   contractCurrency: CurrencyCode
   contractSoldPrice: number
+  contractRemainingAmount: number | null
   contractProfit: number | null
   customerName: string | null
   soldAt: string
@@ -75,7 +76,7 @@ export interface ShopDeviceListItem {
   batteryHealth: number | null
   purchasePrice: number
   imei: string
-  status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
+  status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA' | 'RETURNED' | 'DELETED'
   createdAt: string
   note: string | null
   supplierName: string | null
@@ -143,7 +144,7 @@ export function initialLogsRequestKey() {
   return new URLSearchParams({ skip: '0', take: '10' }).toString()
 }
 
-export type DeviceStatusFilter = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_NASIYA' | 'RESERVED' | 'RETURNED' | 'DELETED'
+export type DeviceStatusFilter = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA' | 'RETURNED' | 'DELETED'
 
 export interface ShopDevicesQuery {
   search?: string
@@ -165,6 +166,7 @@ function buildDeviceSaleInfo(device: {
     customer: { name: string }
     contractCurrency: CurrencyCode
     contractSalePrice: unknown
+    contractRemainingAmount: unknown
     contractExchangeRateAtCreation: unknown
   }[]
   nasiya: {
@@ -212,6 +214,7 @@ function buildDeviceSaleInfo(device: {
       profit: returned ? null : soldPrice - purchasePrice,
       contractCurrency,
       contractSoldPrice,
+      contractRemainingAmount: null,
       contractProfit: returned ? null : computeSaleContractMargin(contractSoldPrice, contractCurrency, contractExchangeRateAtCreation, purchase),
       customerName: latestNasiya.customer.name,
       soldAt: latestNasiya.createdAt.toISOString(),
@@ -222,6 +225,7 @@ function buildDeviceSaleInfo(device: {
   const soldPrice = Number(latestSale!.salePrice)
   const contractCurrency = latestSale!.contractCurrency
   const contractSoldPrice = Number(latestSale!.contractSalePrice)
+  const contractRemainingAmount = Number(latestSale!.contractRemainingAmount)
   const contractExchangeRateAtCreation =
     latestSale!.contractExchangeRateAtCreation != null ? Number(latestSale!.contractExchangeRateAtCreation) : null
   return {
@@ -231,6 +235,7 @@ function buildDeviceSaleInfo(device: {
     profit: returned ? null : soldPrice - purchasePrice,
     contractCurrency,
     contractSoldPrice,
+    contractRemainingAmount,
     contractProfit: returned ? null : computeSaleContractMargin(contractSoldPrice, contractCurrency, contractExchangeRateAtCreation, purchase),
     customerName: latestSale!.customer.name,
     soldAt: latestSale!.createdAt.toISOString(),
@@ -314,6 +319,7 @@ export async function getShopDevicesList(shopId: string, query: ShopDevicesQuery
             customer: { select: { name: true } },
             contractCurrency: true,
             contractSalePrice: true,
+            contractRemainingAmount: true,
             contractExchangeRateAtCreation: true,
           },
         },
