@@ -19,7 +19,7 @@ export const phoneSchema = z
 
 const passwordSchema = z
   .string({ error: "Parol kiritilishi shart" })
-  .min(6, "Parol kamida 6 ta belgidan iborat bo'lishi kerak")
+  .min(10, "Parol kamida 10 ta belgidan iborat bo'lishi kerak")
 
 const telegramIdInputSchema = z
   .string()
