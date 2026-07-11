@@ -66,11 +66,11 @@ export function ShopLayoutClient({ children, shopName, adminName }: { children: 
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col md:overflow-hidden">
-        <header className="h-14 border-b border-zinc-200 flex items-center justify-between px-6 bg-white/90 backdrop-blur flex-shrink-0">
-          <span className="font-medium text-sm text-zinc-900">Do&apos;kon portali</span>
-          <div className="flex items-center gap-2">
-            <span className="max-w-40 truncate text-sm text-zinc-500">{adminName}</span>
+      <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
+        <header className="flex h-14 flex-shrink-0 items-center justify-end gap-2 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur sm:justify-between sm:px-6">
+          <span className="hidden text-sm font-medium text-zinc-900 sm:inline">Do&apos;kon portali</span>
+          <div className="flex min-w-0 items-center gap-2">
+            <span className="max-w-32 truncate text-xs text-zinc-500 sm:max-w-40 sm:text-sm">{adminName}</span>
             <div className="w-8 h-8 rounded-full bg-zinc-900 text-white text-xs flex items-center justify-center font-medium shadow-sm">
               {initials(adminName)}
             </div>
@@ -80,7 +80,7 @@ export function ShopLayoutClient({ children, shopName, adminName }: { children: 
 
         <DueOverdueBanner />
 
-        <main className="flex-1 overflow-auto bg-zinc-50">{children}</main>
+        <main className="min-w-0 flex-1 overflow-auto bg-zinc-50">{children}</main>
       </div>
     </div>
   )
