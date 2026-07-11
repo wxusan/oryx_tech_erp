@@ -72,7 +72,8 @@ describe('shop layout: banner shown on every shop page, not just the dashboard',
   const shell = read('src/app/(shop)/shop-layout-client.tsx')
 
   it('renders DueOverdueBanner once, outside the page-specific <main> content', () => {
-    expect(layout).toContain('<ShopLayoutClient>{children}</ShopLayoutClient>')
+    expect(layout).toContain('<ShopLayoutClient')
+    expect(layout).toContain('{children}')
     expect(shell).toContain('<DueOverdueBanner />')
     const bannerIndex = shell.indexOf('<DueOverdueBanner />')
     const mainIndex = shell.indexOf('<main')

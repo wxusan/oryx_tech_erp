@@ -18,7 +18,11 @@ const navLinks = [
   { href: '/shop/settings', label: 'Sozlamalar', icon: Settings },
 ]
 
-export function ShopLayoutClient({ children }: { children: React.ReactNode }) {
+function initials(name: string) {
+  return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'DA'
+}
+
+export function ShopLayoutClient({ children, shopName, adminName }: { children: React.ReactNode; shopName: string; adminName: string }) {
   const pathname = usePathname()
 
   return (
@@ -56,7 +60,7 @@ export function ShopLayoutClient({ children }: { children: React.ReactNode }) {
 
         <div className="p-4 border-t border-zinc-200">
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-            <div className="text-xs font-medium text-zinc-900">Malika shop OS</div>
+            <div className="truncate text-xs font-medium text-zinc-900">{shopName}</div>
             <div className="mt-1 text-xs text-zinc-500">Ombor, nasiya, hisobot</div>
           </div>
         </div>
@@ -66,9 +70,9 @@ export function ShopLayoutClient({ children }: { children: React.ReactNode }) {
         <header className="h-14 border-b border-zinc-200 flex items-center justify-between px-6 bg-white/90 backdrop-blur flex-shrink-0">
           <span className="font-medium text-sm text-zinc-900">Do&apos;kon portali</span>
           <div className="flex items-center gap-2">
-            <span className="text-sm text-zinc-500">Do'kon admini</span>
+            <span className="max-w-40 truncate text-sm text-zinc-500">{adminName}</span>
             <div className="w-8 h-8 rounded-full bg-zinc-900 text-white text-xs flex items-center justify-center font-medium shadow-sm">
-              S
+              {initials(adminName)}
             </div>
             <SessionControls callbackUrl="/shop/login" />
           </div>
