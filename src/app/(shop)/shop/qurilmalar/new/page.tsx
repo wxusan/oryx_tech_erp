@@ -13,6 +13,10 @@ import { currencyLabel } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, ImagePlus, Loader2, X } from 'lucide-react'
 import { navigateAfterMutation } from '@/lib/client-events'
+import { useQueryClient } from '@tanstack/react-query'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { patchDeviceUpsert } from '@/lib/device-query-cache'
+import type { DeviceListItem } from '@/lib/device-list-contract'
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -31,6 +35,8 @@ interface FormData {
 
 export default function NewDevicePage() {
   const router = useRouter()
+  const queryClient = useQueryClient()
+  const queryScope = useAuthenticatedQueryScope()
   const { currency, currencyError } = useShopCurrency()
   const [form, setForm] = useState<FormData>({
     model: '',
@@ -134,8 +140,13 @@ export default function NewDevicePage() {
           imageUrls,
         }),
       })
-      const json = await res.json()
+      const json = await res.json() as {
+        success?: boolean
+        error?: string
+        data?: { id: string; item: DeviceListItem; changeCursor: string }
+      }
       if (res.ok && json.success) {
+        if (json.data?.item) patchDeviceUpsert(queryClient, queryScope, json.data.item)
         await navigateAfterMutation(router, '/shop/qurilmalar', {
           kind: 'device.created',
           deviceId: json.data?.id,

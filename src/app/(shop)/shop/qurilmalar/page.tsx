@@ -4,6 +4,7 @@ import { getShopDevicesList } from '@/lib/server/shop-lists'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import QurilmalarClient from './qurilmalar-client'
 import { positivePage, scalarParam } from '@/lib/list-url-state'
+import { latestChangeCursorForSession } from '@/lib/server/change-events'
 
 interface QurilmalarPageProps {
   searchParams?: Promise<{ status?: string | string[]; q?: string | string[]; page?: string | string[] }>
@@ -27,6 +28,7 @@ export default async function QurilmalarPage({ searchParams }: QurilmalarPagePro
     ? (status as (typeof validStatuses)[number])
     : 'Barchasi'
 
+  const snapshotCursor = await latestChangeCursorForSession(guarded.session)
   const [{ items: devices, total }, currency] = await Promise.all([
     getShopDevicesList(guarded.shopId, {
       status: initialStatus === 'Barchasi' ? undefined : initialStatus,
@@ -45,6 +47,7 @@ export default async function QurilmalarPage({ searchParams }: QurilmalarPagePro
       initialStatus={initialStatus}
       initialSearch={initialSearch}
       initialPage={initialPage}
+      initialSyncCursor={snapshotCursor}
     />
   )
 }

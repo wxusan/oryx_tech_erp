@@ -207,11 +207,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       })
       if (!response.ok) throw new Error(await readApiError(response))
       const json: ApiResponse<SuperAdminProfile> = await response.json()
-      const invalidated = await commitNavigationMutation({ kind: 'admin.profileUpdated' })
-      if (!invalidated) {
-        window.location.reload()
-        return
-      }
+      await commitNavigationMutation({ kind: 'admin.profileUpdated' })
       setProfile(json.data ?? null)
       setName(json.data?.name ?? '')
       setNameSuccess('Profil yangilandi.')
@@ -244,11 +240,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       if (!response.ok) throw new Error(await readApiError(response))
 
       const json: ApiResponse<SuperAdminProfile> = await response.json()
-      const invalidated = await commitNavigationMutation({ kind: 'admin.profileUpdated' })
-      if (!invalidated) {
-        window.location.reload()
-        return
-      }
+      await commitNavigationMutation({ kind: 'admin.profileUpdated' })
       setProfile(json.data ?? null)
       setTelegramId(json.data?.telegramId ?? '')
       setTelegramSuccess(json.message ?? 'Telegram ID yangilandi.')
@@ -279,11 +271,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       })
       if (!response.ok) throw new Error(await readApiError(response))
       const json: ApiResponse<CurrencyRateRecord> = await response.json()
-      const invalidated = await commitNavigationMutation({ kind: 'currency.updated' })
-      if (!invalidated) {
-        window.location.reload()
-        return
-      }
+      await commitNavigationMutation({ kind: 'currency.updated' })
       const savedRate = json.data ?? null
       if (savedRate) {
         setCurrencyRate((current) => ({

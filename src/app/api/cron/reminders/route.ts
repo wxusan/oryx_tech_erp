@@ -44,6 +44,8 @@ import { recordOpsEvent } from '@/lib/server/ops-events'
 import { getUsdUzsRate } from '@/lib/server/currency'
 import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
+import { cleanupExpiredChangeEvents } from '@/lib/server/change-events'
+import { transitionNasiyaToOverdue } from '@/lib/server/overdue-transition'
 import {
   nasiyaDueTodayMessage,
   nasiyaOverdueMessage,
@@ -218,34 +220,20 @@ export async function GET(request: NextRequest): Promise<Response> {
       daysLate,
       currency: await reminderCurrency(schedule.nasiya.shop),
     })
-    const transitioned = await prisma.$transaction(async (tx) => {
-      for (const admin of schedule.nasiya.shop.admins) {
-        const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
-        await tx.notification.upsert({
-          where: { dedupeKey },
-          update: {},
-          create: {
-            dedupeKey,
-            shopId: schedule.nasiya.shopId,
-            type: 'OVERDUE',
-            message: msg,
-            telegramId: admin.telegramId!,
-            scheduledAt: scheduledReminderSendAt(dedupeKey),
-            relatedId: schedule.id,
-            relatedType: 'NasiyaSchedule',
-          },
-        })
+    const notifications = schedule.nasiya.shop.admins.map((admin) => {
+      const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
+      return {
+        dedupeKey,
+        message: msg,
+        telegramId: admin.telegramId!,
+        scheduledAt: scheduledReminderSendAt(dedupeKey),
       }
-
-      const scheduleUpdate = await tx.nasiyaSchedule.updateMany({
-        where: { id: schedule.id, status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] } },
-        data: { status: 'OVERDUE' },
-      })
-      const nasiyaUpdate = await tx.nasiya.updateMany({
-        where: { id: schedule.nasiya.id, status: { not: 'OVERDUE' } },
-        data: { status: 'OVERDUE' },
-      })
-      return scheduleUpdate.count > 0 || nasiyaUpdate.count > 0
+    })
+    const transitioned = await transitionNasiyaToOverdue({
+      scheduleId: schedule.id,
+      nasiyaId: schedule.nasiya.id,
+      shopId: schedule.nasiya.shopId,
+      notifications,
     })
     if (transitioned) transitionedShopIds.add(schedule.nasiya.shopId)
   }
@@ -629,9 +617,24 @@ export async function GET(request: NextRequest): Promise<Response> {
       })
     }
     if (payable.status !== 'OVERDUE') {
-      await prisma.supplierPayable.updateMany({
-        where: { id: payable.id, status: 'PENDING' },
-        data: { status: 'OVERDUE' },
+      await prisma.$transaction(async (tx) => {
+        const changed = await tx.supplierPayable.updateMany({
+          where: { id: payable.id, status: 'PENDING' },
+          data: { status: 'OVERDUE' },
+        })
+        if (changed.count > 0) {
+          await tx.changeEvent.create({
+            data: {
+              scopeType: 'SHOP',
+              scopeId: payable.shopId,
+              domain: 'olibSotdim',
+              entityType: 'SupplierPayable',
+              entityId: payable.id,
+              operation: 'updated',
+              mutationKind: 'supplierPayable.overdue',
+            },
+          })
+        }
       })
     }
   }
@@ -696,6 +699,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   // Flush pending Telegram notifications before the cron response completes.
   const delivery = await processPendingNotifications()
+  const expiredChanges = await cleanupExpiredChangeEvents()
 
   const summary = {
     reminders: dueToday.length,
@@ -722,6 +726,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       notificationsFailed: delivery.failed,
       notificationsCancelled: delivery.cancelled,
       overdueTransitions: transitionedShopIds.size,
+      expiredChangeEventsDeleted: expiredChanges.count,
       durationMs: Date.now() - startedAt,
     },
   })

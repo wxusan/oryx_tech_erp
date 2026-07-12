@@ -10,6 +10,7 @@ import { getShopCurrencyContext } from '@/lib/server/currency'
 import { computeSaleContractMargin, type PurchaseCostLike } from '@/lib/nasiya-contract'
 import type { CurrencyCode } from '@/lib/currency'
 import { normalizePhone } from '@/lib/phone'
+import type { DeviceListItem, DeviceListSaleInfo } from '@/lib/device-list-contract'
 
 /**
  * Real page/skip/take pagination envelope for the devices/nasiyalar list
@@ -53,36 +54,8 @@ function clampSkip(skip?: number): number {
  * reconverting the legacy snapshot through today's rate (see
  * docs/currency-accounting-model.md).
  */
-export interface ShopDeviceSaleInfo {
-  saleType: 'CASH' | 'NASIYA'
-  soldPrice: number
-  interestAmount: number
-  profit: number | null
-  contractCurrency: CurrencyCode
-  contractSoldPrice: number
-  contractRemainingAmount: number | null
-  contractProfit: number | null
-  customerName: string | null
-  soldAt: string
-  returned: boolean
-  refundAmount: number | null
-}
-
-export interface ShopDeviceListItem {
-  id: string
-  model: string
-  color: string | null
-  storage: string | null
-  batteryHealth: number | null
-  purchasePrice: number
-  imei: string
-  status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA' | 'RETURNED' | 'DELETED'
-  createdAt: string
-  note: string | null
-  supplierName: string | null
-  supplierPhone: string | null
-  saleInfo: ShopDeviceSaleInfo | null
-}
+export type ShopDeviceSaleInfo = DeviceListSaleInfo
+export type ShopDeviceListItem = DeviceListItem
 
 export interface ShopNasiyaListItem {
   id: string
@@ -152,6 +125,59 @@ export interface ShopDevicesQuery {
   skip?: number
   take?: number
 }
+
+const shopDeviceListSelect = {
+  id: true,
+  model: true,
+  color: true,
+  storage: true,
+  batteryHealth: true,
+  purchasePrice: true,
+  purchaseCurrency: true,
+  purchaseInputAmount: true,
+  purchaseAmountUzsSnapshot: true,
+  imei: true,
+  status: true,
+  createdAt: true,
+  note: true,
+  supplierPhone: true,
+  supplier: { select: { name: true } },
+  sales: {
+    where: { deletedAt: null },
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
+    select: {
+      salePrice: true,
+      createdAt: true,
+      customer: { select: { name: true } },
+      contractCurrency: true,
+      contractSalePrice: true,
+      contractRemainingAmount: true,
+      contractExchangeRateAtCreation: true,
+    },
+  },
+  nasiya: {
+    where: { deletedAt: null },
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
+    select: {
+      totalAmount: true,
+      interestAmount: true,
+      createdAt: true,
+      customer: { select: { name: true } },
+      contractCurrency: true,
+      contractTotalAmount: true,
+      contractExchangeRateAtCreation: true,
+    },
+  },
+  returns: {
+    orderBy: { createdAt: 'desc' as const },
+    take: 1,
+    select: { refundAmount: true, createdAt: true },
+  },
+} satisfies Prisma.DeviceSelect
+
+type ShopDeviceListRow = Prisma.DeviceGetPayload<{ select: typeof shopDeviceListSelect }>
 
 /** Pick whichever of the device's latest sale/nasiya is more recent and build its profit summary. */
 function buildDeviceSaleInfo(device: {
@@ -244,6 +270,24 @@ function buildDeviceSaleInfo(device: {
   }
 }
 
+function mapShopDeviceListRow(device: ShopDeviceListRow): ShopDeviceListItem {
+  return {
+    id: device.id,
+    model: device.model,
+    color: device.color,
+    storage: device.storage,
+    batteryHealth: device.batteryHealth,
+    purchasePrice: Number(device.purchasePrice),
+    imei: device.imei,
+    status: device.status,
+    createdAt: device.createdAt.toISOString(),
+    note: device.note,
+    supplierName: device.supplier?.name ?? null,
+    supplierPhone: device.supplierPhone,
+    saleInfo: buildDeviceSaleInfo(device),
+  }
+}
+
 /**
  * Real page/skip/take pagination for the devices list — search/status are
  * applied server-side (via a Prisma `where`, run through `count()` with the
@@ -293,80 +337,31 @@ export async function getShopDevicesList(shopId: string, query: ShopDevicesQuery
       orderBy: { createdAt: 'desc' },
       skip,
       take,
-      select: {
-        id: true,
-        model: true,
-        color: true,
-        storage: true,
-        batteryHealth: true,
-        purchasePrice: true,
-        purchaseCurrency: true,
-        purchaseInputAmount: true,
-        purchaseAmountUzsSnapshot: true,
-        imei: true,
-        status: true,
-        createdAt: true,
-        note: true,
-        supplierPhone: true,
-        supplier: { select: { name: true } },
-        sales: {
-          where: { deletedAt: null },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          select: {
-            salePrice: true,
-            createdAt: true,
-            customer: { select: { name: true } },
-            contractCurrency: true,
-            contractSalePrice: true,
-            contractRemainingAmount: true,
-            contractExchangeRateAtCreation: true,
-          },
-        },
-        nasiya: {
-          where: { deletedAt: null },
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          select: {
-            totalAmount: true,
-            interestAmount: true,
-            createdAt: true,
-            customer: { select: { name: true } },
-            contractCurrency: true,
-            contractTotalAmount: true,
-            contractExchangeRateAtCreation: true,
-          },
-        },
-        returns: {
-          orderBy: { createdAt: 'desc' },
-          take: 1,
-          select: { refundAmount: true, createdAt: true },
-        },
-      },
+      select: shopDeviceListSelect,
     }),
     prisma.device.count({ where }),
   ])
 
   return {
-    items: rows.map((device) => ({
-      id: device.id,
-      model: device.model,
-      color: device.color,
-      storage: device.storage,
-      batteryHealth: device.batteryHealth,
-      purchasePrice: Number(device.purchasePrice),
-      imei: device.imei,
-      status: device.status,
-      createdAt: device.createdAt.toISOString(),
-      note: device.note,
-      supplierName: device.supplier?.name ?? null,
-      supplierPhone: device.supplierPhone,
-      saleInfo: buildDeviceSaleInfo(device),
-    })),
+    items: rows.map(mapShopDeviceListRow),
     total,
     skip,
     take,
   }
+}
+
+/** Canonical list DTO resolver used by mutation responses and incremental sync. */
+export async function getShopDeviceListItemsByIds(shopId: string, ids: readonly string[]): Promise<ShopDeviceListItem[]> {
+  if (ids.length === 0) return []
+  const rows = await prisma.device.findMany({
+    where: { shopId, id: { in: [...new Set(ids)] }, deletedAt: null },
+    select: shopDeviceListSelect,
+  })
+  const byId = new Map(rows.map((row) => [row.id, mapShopDeviceListRow(row)]))
+  return ids.flatMap((id) => {
+    const item = byId.get(id)
+    return item ? [item] : []
+  })
 }
 
 export type NasiyaStatusFilter = 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'

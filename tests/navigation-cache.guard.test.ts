@@ -7,47 +7,45 @@ function read(path: string) {
 }
 
 describe('navigation cache integration guards', () => {
-  it('configures a 30-second Client Router Cache for navigated and targeted-prefetch routes', () => {
+  it('configures a two-minute Client Router Cache for navigated and targeted-prefetch routes', () => {
     const config = read('next.config.ts')
-    expect(config).toContain('staleTimes: { dynamic: 30, static: 30 }')
+    expect(config).toContain('staleTimes: { dynamic: 120, static: 120 }')
   })
 
-  it('authenticates the Server Action, revalidates typed paths, then refreshes the current route', () => {
-    const action = read('src/app/actions/navigation-cache.ts')
-    expect(action).toContain('await requireApiSession()')
-    expect(action).toContain('navigationImpactForMutation(mutation)')
-    expect(action).toContain('for (const path of impact.paths)')
-    expect(action).toContain('revalidatePath(path)')
-    expect(action).toContain('refresh()')
+  it('authenticates private delta sync and derives the tenant scope server-side', () => {
+    const route = read('src/app/api/sync/route.ts')
+    expect(route).toContain('await requireApiSession()')
+    expect(route).toContain("'Cache-Control': 'private, no-store, max-age=0'")
+    expect(route).not.toContain("searchParams.get('shopId')")
+    expect(read('prisma/migrations/202607120001_incremental_change_events/migration.sql')).toContain('AFTER INSERT ON "Log"')
   })
 
-  it('emits and broadcasts only after successful Server Action invalidation', () => {
+  it('synchronizes, then broadcasts without a cache-clearing Server Action', () => {
     const events = read('src/lib/client-events.ts')
-    const action = events.indexOf('await invalidateNavigationAfterMutation(mutation)')
-    const dispatch = events.indexOf('dispatchSuccessfulMutation(mutation, result.impact)')
-    expect(action).toBeGreaterThan(0)
-    expect(dispatch).toBeGreaterThan(action)
-    expect(events).toContain('catch {\n    return false')
+    expect(events).toContain('await requestIncrementalSync()')
+    expect(events).toContain('broadcastSuccessfulMutation(message)')
+    expect(events).not.toContain('invalidateNavigationAfterMutation')
+    expect(events).not.toContain('window.location.assign(href)')
   })
 
-  it('uses narrow hard-navigation fallbacks and clears client state at logout', () => {
+  it('clears both query and cross-tab state at logout', () => {
     const events = read('src/lib/client-events.ts')
     const session = read('src/components/auth/session-controls.tsx')
-    expect(events).toContain('else window.location.assign(href)')
-    expect(events).toContain('else window.location.reload()')
+    expect(events).toContain('clearActiveAuthenticatedQueryCache()')
     expect(session).toContain('clearNavigationClientState()')
     expect(session).toContain('signOut({ callbackUrl })')
   })
 
-  it('coordinates cross-tab, focus, visibility, reconnect, dedupe, and scope isolation', () => {
+  it('coordinates cross-tab, polling, focus, visibility, reconnect, backoff, and scope isolation', () => {
     const coordinator = read('src/components/navigation-cache-coordinator.tsx')
     expect(coordinator).toContain("window.addEventListener('focus'")
     expect(coordinator).toContain("window.addEventListener('online'")
     expect(coordinator).toContain("document.addEventListener('visibilitychange'")
     expect(coordinator).toContain('message.scopeKey !== scopeKey')
     expect(coordinator).toContain('message.sourceId === sourceId')
-    expect(coordinator).toContain('seenRef.current.has(message.id)')
-    expect(coordinator).toContain('refreshQueuedRef.current = true')
+    expect(coordinator).toContain('window.setInterval(visibleSync, SYNC_INTERVAL_MS)')
+    expect(coordinator).toContain('nextAllowedAtRef.current')
+    expect(coordinator).toContain('runningRef.current')
   })
 
   it('wires every client operational-mutation module to the central contract', () => {
@@ -92,11 +90,18 @@ describe('navigation cache integration guards', () => {
     }
   })
 
-  it('cancels or generation-guards stale list responses', () => {
-    expect(read('src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx')).toContain('controller.abort()')
-    expect(read('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')).toContain('controller.abort()')
-    expect(read('src/app/(shop)/shop/logs/logs-client.tsx')).toContain('controller.abort()')
-    expect(read('src/app/(shop)/shop/mijozlar/customers-client.tsx')).toContain('requestGenerationRef')
-    expect(read('src/app/(shop)/shop/olib-sotdim/olib-sotdim-client.tsx')).toContain('requestGenerationRef')
+  it('uses TanStack query signals and previous-data retention for operational lists', () => {
+    for (const path of [
+      'src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx',
+      'src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx',
+      'src/app/(shop)/shop/logs/logs-client.tsx',
+      'src/app/(shop)/shop/mijozlar/customers-client.tsx',
+      'src/app/(shop)/shop/olib-sotdim/olib-sotdim-client.tsx',
+    ]) {
+      const source = read(path)
+      expect(source, path).toContain('useQuery({')
+      expect(source, path).toContain('signal')
+      expect(source, path).toContain('placeholderData: keepPreviousData')
+    }
   })
 })

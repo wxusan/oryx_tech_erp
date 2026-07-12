@@ -4,6 +4,8 @@ import { getShopNasiyalarList } from '@/lib/server/shop-lists'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import NasiyalarClient from './nasiyalar-client'
 import { positivePage, scalarParam } from '@/lib/list-url-state'
+import { latestChangeCursorForSession } from '@/lib/server/change-events'
+import { IncrementalSnapshotBoundary } from '@/components/incremental-snapshot-boundary'
 
 interface NasiyalarPageProps {
   searchParams?: Promise<{ status?: string | string[]; q?: string | string[]; page?: string | string[] }>
@@ -26,6 +28,7 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
   const initialFilter = validStatuses.includes(status as (typeof validStatuses)[number])
     ? (status as (typeof validStatuses)[number])
     : 'Barchasi'
+  const cursor = await latestChangeCursorForSession(guarded.session)
   const [{ items: nasiyalar, total }, currency] = await Promise.all([
     getShopNasiyalarList(guarded.shopId, {
       status: initialFilter === 'Barchasi' ? undefined : initialFilter,
@@ -37,13 +40,16 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
   ])
 
   return (
-    <NasiyalarClient
-      initialNasiyalar={nasiyalar}
-      initialTotal={total}
-      initialFilter={initialFilter}
-      initialSearch={initialSearch}
-      initialPage={initialPage}
-      currency={currency}
-    />
+    <>
+      <IncrementalSnapshotBoundary cursor={cursor} />
+      <NasiyalarClient
+        initialNasiyalar={nasiyalar}
+        initialTotal={total}
+        initialFilter={initialFilter}
+        initialSearch={initialSearch}
+        initialPage={initialPage}
+        currency={currency}
+      />
+    </>
   )
 }

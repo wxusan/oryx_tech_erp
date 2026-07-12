@@ -1,61 +1,29 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { memo, useEffect, useMemo, useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { exportUrl } from '@/lib/api-client'
 import { uzDate } from '@/lib/dates'
 import { displayImei } from '@/lib/device-display'
-import { formatMoneyByCurrency, type CurrencyContext, type CurrencyCode } from '@/lib/currency'
+import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 import { replaceListUrlState } from '@/lib/list-url-state'
+import type { DeviceListItem, DeviceListPage, DeviceStatus } from '@/lib/device-list-contract'
+import { queryKeys, type DeviceListQuery } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { adoptIncrementalSnapshotCursor, requestIncrementalSync } from '@/lib/client-sync-runtime'
 
-type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA' | 'RETURNED' | 'DELETED'
 type DisplayStatus = 'Omborda' | 'Sotilgan' | 'Qarz' | 'Nasiyada' | 'Qaytarilgan (eski holat)' | "O'chirilgan"
-
-interface DeviceSaleInfo {
-  saleType: 'CASH' | 'NASIYA'
-  soldPrice: number
-  interestAmount: number
-  profit: number | null
-  // Native contract-currency ledger — see docs/currency-accounting-model.md.
-  contractCurrency: CurrencyCode
-  contractSoldPrice: number
-  contractRemainingAmount: number | null
-  contractProfit: number | null
-  customerName: string | null
-  soldAt: string
-  returned: boolean
-  refundAmount: number | null
-}
-
-interface Device {
-  id: string
-  model: string
-  color: string | null
-  storage: string | null
-  batteryHealth: number | null
-  purchasePrice: number
-  imei: string
-  status: DeviceStatus
-  createdAt: string
-  note: string | null
-  supplierName: string | null
-  supplierPhone: string | null
-  saleInfo: DeviceSaleInfo | null
-}
+type Device = DeviceListItem
 
 interface ApiResponse<T> {
   success: boolean
   data?: T
   error?: string
-}
-
-interface DevicesPayload {
-  items: Device[]
-  total: number
 }
 
 const statusMap: Record<DeviceStatus, DisplayStatus> = {
@@ -122,6 +90,96 @@ function ProfitValue({ d, currency }: { d: Device; currency: CurrencyContext }) 
   )
 }
 
+const DeviceTableRow = memo(function DeviceTableRow({
+  device: d,
+  currency,
+}: {
+  device: Device
+  currency: CurrencyContext
+}) {
+  return (
+    <tr className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
+      <td className="px-4 py-3 font-medium text-zinc-900">{d.model}</td>
+      <td className="px-4 py-3 text-zinc-600">{d.color ?? '—'}</td>
+      <td className="px-4 py-3 text-zinc-600">{d.storage ?? '—'}</td>
+      <td className="px-4 py-3 text-zinc-600">{d.batteryHealth != null ? `${d.batteryHealth}%` : '—'}</td>
+      <td className="px-4 py-3 font-medium text-zinc-900">
+        {formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate)}
+      </td>
+      <td className="px-4 py-3 font-mono text-xs text-zinc-400">{displayImei(d.imei)}</td>
+      <td className="px-4 py-3"><StatusBadge status={d.status} /></td>
+      <td className="px-4 py-3 font-medium text-zinc-900">
+        {d.saleInfo ? (
+          <>
+            <div><SoldPriceValue d={d} currency={currency} /></div>
+            {d.status === 'SOLD_DEBT' && d.saleInfo.contractRemainingAmount != null && (
+              <div className="mt-0.5 text-xs font-medium text-amber-800">
+                Qarz: {formatDisplayMoneyFromContract(d.saleInfo.contractRemainingAmount, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}
+              </div>
+            )}
+          </>
+        ) : '—'}
+      </td>
+      <td className="px-4 py-3"><ProfitValue d={d} currency={currency} /></td>
+      <td className="px-4 py-3 text-zinc-600">{d.saleInfo?.customerName ?? '—'}</td>
+      <td className="px-4 py-3 text-zinc-500">{uzDate(d.createdAt)}</td>
+      <td className="px-4 py-3">
+        <IntentPrefetchLink
+          href={`/shop/qurilmalar/${d.id}`}
+          className="inline-flex rounded border border-zinc-200 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100"
+        >
+          Ko&apos;rish
+        </IntentPrefetchLink>
+      </td>
+    </tr>
+  )
+})
+
+const DeviceMobileCard = memo(function DeviceMobileCard({
+  device: d,
+  currency,
+}: {
+  device: Device
+  currency: CurrencyContext
+}) {
+  return (
+    <div className="space-y-2 rounded border border-zinc-200 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <div>
+          <div className="font-medium text-zinc-900">{d.model}</div>
+          <div className="mt-0.5 font-mono text-xs text-zinc-500">{displayImei(d.imei)}</div>
+        </div>
+        <StatusBadge status={d.status} />
+      </div>
+      <div className="text-xs text-zinc-500">
+        {[d.color, d.storage, d.batteryHealth != null ? `${d.batteryHealth}%` : null].filter(Boolean).join(' · ') || '—'}
+      </div>
+      <div className="flex items-center justify-between text-xs text-zinc-600">
+        <span>Kelish: {formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate)}</span>
+        {d.saleInfo && <span>Sotuv: <SoldPriceValue d={d} currency={currency} /></span>}
+      </div>
+      {d.status === 'SOLD_DEBT' && d.saleInfo?.contractRemainingAmount != null && (
+        <div className="text-xs font-medium text-amber-800">
+          Qarz: {formatDisplayMoneyFromContract(d.saleInfo.contractRemainingAmount, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}
+        </div>
+      )}
+      {d.saleInfo && (
+        <div className="flex items-center justify-between text-xs">
+          <span className="text-zinc-500">{d.saleInfo.customerName ?? '—'}</span>
+          <ProfitValue d={d} currency={currency} />
+        </div>
+      )}
+      <div className="text-xs text-zinc-400">{uzDate(d.createdAt)}</div>
+      <IntentPrefetchLink
+        href={`/shop/qurilmalar/${d.id}`}
+        className={buttonVariants({ variant: 'outline', className: 'h-8 w-full rounded border-zinc-200 text-xs' })}
+      >
+        Ko&apos;rish
+      </IntentPrefetchLink>
+    </div>
+  )
+})
+
 // Item — real page/skip/take pagination (matches /api/logs' established
 // envelope, and mijozlar/logs' client-fetch pattern) — replaces the old
 // single unbounded-in-spirit fetch capped at a fixed ceiling.
@@ -143,6 +201,7 @@ export default function QurilmalarClient({
   initialStatus = 'Barchasi',
   initialSearch = '',
   initialPage = 1,
+  initialSyncCursor,
 }: {
   initialDevices: Device[]
   initialTotal: number
@@ -150,15 +209,22 @@ export default function QurilmalarClient({
   initialStatus?: DeviceStatus | 'Barchasi'
   initialSearch?: string
   initialPage?: number
+  initialSyncCursor: string
 }) {
-  const [devices, setDevices] = useState<Device[]>(initialDevices)
-  const [total, setTotal] = useState(initialTotal)
+  const scope = useAuthenticatedQueryScope()
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState(initialSearch)
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch)
   const [activeStatus, setActiveStatus] = useState<DeviceStatus | 'Barchasi'>(initialStatus)
-  const [error, setError] = useState('')
-  const [loadedKey, setLoadedKey] = useState(() => buildRequestKey(initialSearch, initialStatus, initialPage))
+  const initialRequestKey = useMemo(
+    () => buildRequestKey(initialSearch, initialStatus, initialPage),
+    [initialPage, initialSearch, initialStatus],
+  )
+
+  useEffect(() => {
+    adoptIncrementalSnapshotCursor(initialSyncCursor)
+    void requestIncrementalSync()
+  }, [initialSyncCursor])
 
   // Debounce the free-text search so typing doesn't fire a request per keystroke.
   useEffect(() => {
@@ -171,38 +237,38 @@ export default function QurilmalarClient({
     [debouncedSearch, activeStatus, page],
   )
 
+  const listQuery = useMemo<DeviceListQuery>(() => ({
+    search: debouncedSearch,
+    status: activeStatus,
+    page,
+    take: PER_PAGE,
+    sort: 'createdAt-desc',
+  }), [activeStatus, debouncedSearch, page])
+
+  const devicesQuery = useQuery({
+    queryKey: queryKeys.devices.list(scope, listQuery),
+    queryFn: async ({ signal }) => {
+      const response = await fetch(`/api/devices?${requestKey}`, { signal, cache: 'no-store' })
+      const json = await response.json() as ApiResponse<DeviceListPage>
+      if (!response.ok || !json.success || !json.data) {
+        throw new Error(json.error || 'Qurilmalar yuklanmadi')
+      }
+      return json.data
+    },
+    initialData: requestKey === initialRequestKey
+      ? { items: initialDevices, total: initialTotal, skip: (initialPage - 1) * PER_PAGE, take: PER_PAGE }
+      : undefined,
+    placeholderData: keepPreviousData,
+  })
+
   useEffect(() => {
     replaceListUrlState({ q: debouncedSearch, status: activeStatus, page })
   }, [activeStatus, debouncedSearch, page])
 
-  useEffect(() => {
-    if (loadedKey === requestKey) return
-
-    const controller = new AbortController()
-
-    fetch(`/api/devices?${requestKey}`, { signal: controller.signal })
-      .then((res) => res.json())
-      .then((json: ApiResponse<DevicesPayload>) => {
-        if (!json.success || !json.data) {
-          setError(json.error || 'Qurilmalar yuklanmadi')
-          setLoadedKey(requestKey)
-          return
-        }
-        setError('')
-        setDevices(json.data.items)
-        setTotal(json.data.total)
-        setLoadedKey(requestKey)
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-        setError('Qurilmalar yuklanmadi')
-        setLoadedKey(requestKey)
-      })
-
-    return () => controller.abort()
-  }, [loadedKey, requestKey])
-
-  const loading = loadedKey !== requestKey
+  const devices = devicesQuery.data?.items ?? []
+  const total = devicesQuery.data?.total ?? 0
+  const error = devicesQuery.error instanceof Error ? devicesQuery.error.message : ''
+  const loading = devicesQuery.isPending && !devicesQuery.data
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
 
   return (
@@ -283,66 +349,8 @@ export default function QurilmalarClient({
                   </td>
                 </tr>
               ) : (
-                devices.map((d) => (
-                <tr key={d.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
-                  <td className="px-4 py-3 font-medium text-zinc-900">{d.model}</td>
-                  <td className="px-4 py-3 text-zinc-600">{d.color ?? '—'}</td>
-                  <td className="px-4 py-3 text-zinc-600">{d.storage ?? '—'}</td>
-                  <td className="px-4 py-3 text-zinc-600">{d.batteryHealth != null ? `${d.batteryHealth}%` : '—'}</td>
-                  <td className="px-4 py-3 text-zinc-900 font-medium">
-                    {formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate)}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-400 text-xs font-mono">{displayImei(d.imei)}</td>
-                  <td className="px-4 py-3">
-                    <StatusBadge status={d.status} />
-                  </td>
-                  <td className="px-4 py-3 text-zinc-900 font-medium">
-                    {/* Converts from the deal's own contract currency, never the
-                        legacy UZS snapshot re-derived through today's rate — a
-                        USD-native sale must stay $500, not drift to $480.76
-                        (see docs/currency-accounting-model.md). */}
-                    {d.saleInfo ? (
-                      <>
-                        <div>{formatDisplayMoneyFromContract(d.saleInfo.contractSoldPrice, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}</div>
-                        {d.status === 'SOLD_DEBT' && d.saleInfo.contractRemainingAmount != null && (
-                          <div className="mt-0.5 text-xs font-medium text-amber-800">
-                            Qarz: {formatDisplayMoneyFromContract(d.saleInfo.contractRemainingAmount, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}
-                          </div>
-                        )}
-                      </>
-                    ) : '—'}
-                  </td>
-                  <td className="px-4 py-3">
-                    {!d.saleInfo ? (
-                      '—'
-                    ) : d.saleInfo.returned ? (
-                      <span className="text-xs text-blue-700">Qaytarilgan</span>
-                    ) : d.saleInfo.contractProfit != null ? (
-                      <span className={d.saleInfo.contractProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
-                        {formatDisplayMoneyFromContract(d.saleInfo.contractProfit, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}
-                      </span>
-                    ) : (
-                      // Fallback for the rare case a USD contract has no creation
-                      // rate on record — conservative legacy UZS figure rather
-                      // than inventing a native profit (see computeContractCurrencyMargin).
-                      <span className={d.saleInfo.profit != null && d.saleInfo.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
-                        {formatMoneyByCurrency(d.saleInfo.profit ?? 0, currency.currency, currency.usdUzsRate)}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-3 text-zinc-600">{d.saleInfo?.customerName ?? '—'}</td>
-                  <td className="px-4 py-3 text-zinc-500">
-                    {uzDate(d.createdAt)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <IntentPrefetchLink
-                      href={`/shop/qurilmalar/${d.id}`}
-                      className="inline-flex rounded border border-zinc-200 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100"
-                    >
-                      Ko'rish
-                    </IntentPrefetchLink>
-                  </td>
-                </tr>
+                devices.map((device) => (
+                  <DeviceTableRow key={device.id} device={device} currency={currency} />
                 ))
               )}
             </tbody>
@@ -357,41 +365,8 @@ export default function QurilmalarClient({
         ) : devices.length === 0 ? (
           <div className="border border-zinc-200 rounded px-4 py-8 text-center text-sm text-zinc-500">Qurilma topilmadi</div>
         ) : (
-          devices.map((d) => (
-            <div key={d.id} className="border border-zinc-200 rounded p-3 space-y-2">
-              <div className="flex items-start justify-between gap-2">
-                <div>
-                  <div className="font-medium text-zinc-900">{d.model}</div>
-                  <div className="text-xs font-mono text-zinc-500 mt-0.5">{displayImei(d.imei)}</div>
-                </div>
-                <StatusBadge status={d.status} />
-              </div>
-              <div className="text-xs text-zinc-500">
-                {[d.color, d.storage, d.batteryHealth != null ? `${d.batteryHealth}%` : null].filter(Boolean).join(' · ') || '—'}
-              </div>
-              <div className="flex items-center justify-between text-xs text-zinc-600">
-                <span>Kelish: {formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate)}</span>
-                {d.saleInfo && <span>Sotuv: <SoldPriceValue d={d} currency={currency} /></span>}
-              </div>
-              {d.status === 'SOLD_DEBT' && d.saleInfo?.contractRemainingAmount != null && (
-                <div className="text-xs font-medium text-amber-800">
-                  Qarz: {formatDisplayMoneyFromContract(d.saleInfo.contractRemainingAmount, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}
-                </div>
-              )}
-              {d.saleInfo && (
-                <div className="flex items-center justify-between text-xs">
-                  <span className="text-zinc-500">{d.saleInfo.customerName ?? '—'}</span>
-                  <ProfitValue d={d} currency={currency} />
-                </div>
-              )}
-              <div className="text-xs text-zinc-400">{uzDate(d.createdAt)}</div>
-              <IntentPrefetchLink
-                href={`/shop/qurilmalar/${d.id}`}
-                className={buttonVariants({ variant: 'outline', className: 'h-8 w-full rounded border-zinc-200 text-xs' })}
-              >
-                Ko&apos;rish
-              </IntentPrefetchLink>
-            </div>
+          devices.map((device) => (
+            <DeviceMobileCard key={device.id} device={device} currency={currency} />
           ))
         )}
       </div>

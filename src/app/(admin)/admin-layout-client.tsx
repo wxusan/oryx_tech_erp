@@ -5,7 +5,6 @@ import { usePathname } from 'next/navigation'
 import { Activity, BarChart3, LayoutDashboard, Store, CreditCard, ScrollText, Settings } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
-import { NavigationCacheCoordinator } from '@/components/navigation-cache-coordinator'
 
 const navItems = [
   { label: 'Boshqaruv', href: '/admin', icon: LayoutDashboard, prefetch: true },
@@ -26,13 +25,12 @@ function initials(name: string) {
     .join('')
 }
 
-export function AdminLayoutClient({ children, adminName, navigationScope }: { children: React.ReactNode; adminName: string; navigationScope: string }) {
+export function AdminLayoutClient({ children, adminName }: { children: React.ReactNode; adminName: string }) {
   const pathname = usePathname()
   const displayName = adminName.trim() || 'Admin'
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 md:h-screen md:flex-row md:overflow-hidden">
-      <NavigationCacheCoordinator scopeKey={navigationScope} />
       <aside className="flex w-full shrink-0 flex-col border-b border-zinc-200 bg-white/95 md:w-64 md:border-b-0 md:border-r">
         <div className="border-b border-zinc-200 px-5 py-5">
           <div className="flex items-center justify-between gap-2">

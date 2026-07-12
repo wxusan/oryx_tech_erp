@@ -32,19 +32,19 @@ describe('GET /api/customers: real pagination envelope', () => {
 describe('mijozlar page: page state, total, and a submit-triggered search that resets to page 1', () => {
   const page = read('src/app/(shop)/shop/mijozlar/customers-client.tsx')
 
-  it('has page/total state and re-fetches when page changes', () => {
+  it('keys the query cache by page and reads the real total', () => {
     expect(page).toContain('const [page, setPage] = useState(initialPage)')
-    expect(page).toContain('const [total, setTotal] = useState(0)')
-    expect(page).toContain('requestCustomers(initialSearch, initialPage)')
+    expect(page).toContain("queryKeys.list(scope, 'customers'")
+    expect(page).toContain('const total = customersQuery.data?.total ?? 0')
   })
 
   it('a new search always resets to page 1', () => {
-    expect(page).toContain('function submitSearch() {\n    setPage(1)\n    loadCustomers(search, 1)')
+    expect(page).toContain('function submitSearch() {\n    loadCustomers(search, 1)')
   })
 
   it('reads items/total from the new response envelope, not a raw array', () => {
-    expect(page).toContain('setCustomers(json.data.items)')
-    expect(page).toContain('setTotal(json.data.total)')
+    expect(page).toContain('data?: { items: Customer[]; total: number }')
+    expect(page).toContain('const customers = customersQuery.data?.items ?? []')
   })
 
   it('renders Prev/Next controls gated on the real total, disabled at the boundaries', () => {

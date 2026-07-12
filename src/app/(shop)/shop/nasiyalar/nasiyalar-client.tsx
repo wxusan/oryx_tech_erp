@@ -1,8 +1,8 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { uzDate } from '@/lib/dates'
@@ -13,6 +13,8 @@ import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 import { replaceListUrlState } from '@/lib/list-url-state'
 import type { PaymentScoreColor, PaymentScoreLabel } from '@/lib/nasiya-payment-score'
+import { queryKeys } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 
 type NasiyaStatus = 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
 type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan' | 'Bekor qilingan'
@@ -150,16 +152,16 @@ export default function NasiyalarClient({
   initialPage?: number
   currency: CurrencyContext
 }) {
-  const router = useRouter()
-  const [nasiyalar, setNasiyalar] = useState<Nasiya[]>(initialNasiyalar)
-  const [total, setTotal] = useState(initialTotal)
+  const scope = useAuthenticatedQueryScope()
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState(initialSearch)
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch)
   const [activeFilter, setActiveFilter] = useState<NasiyaStatus | 'Barchasi'>(initialFilter)
-  const [error, setError] = useState('')
-  const [loadedKey, setLoadedKey] = useState(() => buildRequestKey(initialSearch, initialFilter, initialPage))
   const [payFor, setPayFor] = useState<Nasiya | null>(null)
+  const initialRequestKey = useMemo(
+    () => buildRequestKey(initialSearch, initialFilter, initialPage),
+    [initialFilter, initialPage, initialSearch],
+  )
 
   // Debounce the free-text search so typing doesn't fire a request per keystroke.
   useEffect(() => {
@@ -176,45 +178,34 @@ export default function NasiyalarClient({
     replaceListUrlState({ q: debouncedSearch, status: activeFilter, page })
   }, [activeFilter, debouncedSearch, page])
 
-  function loadNasiyalar(key: string) {
-    const controller = new AbortController()
-    fetch(`/api/nasiya?${key}`, { signal: controller.signal })
-      .then((res) => res.json())
-      .then((json: ApiResponse<NasiyalarPayload>) => {
-        if (!json.success || !json.data) {
-          setError(json.error || 'Nasiyalar yuklanmadi')
-          setLoadedKey(key)
-          return
-        }
-        setError('')
-        setNasiyalar(json.data.items)
-        setTotal(json.data.total)
-        setLoadedKey(key)
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-        setError('Nasiyalar yuklanmadi')
-        setLoadedKey(key)
-      })
-    return controller
-  }
+  const nasiyalarQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'nasiyas', {
+      search: debouncedSearch,
+      status: activeFilter,
+      page,
+      take: PER_PAGE,
+      sort: 'createdAt-desc',
+    }),
+    queryFn: async ({ signal }) => {
+      const response = await fetch(`/api/nasiya?${requestKey}`, { signal, cache: 'no-store' })
+      const json = await response.json() as ApiResponse<NasiyalarPayload>
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Nasiyalar yuklanmadi')
+      return json.data
+    },
+    initialData: requestKey === initialRequestKey ? { items: initialNasiyalar, total: initialTotal } : undefined,
+    placeholderData: keepPreviousData,
+  })
 
-  useEffect(() => {
-    if (loadedKey === requestKey) return
-    const controller = loadNasiyalar(requestKey)
-    return () => controller.abort()
-  }, [loadedKey, requestKey])
-
-  // A payment doesn't change page/filter/search, so the requestKey-based
-  // effect above never refires on its own — refetch the current page
-  // directly, and keep router.refresh() so any other server-rendered
-  // surface (e.g. dashboard) that reads this shop's nasiya data also updates.
+  // Keep the existing list visible while the affected page refetches. The
+  // incremental coordinator updates other query-backed surfaces separately.
   function handlePaymentSuccess() {
-    router.refresh()
-    loadNasiyalar(requestKey)
+    void nasiyalarQuery.refetch()
   }
 
-  const loading = loadedKey !== requestKey
+  const nasiyalar = nasiyalarQuery.data?.items ?? []
+  const total = nasiyalarQuery.data?.total ?? 0
+  const error = nasiyalarQuery.error instanceof Error ? nasiyalarQuery.error.message : ''
+  const loading = nasiyalarQuery.isPending && !nasiyalarQuery.data
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
 
   return (

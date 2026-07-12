@@ -320,7 +320,7 @@ model Customer {
   // or second personal number. Stored normalized (digits-only, `phone.ts`
   // convention) so search can match them the same way as the primary phone.
   // Additive, optional; existing customers default to an empty array.
-  additionalPhones String[] @default([])
+  additionalPhones String[]  @default([])
   passportPhotoUrl String?
   note             String?
   // Item 12 — optional admin override for the computed nasiya trust rating
@@ -853,4 +853,31 @@ model OpsEvent {
   @@index([event])
   @@index([createdAt])
   @@index([event, createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// ChangeEvent — durable, tenant-scoped incremental synchronization cursor.
+//
+// Business mutations already write an audit Log in the same PostgreSQL
+// transaction. A database trigger added by the corresponding migration turns
+// those audit rows into ChangeEvents atomically. The browser consumes only
+// authorized canonical DTOs resolved by /api/sync; metadata here deliberately
+// contains no customer, device, payment, or authentication payload.
+// ---------------------------------------------------------------------------
+
+model ChangeEvent {
+  sequence      BigInt   @id @default(autoincrement())
+  scopeType     String
+  scopeId       String
+  domain        String
+  entityType    String
+  entityId      String
+  operation     String
+  mutationKind  String
+  entityVersion DateTime @default(now())
+  createdAt     DateTime @default(now())
+
+  @@index([scopeType, scopeId, sequence])
+  @@index([scopeType, scopeId, domain, sequence])
+  @@index([createdAt])
 }

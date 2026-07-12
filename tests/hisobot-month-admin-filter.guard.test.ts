@@ -46,6 +46,7 @@ describe('getShopStats: month/admin filter is additive, existing callers unaffec
 
 describe('hisobot page: month selector + admin filter UI', () => {
   const page = read('src/app/(shop)/shop/hisobot/page.tsx')
+  const client = read('src/app/(shop)/shop/hisobot/hisobot-client.tsx')
   const filters = read('src/app/(shop)/shop/hisobot/hisobot-filters.tsx')
 
   it('parses month/admin from searchParams and passes them through to getShopStats', () => {
@@ -62,8 +63,8 @@ describe('hisobot page: month selector + admin filter UI', () => {
   })
 
   it('shows an explicit non-attribution note when an admin filter is active', () => {
-    expect(page).toContain('{stats.filteredByAdmin && (')
-    expect(page).toContain("bitta adminga bog'lab bo'lmaydi")
+    expect(client).toContain('{stats.filteredByAdmin && (')
+    expect(client).toContain("bitta adminga bog'lab bo'lmaydi")
   })
 
   it('the filter UI navigates via query params, not client-only state (so the server component re-fetches)', () => {

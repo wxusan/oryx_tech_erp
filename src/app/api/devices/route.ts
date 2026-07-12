@@ -18,7 +18,8 @@ import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { normalizePhone } from '@/lib/phone'
-import { getShopDevicesList, type DeviceStatusFilter } from '@/lib/server/shop-lists'
+import { getShopDeviceListItemsByIds, getShopDevicesList, type DeviceStatusFilter } from '@/lib/server/shop-lists'
+import { latestChangeCursorForShop } from '@/lib/server/change-events'
 import type { ZodError } from 'zod'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED', 'DELETED'] as const
@@ -307,7 +308,18 @@ export async function POST(req: NextRequest) {
       }
     })
 
-    return created(device, "Qurilma muvaffaqiyatli qo'shildi")
+    const [item, changeCursor] = await Promise.all([
+      getShopDeviceListItemsByIds(resolvedShopId, [device.id]).then((items) => items[0]),
+      latestChangeCursorForShop(resolvedShopId),
+    ])
+    if (!item) throw new Error('CREATED_DEVICE_DTO_NOT_FOUND')
+    return created({
+      id: device.id,
+      item,
+      changeCursor,
+      affectedDomains: ['devices', 'reports', 'logs'],
+      mutationId: `device.created:${device.id}:${changeCursor}`,
+    }, "Qurilma muvaffaqiyatli qo'shildi")
   } catch (err) {
     // Handle the race where two concurrent adds both pass the IMEI pre-check
     // and one violates the active partial unique index (Prisma P2002).

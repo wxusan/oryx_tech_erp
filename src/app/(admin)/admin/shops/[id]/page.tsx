@@ -283,11 +283,7 @@ export default function ShopDetailPage() {
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        const invalidated = await commitNavigationMutation({ kind: 'admin.shopPaymentRecorded', shopId: id })
-        if (!invalidated) {
-          window.location.reload()
-          return
-        }
+        await commitNavigationMutation({ kind: 'admin.shopPaymentRecorded', shopId: id })
         setPaymentModalOpen(false)
         resetPayment()
         fetchShop()
@@ -318,11 +314,7 @@ export default function ShopDetailPage() {
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        const invalidated = await commitNavigationMutation({ kind: 'admin.shopUpdated', shopId: id })
-        if (!invalidated) {
-          window.location.reload()
-          return
-        }
+        await commitNavigationMutation({ kind: 'admin.shopUpdated', shopId: id })
         setSuspendModalOpen(false)
         setSuspendReason('')
         setSuspendError(null)
@@ -356,11 +348,7 @@ export default function ShopDetailPage() {
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        const invalidated = await commitNavigationMutation({ kind: 'admin.shopUpdated', shopId: id })
-        if (!invalidated) {
-          window.location.reload()
-          return
-        }
+        await commitNavigationMutation({ kind: 'admin.shopUpdated', shopId: id })
         setEditModalOpen(false)
         resetEditShop()
         fetchShop()
@@ -415,11 +403,7 @@ export default function ShopDetailPage() {
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        const invalidated = await commitNavigationMutation({ kind: 'admin.shopAdminsUpdated', shopId: id })
-        if (!invalidated) {
-          window.location.reload()
-          return
-        }
+        await commitNavigationMutation({ kind: 'admin.shopAdminsUpdated', shopId: id })
         setAddAdminModalOpen(false)
         resetAdmin()
         fetchShop()
@@ -451,11 +435,7 @@ export default function ShopDetailPage() {
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        const invalidated = await commitNavigationMutation({ kind: 'admin.shopAdminsUpdated', shopId: id })
-        if (!invalidated) {
-          window.location.reload()
-          return
-        }
+        await commitNavigationMutation({ kind: 'admin.shopAdminsUpdated', shopId: id })
         setDeleteAdminTarget(null)
         setDeleteAdminNote('')
         fetchShop()
@@ -493,11 +473,7 @@ export default function ShopDetailPage() {
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        const invalidated = await commitNavigationMutation({ kind: 'admin.shopAdminsUpdated', shopId: id })
-        if (!invalidated) {
-          window.location.reload()
-          return
-        }
+        await commitNavigationMutation({ kind: 'admin.shopAdminsUpdated', shopId: id })
         setResetPasswordModalOpen(false)
         resetPasswordForm()
         fetchShop()

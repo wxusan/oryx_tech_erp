@@ -48,22 +48,24 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     if (!nasiya) return notFound('Nasiya topilmadi')
 
-    const updated = await prisma.nasiya.update({
-      where: { id: nasiya.id },
-      data: { reminderEnabled },
-    })
-
-    await prisma.log.create({
-      data: {
-        shopId: nasiya.shopId,
-        actorId: session.user.id,
-        actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
-        action: 'UPDATE_REMINDER',
-        targetType: 'Nasiya',
-        targetId: nasiya.id,
-        oldValue: { reminderEnabled: nasiya.reminderEnabled },
-        newValue: { reminderEnabled },
-      },
+    const updated = await prisma.$transaction(async (tx) => {
+      const value = await tx.nasiya.update({
+        where: { id: nasiya.id },
+        data: { reminderEnabled },
+      })
+      await tx.log.create({
+        data: {
+          shopId: nasiya.shopId,
+          actorId: session.user.id,
+          actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
+          action: 'UPDATE_REMINDER',
+          targetType: 'Nasiya',
+          targetId: nasiya.id,
+          oldValue: { reminderEnabled: nasiya.reminderEnabled },
+          newValue: { reminderEnabled },
+        },
+      })
+      return value
     })
 
     invalidateShopReminderMutation(nasiya.shopId)

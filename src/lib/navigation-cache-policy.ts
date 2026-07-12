@@ -1,4 +1,4 @@
-export const NAVIGATION_CACHE_TTL_SECONDS = 30
+export const NAVIGATION_CACHE_TTL_SECONDS = 120
 export const NAVIGATION_CACHE_TTL_MS = NAVIGATION_CACHE_TTL_SECONDS * 1_000
 
 export const navigationDomains = [

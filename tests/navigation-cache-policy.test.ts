@@ -6,8 +6,8 @@ import {
 } from '@/lib/navigation-cache-policy'
 
 describe('mutation-aware navigation cache policy', () => {
-  it('uses the measured short dynamic-route TTL', () => {
-    expect(NAVIGATION_CACHE_TTL_SECONDS).toBe(30)
+  it('uses the two-minute warm-navigation TTL', () => {
+    expect(NAVIGATION_CACHE_TTL_SECONDS).toBe(120)
   })
 
   it('invalidates the device list, both stock selectors, dashboard, reports, and logs after creation', () => {

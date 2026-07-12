@@ -1,7 +1,11 @@
 'use client'
 
-import { invalidateNavigationAfterMutation } from '@/app/actions/navigation-cache'
-import type { NavigationImpact, NavigationMutation } from '@/lib/navigation-cache-policy'
+import { navigationImpactForMutation, type NavigationImpact, type NavigationMutation } from '@/lib/navigation-cache-policy'
+import {
+  activeIncrementalSyncScopeKey,
+  clearActiveAuthenticatedQueryCache,
+  requestIncrementalSync,
+} from '@/lib/client-sync-runtime'
 
 export const FINANCIAL_DATA_CHANGED_EVENT = 'oryx:financial-data-changed'
 export const NAVIGATION_MUTATION_EVENT = 'oryx:navigation-mutation'
@@ -15,6 +19,7 @@ export interface NavigationMutationBroadcast {
   scopeKey: string
   mutation: NavigationMutation
   createdAt: number
+  cursor?: string | null
 }
 
 let clientInstanceId: string | null = null
@@ -52,21 +57,21 @@ function broadcastSuccessfulMutation(message: NavigationMutationBroadcast) {
 
 /** Call only after the API mutation has returned a confirmed success. */
 export async function commitNavigationMutation(mutation: NavigationMutation) {
-  try {
-    const result = await invalidateNavigationAfterMutation(mutation)
-    const message: NavigationMutationBroadcast = {
-      id: mutationId(),
-      sourceId: navigationClientInstanceId(),
-      scopeKey: result.scopeKey,
-      mutation,
-      createdAt: Date.now(),
-    }
-    dispatchSuccessfulMutation(mutation, result.impact)
-    broadcastSuccessfulMutation(message)
-    return true
-  } catch {
-    return false
+  const scopeKey = activeIncrementalSyncScopeKey()
+  if (!scopeKey) return false
+  const impact = navigationImpactForMutation(mutation)
+  dispatchSuccessfulMutation(mutation, impact)
+  const cursor = await requestIncrementalSync()
+  const message: NavigationMutationBroadcast = {
+    id: mutationId(),
+    sourceId: navigationClientInstanceId(),
+    scopeKey,
+    mutation,
+    createdAt: Date.now(),
+    cursor,
   }
+  broadcastSuccessfulMutation(message)
+  return true
 }
 
 export interface NavigationRouter {
@@ -79,15 +84,12 @@ export async function navigateAfterMutation(
   href: string,
   mutation: NavigationMutation,
 ) {
-  const invalidated = await commitNavigationMutation(mutation)
-  if (invalidated) router.push(href)
-  else window.location.assign(href)
+  await commitNavigationMutation(mutation)
+  router.push(href)
 }
 
 export async function refreshAfterMutation(router: NavigationRouter, mutation: NavigationMutation) {
-  const invalidated = await commitNavigationMutation(mutation)
-  if (invalidated) router.refresh()
-  else window.location.reload()
+  await commitNavigationMutation(mutation)
 }
 
 export function subscribeToNavigationMutations(listener: (message: NavigationMutationBroadcast) => void) {
@@ -117,5 +119,6 @@ export function clearNavigationClientState() {
   } catch {
     // Restricted/private contexts may not expose localStorage.
   }
+  clearActiveAuthenticatedQueryCache()
   window.dispatchEvent(new Event(NAVIGATION_LOGOUT_EVENT))
 }

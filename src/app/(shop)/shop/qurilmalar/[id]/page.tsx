@@ -318,11 +318,7 @@ export default function QurilmaDetailPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Saqlashda xatolik')
-      const invalidated = await commitNavigationMutation({ kind: 'device.updated', deviceId: id })
-      if (!invalidated) {
-        window.location.reload()
-        return
-      }
+      await commitNavigationMutation({ kind: 'device.updated', deviceId: id })
       setEditOpen(false)
       await fetchDevice()
     } catch (err) {
@@ -424,14 +420,10 @@ export default function QurilmaDetailPage() {
       if (!res.ok || !json.success) {
         throw new Error(json.error || "To'lovni saqlashda xatolik")
       }
-      const invalidated = await commitNavigationMutation({
+      await commitNavigationMutation({
         kind: 'sale.paymentRecorded',
         deviceId: id,
       })
-      if (!invalidated) {
-        window.location.reload()
-        return
-      }
       setSalePaymentOpen(false)
       setSalePayAmount('')
       setSalePayMethod('')
@@ -481,11 +473,7 @@ export default function QurilmaDetailPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Sotuvni yangilashda xatolik')
-      const invalidated = await commitNavigationMutation({ kind: 'sale.updated', deviceId: id })
-      if (!invalidated) {
-        window.location.reload()
-        return
-      }
+      await commitNavigationMutation({ kind: 'sale.updated', deviceId: id })
       setSaleEditOpen(false)
       await fetchDevice()
     } catch (err) {
@@ -544,11 +532,7 @@ export default function QurilmaDetailPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Omborga qaytarishda xatolik')
-      const invalidated = await commitNavigationMutation({ kind: 'device.restocked', deviceId: id })
-      if (!invalidated) {
-        window.location.reload()
-        return
-      }
+      await commitNavigationMutation({ kind: 'device.restocked', deviceId: id })
       // Local refetch: status becomes IN_STOCK and the sell / nasiya actions
       // reappear without a full page reload.
       setRestockModalOpen(false)

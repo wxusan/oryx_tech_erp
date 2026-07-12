@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { AlertTriangle, Building2, CalendarClock, CreditCard, Percent, ReceiptText } from 'lucide-react'
 import {
@@ -23,6 +24,8 @@ import {
 import type { ApiResponse } from '@/types'
 import { uzLongDate } from '@/lib/dates'
 import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
+import { queryKeys } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 
 interface AdminStats {
   thisMonthRevenue: number
@@ -68,20 +71,19 @@ function daysUntil(value: string) {
 }
 
 export default function AdminReportsPage() {
-  const [stats, setStats] = useState<AdminStats | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    fetch('/api/stats/admin')
-      .then(async (response) => {
-        const json: ApiResponse<AdminStats> = await response.json()
-        if (!response.ok || !json.success) throw new Error(json.error || 'Hisobot yuklanmadi')
-        setStats(json.data ?? null)
-      })
-      .catch((err: Error) => setError(err.message || 'Hisobot yuklanmadi'))
-      .finally(() => setLoading(false))
-  }, [])
+  const scope = useAuthenticatedQueryScope()
+  const statsQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'adminReports', { view: 'report' }),
+    queryFn: async ({ signal }) => {
+      const response = await fetch('/api/stats/admin', { signal, cache: 'no-store' })
+      const json: ApiResponse<AdminStats> = await response.json()
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Hisobot yuklanmadi')
+      return json.data
+    },
+  })
+  const stats = statsQuery.data ?? null
+  const loading = statsQuery.isPending && !statsQuery.data
+  const error = statsQuery.error instanceof Error ? statsQuery.error.message : ''
 
   const collectionRate = stats?.expectedRevenue
     ? Math.min(100, Math.round((stats.thisMonthRevenue / stats.expectedRevenue) * 100))

@@ -74,13 +74,17 @@ describe('qurilmalar client: mobile card view alongside the desktop table', () =
 
   it('desktop table is hidden below sm:, shown from sm: up', () => {
     expect(client).toContain('hidden sm:block border border-zinc-200 rounded overflow-x-auto')
+    expect(client).toContain('const DeviceTableRow = memo(')
+    expect(client).toContain('<DeviceTableRow key={device.id} device={device} currency={currency} />')
   })
 
   it('a separate card list is shown only below sm:, with a directly-visible Ko\'rish link (not an overflow menu)', () => {
     expect(client).toContain('sm:hidden space-y-3')
-    const mobileBlockStart = client.indexOf('sm:hidden space-y-3')
-    const mobileBlock = client.slice(mobileBlockStart, mobileBlockStart + 4000)
-    expect(mobileBlock).toContain("Ko&apos;rish")
-    expect(mobileBlock).toContain('displayImei(d.imei)')
+    expect(client).toContain('<DeviceMobileCard key={device.id} device={device} currency={currency} />')
+    const mobileCardStart = client.indexOf('const DeviceMobileCard')
+    const mobileCard = client.slice(mobileCardStart, mobileCardStart + 4000)
+    expect(mobileCard).toContain("Ko&apos;rish")
+    expect(mobileCard).toContain('displayImei(d.imei)')
+    expect(client).toContain('const DeviceMobileCard = memo(')
   })
 })
