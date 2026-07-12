@@ -4,6 +4,7 @@ import { Prisma, PrismaClient } from '@/generated/prisma/client'
 import type { Session } from 'next-auth'
 import { readChangeEventBatch } from '@/lib/server/change-events'
 import { transitionNasiyaToOverdue } from '@/lib/server/overdue-transition'
+import { findShopNasiyaIdsByDerivedStatus } from '@/lib/server/shop-lists'
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL or DATABASE_URL is required')
@@ -63,6 +64,46 @@ afterAll(async () => {
 })
 
 describe('migration-managed active-only uniqueness', () => {
+  it('normalizes direct writes and rejects every primary/secondary collision permutation', async () => {
+    const { shop } = await seedShop('imei_matrix')
+    const cases = [
+      ['PRIMARY', 'PRIMARY'],
+      ['PRIMARY', 'SECONDARY'],
+      ['SECONDARY', 'PRIMARY'],
+      ['SECONDARY', 'SECONDARY'],
+    ] as const
+
+    for (const [index, [existingSlot, attemptedSlot]] of cases.entries()) {
+      const value = `35123456002${String(index).padStart(4, '0')}`
+      const existingDevice = await prisma.device.create({
+        data: { shopId: shop.id, model: `Existing ${index}`, purchasePrice: 100, imei: `LEGACY-A-${index}`, addedBy: 'integration' },
+      })
+      const attemptedDevice = await prisma.device.create({
+        data: { shopId: shop.id, model: `Attempt ${index}`, purchasePrice: 100, imei: `LEGACY-B-${index}`, addedBy: 'integration' },
+      })
+      const normalized = await prisma.deviceImei.create({
+        data: {
+          shopId: shop.id,
+          deviceId: existingDevice.id,
+          slot: existingSlot,
+          value: value.replace(/(\d{3})(\d{3})$/, '$1-$2'),
+          normalizedValue: null,
+        },
+      })
+      expect(normalized.normalizedValue).toBe(value)
+
+      await expect(prisma.deviceImei.create({
+        data: {
+          shopId: shop.id,
+          deviceId: attemptedDevice.id,
+          slot: attemptedSlot,
+          value,
+          normalizedValue: null,
+        },
+      })).rejects.toMatchObject({ code: 'P2002' })
+    }
+  })
+
   it('enforces IMEI uniqueness across primary/secondary slots and releases it on device soft-delete', async () => {
     const firstShop = await seedShop('imei_slots_a')
     const secondShop = await seedShop('imei_slots_b')
@@ -168,6 +209,80 @@ describe('migration-managed active-only uniqueness', () => {
       data: { shopId: shop.id, name: 'Customer C', phone: '+998901234567', normalizedPhone: '998901234567' },
     })
     expect(reused.normalizedPhone).toBe('998901234567')
+  })
+
+  it('rejects a child record whose parent belongs to another shop', async () => {
+    const first = await seedShop('tenant_fk_a')
+    const second = await seedShop('tenant_fk_b')
+    const device = await prisma.device.create({
+      data: { shopId: first.shop.id, model: 'Tenant A phone', purchasePrice: 100, imei: '744444444444444', addedBy: first.owner.id },
+    })
+    const otherCustomer = await prisma.customer.create({
+      data: { shopId: second.shop.id, name: 'Tenant B customer', phone: '+998901212121', normalizedPhone: '998901212121' },
+    })
+
+    await expect(prisma.sale.create({
+      data: {
+        shopId: first.shop.id,
+        deviceId: device.id,
+        customerId: otherCustomer.id,
+        salePrice: 200,
+        amountPaid: 200,
+        remainingAmount: 0,
+        contractSalePrice: 200,
+        contractAmountPaid: 200,
+        contractRemainingAmount: 0,
+        paymentMethod: 'CASH',
+        createdBy: first.owner.id,
+      },
+    })).rejects.toMatchObject({ code: 'P2003' })
+  })
+
+  it('stores a frozen native refund amount and exchange-rate snapshot', async () => {
+    const { owner, shop } = await seedShop('refund_snapshot')
+    const customer = await prisma.customer.create({
+      data: { shopId: shop.id, name: 'Refund customer', phone: '+998907777777', normalizedPhone: '998907777777' },
+    })
+    const device = await prisma.device.create({
+      data: { shopId: shop.id, model: 'Refund phone', purchasePrice: 100, imei: '755555555555555', addedBy: owner.id, status: 'SOLD_CASH' },
+    })
+    const sale = await prisma.sale.create({
+      data: {
+        shopId: shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        salePrice: 6_250_000,
+        amountPaid: 6_250_000,
+        remainingAmount: 0,
+        contractCurrency: 'USD',
+        contractExchangeRateAtCreation: 12_500,
+        contractSalePrice: 500,
+        contractAmountPaid: 500,
+        contractRemainingAmount: 0,
+        paymentMethod: 'CASH',
+        createdBy: owner.id,
+      },
+    })
+    const returned = await prisma.deviceReturn.create({
+      data: {
+        shopId: shop.id,
+        deviceId: device.id,
+        saleId: sale.id,
+        refundAmount: 6_250_000,
+        refundInputAmount: 500,
+        refundInputCurrency: 'USD',
+        refundExchangeRateAtCreation: 12_500,
+        refundMethod: 'CASH',
+        note: 'Integration refund',
+        createdBy: owner.id,
+      },
+    })
+    expect(returned).toMatchObject({
+      refundInputCurrency: 'USD',
+    })
+    expect(Number(returned.refundInputAmount)).toBe(500)
+    expect(Number(returned.refundExchangeRateAtCreation)).toBe(12_500)
+    expect(Number(returned.refundAmount)).toBe(6_250_000)
   })
 })
 
@@ -400,7 +515,15 @@ describe('transactional incremental change events', () => {
       select: { sequence: true },
     })
     const oldCursor = shopEvents[0]!.sequence
-    await prisma.changeEvent.deleteMany({ where: { sequence: { lte: shopEvents[2]!.sequence } } })
+    // Keep lower global events for other scopes. Gap detection must compare
+    // against this shop's oldest retained cursor, not the global sequence.
+    await prisma.changeEvent.deleteMany({
+      where: {
+        scopeType: 'SHOP',
+        scopeId: first.shop.id,
+        sequence: { lte: shopEvents[2]!.sequence },
+      },
+    })
 
     const reset = await readChangeEventBatch({
       session: session({ id: first.owner.id, role: 'SHOP_ADMIN', shopId: first.shop.id }),
@@ -452,15 +575,93 @@ describe('transactional incremental change events', () => {
       },
     })
 
+    const scheduleId = (await prisma.nasiyaSchedule.findFirstOrThrow({ where: { nasiyaId: nasiya.id } })).id
     expect(await transitionNasiyaToOverdue({
-      scheduleId: (await prisma.nasiyaSchedule.findFirstOrThrow({ where: { nasiyaId: nasiya.id } })).id,
+      scheduleId,
       nasiyaId: nasiya.id,
       shopId: shop.id,
+      overdueBefore: new Date('2026-01-10T00:00:00.000Z'),
+    })).toBe(false)
+    expect(await prisma.nasiya.findUnique({ where: { id: nasiya.id }, select: { status: true } }))
+      .toEqual({ status: 'ACTIVE' })
+
+    expect(await transitionNasiyaToOverdue({
+      scheduleId,
+      nasiyaId: nasiya.id,
+      shopId: shop.id,
+      overdueBefore: new Date('2026-01-11T00:00:00.000Z'),
     })).toBe(true)
     expect(await prisma.nasiya.findUnique({ where: { id: nasiya.id }, select: { status: true } }))
       .toEqual({ status: 'OVERDUE' })
     expect(await prisma.changeEvent.findFirst({
       where: { scopeType: 'SHOP', scopeId: shop.id, entityType: 'Nasiya', entityId: nasiya.id },
     })).toMatchObject({ operation: 'updated', mutationKind: 'nasiya.overdue' })
+  })
+})
+
+describe('bounded derived nasiya status projection', () => {
+  it('pages active, overdue, and completed contracts in PostgreSQL at the Tashkent boundary', async () => {
+    const { owner, shop } = await seedShop('derived_status')
+    const customer = await prisma.customer.create({
+      data: { shopId: shop.id, name: 'Status customer', phone: '+998908181818', normalizedPhone: '998908181818' },
+    })
+
+    async function createContract(index: number, dueDate: Date, paid: number) {
+      const device = await prisma.device.create({
+        data: { shopId: shop.id, model: `Status phone ${index}`, purchasePrice: 50, imei: `76666666666666${index}`, addedBy: owner.id, status: 'SOLD_NASIYA' },
+      })
+      const remaining = 100 - paid
+      const nasiya = await prisma.nasiya.create({
+        data: {
+          shopId: shop.id,
+          deviceId: device.id,
+          customerId: customer.id,
+          totalAmount: 100,
+          downPayment: 0,
+          baseRemainingAmount: 100,
+          finalNasiyaAmount: 100,
+          remainingAmount: remaining,
+          months: 1,
+          monthlyPayment: 100,
+          startDate: dueDate,
+          contractCurrency: 'UZS',
+          contractTotalAmount: 100,
+          contractBaseRemainingAmount: 100,
+          contractFinalAmount: 100,
+          contractMonthlyPayment: 100,
+          contractPaidAmount: paid,
+          contractRemainingAmount: remaining,
+          createdBy: owner.id,
+        },
+      })
+      await prisma.nasiyaSchedule.create({
+        data: {
+          nasiyaId: nasiya.id,
+          shopId: shop.id,
+          monthNumber: 1,
+          dueDate,
+          expectedAmount: 100,
+          paidAmount: paid,
+          contractCurrency: 'UZS',
+          contractExpectedAmount: 100,
+          contractPaidAmount: paid,
+          contractRemainingAmount: remaining,
+          status: paid === 100 ? 'PAID' : 'PENDING',
+        },
+      })
+      return nasiya.id
+    }
+
+    const today = await createContract(1, new Date('2026-07-12T00:00:00.000Z'), 0)
+    const overdue = await createContract(2, new Date('2026-07-11T00:00:00.000Z'), 0)
+    const completed = await createContract(3, new Date('2026-07-11T00:00:00.000Z'), 100)
+    const now = new Date('2026-07-12T12:00:00.000Z')
+
+    await expect(findShopNasiyaIdsByDerivedStatus({ shopId: shop.id, status: 'ACTIVE', skip: 0, take: 25, now }))
+      .resolves.toMatchObject({ ids: [today], total: 1 })
+    await expect(findShopNasiyaIdsByDerivedStatus({ shopId: shop.id, status: 'OVERDUE', skip: 0, take: 25, now }))
+      .resolves.toMatchObject({ ids: [overdue], total: 1 })
+    await expect(findShopNasiyaIdsByDerivedStatus({ shopId: shop.id, status: 'COMPLETED', skip: 0, take: 25, now }))
+      .resolves.toMatchObject({ ids: [completed], total: 1 })
   })
 })

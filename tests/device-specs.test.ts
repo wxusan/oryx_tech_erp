@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deviceConditionLabel, formatDeviceStorage, normalizeImei, parseDeviceStorage, presentDeviceSpecs, validateImeiPair } from '@/lib/device-specs'
+import { deviceConditionLabel, formatDeviceStorage, normalizeImei, parseDeviceStorage, presentDeviceSpecs, resolveImeiPairUpdate, validateImeiPair } from '@/lib/device-specs'
 
 describe('device specs', () => {
   it.each([
@@ -58,5 +58,16 @@ describe('device specs', () => {
     expect(normalizeImei('35123 456-0012345')).toBe('351234560012345')
     expect(validateImeiPair('351234560012345', '351234560012345')).toMatchObject({ ok: false })
     expect(validateImeiPair('351234560012345', '351234560012346')).toEqual({ ok: true, primaryImei: '351234560012345', secondaryImei: '351234560012346' })
+  })
+
+  it('preserves the secondary IMEI when a partial update changes only primary', () => {
+    expect(resolveImeiPairUpdate(
+      { primary: '351234560012345', secondary: '351234560012346' },
+      { primary: '351234560012347' },
+    )).toEqual({
+      ok: true,
+      primaryImei: '351234560012347',
+      secondaryImei: '351234560012346',
+    })
   })
 })

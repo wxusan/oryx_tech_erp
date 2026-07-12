@@ -17,8 +17,8 @@ function read(rel: string): string {
 describe('schema: optional admin override, never read by accounting logic', () => {
   it('Customer.trustOverride is additive (nullable string, no default enforced)', () => {
     const schema = read('prisma/schema.prisma')
-    const block = schema.slice(schema.indexOf('model Customer'), schema.indexOf('model Customer') + 900)
-    expect(block).toContain('trustOverride    String?')
+    const block = schema.slice(schema.indexOf('model Customer'), schema.indexOf('model Customer') + 1400)
+    expect(block).toMatch(/trustOverride\s+String\?/)
   })
 
   it('never referenced by any payment/allocation/schedule logic', () => {

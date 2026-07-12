@@ -244,12 +244,14 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
 
         <div className="flex items-center gap-2">
           <DateInput
+            aria-label="Boshlanish sanasi"
             value={dateFrom}
             onValueChange={(value) => { setDateFrom(value); setPage(1) }}
             className="h-8 w-36 rounded border-zinc-200 text-xs"
           />
           <span className="text-xs text-zinc-400">—</span>
           <DateInput
+            aria-label="Tugash sanasi"
             value={dateTo}
             onValueChange={(value) => { setDateTo(value); setPage(1) }}
             className="h-8 w-36 rounded border-zinc-200 text-xs"

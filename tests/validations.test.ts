@@ -22,6 +22,20 @@ describe('validation hardening', () => {
     expect(addDeviceSchema.safeParse({ ...base, imageUrls: ['shops/shop_1/devices/file.webp'] }).success).toBe(true)
   })
 
+  it('does not trust a conflicting client-composed storage label', () => {
+    const parsed = addDeviceSchema.parse({
+      model: 'iPhone 15',
+      purchasePrice: 10_000_000,
+      imei: '123456789012345',
+      storage: '1TBTB',
+      storageAmount: 1,
+      storageUnit: 'TB',
+      conditionCode: 'NEW',
+    })
+    expect(parsed).not.toHaveProperty('storage')
+    expect(parsed).toMatchObject({ storageAmount: 1, storageUnit: 'TB' })
+  })
+
   it('caps long text fields on core create flows', () => {
     expect(createShopSchema.safeParse({
       name: 'A'.repeat(121),

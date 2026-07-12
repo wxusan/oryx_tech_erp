@@ -254,6 +254,7 @@ model Supplier {
   shop    Shop     @relation(fields: [shopId], references: [id])
   devices Device[]
 
+  @@unique([id, shopId])
   @@index([shopId])
 }
 
@@ -262,28 +263,28 @@ model Supplier {
 // ---------------------------------------------------------------------------
 
 model Device {
-  id                             String       @id @default(cuid())
+  id                             String               @id @default(cuid())
   shopId                         String
   model                          String
   color                          String?
   storage                        String?
-  storageAmount                  Decimal?     @db.Decimal(10, 2)
+  storageAmount                  Decimal?             @db.Decimal(10, 2)
   storageUnit                    StorageUnit?
   batteryHealth                  Int?
-  purchasePrice                  Decimal      @db.Decimal(12, 2)
+  purchasePrice                  Decimal              @db.Decimal(12, 2)
   // Native purchase-currency context, additive — `purchasePrice` above stays
   // exactly as-is (UZS compatibility snapshot, dual-written in lockstep).
   // See docs/currency-accounting-model.md. Pre-existing rows are backfilled
   // to UZS (never an invented historical currency/rate).
-  purchaseCurrency               CurrencyCode @default(UZS)
-  purchaseInputAmount            Decimal      @default(0) @db.Decimal(12, 2)
-  purchaseExchangeRateAtCreation Decimal?     @db.Decimal(12, 4)
-  purchaseAmountUzsSnapshot      Decimal      @default(0) @db.Decimal(12, 2)
+  purchaseCurrency               CurrencyCode         @default(UZS)
+  purchaseInputAmount            Decimal              @default(0) @db.Decimal(12, 2)
+  purchaseExchangeRateAtCreation Decimal?             @db.Decimal(12, 4)
+  purchaseAmountUzsSnapshot      Decimal              @default(0) @db.Decimal(12, 2)
   imei                           String
   supplierId                     String?
   supplierPhone                  String?
   imageUrls                      String[]
-  status                         DeviceStatus @default(IN_STOCK)
+  status                         DeviceStatus         @default(IN_STOCK)
   addedBy                        String
   note                           String?
   condition                      String?
@@ -291,16 +292,16 @@ model Device {
   // A device created only to carry an imported (pre-Oryx) nasiya. It is created
   // as SOLD_NASIYA (never IN_STOCK), so it never enters sellable inventory or
   // inventory-cost stats. Its purchasePrice is 0 (original cost unknown).
-  isImported                     Boolean      @default(false)
+  isImported                     Boolean              @default(false)
   // "Olib-sotdim": sourced from another shop/person and sold to our customer in
   // the same operation. Created directly as SOLD_CASH (never IN_STOCK), so it
   // never becomes available for a later normal sale/nasiya and never enters
   // inventoryPurchaseCost (that stat only sums IN_STOCK devices).
   // purchasePrice IS real (what we paid the external supplier) — unlike
   // isImported, this does count toward this month's cost/profit normally.
-  isExternalSourced              Boolean      @default(false)
-  createdAt                      DateTime     @default(now())
-  updatedAt                      DateTime     @updatedAt
+  isExternalSourced              Boolean              @default(false)
+  createdAt                      DateTime             @default(now())
+  updatedAt                      DateTime             @updatedAt
   deletedAt                      DateTime?
   deletedBy                      String?
   deleteNote                     String?
@@ -314,6 +315,7 @@ model Device {
   supplierPayables SupplierPayable[]
   imeis            DeviceImei[]
 
+  @@unique([id, shopId])
   // ACTIVE-ONLY IMEI UNIQUENESS is enforced by a raw-SQL PARTIAL UNIQUE index
   // `Device_shopId_imei_active_key ... WHERE "deletedAt" IS NULL` created in
   // prisma/migrations/202607020002_integrity_return_ledger. Prisma cannot
@@ -323,7 +325,6 @@ model Device {
   @@index([shopId, imei])
   @@index([shopId])
   @@index([status])
-  @@unique([id, shopId])
 }
 
 model DeviceImei {
@@ -349,34 +350,35 @@ model DeviceImei {
 // ---------------------------------------------------------------------------
 
 model Customer {
-  id               String    @id @default(cuid())
-  shopId           String
-  name             String
-  phone            String
-  normalizedPhone  String?
+  id                            String    @id @default(cuid())
+  shopId                        String
+  name                          String
+  phone                         String
+  normalizedPhone               String?
   // Additional contact numbers beyond the primary `phone` — e.g. a relative's
   // or second personal number. Stored normalized (digits-only, `phone.ts`
   // convention) so search can match them the same way as the primary phone.
   // Additive, optional; existing customers default to an empty array.
-  additionalPhones String[]  @default([])
-  passportPhotoUrl String?
-  note             String?
+  additionalPhones              String[]  @default([])
+  passportPhotoUrl              String?
+  note                          String?
   // Item 12 — optional admin override for the computed nasiya trust rating
   // (src/lib/nasiya-customer-trust.ts). One of TrustTier ('NEW' | 'LOW' |
   // 'MEDIUM' | 'HIGH' | 'VERY_HIGH'), null = use the computed tier. Never
   // read by any automatic accounting logic — display/explainability only.
-  trustOverride    String?
-  phoneNormalizationNeedsReview Boolean @default(false)
-  createdAt        DateTime  @default(now())
-  deletedAt        DateTime?
-  deletedBy        String?
-  deleteNote       String?
+  trustOverride                 String?
+  phoneNormalizationNeedsReview Boolean   @default(false)
+  createdAt                     DateTime  @default(now())
+  deletedAt                     DateTime?
+  deletedBy                     String?
+  deleteNote                    String?
 
   // Relations
   shop   Shop     @relation(fields: [shopId], references: [id])
   sales  Sale[]
   nasiya Nasiya[]
 
+  @@unique([id, shopId])
   // ACTIVE-ONLY CUSTOMER PHONE UNIQUENESS (per shop) is enforced by a raw-SQL
   // PARTIAL UNIQUE index `Customer_shopId_normalizedPhone_active_key ... WHERE
   // "deletedAt" IS NULL AND "normalizedPhone" IS NOT NULL` created in
@@ -445,6 +447,7 @@ model Sale {
   returns         DeviceReturn[]
   supplierPayable SupplierPayable?
 
+  @@unique([id, shopId])
   @@index([shopId])
   @@index([customerId])
   @@index([deviceId])
@@ -655,6 +658,7 @@ model Nasiya {
   payments  NasiyaPayment[]
   returns   DeviceReturn[]
 
+  @@unique([id, shopId])
   @@index([shopId])
   @@index([status])
   @@index([deviceId])
@@ -696,6 +700,7 @@ model NasiyaSchedule {
   nasiya   Nasiya          @relation(fields: [nasiyaId], references: [id], onDelete: Cascade)
   payments NasiyaPayment[]
 
+  @@unique([id, shopId])
   @@index([nasiyaId])
   @@index([shopId])
   @@index([status])
@@ -780,16 +785,22 @@ model NasiyaPayment {
 // ---------------------------------------------------------------------------
 
 model DeviceReturn {
-  id           String         @id @default(cuid())
-  shopId       String
-  deviceId     String
-  saleId       String?
-  nasiyaId     String?
-  refundAmount Decimal        @default(0) @db.Decimal(12, 2)
-  refundMethod PaymentMethod?
-  note         String
-  createdBy    String
-  createdAt    DateTime       @default(now())
+  id                           String         @id @default(cuid())
+  shopId                       String
+  deviceId                     String
+  saleId                       String?
+  nasiyaId                     String?
+  refundAmount                 Decimal        @default(0) @db.Decimal(12, 2)
+  // Frozen native refund entry. `refundAmount` remains the UZS accounting
+  // snapshot for compatibility; these fields preserve exactly what the user
+  // entered so historic USD refunds never use a later exchange rate.
+  refundInputAmount            Decimal?       @db.Decimal(12, 2)
+  refundInputCurrency          CurrencyCode?
+  refundExchangeRateAtCreation Decimal?       @db.Decimal(12, 4)
+  refundMethod                 PaymentMethod?
+  note                         String
+  createdBy                    String
+  createdAt                    DateTime       @default(now())
 
   // Relations
   shop   Shop    @relation(fields: [shopId], references: [id])
@@ -809,29 +820,29 @@ model DeviceReturn {
 // ---------------------------------------------------------------------------
 
 model Notification {
-  id            String             @id @default(cuid())
-  shopId        String
-  dedupeKey     String?            @unique
-  type          String
-  message       String
-  telegramId    String
-  status        NotificationStatus @default(PENDING)
-  scheduledAt   DateTime
-  sentAt        DateTime?
-  attemptCount  Int                @default(0)
-  lastAttemptAt DateTime?
-  nextAttemptAt DateTime?
-  lastError     String?
-  relatedId     String?
-  relatedType   String?
+  id                 String             @id @default(cuid())
+  shopId             String
+  dedupeKey          String?            @unique
+  type               String
+  message            String
+  telegramId         String
+  status             NotificationStatus @default(PENDING)
+  scheduledAt        DateTime
+  sentAt             DateTime?
+  attemptCount       Int                @default(0)
+  lastAttemptAt      DateTime?
+  nextAttemptAt      DateTime?
+  lastError          String?
+  relatedId          String?
+  relatedType        String?
   // Ordered, tenant-validated device-image keys captured on the first send
   // attempt. Progress is stored per position so a later chunk can be retried
   // without duplicating media Telegram already accepted.
-  mediaKeys          String[] @default([])
-  mediaSentPositions Int[]    @default([])
+  mediaKeys          String[]           @default([])
+  mediaSentPositions Int[]              @default([])
   mediaSnapshotAt    DateTime?
   textSentAt         DateTime?
-  createdAt     DateTime           @default(now())
+  createdAt          DateTime           @default(now())
 
   // Relations
   shop Shop @relation(fields: [shopId], references: [id])

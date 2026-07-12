@@ -9,6 +9,7 @@ import {
   emptyIncrementalSyncResponse,
   parseNavigationDomains,
   parseSyncCursor,
+  scopedCursorResetRequired,
   type SyncEvent,
 } from '@/lib/sync-contract'
 import { entityStructuralSharing } from '@/lib/query-structural-sharing'
@@ -143,11 +144,11 @@ describe('sync cursor contract', () => {
   })
 
   it('coalesces repeated entity changes to the latest ordered event', () => {
-    const event = (cursor: string, operation: SyncEvent['operation']): SyncEvent => ({
+    const event = (cursor: string, operation: SyncEvent['operation'], entityId = 'device-1'): SyncEvent => ({
       cursor,
       domain: 'devices',
       entityType: 'Device',
-      entityId: 'device-1',
+      entityId,
       operation,
       mutationKind: `device.${operation}`,
       entityVersion: '2026-07-12T00:00:00.000Z',
@@ -155,5 +156,30 @@ describe('sync cursor contract', () => {
     })
     expect(coalesceSyncEvents([event('10', 'created'), event('11', 'updated'), event('12', 'deleted')]))
       .toEqual([event('12', 'deleted')])
+  })
+
+  it('keeps coalesced entities in ascending cursor order after an interleaved replacement', () => {
+    const event = (cursor: string, entityId: string): SyncEvent => ({
+      cursor,
+      domain: 'devices',
+      entityType: 'Device',
+      entityId,
+      operation: 'updated',
+      mutationKind: 'device.updated',
+      entityVersion: '2026-07-12T00:00:00.000Z',
+      affectedDomains: ['devices'],
+    })
+    expect(coalesceSyncEvents([
+      event('10', 'device-a'),
+      event('11', 'device-b'),
+      event('12', 'device-a'),
+    ])).toEqual([event('11', 'device-b'), event('12', 'device-a')])
+  })
+
+  it('detects retention gaps only against the authorized scoped stream', () => {
+    expect(scopedCursorResetRequired(BigInt(0), BigInt(900))).toBe(false)
+    expect(scopedCursorResetRequired(BigInt(500), BigInt(500))).toBe(false)
+    expect(scopedCursorResetRequired(BigInt(500), BigInt(900))).toBe(true)
+    expect(scopedCursorResetRequired(BigInt(500), null)).toBe(false)
   })
 })

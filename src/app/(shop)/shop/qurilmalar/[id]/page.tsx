@@ -10,6 +10,7 @@ import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { formatUzPhoneDisplay } from '@/lib/phone'
 import { MoneyInput } from '@/components/ui/money-input'
+import { StorageInput } from '@/components/ui/storage-input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
@@ -36,6 +37,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { patchDeviceUpsert } from '@/lib/device-query-cache'
 import type { DeviceListItem } from '@/lib/device-list-contract'
+import { DeviceConditionBadge } from '@/components/shop/device-condition-badge'
 
 interface Supplier {
   name: string
@@ -114,6 +116,9 @@ interface Nasiya {
 
 interface DeviceReturnInfo {
   refundAmount: number
+  refundInputAmount: number | string | null
+  refundInputCurrency: 'UZS' | 'USD' | null
+  refundExchangeRateAtCreation: number | string | null
   refundMethod: string | null
   note: string | null
   createdAt: string
@@ -775,7 +780,7 @@ export default function QurilmaDetailPage() {
             >
               <span className="text-xs text-zinc-500 sm:w-32 sm:flex-shrink-0 sm:pt-0.5">{row.label}</span>
               <span className="text-sm text-zinc-900 font-medium">
-                {row.value}
+                {row.label === 'Holati' ? <DeviceConditionBadge label={row.value} /> : row.value}
                 {row.hint && <span className="block text-xs text-zinc-400 font-normal">{row.hint}</span>}
               </span>
             </div>
@@ -1063,7 +1068,15 @@ export default function QurilmaDetailPage() {
             {latestReturn.refundAmount > 0 && (
               <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Qaytarilgan summa</span>
-                <span className="text-zinc-900 font-medium">{fmt(latestReturn.refundAmount, currency)}</span>
+                <span className="text-zinc-900 font-medium">
+                  {latestReturn.refundInputAmount != null && latestReturn.refundInputCurrency
+                    ? formatUserFacingMoney({
+                        amount: latestReturn.refundInputAmount,
+                        amountCurrency: latestReturn.refundInputCurrency,
+                        displayCurrency: latestReturn.refundInputCurrency,
+                      })
+                    : fmt(latestReturn.refundAmount, currency)}
+                </span>
               </div>
             )}
             {latestReturn.refundMethod && (
@@ -1133,16 +1146,13 @@ export default function QurilmaDetailPage() {
                   className="h-10 rounded-lg border-zinc-200 text-sm"
                 />
               </div>
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-zinc-700">Xotira</label>
-                <div className="flex gap-2">
-                  <Input type="number" min="0.01" step="0.01" value={editForm.storage} onChange={(e) => setEditForm((f) => ({ ...f, storage: e.target.value }))} className="h-10 rounded-lg border-zinc-200 text-sm" />
-                  <Select value={editForm.storageUnit} onValueChange={(value) => value && setEditForm((form) => ({ ...form, storageUnit: value as 'GB' | 'TB' }))}>
-                    <SelectTrigger className="h-10 w-24"><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="GB">GB</SelectItem><SelectItem value="TB">TB</SelectItem></SelectContent>
-                  </Select>
-                </div>
-              </div>
+              <StorageInput
+                id="edit-device-storage"
+                amount={editForm.storage}
+                unit={editForm.storageUnit}
+                onAmountChange={(value) => setEditForm((form) => ({ ...form, storage: value }))}
+                onUnitChange={(value) => setEditForm((form) => ({ ...form, storageUnit: value }))}
+              />
               <div className="space-y-1.5">
                 <label className="block text-xs font-medium text-zinc-700">Batareya (%)</label>
                 <Input
@@ -1318,6 +1328,7 @@ export default function QurilmaDetailPage() {
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-zinc-700">Qarz muddati</label>
                 <DateInput
+                  aria-label="Qarz muddati"
                   value={saleEditDueDate}
                   onValueChange={setSaleEditDueDate}
                   className="h-9 rounded border-zinc-200 text-sm"

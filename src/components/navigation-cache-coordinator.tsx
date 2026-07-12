@@ -4,12 +4,14 @@ import { useEffect, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { patchDeviceDelete, patchDeviceUpsert } from '@/lib/device-query-cache'
-import { queryKeys } from '@/lib/query-keys'
+import { navigationImpactForMutation } from '@/lib/navigation-cache-policy'
+import { invalidateNavigationQueryDomains } from '@/lib/navigation-query-invalidation'
 import { registerIncrementalSyncRunner } from '@/lib/client-sync-runtime'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import type { IncrementalSyncResponse } from '@/lib/sync-contract'
 import {
   navigationClientInstanceId,
+  subscribeToLocalNavigationMutationImpacts,
   subscribeToNavigationMutations,
   type NavigationMutationBroadcast,
 } from '@/lib/client-events'
@@ -48,13 +50,7 @@ export function NavigationCacheCoordinator({
       // Query-backed domains keep their existing data visible while only the
       // affected active query revalidates. Device lists are patched precisely
       // above and therefore do not need a broad refetch.
-      for (const domain of delta.invalidatedDomains) {
-        if (domain === 'devices') continue
-        void queryClient.invalidateQueries({
-          queryKey: queryKeys.domain(scope, domain),
-          refetchType: 'active',
-        })
-      }
+      void invalidateNavigationQueryDomains(queryClient, scope, delta.invalidatedDomains)
     }
 
     async function executeSync(): Promise<string | null> {
@@ -130,8 +126,20 @@ export function NavigationCacheCoordinator({
     )
     const receive = (message: NavigationMutationBroadcast) => {
       if (message.sourceId === sourceId || message.scopeKey !== scopeKey) return
+      // The durable event is still the source of canonical row data, while
+      // the mutation matrix supplies every related aggregate/list domain.
+      // This closes gaps where the audit Log target is narrower than the
+      // business mutation (for example Device/SELL or NasiyaSchedule/PAYMENT).
+      const impact = navigationImpactForMutation(message.mutation)
+      // A stale tab can publish a mutation kind introduced by a newer build.
+      // Its durable cursor still syncs below; only apply domains this build
+      // understands instead of letting an unknown message break the listener.
+      if (impact) void invalidateNavigationQueryDomains(queryClient, scope, impact.domains)
       void runSync()
     }
+    const unsubscribeLocal = subscribeToLocalNavigationMutationImpacts(({ impact }) => {
+      void invalidateNavigationQueryDomains(queryClient, scope, impact.domains)
+    })
     const unsubscribe = subscribeToNavigationMutations(receive)
     const visibleSync = () => {
       if (document.visibilityState === 'visible') void runSync()
@@ -146,6 +154,7 @@ export function NavigationCacheCoordinator({
       if (slowTimer != null) window.clearTimeout(slowTimer)
       controllerRef.current?.abort()
       unregisterRunner()
+      unsubscribeLocal()
       unsubscribe()
       window.clearInterval(interval)
       window.removeEventListener('focus', visibleSync)

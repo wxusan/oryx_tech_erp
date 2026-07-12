@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { StorageInput } from '@/components/ui/storage-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
@@ -136,7 +137,6 @@ export default function NewDevicePage() {
         body: JSON.stringify({
           model: form.model,
           color: form.color,
-          storage: `${form.storage}${form.storageUnit}`,
           storageAmount: Number(form.storage),
           storageUnit: form.storageUnit,
           conditionCode: form.conditionCode,
@@ -215,16 +215,15 @@ export default function NewDevicePage() {
                 className="h-9 text-sm border-zinc-200 rounded"
               />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Xotira <span className="text-red-500">*</span></label>
-              <div className="flex gap-2">
-                <Input type="number" min="0.01" step="0.01" value={form.storage} onChange={set('storage')} placeholder="256" className="h-9 text-sm border-zinc-200 rounded" />
-                <Select value={form.storageUnit} onValueChange={(value) => value && setForm((prev) => ({ ...prev, storageUnit: value as 'GB' | 'TB' }))}>
-                  <SelectTrigger className="h-9 w-24"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="GB">GB</SelectItem><SelectItem value="TB">TB</SelectItem></SelectContent>
-                </Select>
-              </div>
-            </div>
+            <StorageInput
+              id="device-storage"
+              amount={form.storage}
+              unit={form.storageUnit}
+              onAmountChange={(value) => setForm((prev) => ({ ...prev, storage: value }))}
+              onUnitChange={(value) => setForm((prev) => ({ ...prev, storageUnit: value }))}
+              required
+              inputClassName="h-9 rounded"
+            />
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">Akkumulyator %</label>
               <Input

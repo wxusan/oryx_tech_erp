@@ -63,7 +63,7 @@ describe('mijozlar page: mobile card view alongside the desktop table (item 1)',
   it('a separate card list is shown only below sm:, with the edit action directly visible (not in an overflow menu)', () => {
     expect(page).toContain('sm:hidden space-y-3')
     const mobileBlockStart = page.indexOf('sm:hidden space-y-3')
-    const mobileBlock = page.slice(mobileBlockStart, mobileBlockStart + 1500)
+    const mobileBlock = page.slice(mobileBlockStart, mobileBlockStart + 2500)
     expect(mobileBlock).toContain('Tahrirlash')
   })
 })

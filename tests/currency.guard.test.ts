@@ -55,7 +55,7 @@ describe('currency source guards', () => {
       'src/app/api/devices/[id]/return/route.ts',
     ]) {
       const src = read(file)
-      expect(src, file).toContain('moneyInputToUzs')
+      expect(src, file).toMatch(/moneyInputToUzs|createMoneyInputConverter/)
       expect(src, file).toContain('moneyInputMeta')
     }
   })

@@ -158,10 +158,11 @@ describe('money/currency: MoneyInput used, server converts and stores UZS', () =
     expect(form).not.toMatch(/type="number"[^>]*salePrice/)
   })
 
-  it('submits inputCurrency and converts server-side via moneyInputToUzs', () => {
+  it('submits inputCurrency and converts every amount through one operation-scoped rate', () => {
     expect(form).toContain('inputCurrency: currency.currency')
-    expect(route).toContain('moneyInputToUzs(d.purchasePrice, d.inputCurrency)')
-    expect(route).toContain('moneyInputToUzs(d.salePrice, d.inputCurrency)')
+    expect(route).toContain('createMoneyInputConverter(d.inputCurrency)')
+    expect(route).toContain('purchaseInput = convertMoney(d.purchasePrice)')
+    expect(route).toContain('saleInput = convertMoney(d.salePrice)')
   })
 })
 

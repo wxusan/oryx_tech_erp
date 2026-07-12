@@ -366,6 +366,7 @@ export default function NewSotuvPage() {
                     Qachon to&apos;laydi <span className="text-red-500">*</span>
                   </label>
                   <DateInput
+                    aria-label="Qachon to'laydi"
                     value={partialDate}
                     onValueChange={setPartialDate}
                     className="h-9 text-sm border-zinc-200 rounded"

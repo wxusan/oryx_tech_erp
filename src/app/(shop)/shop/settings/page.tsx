@@ -19,6 +19,7 @@ import { PhoneInput } from '@/components/ui/phone-input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { uzDateTime } from '@/lib/dates'
+import { isValidPhone } from '@/lib/phone'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import type { ApiResponse } from '@/types'
 
@@ -169,8 +170,8 @@ export default function ShopSettingsPage() {
       setAccountError("Ism kamida 2 ta harfdan iborat bo'lishi kerak")
       return
     }
-    if (accountPhone.trim().length < 9) {
-      setAccountError("Telefon raqam kamida 9 ta raqam bo'lishi kerak")
+    if (!isValidPhone(accountPhone)) {
+      setAccountError("Telefon raqam noto'g'ri. Masalan: +998 90 123 45 67")
       return
     }
 
@@ -206,8 +207,8 @@ export default function ShopSettingsPage() {
       setShopError("Egasi ismi kamida 2 ta harfdan iborat bo'lishi kerak")
       return
     }
-    if (shopForm.ownerPhone.trim().length < 9) {
-      setShopError("Telefon raqam kamida 9 ta raqam bo'lishi kerak")
+    if (!isValidPhone(shopForm.ownerPhone)) {
+      setShopError("Telefon raqam noto'g'ri. Masalan: +998 90 123 45 67")
       return
     }
 

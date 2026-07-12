@@ -7,7 +7,7 @@ import { resolve } from 'node:path'
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['tests/**/*.test.ts'],
+    include: ['tests/**/*.test.{ts,tsx}'],
     exclude: ['tests/integration/**/*.integration.test.ts'],
     // Dummy DB URLs so modules that import the Prisma client singleton (e.g.
     // telegram-id.ts) can be loaded by pure unit tests. The pg adapter builds a

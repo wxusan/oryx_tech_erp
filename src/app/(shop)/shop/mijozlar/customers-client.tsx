@@ -5,7 +5,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
-import { formatUzPhoneDisplay } from '@/lib/phone'
+import { formatUzPhoneDisplay, isValidPhone } from '@/lib/phone'
 import { commitNavigationMutation } from '@/lib/client-events'
 import { replaceListUrlState } from '@/lib/list-url-state'
 import { Textarea } from '@/components/ui/textarea'
@@ -45,6 +45,7 @@ interface Customer {
   id: string
   name: string
   phone: string
+  phoneNormalizationNeedsReview?: boolean
   additionalPhones?: string[]
   note: string | null
   createdAt: string
@@ -215,7 +216,14 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
               customers.map((customer) => (
                 <tr key={customer.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                   <td className="px-4 py-3 font-medium text-zinc-900">{customer.name}</td>
-                  <td className="px-4 py-3 font-mono text-zinc-600">{formatUzPhoneDisplay(customer.phone)}</td>
+                  <td className="px-4 py-3 font-mono text-zinc-600">
+                    <div>{formatUzPhoneDisplay(customer.phone)}</div>
+                    {customer.phoneNormalizationNeedsReview && (
+                      <span className="mt-1 inline-flex rounded bg-amber-50 px-2 py-0.5 font-sans text-[11px] font-medium text-amber-800" title="Eski telefon raqamini tekshirib, to'g'ri formatda saqlang">
+                        Telefon tekshirilsin
+                      </span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">{customer.trust && <TrustBadge trust={customer.trust} />}</td>
                   <td className="px-4 py-3 text-zinc-600">{customer._count?.sales ?? 0}</td>
                   <td className="px-4 py-3 text-zinc-600">{customer._count?.nasiya ?? 0}</td>
@@ -245,6 +253,11 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
                 <div>
                   <div className="font-medium text-zinc-900">{customer.name}</div>
                   <div className="text-xs font-mono text-zinc-500 mt-0.5">{formatUzPhoneDisplay(customer.phone)}</div>
+                  {customer.phoneNormalizationNeedsReview && (
+                    <span className="mt-1 inline-flex rounded bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
+                      Telefon tekshirilsin
+                    </span>
+                  )}
                 </div>
                 {customer.trust && <TrustBadge trust={customer.trust} />}
               </div>
@@ -390,7 +403,7 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
               disabled={
                 saving ||
                 name.trim().length < 2 ||
-                phone.trim().length < 9 ||
+                !isValidPhone(phone) ||
                 (!!editing && (name !== editing.name || phone !== editing.phone) && reason.trim().length < 5)
               }
               onClick={saveCustomer}

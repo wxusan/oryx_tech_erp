@@ -39,6 +39,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         shopId: true,
         name: true,
         phone: true,
+        phoneNormalizationNeedsReview: true,
         additionalPhones: true,
         note: true,
         createdAt: true,
@@ -129,7 +130,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const customerUpdate = {
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...(parsed.data.phone !== undefined
-        ? { phone: parsed.data.phone, normalizedPhone: normalizePhone(parsed.data.phone) }
+        ? { phone: parsed.data.phone, normalizedPhone: normalizePhone(parsed.data.phone), phoneNormalizationNeedsReview: false }
         : {}),
       ...(parsed.data.additionalPhones !== undefined
         ? { additionalPhones: normalizeAdditionalPhones(parsed.data.additionalPhones, nextPrimaryPhone) }
@@ -149,6 +150,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
           shopId: true,
           name: true,
           phone: true,
+          phoneNormalizationNeedsReview: true,
           additionalPhones: true,
           trustOverride: true,
           note: true,

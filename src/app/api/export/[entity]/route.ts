@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/node'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { csvRows } from '@/lib/csv'
-import { formatMoneyByCurrency } from '@/lib/currency'
+import { formatMoneyByCurrency, formatUserFacingMoney } from '@/lib/currency'
 import { displayImei } from '@/lib/device-display'
 import { prisma } from '@/lib/prisma'
 import { deviceStatusLabel, nasiyaStatusLabel, paymentMethodLabel } from '@/lib/labels'
@@ -397,6 +397,9 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         take,
         select: {
           refundAmount: true,
+          refundInputAmount: true,
+          refundInputCurrency: true,
+          refundExchangeRateAtCreation: true,
           refundMethod: true,
           note: true,
           createdAt: true,
@@ -412,7 +415,10 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'imei',
         'customer',
         'refundAmountUzs',
-        'refundAmountDisplay',
+        'refundInputAmount',
+        'refundInputCurrency',
+        'refundExchangeRateAtCreation',
+        'refundNativeDisplay',
         'refundMethod',
         'note',
         'createdAt',
@@ -422,7 +428,14 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         displayImei(item.device.imei),
         item.sale?.customer.name ?? item.nasiya?.customer.name ?? '',
         item.refundAmount.toString(),
-        formatMoneyByCurrency(Number(item.refundAmount), currency.currency, currency.usdUzsRate),
+        (item.refundInputAmount ?? item.refundAmount).toString(),
+        item.refundInputCurrency ?? 'UZS',
+        item.refundExchangeRateAtCreation?.toString() ?? '',
+        formatUserFacingMoney({
+          amount: (item.refundInputAmount ?? item.refundAmount).toString(),
+          amountCurrency: item.refundInputCurrency ?? 'UZS',
+          displayCurrency: item.refundInputCurrency ?? 'UZS',
+        }),
         paymentMethodLabel(item.refundMethod),
         item.note,
         item.createdAt,

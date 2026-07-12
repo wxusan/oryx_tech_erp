@@ -17,7 +17,6 @@ import { logger } from '@/lib/logger'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { normalizePhone } from '@/lib/phone'
 import { getShopDeviceListItemsByIds, getShopDevicesList, type DeviceStatusFilter } from '@/lib/server/shop-lists'
 import { latestChangeCursorForShop } from '@/lib/server/change-events'
 import type { ZodError } from 'zod'
@@ -50,7 +49,6 @@ export async function GET(req: NextRequest) {
     const conditionParam = searchParams.get('condition') ?? undefined
     if (conditionParam && conditionParam !== 'NEW' && conditionParam !== 'USED') return badRequest("Qurilma holati noto'g'ri")
     const search = searchParams.get('search') ?? undefined // IMEI / model / color / note / customer name/phone
-    const searchDigits = search ? normalizePhone(search) : null
 
     // Sale and nasiya forms need only a tiny searchable stock projection.
     // Keeping this separate from the full device-list projection avoids joins
@@ -118,81 +116,21 @@ export async function GET(req: NextRequest) {
       )
     }
 
-    // Item — the qurilmalar list page opts into the real page/skip/take
-    // pagination envelope ({items, total, skip, take}, same shape /api/logs
-    // and /api/customers already use) via ?paginated=1. Every other existing
-    // consumer of this route (sotuv/new, nasiyalar/new, qurilmalar/new,
-    // qurilmalar/[id]) keeps getting the plain array it already expects —
-    // this branch changes nothing for them.
-    if (searchParams.get('paginated') === '1') {
-      const requestedTake = Number(searchParams.get('take') ?? 25)
-      const requestedSkip = Number(searchParams.get('skip') ?? 0)
-      const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 100)) : 25
-      const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
-      const { items, total } = await getShopDevicesList(shopId, {
-        search,
-        status: status as DeviceStatusFilter | undefined,
-        condition: conditionParam as 'NEW' | 'USED' | undefined,
-        skip,
-        take,
-      })
-      return ok({ items, total, skip, take }, "Qurilmalar ro'yxati")
-    }
-
-    const requestedTake = Number(searchParams.get('take') ?? 200)
+    // The canonical response is always a bounded page envelope. `paginated=1`
+    // remains harmless for older links, but no consumer can accidentally fall
+    // back to the former wide, reduced-field array response.
+    const requestedTake = Number(searchParams.get('take') ?? 25)
     const requestedSkip = Number(searchParams.get('skip') ?? 0)
-    const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 500)) : 200
+    const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 100)) : 25
     const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
-
-    const devices = await prisma.device.findMany({
-      where: {
-        shopId,
-        deletedAt: null,
-        ...(status ? { status } : {}),
-        ...(search
-          ? {
-              OR: [
-                { imei: { contains: search, mode: 'insensitive' } },
-                { imeis: { some: { deletedAt: null, value: { contains: search, mode: 'insensitive' } } } },
-                { model: { contains: search, mode: 'insensitive' } },
-                { color: { contains: search, mode: 'insensitive' } },
-                { storage: { contains: search, mode: 'insensitive' } },
-                { note: { contains: search, mode: 'insensitive' } },
-                { supplierPhone: { contains: search, mode: 'insensitive' } },
-                { supplier: { phone: { contains: search, mode: 'insensitive' } } },
-                { sales: { some: { customer: { phone: { contains: search, mode: 'insensitive' } } } } },
-                { sales: { some: { customer: { name: { contains: search, mode: 'insensitive' } } } } },
-                { nasiya: { some: { customer: { phone: { contains: search, mode: 'insensitive' } } } } },
-                { nasiya: { some: { customer: { name: { contains: search, mode: 'insensitive' } } } } },
-                ...(searchDigits
-                  ? [
-                      { sales: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
-                      { nasiya: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
-                    ]
-                  : []),
-              ],
-            }
-          : {}),
-      },
-      orderBy: { createdAt: 'desc' },
-      take,
+    const { items, total } = await getShopDevicesList(shopId, {
+      search,
+      status: status as DeviceStatusFilter | undefined,
+      condition: conditionParam as 'NEW' | 'USED' | undefined,
       skip,
-      select: {
-        id: true,
-        model: true,
-        color: true,
-        storage: true,
-        batteryHealth: true,
-        purchasePrice: true,
-        imei: true,
-        status: true,
-        imageUrls: true,
-        note: true,
-        createdAt: true,
-      },
+      take,
     })
-
-    return ok(devices, "Qurilmalar ro'yxati")
+    return ok({ items, total, skip, take }, "Qurilmalar ro'yxati")
   } catch (err) {
     logger.error('[GET /api/devices]', { event: 'api.route_error', error: err })
     return serverError()
@@ -219,9 +157,10 @@ export async function POST(req: NextRequest) {
     }
 
     const {
-      model, color, storage, storageAmount, storageUnit, conditionCode, batteryHealth, purchasePrice,
+      model, color, storageAmount, storageUnit, conditionCode, batteryHealth, purchasePrice,
       supplierName, supplierPhone, note, imageUrls,
     } = parsed.data
+    const storage = formatDeviceStorage({ storageAmount, storageUnit })
     const imei = normalizeImei(parsed.data.imei)!
     const secondaryImei = parsed.data.secondaryImei ? normalizeImei(parsed.data.secondaryImei) : null
 

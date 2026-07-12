@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import { navigateAfterMutation } from '@/lib/client-events'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { StorageInput } from '@/components/ui/storage-input'
 import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
@@ -172,7 +173,6 @@ export default function NewOlibSotdimPage() {
         body: JSON.stringify({
           model: model.trim(),
           color: color.trim() || undefined,
-          storage: `${storage}${storageUnit}`,
           storageAmount: Number(storage),
           storageUnit,
           batteryHealth: battery ? Number(battery) : undefined,
@@ -260,16 +260,15 @@ export default function NewOlibSotdimPage() {
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
               </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Xotira <span className="text-red-500">*</span></label>
-                <div className="flex gap-2">
-                  <Input type="number" min="0.01" step="0.01" value={storage} onChange={(e) => setStorage(e.target.value)} placeholder="256" className="h-9 text-sm border-zinc-200 rounded" />
-                  <Select value={storageUnit} onValueChange={(value) => value && setStorageUnit(value as 'GB' | 'TB')}>
-                    <SelectTrigger className="h-9 w-24"><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="GB">GB</SelectItem><SelectItem value="TB">TB</SelectItem></SelectContent>
-                  </Select>
-                </div>
-              </div>
+              <StorageInput
+                id="olib-storage"
+                amount={storage}
+                unit={storageUnit}
+                onAmountChange={setStorage}
+                onUnitChange={setStorageUnit}
+                required
+                inputClassName="h-9 rounded"
+              />
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Akkumulyator %</label>
                 <Input
@@ -451,6 +450,7 @@ export default function NewOlibSotdimPage() {
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">To&apos;lov sanasi</label>
                     <DateInput
+                      aria-label="Yetkazib beruvchiga to'lov sanasi"
                       value={supplierPaidDate}
                       onValueChange={setSupplierPaidDate}
                       className="h-9 text-sm border-zinc-200 rounded"
@@ -466,6 +466,7 @@ export default function NewOlibSotdimPage() {
                       To&apos;lov muddati <span className="text-red-500">*</span>
                     </label>
                     <DateInput
+                      aria-label="Yetkazib beruvchiga to'lov muddati"
                       value={supplierDueDate}
                       onValueChange={setSupplierDueDate}
                       className="h-9 text-sm border-zinc-200 rounded"
@@ -636,6 +637,7 @@ export default function NewOlibSotdimPage() {
                       Qachon to&apos;laydi <span className="text-red-500">*</span>
                     </label>
                     <DateInput
+                      aria-label="Mijoz to'lov muddati"
                       value={partialDate}
                       onValueChange={setPartialDate}
                       className="h-9 text-sm border-zinc-200 rounded"

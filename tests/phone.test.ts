@@ -74,6 +74,13 @@ describe('applyPhonePrefix (auto 998 prefix)', () => {
     expect(applyPhonePrefix('+998 998 90 123 45 67')).toBe('+998901234567')
   })
 
+  it('preserves a valid local number whose operator digits begin with 998', () => {
+    expect(applyPhonePrefix('998123456')).toBe('+998998123456')
+    expect(applyPhonePrefix('+998 99 812 34 56')).toBe('+998998123456')
+    expect(normalizeUzPhone('998123456')).toBe('+998998123456')
+    expect(normalizeUzPhone('+998998123456')).toBe('+998998123456')
+  })
+
   it('normalizes spaces/dashes/parens the same as a plain digit string', () => {
     expect(applyPhonePrefix('90 123 45 67')).toBe('+998901234567')
     expect(applyPhonePrefix('90-123-45-67')).toBe('+998901234567')
@@ -101,6 +108,10 @@ describe('canonical Uzbek phone display and storage', () => {
     expect(formatUzPhoneDisplay('+998901234567')).toBe('+998 90 123 45 67')
     expect(formatUzPhoneDisplay('901234567')).toBe('+998 90 123 45 67')
     expect(formatUzPhoneDisplay('+998 90 123 45 67')).toBe('+998 90 123 45 67')
+  })
+
+  it('does not hide extra digits in an invalid historic phone', () => {
+    expect(formatUzPhoneDisplay('+9989012345678')).toBe('+9989012345678')
   })
 
   it('normalizes all supported entry formats to one submitted value', () => {

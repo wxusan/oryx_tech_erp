@@ -1,8 +1,7 @@
 import type { NextConfig } from "next";
 
 // Conservative, safe-by-default security headers applied to every response.
-// See docs/audits/production-readiness-audit.md for the full rationale and
-// what remains deferred (Content-Security-Policy — see the note below).
+// See docs/audits/production-readiness-audit.md for the full rationale.
 const securityHeaders = [
   // Stop the browser from guessing a response's MIME type from its content
   // (e.g. treating an uploaded image as executable script).
@@ -23,8 +22,7 @@ const securityHeaders = [
   { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
 ]
 
-// Item 6 (docs/product-feature-fixes.md follow-up) — Content-Security-Policy,
-// shipped in REPORT-ONLY mode rather than enforcing. Enumerated the app's own
+// Content-Security-Policy, enforced in production responses. Enumerated the app's own
 // external origins: Next.js's inline hydration/RSC payload scripts and the
 // Tailwind/Radix-style UI primitives' inline styles both need
 // 'unsafe-inline' (this app doesn't yet wire a nonce through middleware —
@@ -33,9 +31,9 @@ const securityHeaders = [
 // directly from Supabase Storage via short-lived signed URLs, so img-src
 // must allow that origin; next/font/google self-hosts fonts at build time
 // (no external font-src needed); there is no analytics/telemetry origin.
-// Report-Only means the browser sends violation reports to the console
-// without blocking anything, so this cannot break the app — it's here to
-// start surfacing what a future *enforcing* policy would need to allow.
+// The policy still allows inline Next hydration/styles until nonce wiring is
+// added, but blocks unapproved external scripts, objects, frames and form
+// targets now instead of merely reporting them.
 function buildCsp(): string {
   let supabaseOrigin = ''
   try {
@@ -55,6 +53,7 @@ function buildCsp(): string {
     `font-src 'self' data:`,
     `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ''}`,
     `object-src 'none'`,
+    `frame-src 'none'`,
     `base-uri 'self'`,
     `frame-ancestors 'self'`,
     `form-action 'self'`,
@@ -76,7 +75,7 @@ const nextConfig: NextConfig = {
     return [
       {
         source: '/:path*',
-        headers: [...securityHeaders, { key: 'Content-Security-Policy-Report-Only', value: buildCsp() }],
+        headers: [...securityHeaders, { key: 'Content-Security-Policy', value: buildCsp() }],
       },
     ]
   },

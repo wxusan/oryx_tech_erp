@@ -26,6 +26,7 @@ import { uzDate } from '@/lib/dates'
 import { formatUserFacingMoney } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { formatUzPhoneDisplay } from '@/lib/phone'
+import { DeviceConditionBadge } from '@/components/shop/device-condition-badge'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import { commitNavigationMutation } from '@/lib/client-events'
 import { replaceListUrlState } from '@/lib/list-url-state'
@@ -219,7 +220,8 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="font-medium text-zinc-900">{row.device.model}</div>
-                <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'} · {row.device.conditionLabel}</div>
+                <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'}</div>
+                <DeviceConditionBadge label={row.device.conditionLabel} className="mt-1" />
                 <div className="font-mono text-xs text-zinc-400">IMEI 1: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · IMEI 2: ${displayImei(row.device.secondaryImei)}` : ''}</div>
               </div>
               <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${statusStyles[row.status]}`}>
@@ -265,7 +267,8 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                   <td className="px-4 py-3 text-zinc-500">{uzDate(row.createdAt)}</td>
                   <td className="px-4 py-3">
                     <div className="font-medium text-zinc-900">{row.device.model}</div>
-                    <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'} · {row.device.conditionLabel}</div>
+                    <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'}</div>
+                    <DeviceConditionBadge label={row.device.conditionLabel} className="mt-1" />
                     <div className="text-xs text-zinc-400 font-mono">IMEI 1: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · IMEI 2: ${displayImei(row.device.secondaryImei)}` : ''}</div>
                   </td>
                   <td className="px-4 py-3">

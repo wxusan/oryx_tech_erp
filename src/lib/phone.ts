@@ -18,10 +18,11 @@ function uzLocalDigits(raw: string, clamp = false) {
   let digits = raw.replace(/\D/g, '')
   if (!digits) return ''
 
-  while (digits.startsWith(UZ_COUNTRY_CODE + UZ_COUNTRY_CODE)) {
+  const explicitInternational = raw.trim().startsWith('+')
+  while (digits.length > UZ_LOCAL_PHONE_LENGTH + UZ_COUNTRY_CODE.length && digits.startsWith(UZ_COUNTRY_CODE + UZ_COUNTRY_CODE)) {
     digits = digits.slice(UZ_COUNTRY_CODE.length)
   }
-  if (digits.startsWith(UZ_COUNTRY_CODE)) {
+  if ((explicitInternational || digits.length > UZ_LOCAL_PHONE_LENGTH) && digits.startsWith(UZ_COUNTRY_CODE)) {
     digits = digits.slice(UZ_COUNTRY_CODE.length)
   }
 
@@ -51,8 +52,8 @@ export function normalizeUzPhone(raw: string): string | null {
   return local.length === UZ_LOCAL_PHONE_LENGTH ? `+${UZ_COUNTRY_CODE}${local}` : null
 }
 
-/** Formats canonical and legacy saved Uzbek phone values for display. */
-export function formatUzPhoneDisplay(raw: string | null | undefined): string {
+/** Formats an in-progress controlled edit, including partial local digits. */
+export function formatUzPhoneInputDisplay(raw: string | null | undefined): string {
   if (!raw) return ''
   const normalized = normalizeUzPhoneInput(raw)
   if (!normalized) return ''
@@ -60,6 +61,18 @@ export function formatUzPhoneDisplay(raw: string | null | undefined): string {
   const local = normalized.slice(UZ_COUNTRY_CODE.length + 1)
   const groups = [local.slice(0, 2), local.slice(2, 5), local.slice(5, 7), local.slice(7, 9), local.slice(9)].filter(Boolean)
   return `+${UZ_COUNTRY_CODE}${groups.length ? ` ${groups.join(' ')}` : ''}`
+}
+
+/**
+ * Formats a saved phone without hiding invalid historic digits. Invalid legacy
+ * values are returned verbatim so operators can see and repair them instead of
+ * seeing a valid-looking truncated number.
+ */
+export function formatUzPhoneDisplay(raw: string | null | undefined): string {
+  if (!raw) return ''
+  const normalized = normalizeUzPhone(raw)
+  if (!normalized) return raw.trim()
+  return formatUzPhoneInputDisplay(normalized)
 }
 
 // Client and server use the same exact Uzbek-number rule. Optional fields

@@ -4,7 +4,7 @@ import type { Session } from 'next-auth'
 import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { navigationDomains, type NavigationDomain } from '@/lib/navigation-cache-policy'
-import { coalesceSyncEvents } from '@/lib/sync-contract'
+import { coalesceSyncEvents, scopedCursorResetRequired } from '@/lib/sync-contract'
 
 export const CHANGE_EVENT_RETENTION_DAYS = 7
 export const CHANGE_EVENT_BATCH_MAX = 100
@@ -81,20 +81,43 @@ export async function latestChangeCursorForShop(shopId: string): Promise<string>
   return (latest._max.sequence ?? BigInt(0)).toString()
 }
 
-export function affectedDomainsForChange(entityType: string, primary: NavigationDomain): NavigationDomain[] {
+export function affectedDomainsForChange(
+  entityType: string,
+  primary: NavigationDomain,
+  mutationKind?: string,
+): NavigationDomain[] {
+  const deviceDomains = mutationKind === 'device.sell'
+    ? ['devices', 'sales', 'customers', 'reports', 'logs', 'overdue'] satisfies NavigationDomain[]
+    : mutationKind === 'device.return'
+      ? ['devices', 'sales', 'nasiyas', 'returns', 'reports', 'logs', 'overdue'] satisfies NavigationDomain[]
+      : mutationKind === 'device.restock'
+        ? ['devices', 'nasiyas', 'returns', 'reports', 'logs'] satisfies NavigationDomain[]
+        : mutationKind
+          ? ['devices', 'reports', 'logs'] satisfies NavigationDomain[]
+          : ['devices', 'sales', 'nasiyas', 'payments', 'returns', 'customers', 'reports', 'logs', 'overdue'] satisfies NavigationDomain[]
   const byEntity: Record<string, NavigationDomain[]> = {
-    Device: ['devices', 'reports', 'logs'],
-    Sale: ['devices', 'sales', 'payments', 'customers', 'reports', 'logs', 'overdue'],
+    // A Device audit target is also used for SELL and RETURN operations. Keep
+    // the canonical device row precise while marking their related aggregates.
+    Device: deviceDomains,
+    // Olib-sotdim creation is audited against its Sale, so that domain must be
+    // included even though the trigger's primary domain is `sales`.
+    Sale: ['devices', 'sales', 'payments', 'customers', 'returns', 'olibSotdim', 'reports', 'logs', 'overdue'],
     SalePayment: ['devices', 'sales', 'payments', 'customers', 'reports', 'logs', 'overdue'],
     Nasiya: ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
     NasiyaPayment: ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
+    // Regular nasiya payments are audited against NasiyaSchedule.
+    NasiyaSchedule: ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
     NasiyaReminder: ['nasiyas', 'logs', 'overdue'],
     Customer: ['customers', 'nasiyas', 'sales', 'reports', 'logs'],
     DeviceReturn: ['devices', 'sales', 'nasiyas', 'returns', 'reports', 'logs', 'overdue'],
     SupplierPayable: ['olibSotdim', 'devices', 'sales', 'payments', 'reports', 'logs'],
     CurrencyRate: ['currency', 'devices', 'sales', 'nasiyas', 'payments', 'customers', 'olibSotdim', 'reports', 'settings'],
-    Shop: ['adminShops', 'adminPayments', 'adminReports', 'adminLogs', 'adminOps'],
-    ShopAdmin: ['adminShops', 'adminLogs', 'adminOps'],
+    Shop: primary === 'settings'
+      ? ['settings', 'logs']
+      : ['adminShops', 'adminPayments', 'adminReports', 'adminLogs', 'adminOps'],
+    ShopAdmin: primary === 'settings'
+      ? ['settings', 'logs']
+      : ['adminShops', 'adminLogs', 'adminOps'],
     SuperAdmin: ['settings', 'adminLogs'],
   }
   return [...new Set([primary, ...(byEntity[entityType] ?? ['logs'])])]
@@ -107,11 +130,16 @@ export async function readChangeEventBatch(input: {
   limit?: number
 }) {
   const limit = Math.min(Math.max(input.limit ?? CHANGE_EVENT_BATCH_MAX, 1), CHANGE_EVENT_BATCH_MAX)
-  const [globalOldest, rows] = await Promise.all([
-    prisma.changeEvent.findFirst({ orderBy: { sequence: 'asc' }, select: { sequence: true } }),
+  const authorizedScope = scopeWhere(input.session, input.domains)
+  const [scopedOldest, rows] = await Promise.all([
+    prisma.changeEvent.findFirst({
+      where: authorizedScope,
+      orderBy: { sequence: 'asc' },
+      select: { sequence: true },
+    }),
     prisma.changeEvent.findMany({
       where: {
-        AND: [scopeWhere(input.session, input.domains), { sequence: { gt: input.cursor } }],
+        AND: [authorizedScope, { sequence: { gt: input.cursor } }],
       },
       orderBy: { sequence: 'asc' },
       take: limit + 1,
@@ -127,9 +155,7 @@ export async function readChangeEventBatch(input: {
     }),
   ])
 
-  const resetRequired = input.cursor > BigInt(0)
-    && globalOldest != null
-    && input.cursor + BigInt(1) < globalOldest.sequence
+  const resetRequired = scopedCursorResetRequired(input.cursor, scopedOldest?.sequence ?? null)
   if (resetRequired) {
     const latestAllowed = await prisma.changeEvent.aggregate({
       where: scopeWhere(input.session, input.domains),
@@ -158,7 +184,7 @@ export async function readChangeEventBatch(input: {
       operation,
       mutationKind: row.mutationKind,
       entityVersion: row.entityVersion.toISOString(),
-      affectedDomains: affectedDomainsForChange(row.entityType, row.domain),
+      affectedDomains: affectedDomainsForChange(row.entityType, row.domain, row.mutationKind),
     }
     events.push(event)
   }

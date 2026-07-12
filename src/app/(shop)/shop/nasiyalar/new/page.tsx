@@ -637,6 +637,7 @@ export default function NewNasiyaPage() {
                   Boshlanish sanasi <span className="text-red-500">*</span>
                 </label>
                 <DateInput
+                  aria-label="Boshlanish sanasi"
                   value={startDate}
                   onValueChange={setStartDate}
                   className="h-9 text-sm border-zinc-200 rounded"

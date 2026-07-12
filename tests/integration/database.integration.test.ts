@@ -20,8 +20,8 @@ describe('disposable PostgreSQL migration foundation', () => {
       ORDER BY migration_name
     `
 
-    expect(rows).toHaveLength(28)
-    expect(rows.at(-1)?.migration_name).toBe('202607120004_phone_canonicalization')
+    expect(rows).toHaveLength(30)
+    expect(rows.at(-1)?.migration_name).toBe('202607120006_tenant_refund_integrity')
   })
 
   it('preserves the migration-managed active-only unique indexes', async () => {
@@ -43,5 +43,33 @@ describe('disposable PostgreSQL migration foundation', () => {
       'Device_shopId_imei_active_key',
     ])
     expect(indexes.every((index) => index.indexdef.includes('WHERE'))).toBe(true)
+  })
+
+  it('installs IMEI normalization/search and tenant-aware relational constraints', async () => {
+    const indexes = await prisma.$queryRaw<Array<{ indexname: string }>>`
+      SELECT indexname FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname IN ('DeviceImei_value_trgm_active_idx', 'Customer_id_shopId_key', 'Sale_id_shopId_key')
+      ORDER BY indexname
+    `
+    expect(indexes.map((row) => row.indexname)).toEqual([
+      'Customer_id_shopId_key',
+      'DeviceImei_value_trgm_active_idx',
+      'Sale_id_shopId_key',
+    ])
+
+    const constraints = await prisma.$queryRaw<Array<{ conname: string; convalidated: boolean }>>`
+      SELECT conname, convalidated
+      FROM pg_constraint
+      WHERE conname IN (
+        'Sale_deviceId_shopId_fkey',
+        'Sale_customerId_shopId_fkey',
+        'Nasiya_deviceId_shopId_fkey',
+        'DeviceReturn_deviceId_shopId_fkey'
+      )
+      ORDER BY conname
+    `
+    expect(constraints).toHaveLength(4)
+    expect(constraints.every((row) => row.convalidated)).toBe(true)
   })
 })

@@ -13,7 +13,7 @@ import {
 } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
-import { formatUzPhoneDisplay } from '@/lib/phone'
+import { formatUzPhoneDisplay, isValidPhone } from '@/lib/phone'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import { commitNavigationMutation, navigateAfterMutation } from '@/lib/client-events'
@@ -171,7 +171,7 @@ export default function ShopDetailPage() {
   const paymentValid = payAmount.trim() !== '' && payMonths !== '' && payMethod !== ''
   const adminValid =
     adminName.trim() !== '' &&
-    adminPhone.trim() !== '' &&
+    isValidPhone(adminPhone) &&
     adminLogin.trim() !== '' &&
     adminPassword.trim() !== ''
   const passwordResetValid =
@@ -181,7 +181,7 @@ export default function ShopDetailPage() {
   const editValid =
     editName.trim().length >= 2 &&
     editOwnerName.trim().length >= 2 &&
-    editOwnerPhone.trim().length >= 9 &&
+    isValidPhone(editOwnerPhone) &&
     editShopNumber.trim().length >= 1
   const isDeleted = shop?.status === 'DELETED' || !!shop?.deletedAt
   const paymentPreview = shop && payMonths

@@ -46,6 +46,9 @@ describe('navigation cache integration guards', () => {
     expect(coordinator).toContain('window.setInterval(visibleSync, SYNC_INTERVAL_MS)')
     expect(coordinator).toContain('nextAllowedAtRef.current')
     expect(coordinator).toContain('runningRef.current')
+    expect(coordinator).toContain('navigationImpactForMutation(message.mutation)')
+    expect(coordinator).toContain('subscribeToLocalNavigationMutationImpacts')
+    expect(coordinator).toContain('invalidateNavigationQueryDomains(queryClient, scope, impact.domains)')
   })
 
   it('wires every client operational-mutation module to the central contract', () => {

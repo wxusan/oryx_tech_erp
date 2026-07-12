@@ -56,6 +56,7 @@ export async function GET(req: NextRequest) {
         shopId: true,
         name: true,
         phone: true,
+        phoneNormalizationNeedsReview: true,
         additionalPhones: true,
         note: true,
         createdAt: true,

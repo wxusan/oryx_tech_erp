@@ -18,7 +18,7 @@ import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
-import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { createMoneyInputConverter, moneyInputMeta, type MoneyInputResult } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { roundContractMoney, computeSaleContractMargin } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
@@ -60,11 +60,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     const currency = await getShopCurrencyContext(shopId)
     const normalizedPhone = normalizePhone(customerPhone)
-    let salePriceInput: Awaited<ReturnType<typeof moneyInputToUzs>>
-    let amountPaidInput: Awaited<ReturnType<typeof moneyInputToUzs>> | null = null
+    let salePriceInput: MoneyInputResult
+    let amountPaidInput: MoneyInputResult | null = null
     try {
-      salePriceInput = await moneyInputToUzs(salePrice, parsed.data.inputCurrency)
-      if (amountPaid !== undefined) amountPaidInput = await moneyInputToUzs(amountPaid, parsed.data.inputCurrency)
+      const convertMoney = await createMoneyInputConverter(parsed.data.inputCurrency)
+      salePriceInput = convertMoney(salePrice)
+      if (amountPaid !== undefined) amountPaidInput = convertMoney(amountPaid)
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }

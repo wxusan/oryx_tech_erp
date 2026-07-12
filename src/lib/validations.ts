@@ -123,7 +123,6 @@ export const addDeviceSchema = z.object({
     .min(1, "Model bo'sh bo'lmasligi kerak")
     .max(120, "Model 120 ta belgidan oshmasligi kerak"),
   color: z.string().max(50, "Rang 50 ta belgidan oshmasligi kerak").optional(),
-  storage: z.string().max(50, "Xotira 50 ta belgidan oshmasligi kerak").optional(),
   storageAmount: z.number().positive("Xotira hajmi 0 dan katta bo'lishi kerak"),
   storageUnit: z.enum(['GB', 'TB']),
   conditionCode: z.enum(['NEW', 'USED'], { error: "Qurilma holati tanlanishi shart" }),
@@ -426,7 +425,6 @@ export const createOlibSotdimSchema = z
     // Section 1 — device
     model: z.string({ error: "Model kiritilishi shart" }).min(1, "Model bo'sh bo'lmasligi kerak").max(120),
     color: z.string().max(50, "Rang 50 ta belgidan oshmasligi kerak").optional(),
-    storage: z.string().max(50, "Xotira 50 ta belgidan oshmasligi kerak").optional(),
     storageAmount: z.number().positive("Xotira hajmi 0 dan katta bo'lishi kerak"),
     storageUnit: z.enum(['GB', 'TB']),
     batteryHealth: z.number().int().min(0).max(100).optional(),

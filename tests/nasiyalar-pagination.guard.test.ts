@@ -36,9 +36,11 @@ describe('shop-lists.ts getShopNasiyalarList: search/status/skip/take/total', ()
     expect(source).toContain('prisma.nasiya.count({ where })')
   })
 
-  it('search matches customer name/phone, device model/IMEI, note (same OR clause as the old inline GET /api/nasiya)', () => {
+  it('search matches customer name/phone, device model/both IMEIs, and note', () => {
     expect(source).toContain("{ customer: { name: { contains: search, mode: 'insensitive' as const } } }")
     expect(source).toContain("{ device: { model: { contains: search, mode: 'insensitive' as const } } }")
+    expect(source).toContain('device: {')
+    expect(source).toContain('imeis: {')
   })
 })
 
