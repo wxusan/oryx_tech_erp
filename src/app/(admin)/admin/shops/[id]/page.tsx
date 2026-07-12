@@ -16,6 +16,7 @@ import { PhoneInput } from '@/components/ui/phone-input'
 import { formatUzPhoneDisplay } from '@/lib/phone'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
+import { commitNavigationMutation, navigateAfterMutation } from '@/lib/client-events'
 import {
   Table,
   TableBody,
@@ -281,7 +282,12 @@ export default function ShopDetailPage() {
         }),
       })
       const json = await res.json()
-      if (json.success) {
+      if (res.ok && json.success) {
+        const invalidated = await commitNavigationMutation({ kind: 'admin.shopPaymentRecorded', shopId: id })
+        if (!invalidated) {
+          window.location.reload()
+          return
+        }
         setPaymentModalOpen(false)
         resetPayment()
         fetchShop()
@@ -311,7 +317,12 @@ export default function ShopDetailPage() {
         body: JSON.stringify({ status: newStatus, reason: suspendReason.trim() }),
       })
       const json = await res.json()
-      if (json.success) {
+      if (res.ok && json.success) {
+        const invalidated = await commitNavigationMutation({ kind: 'admin.shopUpdated', shopId: id })
+        if (!invalidated) {
+          window.location.reload()
+          return
+        }
         setSuspendModalOpen(false)
         setSuspendReason('')
         setSuspendError(null)
@@ -344,7 +355,12 @@ export default function ShopDetailPage() {
         }),
       })
       const json = await res.json()
-      if (json.success) {
+      if (res.ok && json.success) {
+        const invalidated = await commitNavigationMutation({ kind: 'admin.shopUpdated', shopId: id })
+        if (!invalidated) {
+          window.location.reload()
+          return
+        }
         setEditModalOpen(false)
         resetEditShop()
         fetchShop()
@@ -369,8 +385,8 @@ export default function ShopDetailPage() {
         body: JSON.stringify({ deleteNote }),
       })
       const json = await res.json()
-      if (json.success) {
-        router.push('/admin/shops')
+      if (res.ok && json.success) {
+        await navigateAfterMutation(router, '/admin/shops', { kind: 'admin.shopDeleted', shopId: id })
       } else {
         setDeleteError(json.error ?? "O'chirishda xatolik")
       }
@@ -398,7 +414,12 @@ export default function ShopDetailPage() {
         }),
       })
       const json = await res.json()
-      if (json.success) {
+      if (res.ok && json.success) {
+        const invalidated = await commitNavigationMutation({ kind: 'admin.shopAdminsUpdated', shopId: id })
+        if (!invalidated) {
+          window.location.reload()
+          return
+        }
         setAddAdminModalOpen(false)
         resetAdmin()
         fetchShop()
@@ -429,7 +450,12 @@ export default function ShopDetailPage() {
         body: JSON.stringify({ adminId: deleteAdminTarget.id, note: deleteAdminNote.trim() }),
       })
       const json = await res.json()
-      if (json.success) {
+      if (res.ok && json.success) {
+        const invalidated = await commitNavigationMutation({ kind: 'admin.shopAdminsUpdated', shopId: id })
+        if (!invalidated) {
+          window.location.reload()
+          return
+        }
         setDeleteAdminTarget(null)
         setDeleteAdminNote('')
         fetchShop()
@@ -466,7 +492,12 @@ export default function ShopDetailPage() {
         }),
       })
       const json = await res.json()
-      if (json.success) {
+      if (res.ok && json.success) {
+        const invalidated = await commitNavigationMutation({ kind: 'admin.shopAdminsUpdated', shopId: id })
+        if (!invalidated) {
+          window.location.reload()
+          return
+        }
         setResetPasswordModalOpen(false)
         resetPasswordForm()
         fetchShop()

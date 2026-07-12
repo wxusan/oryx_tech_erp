@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { signOut } from 'next-auth/react'
 import { LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { clearNavigationClientState } from '@/lib/client-events'
 
 const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000
 const LOGOUT_EVENT_KEY = 'oryx:last-logout'
@@ -32,6 +33,10 @@ export function SessionControls({
           // localStorage can be unavailable in private/restricted browsers.
         }
       }
+
+      // The callback is a full document navigation, which clears Next's
+      // in-memory Router Cache. Remove our cross-tab marker before leaving too.
+      clearNavigationClientState()
 
       void signOut({ callbackUrl })
     },

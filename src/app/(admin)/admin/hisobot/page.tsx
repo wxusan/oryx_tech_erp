@@ -22,6 +22,7 @@ import {
 } from '@/components/ui/table'
 import type { ApiResponse } from '@/types'
 import { uzLongDate } from '@/lib/dates'
+import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 
 interface AdminStats {
   thisMonthRevenue: number
@@ -186,9 +187,9 @@ export default function AdminReportsPage() {
                   return (
                     <TableRow key={shop.id}>
                       <TableCell className="pl-5 font-medium text-zinc-900">
-                        <Link href={`/admin/shops/${shop.id}`} prefetch={false} className="hover:underline">
+                        <IntentPrefetchLink href={`/admin/shops/${shop.id}`} className="hover:underline">
                           {shop.name} <span className="text-xs text-zinc-400">#{shop.shopNumber}</span>
-                        </Link>
+                        </IntentPrefetchLink>
                       </TableCell>
                       <TableCell className="text-zinc-600">{shop.ownerName}</TableCell>
                       <TableCell className="text-zinc-600">{shop._count.devices}</TableCell>

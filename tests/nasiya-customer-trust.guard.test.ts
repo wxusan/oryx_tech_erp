@@ -105,7 +105,7 @@ describe('nasiya creation form: existing-customer trust preview', () => {
 })
 
 describe('mijozlar list: badge column + admin override in the edit dialog', () => {
-  const source = read('src/app/(shop)/shop/mijozlar/page.tsx')
+  const source = read('src/app/(shop)/shop/mijozlar/customers-client.tsx')
 
   it('renders a trust badge column in the table', () => {
     expect(source).toContain('<td className="px-4 py-3">{customer.trust && <TrustBadge trust={customer.trust} />}</td>')

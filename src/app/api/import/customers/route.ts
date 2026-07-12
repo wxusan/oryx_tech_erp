@@ -9,6 +9,7 @@ import { phoneSchema } from '@/lib/validations'
 import { logger } from '@/lib/logger'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
+import { invalidateShopCustomerMutation } from '@/lib/server/cache-tags'
 
 const customerImportSchema = z.object({
   shopId: z.string().optional(),
@@ -93,6 +94,7 @@ export async function POST(req: NextRequest) {
       return { created, updated, total: parsed.data.customers.length }
     })
 
+    invalidateShopCustomerMutation(resolved.shopId)
     return ok(result, 'Mijozlar import qilindi')
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {

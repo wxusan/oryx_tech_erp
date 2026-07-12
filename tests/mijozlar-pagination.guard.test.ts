@@ -30,16 +30,16 @@ describe('GET /api/customers: real pagination envelope', () => {
 })
 
 describe('mijozlar page: page state, total, and a submit-triggered search that resets to page 1', () => {
-  const page = read('src/app/(shop)/shop/mijozlar/page.tsx')
+  const page = read('src/app/(shop)/shop/mijozlar/customers-client.tsx')
 
   it('has page/total state and re-fetches when page changes', () => {
-    expect(page).toContain('const [page, setPage] = useState(1)')
+    expect(page).toContain('const [page, setPage] = useState(initialPage)')
     expect(page).toContain('const [total, setTotal] = useState(0)')
-    expect(page).toContain('}, [page])')
+    expect(page).toContain('requestCustomers(initialSearch, initialPage)')
   })
 
   it('a new search always resets to page 1', () => {
-    expect(page).toContain('function submitSearch() {\n    setPage(1)')
+    expect(page).toContain('function submitSearch() {\n    setPage(1)\n    loadCustomers(search, 1)')
   })
 
   it('reads items/total from the new response envelope, not a raw array', () => {
@@ -54,7 +54,7 @@ describe('mijozlar page: page state, total, and a submit-triggered search that r
 })
 
 describe('mijozlar page: mobile card view alongside the desktop table (item 1)', () => {
-  const page = read('src/app/(shop)/shop/mijozlar/page.tsx')
+  const page = read('src/app/(shop)/shop/mijozlar/customers-client.tsx')
 
   it('desktop table is hidden below sm:, shown from sm: up', () => {
     expect(page).toContain('hidden sm:block border border-zinc-200 rounded overflow-x-auto')

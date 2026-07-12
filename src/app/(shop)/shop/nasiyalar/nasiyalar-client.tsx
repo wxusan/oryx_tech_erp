@@ -3,13 +3,15 @@
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { uzDate } from '@/lib/dates'
 import { formatUzPhoneDisplay } from '@/lib/phone'
 import type { CurrencyContext } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
+import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
+import { replaceListUrlState } from '@/lib/list-url-state'
 import type { PaymentScoreColor, PaymentScoreLabel } from '@/lib/nasiya-payment-score'
 
 type NasiyaStatus = 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
@@ -137,22 +139,26 @@ export default function NasiyalarClient({
   initialNasiyalar,
   initialTotal,
   initialFilter = 'Barchasi',
+  initialSearch = '',
+  initialPage = 1,
   currency,
 }: {
   initialNasiyalar: Nasiya[]
   initialTotal: number
   initialFilter?: NasiyaStatus | 'Barchasi'
+  initialSearch?: string
+  initialPage?: number
   currency: CurrencyContext
 }) {
   const router = useRouter()
   const [nasiyalar, setNasiyalar] = useState<Nasiya[]>(initialNasiyalar)
   const [total, setTotal] = useState(initialTotal)
-  const [page, setPage] = useState(1)
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [page, setPage] = useState(initialPage)
+  const [search, setSearch] = useState(initialSearch)
+  const [debouncedSearch, setDebouncedSearch] = useState(initialSearch)
   const [activeFilter, setActiveFilter] = useState<NasiyaStatus | 'Barchasi'>(initialFilter)
   const [error, setError] = useState('')
-  const [loadedKey, setLoadedKey] = useState(() => buildRequestKey('', initialFilter, 1))
+  const [loadedKey, setLoadedKey] = useState(() => buildRequestKey(initialSearch, initialFilter, initialPage))
   const [payFor, setPayFor] = useState<Nasiya | null>(null)
 
   // Debounce the free-text search so typing doesn't fire a request per keystroke.
@@ -165,6 +171,10 @@ export default function NasiyalarClient({
     () => buildRequestKey(debouncedSearch, activeFilter, page),
     [debouncedSearch, activeFilter, page],
   )
+
+  useEffect(() => {
+    replaceListUrlState({ q: debouncedSearch, status: activeFilter, page })
+  }, [activeFilter, debouncedSearch, page])
 
   function loadNasiyalar(key: string) {
     const controller = new AbortController()
@@ -235,12 +245,12 @@ export default function NasiyalarClient({
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 border-b border-zinc-200">
+      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200">
         {filterTabs.map((tab) => (
           <button
             key={tab.value}
             onClick={() => { setActiveFilter(tab.value); setPage(1) }}
-            className={`px-3 py-2 text-sm transition-colors border-b-2 -mb-px ${
+            className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors ${
               activeFilter === tab.value
                 ? 'border-zinc-900 text-zinc-900 font-medium'
                 : 'border-transparent text-zinc-500 hover:text-zinc-700'
@@ -290,7 +300,7 @@ export default function NasiyalarClient({
                   }`}
                 >
                   <div className="flex items-start justify-between gap-4">
-                    <Link href={`/shop/nasiyalar/${n.id}`} prefetch={false} className="flex-1 min-w-0 block">
+                    <IntentPrefetchLink href={`/shop/nasiyalar/${n.id}`} className="flex-1 min-w-0 block">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-medium text-sm text-zinc-900">{n.customer.name}</span>
@@ -331,7 +341,7 @@ export default function NasiyalarClient({
                           )}
                         </div>
                       </div>
-                    </Link>
+                    </IntentPrefetchLink>
 
                     <div className="text-right flex-shrink-0 space-y-2">
                       <div>
@@ -394,11 +404,12 @@ export default function NasiyalarClient({
                     <span className="font-bold text-sm text-zinc-900">{dfmt(n.contractRemainingAmount)} qolgan</span>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Link href={`/shop/nasiyalar/${n.id}`} prefetch={false} className="flex-1">
-                      <Button variant="outline" className="h-8 w-full rounded border-zinc-200 text-xs">
-                        Ko&apos;rish
-                      </Button>
-                    </Link>
+                    <IntentPrefetchLink
+                      href={`/shop/nasiyalar/${n.id}`}
+                      className={buttonVariants({ variant: 'outline', className: 'h-8 flex-1 rounded border-zinc-200 text-xs' })}
+                    >
+                      Ko&apos;rish
+                    </IntentPrefetchLink>
                     {canPay && (
                       <button
                         type="button"
@@ -420,7 +431,7 @@ export default function NasiyalarClient({
       )}
 
       {total > 0 && (
-        <div className="flex items-center justify-between text-sm text-zinc-500">
+        <div className="flex flex-col gap-2 text-sm text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
           <span>
             {total} ta nasiyadan {Math.min((page - 1) * PER_PAGE + 1, total)}-{Math.min(page * PER_PAGE, total)} ko&apos;rsatilmoqda
           </span>

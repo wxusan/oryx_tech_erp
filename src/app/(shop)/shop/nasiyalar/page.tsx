@@ -3,9 +3,10 @@ import { requireApiSession } from '@/lib/api-auth'
 import { getShopNasiyalarList } from '@/lib/server/shop-lists'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import NasiyalarClient from './nasiyalar-client'
+import { positivePage, scalarParam } from '@/lib/list-url-state'
 
 interface NasiyalarPageProps {
-  searchParams?: Promise<{ status?: string | string[] }>
+  searchParams?: Promise<{ status?: string | string[]; q?: string | string[]; page?: string | string[] }>
 }
 
 // Matches PER_PAGE in nasiyalar-client.tsx (first page is server-rendered
@@ -19,6 +20,8 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
 
   const params = await searchParams
   const status = Array.isArray(params?.status) ? params?.status[0] : params?.status
+  const initialSearch = scalarParam(params?.q).slice(0, 100)
+  const initialPage = positivePage(params?.page)
   const validStatuses = ['ACTIVE', 'OVERDUE', 'COMPLETED', 'CANCELLED'] as const
   const initialFilter = validStatuses.includes(status as (typeof validStatuses)[number])
     ? (status as (typeof validStatuses)[number])
@@ -26,7 +29,8 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
   const [{ items: nasiyalar, total }, currency] = await Promise.all([
     getShopNasiyalarList(guarded.shopId, {
       status: initialFilter === 'Barchasi' ? undefined : initialFilter,
-      skip: 0,
+      search: initialSearch || undefined,
+      skip: (initialPage - 1) * PER_PAGE,
       take: PER_PAGE,
     }),
     getShopCurrencyContext(guarded.shopId),
@@ -37,6 +41,8 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
       initialNasiyalar={nasiyalar}
       initialTotal={total}
       initialFilter={initialFilter}
+      initialSearch={initialSearch}
+      initialPage={initialPage}
       currency={currency}
     />
   )

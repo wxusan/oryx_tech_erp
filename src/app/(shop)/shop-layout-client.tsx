@@ -6,27 +6,29 @@ import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, Scroll
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
 import { DueOverdueBanner } from '@/components/shop/due-overdue-banner'
+import { NavigationCacheCoordinator } from '@/components/navigation-cache-coordinator'
 
 const navLinks = [
-  { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard },
-  { href: '/shop/qurilmalar', label: 'Qurilmalar', icon: Smartphone },
-  { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users },
-  { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard },
-  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus },
-  { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3 },
-  { href: '/shop/logs', label: 'Loglar', icon: ScrollText },
-  { href: '/shop/settings', label: 'Sozlamalar', icon: Settings },
+  { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard, prefetch: true },
+  { href: '/shop/qurilmalar', label: 'Qurilmalar', icon: Smartphone, prefetch: true },
+  { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users, prefetch: false },
+  { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard, prefetch: true },
+  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus, prefetch: false },
+  { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3, prefetch: false },
+  { href: '/shop/logs', label: 'Loglar', icon: ScrollText, prefetch: false },
+  { href: '/shop/settings', label: 'Sozlamalar', icon: Settings, prefetch: false },
 ]
 
 function initials(name: string) {
   return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'DA'
 }
 
-export function ShopLayoutClient({ children, shopName, adminName }: { children: React.ReactNode; shopName: string; adminName: string }) {
+export function ShopLayoutClient({ children, shopName, adminName, navigationScope }: { children: React.ReactNode; shopName: string; adminName: string; navigationScope: string }) {
   const pathname = usePathname()
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 md:h-screen md:flex-row md:overflow-hidden">
+      <NavigationCacheCoordinator scopeKey={navigationScope} />
       <aside className="flex w-full flex-shrink-0 flex-col border-b border-zinc-200 bg-white/95 md:w-64 md:border-b-0 md:border-r">
         <div className="px-4 py-5 border-b border-zinc-200">
           <div className="flex items-center justify-between gap-2">
@@ -39,12 +41,13 @@ export function ShopLayoutClient({ children, shopName, adminName }: { children: 
         </div>
 
         <nav className="flex gap-1 overflow-x-auto px-2 py-3 md:block md:flex-1 md:space-y-0.5">
-          {navLinks.map(({ href, label, icon: Icon }) => {
+          {navLinks.map(({ href, label, icon: Icon, prefetch }) => {
             const isActive = pathname === href || pathname.startsWith(href + '/')
             return (
               <Link
                 key={href}
                 href={href}
+                prefetch={prefetch}
                 className={`flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm transition-colors ${
                   isActive
                     ? 'bg-zinc-900 font-medium text-white shadow-sm'

@@ -12,6 +12,7 @@ import { Textarea } from '@/components/ui/textarea'
 import { currencyLabel } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, ImagePlus, Loader2, X } from 'lucide-react'
+import { navigateAfterMutation } from '@/lib/client-events'
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -134,8 +135,11 @@ export default function NewDevicePage() {
         }),
       })
       const json = await res.json()
-      if (json.success) {
-        router.push('/shop/qurilmalar')
+      if (res.ok && json.success) {
+        await navigateAfterMutation(router, '/shop/qurilmalar', {
+          kind: 'device.created',
+          deviceId: json.data?.id,
+        })
       } else {
         setError(json.error || 'Saqlashda xatolik yuz berdi')
       }

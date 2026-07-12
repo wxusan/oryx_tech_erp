@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { navigateAfterMutation } from '@/lib/client-events'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { Textarea } from '@/components/ui/textarea'
@@ -127,8 +128,11 @@ export default function NewShopPage() {
       })
       const json = await res.json()
 
-      if (json.success) {
-        router.push('/admin/shops')
+      if (res.ok && json.success) {
+        await navigateAfterMutation(router, '/admin/shops', {
+          kind: 'admin.shopCreated',
+          shopId: json.data?.id,
+        })
       } else {
         setFormError(json.error ?? "Do'kon yaratishda xatolik")
       }

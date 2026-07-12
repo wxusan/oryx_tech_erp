@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
+import { navigateAfterMutation } from '@/lib/client-events'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
@@ -196,7 +197,10 @@ export default function NewOlibSotdimPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Saqlashda xatolik')
-      router.push('/shop/olib-sotdim')
+      await navigateAfterMutation(router, '/shop/olib-sotdim', {
+        kind: 'olibSotdim.created',
+        deviceId: json.data?.deviceId,
+      })
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Saqlashda xatolik')
     } finally {

@@ -53,7 +53,7 @@ describe('qurilmalar page/client: page state, total, and pagination controls', (
   })
 
   it('client has page state and resets to page 1 when the search or status filter changes', () => {
-    expect(client).toContain('const [page, setPage] = useState(1)')
+    expect(client).toContain('const [page, setPage] = useState(initialPage)')
     expect(client).toContain("setSearch(e.target.value); setPage(1)")
     expect(client).toContain('setActiveStatus(tab.value); setPage(1)')
   })

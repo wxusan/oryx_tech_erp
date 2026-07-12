@@ -5,15 +5,16 @@ import { usePathname } from 'next/navigation'
 import { Activity, BarChart3, LayoutDashboard, Store, CreditCard, ScrollText, Settings } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
+import { NavigationCacheCoordinator } from '@/components/navigation-cache-coordinator'
 
 const navItems = [
-  { label: 'Boshqaruv', href: '/admin', icon: LayoutDashboard },
-  { label: "Do'konlar", href: '/admin/shops', icon: Store },
-  { label: "To'lovlar", href: '/admin/payments', icon: CreditCard },
-  { label: 'Hisobot', href: '/admin/hisobot', icon: BarChart3 },
-  { label: 'Loglar', href: '/admin/logs', icon: ScrollText },
-  { label: 'Tizim', href: '/admin/ops', icon: Activity },
-  { label: 'Sozlamalar', href: '/admin/settings', icon: Settings },
+  { label: 'Boshqaruv', href: '/admin', icon: LayoutDashboard, prefetch: true },
+  { label: "Do'konlar", href: '/admin/shops', icon: Store, prefetch: true },
+  { label: "To'lovlar", href: '/admin/payments', icon: CreditCard, prefetch: false },
+  { label: 'Hisobot', href: '/admin/hisobot', icon: BarChart3, prefetch: false },
+  { label: 'Loglar', href: '/admin/logs', icon: ScrollText, prefetch: false },
+  { label: 'Tizim', href: '/admin/ops', icon: Activity, prefetch: false },
+  { label: 'Sozlamalar', href: '/admin/settings', icon: Settings, prefetch: false },
 ]
 
 function initials(name: string) {
@@ -25,12 +26,13 @@ function initials(name: string) {
     .join('')
 }
 
-export function AdminLayoutClient({ children, adminName }: { children: React.ReactNode; adminName: string }) {
+export function AdminLayoutClient({ children, adminName, navigationScope }: { children: React.ReactNode; adminName: string; navigationScope: string }) {
   const pathname = usePathname()
   const displayName = adminName.trim() || 'Admin'
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 md:h-screen md:flex-row md:overflow-hidden">
+      <NavigationCacheCoordinator scopeKey={navigationScope} />
       <aside className="flex w-full shrink-0 flex-col border-b border-zinc-200 bg-white/95 md:w-64 md:border-b-0 md:border-r">
         <div className="border-b border-zinc-200 px-5 py-5">
           <div className="flex items-center justify-between gap-2">
@@ -50,6 +52,7 @@ export function AdminLayoutClient({ children, adminName }: { children: React.Rea
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={item.prefetch}
                 className={[
                   'flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm transition-colors',
                   isActive

@@ -3,9 +3,10 @@ import { requireApiSession } from '@/lib/api-auth'
 import { getShopDevicesList } from '@/lib/server/shop-lists'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import QurilmalarClient from './qurilmalar-client'
+import { positivePage, scalarParam } from '@/lib/list-url-state'
 
 interface QurilmalarPageProps {
-  searchParams?: Promise<{ status?: string | string[] }>
+  searchParams?: Promise<{ status?: string | string[]; q?: string | string[]; page?: string | string[] }>
 }
 
 // Matches PER_PAGE in qurilmalar-client.tsx (first page is server-rendered
@@ -19,6 +20,8 @@ export default async function QurilmalarPage({ searchParams }: QurilmalarPagePro
 
   const params = await searchParams
   const status = Array.isArray(params?.status) ? params?.status[0] : params?.status
+  const initialSearch = scalarParam(params?.q).slice(0, 100)
+  const initialPage = positivePage(params?.page)
   const validStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED'] as const
   const initialStatus = validStatuses.includes(status as (typeof validStatuses)[number])
     ? (status as (typeof validStatuses)[number])
@@ -27,7 +30,8 @@ export default async function QurilmalarPage({ searchParams }: QurilmalarPagePro
   const [{ items: devices, total }, currency] = await Promise.all([
     getShopDevicesList(guarded.shopId, {
       status: initialStatus === 'Barchasi' ? undefined : initialStatus,
-      skip: 0,
+      search: initialSearch || undefined,
+      skip: (initialPage - 1) * PER_PAGE,
       take: PER_PAGE,
     }),
     getShopCurrencyContext(guarded.shopId),
@@ -39,6 +43,8 @@ export default async function QurilmalarPage({ searchParams }: QurilmalarPagePro
       initialTotal={total}
       currency={currency}
       initialStatus={initialStatus}
+      initialSearch={initialSearch}
+      initialPage={initialPage}
     />
   )
 }

@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest'
-import { paymentAmountDisplay, type NasiyaPayment } from '@/app/(shop)/shop/nasiyalar/[id]/page'
+import {
+  paymentAmountDisplay,
+  type NasiyaPaymentDisplayRecord as NasiyaPayment,
+} from '@/lib/payment-history-display'
 import { nasiyaPaymentMessage, salePaymentMessage } from '@/lib/telegram-templates'
 
 function payment(overrides: Partial<NasiyaPayment> = {}): NasiyaPayment {
