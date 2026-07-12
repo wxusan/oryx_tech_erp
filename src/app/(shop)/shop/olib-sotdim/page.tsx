@@ -46,6 +46,7 @@ const statusStyles: Record<PayableStatus, string> = {
 interface OlibSotdimRow {
   id: string
   amount: number
+  contractCurrency: 'UZS' | 'USD'
   status: PayableStatus
   dueDate: string
   paidAt: string | null
@@ -53,8 +54,8 @@ interface OlibSotdimRow {
   supplierPhone: string
   supplierLocation: string | null
   createdAt: string
-  device: { id: string; model: string; imei: string; color: string | null; storage: string | null; purchasePrice: number }
-  sale: { id: string; salePrice: number; customer: { name: string; phone: string } }
+  device: { id: string; model: string; imei: string; color: string | null; storage: string | null; purchasePrice: number; purchaseCurrency: 'UZS' | 'USD' }
+  sale: { id: string; salePrice: number; contractCurrency: 'UZS' | 'USD'; customer: { name: string; phone: string } }
   profit: number
 }
 
@@ -62,6 +63,8 @@ export default function OlibSotdimPage() {
   const { currency } = useShopCurrency()
   const [rows, setRows] = useState<OlibSotdimRow[]>([])
   const [search, setSearch] = useState('')
+  const [page, setPage] = useState(0)
+  const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [payFor, setPayFor] = useState<OlibSotdimRow | null>(null)
@@ -71,16 +74,24 @@ export default function OlibSotdimPage() {
   const [payError, setPayError] = useState('')
   const [paySubmitting, setPaySubmitting] = useState(false)
 
-  function fmt(n: number) {
-    return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
+  function fmt(n: number, valueCurrency: 'UZS' | 'USD' = currency.currency) {
+    return formatMoneyByCurrency(n, valueCurrency, currency.usdUzsRate)
   }
 
-  function load(query = search) {
+  const pageSize = 25
+
+  function load(query = search, nextPage = page) {
     setLoading(true)
-    fetch(`/api/olib-sotdim?search=${encodeURIComponent(query)}`)
+    setError('')
+    const params = new URLSearchParams({ search: query, skip: String(nextPage * pageSize), take: String(pageSize) })
+    fetch(`/api/olib-sotdim?${params.toString()}`)
       .then((res) => res.json())
       .then((json) => {
-        if (json.success) setRows(json.data)
+        if (json.success) {
+          setRows(json.data.items)
+          setTotal(json.data.total)
+          setPage(nextPage)
+        }
         else setError(json.error || "Ro'yxat yuklanmadi")
       })
       .catch(() => setError("Ro'yxat yuklanmadi"))
@@ -93,7 +104,10 @@ export default function OlibSotdimPage() {
       .then((res) => res.json())
       .then((json) => {
         if (ignore) return
-        if (json.success) setRows(json.data)
+        if (json.success) {
+          setRows(json.data.items)
+          setTotal(json.data.total)
+        }
         else setError(json.error || "Ro'yxat yuklanmadi")
       })
       .catch(() => {
@@ -161,14 +175,60 @@ export default function OlibSotdimPage() {
           placeholder="Yetkazib beruvchi, mijoz, model yoki IMEI bo'yicha qidirish..."
           className="h-9 text-sm border-zinc-200 rounded"
         />
-        <Button onClick={() => load()} className="h-9 rounded bg-zinc-900 px-4 text-sm text-white">
+        <Button onClick={() => load(search, 0)} className="h-9 rounded bg-zinc-900 px-4 text-sm text-white">
           Qidirish
         </Button>
       </div>
 
+      <div className="flex items-center justify-between text-xs text-zinc-500">
+        <span>{total} ta operatsiya</span>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="sm" disabled={loading || page === 0} onClick={() => load(search, page - 1)}>
+            Oldingi
+          </Button>
+          <span>{page + 1} / {Math.max(1, Math.ceil(total / pageSize))}</span>
+          <Button variant="outline" size="sm" disabled={loading || (page + 1) * pageSize >= total} onClick={() => load(search, page + 1)}>
+            Keyingi
+          </Button>
+        </div>
+      </div>
+
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">{error}</div>}
 
-      <div className="border border-zinc-200 rounded overflow-x-auto">
+      <div className="space-y-3 md:hidden">
+        {loading ? (
+          <div className="rounded border border-zinc-200 bg-white px-4 py-8 text-center text-sm text-zinc-400">Yuklanmoqda...</div>
+        ) : rows.length === 0 ? (
+          <div className="rounded border border-zinc-200 bg-white px-4 py-8 text-center text-sm text-zinc-400">Operatsiya topilmadi</div>
+        ) : rows.map((row) => (
+          <article key={row.id} className="space-y-3 rounded-lg border border-zinc-200 bg-white p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="font-medium text-zinc-900">{row.device.model}</div>
+                <div className="font-mono text-xs text-zinc-400">{displayImei(row.device.imei)}</div>
+              </div>
+              <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${statusStyles[row.status]}`}>
+                {statusLabels[row.status]}
+              </span>
+            </div>
+            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+              <div><dt className="text-zinc-400">Yetkazib beruvchi</dt><dd className="mt-0.5 text-zinc-800">{row.supplierName}</dd></div>
+              <div><dt className="text-zinc-400">Mijoz</dt><dd className="mt-0.5 text-zinc-800">{row.sale.customer.name}</dd></div>
+              <div><dt className="text-zinc-400">Olingan</dt><dd className="mt-0.5 font-medium text-zinc-900">{fmt(row.device.purchasePrice, row.device.purchaseCurrency)}</dd></div>
+              <div><dt className="text-zinc-400">Sotilgan</dt><dd className="mt-0.5 font-medium text-zinc-900">{fmt(row.sale.salePrice, row.sale.contractCurrency)}</dd></div>
+              <div><dt className="text-zinc-400">Farq</dt><dd className={`mt-0.5 font-medium ${row.profit < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{fmt(row.profit, row.contractCurrency)}</dd></div>
+              <div><dt className="text-zinc-400">Sana</dt><dd className="mt-0.5 text-zinc-700">{uzDate(row.createdAt)}</dd></div>
+            </dl>
+            {(row.status === 'PENDING' || row.status === 'OVERDUE') && (
+              <Button variant="outline" className="h-10 w-full" onClick={() => openPay(row)}>
+                To&apos;landi deb belgilash
+              </Button>
+            )}
+          </article>
+        ))}
+      </div>
+
+      <div className="hidden border border-zinc-200 rounded overflow-x-auto md:block">
         <table className="min-w-[1100px] w-full text-sm">
           <thead className="bg-zinc-50 border-b border-zinc-200">
             <tr>
@@ -200,10 +260,10 @@ export default function OlibSotdimPage() {
                     <div className="text-zinc-900">{row.sale.customer.name}</div>
                     <div className="text-xs text-zinc-500">{formatUzPhoneDisplay(row.sale.customer.phone)}</div>
                   </td>
-                  <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.device.purchasePrice)}</td>
-                  <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.sale.salePrice)}</td>
+                  <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.device.purchasePrice, row.device.purchaseCurrency)}</td>
+                  <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.sale.salePrice, row.sale.contractCurrency)}</td>
                   <td className="px-4 py-3">
-                    <span className={row.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>{fmt(row.profit)}</span>
+                    <span className={row.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>{fmt(row.profit, row.contractCurrency)}</span>
                     {row.status !== 'PAID' && <div className="text-[10px] text-amber-600 mt-0.5">Kutilayotgan</div>}
                   </td>
                   <td className="px-4 py-3">
@@ -237,13 +297,13 @@ export default function OlibSotdimPage() {
           {payFor && (
             <div className="space-y-3">
               <div className="text-sm text-zinc-600">
-                {payFor.supplierName} · {fmt(payFor.amount)}
+                {payFor.supplierName} · {fmt(payFor.amount, payFor.contractCurrency)}
               </div>
               {payError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{payError}</div>}
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">To&apos;lov usuli</label>
+                <label htmlFor="supplier-payment-method" className="block text-xs font-medium text-zinc-700 mb-1.5">To&apos;lov usuli</label>
                 <Select value={payMethod} onValueChange={(v) => v && setPayMethod(v as PaymentMethod)}>
-                  <SelectTrigger className="h-9 text-sm border-zinc-200 rounded">
+                  <SelectTrigger id="supplier-payment-method" className="h-9 text-sm border-zinc-200 rounded">
                     <SelectValue placeholder="Tanlang" />
                   </SelectTrigger>
                   <SelectContent>
@@ -255,12 +315,12 @@ export default function OlibSotdimPage() {
                 </Select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Sana</label>
-                <Input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
+                <label htmlFor="supplier-payment-date" className="block text-xs font-medium text-zinc-700 mb-1.5">Sana</label>
+                <Input id="supplier-payment-date" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
               </div>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
-                <Textarea value={payNote} onChange={(e) => setPayNote(e.target.value)} className="text-sm border-zinc-200 rounded min-h-[60px]" />
+                <label htmlFor="supplier-payment-note" className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
+                <Textarea id="supplier-payment-note" value={payNote} onChange={(e) => setPayNote(e.target.value)} className="text-sm border-zinc-200 rounded min-h-[60px]" />
               </div>
             </div>
           )}

@@ -24,12 +24,41 @@ Open `http://localhost:3000`.
 ## Verification
 
 ```bash
+npm test
+npm run test:integration # requires an explicitly disposable TEST_DATABASE_URL
 npm run typecheck
 npm run lint
+npm run prisma:validate
 npm run build
+git diff --check
 ```
 
+`npm run test:integration` applies every checked-in migration and runs real
+PostgreSQL tests. For a local disposable database, set `TEST_DATABASE_URL`. To
+reset its `public` schema first, also set:
+
+```bash
+INTEGRATION_DB_RESET=yes \
+TEST_DATABASE_CONFIRM=reset-disposable-integration-database \
+npm run test:integration
+```
+
+Remote test databases are rejected unless `ALLOW_REMOTE_TEST_DATABASE=yes` is
+explicitly set. Never point this command at production.
+
 ## Data Operations
+
+Read-only production/staging diagnostics live in
+`scripts/sql/production-diagnostics.sql`. Run them on a restored staging copy
+first. The SQL opens a repeatable-read, read-only transaction and rolls it back:
+
+```bash
+psql "$DIAGNOSTICS_DATABASE_URL" \
+  --set ON_ERROR_STOP=on \
+  --file scripts/sql/production-diagnostics.sql
+```
+
+Do not paste the expanded database URL into logs or committed scripts.
 
 Shop admins can export CSV data from `/api/export/devices`, `/api/export/customers`, `/api/export/sales`, `/api/export/nasiya`, and `/api/export/logs`.
 
@@ -89,6 +118,10 @@ environment before any destructive Prisma command:
 
 The **build never runs migrations**: `prebuild`/`postinstall` run only
 `prisma generate`; Vercel's `buildCommand` is `npm run build` (= `next build`).
+Production releases use the manually approved artifact-first workflow in
+`.github/workflows/release-production.yml`: build first, apply a rehearsed
+backward-compatible migration, then deploy the exact prebuilt artifact. See
+`docs/operations/recovery-and-release-runbook.md`.
 
 ### Fresh database (recommended)
 

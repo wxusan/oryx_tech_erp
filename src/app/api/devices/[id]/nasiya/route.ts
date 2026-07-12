@@ -239,6 +239,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             paidAt: new Date(),
             note: "Boshlang'ich to'lov",
             createdBy: session.user.id,
+            paymentInputAmount: downPayment,
+            paymentInputCurrency: downPaymentInput.inputCurrency,
+            paymentExchangeRate: downPaymentInput.exchangeRateUsed,
             appliedAmountInContractCurrency: contractAmounts.downPayment,
           },
         })

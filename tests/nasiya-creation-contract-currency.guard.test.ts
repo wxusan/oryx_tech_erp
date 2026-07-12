@@ -48,7 +48,8 @@ describe('nasiya creation stores the native contract-currency ledger', () => {
   })
 
   it('stores appliedAmountInContractCurrency on the initial down-payment NasiyaPayment', () => {
-    const block = route.slice(route.indexOf('"Boshlang\'ich to\'lov"') - 400, route.indexOf('"Boshlang\'ich to\'lov"') + 200)
+    const paymentStart = route.lastIndexOf('tx.nasiyaPayment.create', route.indexOf('"Boshlang\'ich to\'lov"'))
+    const block = route.slice(paymentStart, route.indexOf('const shopAdmins', paymentStart))
     expect(block).toContain('appliedAmountInContractCurrency: contractAmounts.downPayment')
   })
 })

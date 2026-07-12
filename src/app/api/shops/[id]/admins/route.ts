@@ -38,7 +38,7 @@ const addAdminSchema = z.object({
     .min(3, "Login kamida 3 ta belgidan iborat bo'lishi kerak"),
   password: z
     .string({ error: "Parol kiritilishi shart" })
-    .min(6, "Parol kamida 6 ta belgidan iborat bo'lishi kerak"),
+    .min(10, "Parol kamida 10 ta belgidan iborat bo'lishi kerak"),
 })
 
 const deleteAdminSchema = z.object({
@@ -52,7 +52,7 @@ const resetPasswordSchema = z.object({
   adminId: z.string({ error: "Admin ID kiritilishi shart" }).min(1),
   password: z
     .string({ error: "Yangi parol kiritilishi shart" })
-    .min(6, "Parol kamida 6 ta belgidan iborat bo'lishi kerak"),
+    .min(10, "Parol kamida 10 ta belgidan iborat bo'lishi kerak"),
   note: z
     .string({ error: "Sabab kiritilishi shart" })
     .min(5, "Sabab kamida 5 ta belgidan iborat bo'lishi kerak"),

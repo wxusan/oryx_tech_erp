@@ -49,13 +49,18 @@ export async function GET(req: NextRequest) {
 
     const search = searchParams.get('search')?.trim()
     const searchDigits = search ? normalizePhone(search) : null
-    const requestedTake = Number(searchParams.get('take') ?? 100)
-    const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 200)) : 100
+    const status = searchParams.get('status')
+    const payableStatuses = ['PENDING', 'PAID', 'CANCELLED', 'OVERDUE'] as const
+    const statusFilter = payableStatuses.find((candidate) => candidate === status)
+    const requestedTake = Number(searchParams.get('take') ?? 25)
+    const requestedSkip = Number(searchParams.get('skip') ?? 0)
+    const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 100)) : 25
+    const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
 
-    const payables = await prisma.supplierPayable.findMany({
-      where: {
+    const where: Prisma.SupplierPayableWhereInput = {
         shopId,
         deletedAt: null,
+        ...(statusFilter ? { status: statusFilter } : {}),
         ...(search
           ? {
               OR: [
@@ -70,12 +75,19 @@ export async function GET(req: NextRequest) {
               ],
             }
           : {}),
-      },
+      }
+
+    const [payables, total] = await Promise.all([
+      prisma.supplierPayable.findMany({
+      where,
       orderBy: { createdAt: 'desc' },
       take,
+      skip,
       select: {
         id: true,
         amount: true,
+        contractAmount: true,
+        contractCurrency: true,
         status: true,
         dueDate: true,
         paidAt: true,
@@ -84,15 +96,18 @@ export async function GET(req: NextRequest) {
         supplierPhone: true,
         supplierLocation: true,
         createdAt: true,
-        device: { select: { id: true, model: true, imei: true, color: true, storage: true, purchasePrice: true } },
-        sale: { select: { id: true, salePrice: true, customer: { select: { name: true, phone: true } } } },
+        device: { select: { id: true, model: true, imei: true, color: true, storage: true, purchasePrice: true, purchaseInputAmount: true, purchaseCurrency: true } },
+        sale: { select: { id: true, salePrice: true, contractSalePrice: true, contractCurrency: true, customer: { select: { name: true, phone: true } } } },
       },
-    })
+      }),
+      prisma.supplierPayable.count({ where }),
+    ])
 
     return ok(
-      payables.map((p) => ({
+      { items: payables.map((p) => ({
         id: p.id,
-        amount: Number(p.amount),
+        amount: Number(p.contractAmount),
+        contractCurrency: p.contractCurrency,
         status: p.status,
         dueDate: p.dueDate.toISOString(),
         paidAt: p.paidAt?.toISOString() ?? null,
@@ -101,10 +116,10 @@ export async function GET(req: NextRequest) {
         supplierPhone: p.supplierPhone,
         supplierLocation: p.supplierLocation,
         createdAt: p.createdAt.toISOString(),
-        device: { ...p.device, purchasePrice: Number(p.device.purchasePrice) },
-        sale: { ...p.sale, salePrice: Number(p.sale.salePrice) },
-        profit: Number(p.sale.salePrice) - Number(p.device.purchasePrice),
-      })),
+        device: { ...p.device, purchasePrice: Number(p.device.purchaseInputAmount), purchaseCurrency: p.device.purchaseCurrency },
+        sale: { ...p.sale, salePrice: Number(p.sale.contractSalePrice), contractCurrency: p.sale.contractCurrency },
+        profit: Number(p.sale.contractSalePrice) - Number(p.contractAmount),
+      })), total, skip, take },
       "Olib-sotdim ro'yxati",
     )
   } catch (err) {
@@ -269,6 +284,9 @@ export async function POST(req: NextRequest) {
             note: remaining > 0 ? "Boshlang'ich to'lov" : "To'liq to'lov",
             idempotencyKey: `olib-sotdim-initial:${sale.id}`,
             createdBy: session.user.id,
+            paymentInputAmount: d.paidFully ? d.salePrice : d.amountPaid,
+            paymentInputCurrency: saleInput.inputCurrency,
+            paymentExchangeRate: saleInput.exchangeRateUsed,
             appliedAmountInContractCurrency: contractPaid,
           },
         })

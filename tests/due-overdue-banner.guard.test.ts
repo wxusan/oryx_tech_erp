@@ -61,9 +61,18 @@ describe('DueOverdueBanner: persistent, non-spammy, links to the right place', (
     expect(component).toContain("'/shop/nasiyalar?status=OVERDUE'")
   })
 
-  it('refreshes periodically rather than only once per full page load (layout persists across client navigation)', () => {
-    expect(component).toContain('setInterval(load, 60_000)')
-    expect(component).toContain('clearInterval(interval)')
+  it('refreshes on money mutations/focus and uses a five-minute fallback instead of 60-second polling', () => {
+    expect(component).toContain('const FALLBACK_REFRESH_MS = 5 * 60_000')
+    expect(component).toContain("window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, load)")
+    expect(component).toContain("window.addEventListener('focus', refreshWhenVisible)")
+    expect(component).toContain('window.setInterval(refreshWhenVisible, FALLBACK_REFRESH_MS)')
+    expect(component).not.toContain('setInterval(load, 60_000)')
+  })
+
+  it('aborts stale requests and cleans up every persistent listener', () => {
+    expect(component).toContain('activeController?.abort()')
+    expect(component).toContain("window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, load)")
+    expect(component).toContain("document.removeEventListener('visibilitychange', refreshWhenVisible)")
   })
 })
 
@@ -72,7 +81,8 @@ describe('shop layout: banner shown on every shop page, not just the dashboard',
   const shell = read('src/app/(shop)/shop-layout-client.tsx')
 
   it('renders DueOverdueBanner once, outside the page-specific <main> content', () => {
-    expect(layout).toContain('<ShopLayoutClient>{children}</ShopLayoutClient>')
+    expect(layout).toContain('<ShopLayoutClient')
+    expect(layout).toContain('{children}')
     expect(shell).toContain('<DueOverdueBanner />')
     const bannerIndex = shell.indexOf('<DueOverdueBanner />')
     const mainIndex = shell.indexOf('<main')

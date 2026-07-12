@@ -155,8 +155,8 @@ export default function ShopSettingsPage() {
 
   const canSubmitPassword =
     passwordForm.currentPassword.length > 0 &&
-    passwordForm.newPassword.length >= 8 &&
-    passwordForm.confirmPassword.length >= 8 &&
+    passwordForm.newPassword.length >= 10 &&
+    passwordForm.confirmPassword.length >= 10 &&
     !passwordLoading
 
   async function handleAccountSubmit(event: FormEvent<HTMLFormElement>) {
@@ -673,7 +673,7 @@ function PasswordField({
         type="password"
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        minLength={8}
+        minLength={10}
         required
         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
       />

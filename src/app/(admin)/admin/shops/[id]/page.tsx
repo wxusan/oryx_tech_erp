@@ -175,7 +175,7 @@ export default function ShopDetailPage() {
     adminPassword.trim() !== ''
   const passwordResetValid =
     !!passwordAdmin &&
-    newAdminPassword.trim().length >= 6 &&
+    newAdminPassword.trim().length >= 10 &&
     passwordResetNote.trim().length >= 5
   const editValid =
     editName.trim().length >= 2 &&

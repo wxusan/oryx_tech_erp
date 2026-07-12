@@ -4,6 +4,9 @@ import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AlertTriangle } from 'lucide-react'
 import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
+import { FINANCIAL_DATA_CHANGED_EVENT } from '@/lib/client-events'
+
+const FALLBACK_REFRESH_MS = 5 * 60_000
 
 interface DueOverdueSummary {
   overdueDealCount: number
@@ -26,8 +29,11 @@ export function DueOverdueBanner() {
 
   useEffect(() => {
     let ignore = false
+    let activeController: AbortController | null = null
     function load() {
-      fetch('/api/stats/due-overdue')
+      activeController?.abort()
+      activeController = new AbortController()
+      fetch('/api/stats/due-overdue', { signal: activeController.signal })
         .then((res) => res.json())
         .then((json) => {
           if (!ignore && json.success) setSummary(json.data)
@@ -35,14 +41,25 @@ export function DueOverdueBanner() {
         .catch(() => {})
     }
     load()
-    // The layout persists across client-side navigation in the App Router,
-    // so without a periodic refresh the banner would stay stale (e.g. still
-    // showing after the last overdue payment gets paid) for the rest of the
-    // session. One shared interval, not a per-item poll.
-    const interval = setInterval(load, 60_000)
+    // Refresh immediately after local money mutations and when the user
+    // returns to the app. The five-minute interval is only a safety net for
+    // changes made in another tab/device, replacing the old 60-second poll.
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') load()
+    }
+    const interval = window.setInterval(refreshWhenVisible, FALLBACK_REFRESH_MS)
+    window.addEventListener('focus', refreshWhenVisible)
+    window.addEventListener('online', refreshWhenVisible)
+    window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, load)
+    document.addEventListener('visibilitychange', refreshWhenVisible)
     return () => {
       ignore = true
-      clearInterval(interval)
+      activeController?.abort()
+      window.clearInterval(interval)
+      window.removeEventListener('focus', refreshWhenVisible)
+      window.removeEventListener('online', refreshWhenVisible)
+      window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, load)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
     }
   }, [])
 

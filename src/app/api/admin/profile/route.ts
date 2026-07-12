@@ -12,7 +12,7 @@ const changePasswordSchema = z.object({
   currentPassword: z.string({ error: 'Joriy parol kiritilishi shart' }).min(1, 'Joriy parol kiritilishi shart'),
   newPassword: z
     .string({ error: 'Yangi parol kiritilishi shart' })
-    .min(8, "Yangi parol kamida 8 ta belgidan iborat bo'lishi kerak"),
+    .min(10, "Yangi parol kamida 10 ta belgidan iborat bo'lishi kerak"),
 })
 
 const updateTelegramSchema = z.object({

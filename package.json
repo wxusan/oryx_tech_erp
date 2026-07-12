@@ -12,6 +12,7 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit --pretty false",
     "test": "vitest run",
+    "test:integration": "node scripts/run-integration-tests.mjs",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",
@@ -25,7 +26,7 @@
     "seed:demo": "node scripts/seed-demo.mjs"
   },
   "engines": {
-    "node": ">=20.19"
+    "node": ">=20.19 <21"
   },
   "dependencies": {
     "@base-ui/react": "^1.6.0",

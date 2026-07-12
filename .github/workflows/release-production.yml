@@ -1,0 +1,42 @@
+name: Release production
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type RELEASE_PRODUCTION after preview and migration rehearsal approval
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: inputs.confirm == 'RELEASE_PRODUCTION'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    environment: production
+    env:
+      VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      DATABASE_URL: ${{ secrets.PRODUCTION_DATABASE_URL }}
+      DIRECT_URL: ${{ secrets.PRODUCTION_DIRECT_URL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20.19.0
+          cache: npm
+      - run: npm ci
+      - name: Pull production configuration
+        run: npx vercel@51.7.0 pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
+      - name: Build immutable production artifact before schema mutation
+        run: npx vercel@51.7.0 build --prod --token="${{ secrets.VERCEL_TOKEN }}"
+      - name: Apply approved backward-compatible migrations
+        run: npm run prisma:migrate:deploy
+      - name: Promote the already-tested artifact
+        run: npx vercel@51.7.0 deploy --prebuilt --prod --token="${{ secrets.VERCEL_TOKEN }}"

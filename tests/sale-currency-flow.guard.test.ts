@@ -64,15 +64,18 @@ describe('no auto-selection of a device', () => {
   for (const file of [SOTUV, NASIYA]) {
     it(`${file}: only preselects when ?deviceId is present and valid`, () => {
       const src = read(file)
-      // The only auto-advance path is guarded by a deviceId lookup.
-      expect(src).toContain("const deviceId = new URLSearchParams(window.location.search).get('deviceId')")
-      expect(src).toContain('if (deviceId) {')
+      expect(src).toContain('onDeepLinkSelect={(device) => {')
       expect(src).toContain('setStep(2)')
-      // Never pick "the first device" implicitly.
-      expect(src).not.toContain('nextDevices[0]')
       expect(src).not.toContain('devices[0]')
     })
   }
+
+  it('the shared picker only resolves an explicit deviceId and never selects the first result', () => {
+    const src = read('src/components/shop/in-stock-device-picker.tsx')
+    expect(src).toContain("const deviceId = new URLSearchParams(window.location.search).get('deviceId')")
+    expect(src).toContain('if (!deviceId) return')
+    expect(src).not.toContain('devices[0]')
+  })
 })
 
 describe('change device ("O\'zgartirish") returns to step 1 and keeps the choice', () => {
