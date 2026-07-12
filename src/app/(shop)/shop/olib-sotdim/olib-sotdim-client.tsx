@@ -60,7 +60,18 @@ interface OlibSotdimRow {
   supplierPhone: string
   supplierLocation: string | null
   createdAt: string
-  device: { id: string; model: string; imei: string; color: string | null; storage: string | null; purchasePrice: number; purchaseCurrency: 'UZS' | 'USD' }
+  device: {
+    id: string
+    model: string
+    imei: string
+    secondaryImei: string | null
+    color: string | null
+    storage: string | null
+    storageDisplay: string | null
+    conditionLabel: string
+    purchasePrice: number
+    purchaseCurrency: 'UZS' | 'USD'
+  }
   sale: { id: string; salePrice: number; contractCurrency: 'UZS' | 'USD'; customer: { name: string; phone: string } }
   profit: number
 }
@@ -208,7 +219,8 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="font-medium text-zinc-900">{row.device.model}</div>
-                <div className="font-mono text-xs text-zinc-400">{displayImei(row.device.imei)}</div>
+                <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'} · {row.device.conditionLabel}</div>
+                <div className="font-mono text-xs text-zinc-400">IMEI 1: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · IMEI 2: ${displayImei(row.device.secondaryImei)}` : ''}</div>
               </div>
               <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${statusStyles[row.status]}`}>
                 {statusLabels[row.status]}
@@ -253,7 +265,8 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                   <td className="px-4 py-3 text-zinc-500">{uzDate(row.createdAt)}</td>
                   <td className="px-4 py-3">
                     <div className="font-medium text-zinc-900">{row.device.model}</div>
-                    <div className="text-xs text-zinc-400 font-mono">{displayImei(row.device.imei)}</div>
+                    <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'} · {row.device.conditionLabel}</div>
+                    <div className="text-xs text-zinc-400 font-mono">IMEI 1: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · IMEI 2: ${displayImei(row.device.secondaryImei)}` : ''}</div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="text-zinc-900">{row.supplierName}</div>

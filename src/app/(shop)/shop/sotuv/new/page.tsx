@@ -34,9 +34,11 @@ function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']
 function deviceMeta(device: Device) {
   return [
     device.color,
-    device.storage,
+    device.storageDisplay || device.storage,
     device.batteryHealth != null ? `${device.batteryHealth}%` : null,
-    `IMEI: ${displayImei(device.imei)}`,
+    device.conditionLabel,
+    `IMEI 1: ${displayImei(device.imei)}`,
+    device.secondaryImei ? `IMEI 2: ${displayImei(device.secondaryImei)}` : null,
   ]
     .filter(Boolean)
     .join(' · ')

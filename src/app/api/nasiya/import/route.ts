@@ -297,6 +297,8 @@ export async function POST(req: NextRequest) {
           storage: data.storage,
           color: data.color,
           imei: enteredImei || null,
+          secondaryImei,
+          conditionLabel: data.conditionCode === 'NEW' ? 'Yangi' : 'B/U',
         },
         originalTotalAmount: originalTotalInput.amountUzs,
         alreadyPaidBeforeImport: alreadyPaidInput.amountUzs,

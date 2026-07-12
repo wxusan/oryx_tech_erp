@@ -18,7 +18,7 @@ import { Prisma } from '@/generated/prisma/client'
 import type { ZodError } from 'zod'
 import { logger } from '@/lib/logger'
 import { phoneSchema } from '@/lib/validations'
-import { normalizeImei } from '@/lib/device-specs'
+import { deviceConditionLabel, formatDeviceStorage, normalizeImei } from '@/lib/device-specs'
 import { getShopDeviceListItemsByIds } from '@/lib/server/shop-lists'
 import { latestChangeCursorForShop } from '@/lib/server/change-events'
 
@@ -45,6 +45,9 @@ const updateDeviceSchema = z.object({
   supplierPhone: phoneSchema.or(z.literal('')).optional(),
   note: z.string().optional(),
   reason: z.string().optional(),
+}).refine((data) => (data.storageAmount === undefined) === (data.storageUnit === undefined), {
+  message: 'Xotira hajmi va birligi birga kiritilishi kerak',
+  path: ['storageUnit'],
 })
 
 const deleteDeviceSchema = z.object({
@@ -76,16 +79,26 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
           model: true,
           color: true,
           storage: true,
+          storageAmount: true,
+          storageUnit: true,
+          conditionCode: true,
           batteryHealth: true,
           purchasePrice: true,
           imei: true,
+          imeis: { where: { deletedAt: null }, select: { slot: true, value: true } },
           status: true,
         },
       })
 
       if (!pickerDevice) return notFound("Qurilma topilmadi")
       return ok(
-        { ...pickerDevice, purchasePrice: Number(pickerDevice.purchasePrice) },
+        {
+          ...pickerDevice,
+          purchasePrice: Number(pickerDevice.purchasePrice),
+          storageDisplay: formatDeviceStorage(pickerDevice) || null,
+          secondaryImei: pickerDevice.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
+          conditionLabel: deviceConditionLabel(pickerDevice.conditionCode),
+        },
         "Qurilma ma'lumotlari",
       )
     }
@@ -245,7 +258,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (secondaryImei && secondaryImei === primaryImei) return badRequest('Asosiy va ikkinchi IMEI bir xil bo\'lishi mumkin emas')
     if (updateData.storageAmount !== undefined && updateData.storageUnit !== undefined) updateData.storage = `${updateData.storageAmount}${updateData.storageUnit}`
     if (updateData.conditionCode) (updateData as typeof updateData & { condition?: string }).condition = updateData.conditionCode === 'NEW' ? 'Yangi' : 'B/U'
-    const hasDeviceChanges = Object.entries(updateData).some(([key, value]) => {
+    const hasDeviceChanges = identityChanged || Object.entries(updateData).some(([key, value]) => {
       if (value === undefined) return false
       return String(existing[key as keyof typeof existing] ?? '') !== String(value)
     })

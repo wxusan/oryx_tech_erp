@@ -23,6 +23,7 @@ import { normalizePhone } from '@/lib/phone'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
+import { presentDeviceSpecs } from '@/lib/device-specs'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -136,7 +137,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
-        include: { shop: { select: { name: true } } },
+        include: { shop: { select: { name: true } }, imeis: { where: { deletedAt: null } } },
       })
 
       if (!device) throw { status: 404, message: "Qurilma topilmadi" }
@@ -254,13 +255,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         shopName: device.shop.name,
         customerName,
         customerPhone,
-        device: {
-          deviceModel: device.model,
-          storage: device.storage,
-          color: device.color,
-          batteryHealth: device.batteryHealth,
-          imei: device.imei,
-        },
+        device: presentDeviceSpecs(device),
         totalAmount: amounts.totalAmount,
         downPayment: amounts.downPayment,
         baseRemainingAmount: amounts.baseRemainingAmount,

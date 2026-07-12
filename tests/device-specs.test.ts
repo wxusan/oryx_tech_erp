@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { deviceConditionLabel, formatDeviceStorage, normalizeImei, parseDeviceStorage, validateImeiPair } from '@/lib/device-specs'
+import { deviceConditionLabel, formatDeviceStorage, normalizeImei, parseDeviceStorage, presentDeviceSpecs, validateImeiPair } from '@/lib/device-specs'
 
 describe('device specs', () => {
   it.each([
@@ -9,6 +9,32 @@ describe('device specs', () => {
     ['1 TB', 1, 'TB'],
   ] as const)('parses %s', (raw, amount, unit) => {
     expect(parseDeviceStorage(raw)).toMatchObject({ amount, unit, display: `${amount}${unit}` })
+  })
+
+  it('builds the canonical display projection with TB, condition, and both active IMEIs', () => {
+    expect(presentDeviceSpecs({
+      model: 'iPhone 17 Pro',
+      storage: '1 TB',
+      storageAmount: 1,
+      storageUnit: 'TB',
+      color: 'Black',
+      batteryHealth: 98,
+      imei: '351234560012345',
+      conditionCode: 'USED',
+      imeis: [
+        { slot: 'PRIMARY', value: '351234560012345' },
+        { slot: 'SECONDARY', value: '351234560012346' },
+        { slot: 'SECONDARY', value: '351234560012347', deletedAt: new Date() },
+      ],
+    })).toEqual({
+      deviceModel: 'iPhone 17 Pro',
+      storage: '1TB',
+      color: 'Black',
+      batteryHealth: 98,
+      imei: '351234560012345',
+      secondaryImei: '351234560012346',
+      conditionLabel: 'B/U',
+    })
   })
 
   it('does not infer a legacy bare amount without an explicit unit', () => {

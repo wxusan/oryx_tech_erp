@@ -21,7 +21,7 @@ import { normalizePhone } from '@/lib/phone'
 import { getShopDeviceListItemsByIds, getShopDevicesList, type DeviceStatusFilter } from '@/lib/server/shop-lists'
 import { latestChangeCursorForShop } from '@/lib/server/change-events'
 import type { ZodError } from 'zod'
-import { normalizeImei } from '@/lib/device-specs'
+import { formatDeviceStorage, deviceConditionLabel, normalizeImei } from '@/lib/device-specs'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED', 'DELETED'] as const
 
@@ -88,9 +88,13 @@ export async function GET(req: NextRequest) {
             model: true,
             color: true,
             storage: true,
+            storageAmount: true,
+            storageUnit: true,
+            conditionCode: true,
             batteryHealth: true,
             purchasePrice: true,
             imei: true,
+            imeis: { where: { deletedAt: null }, select: { slot: true, value: true } },
             status: true,
           },
         }),
@@ -99,7 +103,13 @@ export async function GET(req: NextRequest) {
 
       return ok(
         {
-          items: rows.map((device) => ({ ...device, purchasePrice: Number(device.purchasePrice) })),
+          items: rows.map((device) => ({
+            ...device,
+            purchasePrice: Number(device.purchasePrice),
+            storageDisplay: formatDeviceStorage(device) || null,
+            secondaryImei: device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
+            conditionLabel: deviceConditionLabel(device.conditionCode),
+          })),
           total,
           skip,
           take,

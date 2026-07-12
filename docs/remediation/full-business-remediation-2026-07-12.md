@@ -34,7 +34,7 @@ New authoritative fields are `storageAmount Decimal(10,2)` and `storageUnit GB|T
 
 ## 9. Device UI and cache integration
 
-Create, edit, Olib-sotdim, old-nasiya import, list, mobile card, detail, condition filter, search, export, canonical list DTO and Telegram templates expose structured storage/condition/two IMEIs. Device edit returns the canonical list DTO and patches React Query immediately; cross-tab `/api/sync` remains authoritative.
+Create, edit, stock picker, sale/nasiya review cards, Olib-sotdim, old-nasiya import, list, mobile card, detail, condition filter, search, export, canonical list DTO and Telegram producers expose structured storage/condition/two IMEIs. Existing-device Telegram flows share one presentation mapper across sale, nasiya, payment, completion, return, restock, supplier payment and scheduled reminders so those fields cannot silently drift by route. Device edit returns the canonical list DTO and patches React Query immediately; cross-tab `/api/sync` remains authoritative.
 
 ## 10. Nasiya overdue rule
 
@@ -76,7 +76,7 @@ All 28 migrations applied successfully from empty PostgreSQL in a disposable loc
 
 ## 18. Tests and quality gates
 
-- Unit/guard suite: 1,279 passed, 17 todo, 1 intentionally skipped.
+- Unit/guard suite: 1,285 passed, 17 todo, 1 intentionally skipped.
 - PostgreSQL integration: 13 passed.
 - TypeScript: passed.
 - ESLint: passed.

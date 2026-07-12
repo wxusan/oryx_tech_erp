@@ -30,7 +30,7 @@ import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
-import { normalizeImei } from '@/lib/device-specs'
+import { deviceConditionLabel, formatDeviceStorage, normalizeImei } from '@/lib/device-specs'
 
 // ---------------------------------------------------------------------------
 // GET /api/olib-sotdim
@@ -72,6 +72,7 @@ export async function GET(req: NextRequest) {
                 { sale: { customer: { phone: { contains: search, mode: 'insensitive' } } } },
                 { device: { model: { contains: search, mode: 'insensitive' } } },
                 { device: { imei: { contains: search, mode: 'insensitive' } } },
+                { device: { imeis: { some: { deletedAt: null, value: { contains: search, mode: 'insensitive' } } } } },
               ],
             }
           : {}),
@@ -96,7 +97,12 @@ export async function GET(req: NextRequest) {
         supplierPhone: true,
         supplierLocation: true,
         createdAt: true,
-        device: { select: { id: true, model: true, imei: true, color: true, storage: true, purchasePrice: true, purchaseInputAmount: true, purchaseCurrency: true } },
+        device: { select: {
+          id: true, model: true, imei: true, color: true, storage: true,
+          storageAmount: true, storageUnit: true, conditionCode: true,
+          purchasePrice: true, purchaseInputAmount: true, purchaseCurrency: true,
+          imeis: { where: { deletedAt: null }, select: { slot: true, value: true } },
+        } },
         sale: { select: { id: true, salePrice: true, contractSalePrice: true, contractCurrency: true, customer: { select: { name: true, phone: true } } } },
       },
       }),
@@ -116,7 +122,14 @@ export async function GET(req: NextRequest) {
         supplierPhone: p.supplierPhone,
         supplierLocation: p.supplierLocation,
         createdAt: p.createdAt.toISOString(),
-        device: { ...p.device, purchasePrice: Number(p.device.purchaseInputAmount), purchaseCurrency: p.device.purchaseCurrency },
+        device: {
+          ...p.device,
+          purchasePrice: Number(p.device.purchaseInputAmount),
+          purchaseCurrency: p.device.purchaseCurrency,
+          storageDisplay: formatDeviceStorage(p.device) || null,
+          secondaryImei: p.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
+          conditionLabel: deviceConditionLabel(p.device.conditionCode),
+        },
         sale: { ...p.sale, salePrice: Number(p.sale.contractSalePrice), contractCurrency: p.sale.contractCurrency },
         profit: Number(p.sale.contractSalePrice) - Number(p.contractAmount),
       })), total, skip, take },
