@@ -47,6 +47,17 @@ export function tashkentTodayInputValue(now = new Date()): string {
 }
 
 /**
+ * True only when `value` belongs to a Tashkent calendar day before today's.
+ * A deadline anywhere within today's local day is still due today; it becomes
+ * overdue at 00:00 Asia/Tashkent on the following day.
+ */
+export function isBeforeTashkentToday(value: Date | string, now = new Date()): boolean {
+  const date = value instanceof Date ? value : new Date(value)
+  if (!Number.isFinite(date.getTime())) return false
+  return tashkentDayRange(date).start.getTime() < tashkentDayRange(now).start.getTime()
+}
+
+/**
  * Whole Tashkent-calendar-days between today and an effective due date —
  * the shared day-count math behind every "N days before due date" early
  * reminder (nasiya schedule / sale / supplier payable — see

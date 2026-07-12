@@ -14,6 +14,7 @@ import { prisma } from '@/lib/prisma'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { isContractScheduleOverdue, contractOutstandingAsUzs, convertContractAmountToUzs } from '@/lib/nasiya-contract'
 import { logger } from '@/lib/logger'
+import { tashkentDayRange } from '@/lib/timezone'
 
 export async function GET() {
   try {
@@ -23,6 +24,7 @@ export async function GET() {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
     const now = new Date()
+    const { start: today } = tashkentDayRange(now)
 
     const [overdueSchedules, overdueSales, currency] = await Promise.all([
       prisma.nasiyaSchedule.findMany({
@@ -30,8 +32,8 @@ export async function GET() {
           shopId,
           status: { in: ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'] },
           OR: [
-            { delayedUntil: { lt: now } },
-            { delayedUntil: null, dueDate: { lt: now } },
+            { delayedUntil: { lt: today } },
+            { delayedUntil: null, dueDate: { lt: today } },
           ],
           nasiya: { is: { deletedAt: null, status: { not: 'CANCELLED' } } },
         },
@@ -50,7 +52,7 @@ export async function GET() {
           deletedAt: null,
           paidFully: false,
           remainingAmount: { gt: 0 },
-          dueDate: { lt: now },
+          dueDate: { lt: today },
         },
         select: { id: true, dueDate: true, contractCurrency: true, contractRemainingAmount: true },
       }),
@@ -64,7 +66,7 @@ export async function GET() {
         now,
       ),
     )
-    const overdueSalesRows = overdueSales.filter((s) => s.dueDate && s.dueDate < now)
+    const overdueSalesRows = overdueSales.filter((s) => s.dueDate && s.dueDate < today)
 
     const overdueMoneyUzs =
       overdueNasiyaSchedules.reduce(

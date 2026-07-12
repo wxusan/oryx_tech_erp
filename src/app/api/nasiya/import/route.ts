@@ -31,6 +31,7 @@ import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
+import { normalizeImei } from '@/lib/device-specs'
 
 export async function POST(req: NextRequest) {
   try {
@@ -57,7 +58,8 @@ export async function POST(req: NextRequest) {
     }
     const data = parsed.data
 
-    const enteredImei = data.imei?.trim() || ''
+    const enteredImei = data.imei ? normalizeImei(data.imei) ?? '' : ''
+    const secondaryImei = data.secondaryImei ? normalizeImei(data.secondaryImei) : null
     const normalizedPhone = normalizePhone(data.customerPhone)
     let originalTotalInput: Awaited<ReturnType<typeof moneyInputToUzs>>
     let alreadyPaidInput: Awaited<ReturnType<typeof moneyInputToUzs>>
@@ -114,8 +116,9 @@ export async function POST(req: NextRequest) {
     // unique index). A blank IMEI gets a unique IMPORT- placeholder so multiple
     // no-IMEI imports don't collide on the active-IMEI unique index.
     if (enteredImei) {
+      const imeiValues = [enteredImei, secondaryImei].filter((value): value is string => Boolean(value))
       const dup = await prisma.device.findFirst({
-        where: { shopId, imei: enteredImei, deletedAt: null },
+        where: { shopId, deletedAt: null, OR: [{ imei: { in: imeiValues } }, { imeis: { some: { normalizedValue: { in: imeiValues }, deletedAt: null } } }] },
         select: { id: true },
       })
       if (dup) return conflict('Bu IMEI raqami allaqachon mavjud')
@@ -177,12 +180,20 @@ export async function POST(req: NextRequest) {
           model: data.deviceModel,
           color: data.color || null,
           storage: data.storage || null,
+          storageAmount: data.storageAmount ?? null,
+          storageUnit: data.storageUnit ?? null,
+          conditionCode: data.conditionCode,
+          condition: data.conditionCode === 'NEW' ? 'Yangi' : 'B/U',
           batteryHealth: data.batteryHealth ?? null,
           purchasePrice: 0,
           imei: storedImei,
           status: 'SOLD_NASIYA',
           isImported: true,
           addedBy: session.user.id,
+          ...(enteredImei ? { imeis: { create: [
+            { slot: 'PRIMARY', value: enteredImei, normalizedValue: enteredImei },
+            ...(secondaryImei ? [{ slot: 'SECONDARY' as const, value: secondaryImei, normalizedValue: secondaryImei }] : []),
+          ] } } : {}),
         },
       })
 

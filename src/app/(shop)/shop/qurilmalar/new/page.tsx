@@ -9,6 +9,7 @@ import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { currencyLabel } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, ImagePlus, Loader2, X } from 'lucide-react'
@@ -25,9 +26,12 @@ interface FormData {
   model: string
   color: string
   storage: string
+  storageUnit: 'GB' | 'TB'
+  conditionCode: 'NEW' | 'USED' | ''
   battery: string
   purchasePrice: string
   imei: string
+  secondaryImei: string
   supplierName: string
   supplierPhone: string
   note: string
@@ -42,9 +46,12 @@ export default function NewDevicePage() {
     model: '',
     color: '',
     storage: '',
+    storageUnit: 'GB',
+    conditionCode: '',
     battery: '',
     purchasePrice: '',
     imei: '',
+    secondaryImei: '',
     supplierName: '',
     supplierPhone: '',
     note: '',
@@ -61,7 +68,7 @@ export default function NewDevicePage() {
   const set = (field: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }))
 
-  const isValid = form.model.trim() && form.color.trim() && form.purchasePrice.trim() && form.imei.trim()
+  const isValid = form.model.trim() && form.color.trim() && form.storage.trim() && form.conditionCode && form.purchasePrice.trim() && /^\d{15}$/.test(form.imei) && (!form.secondaryImei || /^\d{15}$/.test(form.secondaryImei))
 
   function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
@@ -129,11 +136,15 @@ export default function NewDevicePage() {
         body: JSON.stringify({
           model: form.model,
           color: form.color,
-          storage: form.storage,
+          storage: `${form.storage}${form.storageUnit}`,
+          storageAmount: Number(form.storage),
+          storageUnit: form.storageUnit,
+          conditionCode: form.conditionCode,
           batteryHealth: form.battery ? Number(form.battery) : undefined,
           purchasePrice: Number(form.purchasePrice),
           inputCurrency: currency.currency,
           imei: form.imei,
+          secondaryImei: form.secondaryImei || undefined,
           supplierName: form.supplierName || undefined,
           supplierPhone: form.supplierPhone || undefined,
           note: form.note || undefined,
@@ -205,13 +216,14 @@ export default function NewDevicePage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Xotira (GB)</label>
-              <Input
-                value={form.storage}
-                onChange={set('storage')}
-                placeholder="128, 256, 512..."
-                className="h-9 text-sm border-zinc-200 rounded"
-              />
+              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Xotira <span className="text-red-500">*</span></label>
+              <div className="flex gap-2">
+                <Input type="number" min="0.01" step="0.01" value={form.storage} onChange={set('storage')} placeholder="256" className="h-9 text-sm border-zinc-200 rounded" />
+                <Select value={form.storageUnit} onValueChange={(value) => value && setForm((prev) => ({ ...prev, storageUnit: value as 'GB' | 'TB' }))}>
+                  <SelectTrigger className="h-9 w-24"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="GB">GB</SelectItem><SelectItem value="TB">TB</SelectItem></SelectContent>
+                </Select>
+              </div>
             </div>
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">Akkumulyator %</label>
@@ -239,14 +251,27 @@ export default function NewDevicePage() {
             </div>
             <div>
               <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                IMEI <span className="text-red-500">*</span>
+                Asosiy IMEI <span className="text-red-500">*</span>
               </label>
               <Input
                 value={form.imei}
                 onChange={set('imei')}
                 placeholder="351234560012345"
+                inputMode="numeric"
+                maxLength={15}
                 className="h-9 text-sm border-zinc-200 rounded font-mono"
               />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Ikkinchi IMEI</label>
+              <Input value={form.secondaryImei} onChange={set('secondaryImei')} placeholder="351234560012346" inputMode="numeric" maxLength={15} className="h-9 text-sm border-zinc-200 rounded font-mono" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Holati <span className="text-red-500">*</span></label>
+              <Select value={form.conditionCode} onValueChange={(value) => value && setForm((prev) => ({ ...prev, conditionCode: value as 'NEW' | 'USED' }))}>
+                <SelectTrigger className="h-9"><SelectValue placeholder="Tanlang" /></SelectTrigger>
+                <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
+              </Select>
             </div>
           </div>
         </div>

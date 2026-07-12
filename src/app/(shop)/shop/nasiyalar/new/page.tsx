@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
@@ -23,6 +24,7 @@ import { useShopCurrency } from '@/lib/use-shop-currency'
 import { TrustBadge, type TrustBadgeData } from '@/components/shop/trust-badge'
 import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
 import { navigateAfterMutation } from '@/lib/client-events'
+import { tashkentTodayInputValue } from '@/lib/timezone'
 
 type Device = InStockPickerDevice
 
@@ -34,7 +36,7 @@ function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency'
 }
 
 function today() {
-  return new Date().toISOString().slice(0, 10)
+  return tashkentTodayInputValue()
 }
 
 function deviceMeta(device: Device) {
@@ -632,10 +634,9 @@ export default function NewNasiyaPage() {
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Boshlanish sanasi <span className="text-red-500">*</span>
                 </label>
-                <Input
-                  type="date"
+                <DateInput
                   value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
+                  onValueChange={setStartDate}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
               </div>

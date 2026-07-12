@@ -3,101 +3,92 @@ import 'server-only'
 import { prisma } from '@/lib/prisma'
 import { getSupabaseAdminClient, PRIVATE_STORAGE_BUCKET } from '@/lib/supabase-admin'
 
-/**
- * Resolve a SAFE, Telegram-fetchable image for a notification at SEND time.
- *
- * Returns a short-lived signed URL for the related device's first photo, or null
- * when there is no device image (→ the notification falls back to a text
- * message). Signed at send time so the URL is always fresh for Telegram to fetch,
- * and never persisted anywhere.
- *
- * Privacy: only DEVICE photos are ever attached. Customer-document images (ID
- * scans, etc.) live under a different key path and are never referenced here; a
- * regex guard additionally rejects any key outside `/devices/`. The permanent
- * private URL is never exposed — only a short-TTL signed URL.
- */
-
-// Long enough for Telegram's servers to fetch the photo, short enough to stay
-// safe. Telegram fetches immediately on send, so 10 minutes is generous.
 const SIGNED_URL_TTL_SECONDS = 10 * 60
 
-// Device image keys look like `shops/<shopId>/devices/<uuid>`. Other private
-// uploads use a different segment, so this pattern only ever matches a device
-// image.
-const DEVICE_KEY_PATTERN = /^shops\/[^/]+\/devices\/[^/]+$/
-
-interface NotificationRef {
+export interface NotificationRef {
+  shopId: string
   relatedType: string | null
   relatedId: string | null
 }
 
-async function deviceImageKeyFor(ref: NotificationRef): Promise<string | null> {
-  const { relatedType, relatedId } = ref
-  if (!relatedType || !relatedId) return null
-
-  switch (relatedType) {
-    case 'Device': {
-      const device = await prisma.device.findUnique({
-        where: { id: relatedId },
-        select: { imageUrls: true },
-      })
-      return device?.imageUrls?.[0] ?? null
-    }
-    case 'Sale': {
-      const sale = await prisma.sale.findUnique({
-        where: { id: relatedId },
-        select: { device: { select: { imageUrls: true } } },
-      })
-      return sale?.device?.imageUrls?.[0] ?? null
-    }
-    case 'DeviceReturn': {
-      const ret = await prisma.deviceReturn.findUnique({
-        where: { id: relatedId },
-        select: { device: { select: { imageUrls: true } } },
-      })
-      return ret?.device?.imageUrls?.[0] ?? null
-    }
-    case 'Nasiya': {
-      const nasiya = await prisma.nasiya.findUnique({
-        where: { id: relatedId },
-        select: { device: { select: { imageUrls: true } } },
-      })
-      return nasiya?.device?.imageUrls?.[0] ?? null
-    }
-    case 'NasiyaSchedule': {
-      const schedule = await prisma.nasiyaSchedule.findUnique({
-        where: { id: relatedId },
-        select: { nasiya: { select: { device: { select: { imageUrls: true } } } } },
-      })
-      return schedule?.nasiya?.device?.imageUrls?.[0] ?? null
-    }
-    case 'SupplierPayable': {
-      const payable = await prisma.supplierPayable.findUnique({
-        where: { id: relatedId },
-        select: { device: { select: { imageUrls: true } } },
-      })
-      return payable?.device?.imageUrls?.[0] ?? null
-    }
-    default:
-      return null
-  }
+function validDeviceKey(shopId: string, key: string): boolean {
+  const prefix = `shops/${shopId}/devices/`
+  const objectName = key.startsWith(prefix) ? key.slice(prefix.length) : ''
+  return objectName.length > 0 && !objectName.includes('/')
 }
 
-export async function resolveNotificationImageUrl(ref: NotificationRef): Promise<string | null> {
-  try {
-    const key = await deviceImageKeyFor(ref)
-    if (!key || !DEVICE_KEY_PATTERN.test(key)) return null
+function orderedUnique(keys: string[]): string[] {
+  return [...new Set(keys)]
+}
 
-    const supabase = getSupabaseAdminClient()
-    const { data, error } = await supabase.storage
-      .from(PRIVATE_STORAGE_BUCKET)
-      .createSignedUrl(key, SIGNED_URL_TTL_SECONDS)
+/** Resolve every related device key and enforce tenant ownership. */
+export async function resolveNotificationImageKeys(ref: NotificationRef): Promise<string[]> {
+  const { relatedType, relatedId, shopId } = ref
+  if (!relatedType || !relatedId) return []
 
-    if (error || !data?.signedUrl) return null
-    return data.signedUrl
-  } catch {
-    // Missing Supabase config, deleted object, network error, etc. — never let
-    // image resolution break delivery; fall back to a text message.
-    return null
+  let row: { imageUrls: string[] } | null = null
+  switch (relatedType) {
+    case 'Device':
+      row = await prisma.device.findFirst({ where: { id: relatedId, shopId }, select: { imageUrls: true } })
+      break
+    case 'Sale': {
+      const value = await prisma.sale.findFirst({ where: { id: relatedId, shopId }, select: { device: { select: { imageUrls: true } } } })
+      row = value?.device ?? null
+      break
+    }
+    case 'DeviceReturn': {
+      const value = await prisma.deviceReturn.findFirst({ where: { id: relatedId, shopId }, select: { device: { select: { imageUrls: true } } } })
+      row = value?.device ?? null
+      break
+    }
+    case 'Nasiya': {
+      const value = await prisma.nasiya.findFirst({ where: { id: relatedId, shopId }, select: { device: { select: { imageUrls: true } } } })
+      row = value?.device ?? null
+      break
+    }
+    case 'NasiyaSchedule': {
+      const value = await prisma.nasiyaSchedule.findFirst({ where: { id: relatedId, shopId }, select: { nasiya: { select: { device: { select: { imageUrls: true } } } } } })
+      row = value?.nasiya.device ?? null
+      break
+    }
+    case 'SupplierPayable': {
+      const value = await prisma.supplierPayable.findFirst({ where: { id: relatedId, shopId }, select: { device: { select: { imageUrls: true } } } })
+      row = value?.device ?? null
+      break
+    }
   }
+
+  return orderedUnique(row?.imageUrls ?? []).filter((key) => validDeviceKey(shopId, key))
+}
+
+export interface ResolvedNotificationImage {
+  position: number
+  key: string
+  imageUrl: string | null
+}
+
+/** Sign every pending key independently; one missing object never drops peers. */
+export async function resolveNotificationImageUrls(
+  shopId: string,
+  mediaKeys: string[],
+  positions: number[],
+): Promise<ResolvedNotificationImage[]> {
+  const supabase = getSupabaseAdminClient()
+  return Promise.all(positions.map(async (position) => {
+    const key = mediaKeys[position]
+    if (!key || !validDeviceKey(shopId, key)) return { position, key: key ?? '', imageUrl: null }
+    try {
+      const { data, error } = await supabase.storage.from(PRIVATE_STORAGE_BUCKET).createSignedUrl(key, SIGNED_URL_TTL_SECONDS)
+      return { position, key, imageUrl: error ? null : data?.signedUrl ?? null }
+    } catch {
+      return { position, key, imageUrl: null }
+    }
+  }))
+}
+
+/** Back-compatible helper. */
+export async function resolveNotificationImageUrl(ref: NotificationRef): Promise<string | null> {
+  const keys = await resolveNotificationImageKeys(ref)
+  if (!keys.length) return null
+  return (await resolveNotificationImageUrls(ref.shopId, keys, [0]))[0]?.imageUrl ?? null
 }

@@ -6,10 +6,12 @@ import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { formatUzPhoneDisplay } from '@/lib/phone'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { paymentMethodLabel } from '@/lib/labels'
 import { uzDate, uzDateTime } from '@/lib/dates'
@@ -29,6 +31,11 @@ import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
 import { commitNavigationMutation, navigateAfterMutation } from '@/lib/client-events'
 import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
+import { deviceConditionLabel, formatDeviceStorage } from '@/lib/device-specs'
+import { useQueryClient } from '@tanstack/react-query'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { patchDeviceUpsert } from '@/lib/device-query-cache'
+import type { DeviceListItem } from '@/lib/device-list-contract'
 
 interface Supplier {
   name: string
@@ -117,6 +124,9 @@ interface Device {
   model: string
   color: string | null
   storage: string | null
+  storageAmount: number | string | null
+  storageUnit: 'GB' | 'TB' | null
+  conditionCode: 'NEW' | 'USED' | null
   batteryHealth: number | null
   purchasePrice: number
   // Native purchase-currency context — see docs/currency-accounting-model.md.
@@ -126,6 +136,7 @@ interface Device {
   purchaseExchangeRateAtCreation: number | string | null
   purchaseAmountUzsSnapshot: number
   imei: string
+  imeis: { slot: 'PRIMARY' | 'SECONDARY'; value: string }[]
   supplierPhone: string | null
   supplier: Supplier | null
   status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA' | 'RETURNED' | 'DELETED'
@@ -152,6 +163,8 @@ function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']
 export default function QurilmaDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const queryClient = useQueryClient()
+  const queryScope = useAuthenticatedQueryScope()
   const id = params.id as string
   const { currency } = useShopCurrency()
 
@@ -209,14 +222,18 @@ export default function QurilmaDetailPage() {
     model: '',
     color: '',
     storage: '',
+    storageUnit: 'GB' as 'GB' | 'TB',
+    conditionCode: '' as '' | 'NEW' | 'USED',
     batteryHealth: '',
     purchasePrice: '',
     imei: '',
+    secondaryImei: '',
     supplierPhone: '',
     note: '',
   })
   const [editError, setEditError] = useState('')
   const [editSaving, setEditSaving] = useState(false)
+  const [purchasePriceDirty, setPurchasePriceDirty] = useState(false)
 
   const fetchDevice = useCallback(() => {
     if (!id) return
@@ -258,7 +275,9 @@ export default function QurilmaDetailPage() {
     setEditForm({
       model: device.model,
       color: device.color ?? '',
-      storage: device.storage ?? '',
+      storage: device.storageAmount != null ? String(device.storageAmount) : '',
+      storageUnit: device.storageUnit ?? 'GB',
+      conditionCode: device.conditionCode ?? '',
       batteryHealth: device.batteryHealth != null ? String(device.batteryHealth) : '',
       // Stored value is UZS; show it in the shop's display currency (USD when
       // toggled) so the input matches every other money field.
@@ -267,10 +286,12 @@ export default function QurilmaDetailPage() {
           ? convertUzsToUsd(device.purchasePrice, currency.usdUzsRate).toFixed(2)
           : String(device.purchasePrice),
       imei: device.imei,
+      secondaryImei: device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? '',
       supplierPhone: device.supplierPhone ?? '',
       note: '',
     })
     setEditError('')
+    setPurchasePriceDirty(false)
     setEditOpen(true)
   }
 
@@ -307,17 +328,19 @@ export default function QurilmaDetailPage() {
         body: JSON.stringify({
           model: editForm.model.trim(),
           color: editForm.color.trim(),
-          storage: editForm.storage.trim(),
+          ...(editForm.storage.trim() ? { storageAmount: Number(editForm.storage), storageUnit: editForm.storageUnit } : {}),
+          conditionCode: editForm.conditionCode || undefined,
           ...(battery !== undefined ? { batteryHealth: battery } : {}),
-          purchasePrice: price,
-          inputCurrency: currency.currency,
+          ...(purchasePriceDirty ? { purchasePrice: price, inputCurrency: currency.currency } : {}),
           imei: editForm.imei.trim(),
+          secondaryImei: editForm.secondaryImei.trim(),
           supplierPhone: editForm.supplierPhone.trim(),
           note: editForm.note.trim() || undefined,
         }),
       })
-      const json = await res.json()
+      const json = await res.json() as { success?: boolean; error?: string; data?: { item?: DeviceListItem } }
       if (!res.ok || !json.success) throw new Error(json.error || 'Saqlashda xatolik')
+      if (json.data?.item) patchDeviceUpsert(queryClient, queryScope, json.data.item)
       await commitNavigationMutation({ kind: 'device.updated', deviceId: id })
       setEditOpen(false)
       await fetchDevice()
@@ -465,7 +488,7 @@ export default function QurilmaDetailPage() {
           customerName: saleEditCustomerName.trim(),
           customerPhone: saleEditCustomerPhone.trim(),
           paymentMethod: saleEditPaymentMethod,
-          dueDate: saleEditDueDate ? new Date(saleEditDueDate).toISOString() : null,
+          dueDate: saleEditDueDate || null,
           reminderEnabled: saleEditReminderEnabled,
           note: saleEditNote.trim() || undefined,
           reason: saleEditNote.trim() || "Sotuv ma'lumotlari tuzatildi",
@@ -563,7 +586,9 @@ export default function QurilmaDetailPage() {
   const infoRows: { label: string; value: string; hint?: string | null }[] = [
     { label: 'Model', value: device.model },
     { label: 'Rang', value: device.color ?? '—' },
-    { label: 'Xotira', value: device.storage ?? '—' },
+    { label: 'Xotira', value: formatDeviceStorage(device) || '—' },
+    { label: 'Holati', value: deviceConditionLabel(device.conditionCode) },
+    { label: 'Ikkinchi IMEI', value: device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? '—' },
     {
       label: 'Batareya',
       value: device.batteryHealth != null ? `${device.batteryHealth}%` : '—',
@@ -1110,11 +1135,13 @@ export default function QurilmaDetailPage() {
               </div>
               <div className="space-y-1.5">
                 <label className="block text-xs font-medium text-zinc-700">Xotira</label>
-                <Input
-                  value={editForm.storage}
-                  onChange={(e) => setEditForm((f) => ({ ...f, storage: e.target.value }))}
-                  className="h-10 rounded-lg border-zinc-200 text-sm"
-                />
+                <div className="flex gap-2">
+                  <Input type="number" min="0.01" step="0.01" value={editForm.storage} onChange={(e) => setEditForm((f) => ({ ...f, storage: e.target.value }))} className="h-10 rounded-lg border-zinc-200 text-sm" />
+                  <Select value={editForm.storageUnit} onValueChange={(value) => value && setEditForm((form) => ({ ...form, storageUnit: value as 'GB' | 'TB' }))}>
+                    <SelectTrigger className="h-10 w-24"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="GB">GB</SelectItem><SelectItem value="TB">TB</SelectItem></SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="space-y-1.5">
                 <label className="block text-xs font-medium text-zinc-700">Batareya (%)</label>
@@ -1139,20 +1166,33 @@ export default function QurilmaDetailPage() {
                 <MoneyInput
                   currency={currency.currency}
                   value={editForm.purchasePrice}
-                  onChange={(v) => setEditForm((f) => ({ ...f, purchasePrice: v }))}
+                  onChange={(v) => { setPurchasePriceDirty(true); setEditForm((f) => ({ ...f, purchasePrice: v })) }}
                   className="h-10 rounded-lg border-zinc-200 text-sm"
                 />
               </div>
             </div>
             <div className="space-y-1.5">
               <label className="block text-xs font-medium text-zinc-700">
-                IMEI <span className="text-red-500">*</span>
+                Asosiy IMEI <span className="text-red-500">*</span>
               </label>
               <Input
                 value={editForm.imei}
                 onChange={(e) => setEditForm((f) => ({ ...f, imei: e.target.value }))}
+                inputMode="numeric"
+                maxLength={15}
                 className="h-10 rounded-lg border-zinc-200 text-sm font-mono"
               />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-zinc-700">Ikkinchi IMEI</label>
+              <Input value={editForm.secondaryImei} onChange={(e) => setEditForm((f) => ({ ...f, secondaryImei: e.target.value }))} inputMode="numeric" maxLength={15} className="h-10 rounded-lg border-zinc-200 text-sm font-mono" />
+            </div>
+            <div className="space-y-1.5">
+              <label className="block text-xs font-medium text-zinc-700">Holati</label>
+              <Select value={editForm.conditionCode} onValueChange={(value) => value && setEditForm((form) => ({ ...form, conditionCode: value as 'NEW' | 'USED' }))}>
+                <SelectTrigger className="h-10"><SelectValue placeholder="Tanlang" /></SelectTrigger>
+                <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
+              </Select>
             </div>
             <div className="space-y-1.5">
               <label className="block text-xs font-medium text-zinc-700">Yetkazib beruvchi tel</label>
@@ -1277,10 +1317,9 @@ export default function QurilmaDetailPage() {
               </div>
               <div>
                 <label className="mb-1.5 block text-xs font-medium text-zinc-700">Qarz muddati</label>
-                <Input
-                  type="date"
+                <DateInput
                   value={saleEditDueDate}
-                  onChange={(e) => setSaleEditDueDate(e.target.value)}
+                  onValueChange={setSaleEditDueDate}
                   className="h-9 rounded border-zinc-200 text-sm"
                 />
               </div>

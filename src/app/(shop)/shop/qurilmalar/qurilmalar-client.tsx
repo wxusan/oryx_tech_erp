@@ -5,6 +5,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { exportUrl } from '@/lib/api-client'
 import { uzDate } from '@/lib/dates'
 import { displayImei } from '@/lib/device-display'
@@ -99,14 +100,14 @@ const DeviceTableRow = memo(function DeviceTableRow({
 }) {
   return (
     <tr className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
-      <td className="px-4 py-3 font-medium text-zinc-900">{d.model}</td>
+      <td className="px-4 py-3 font-medium text-zinc-900"><div>{d.model}</div><div className="mt-0.5 text-[11px] font-medium text-zinc-500">{d.conditionLabel}</div></td>
       <td className="px-4 py-3 text-zinc-600">{d.color ?? '—'}</td>
-      <td className="px-4 py-3 text-zinc-600">{d.storage ?? '—'}</td>
+      <td className="px-4 py-3 text-zinc-600">{d.storageDisplay || '—'}</td>
       <td className="px-4 py-3 text-zinc-600">{d.batteryHealth != null ? `${d.batteryHealth}%` : '—'}</td>
       <td className="px-4 py-3 font-medium text-zinc-900">
         {formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate)}
       </td>
-      <td className="px-4 py-3 font-mono text-xs text-zinc-400">{displayImei(d.imei)}</td>
+      <td className="px-4 py-3 font-mono text-xs text-zinc-400"><div>{displayImei(d.primaryImei)}</div>{d.secondaryImei && <div className="mt-0.5">{displayImei(d.secondaryImei)}</div>}</td>
       <td className="px-4 py-3"><StatusBadge status={d.status} /></td>
       <td className="px-4 py-3 font-medium text-zinc-900">
         {d.saleInfo ? (
@@ -146,13 +147,13 @@ const DeviceMobileCard = memo(function DeviceMobileCard({
     <div className="space-y-2 rounded border border-zinc-200 p-3">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="font-medium text-zinc-900">{d.model}</div>
-          <div className="mt-0.5 font-mono text-xs text-zinc-500">{displayImei(d.imei)}</div>
+          <div className="font-medium text-zinc-900">{d.model} <span className="text-xs font-normal text-zinc-500">· {d.conditionLabel}</span></div>
+          <div className="mt-0.5 font-mono text-xs text-zinc-500">{displayImei(d.primaryImei)}{d.secondaryImei && ` · ${displayImei(d.secondaryImei)}`}</div>
         </div>
         <StatusBadge status={d.status} />
       </div>
       <div className="text-xs text-zinc-500">
-        {[d.color, d.storage, d.batteryHealth != null ? `${d.batteryHealth}%` : null].filter(Boolean).join(' · ') || '—'}
+        {[d.color, d.storageDisplay, d.batteryHealth != null ? `${d.batteryHealth}%` : null].filter(Boolean).join(' · ') || '—'}
       </div>
       <div className="flex items-center justify-between text-xs text-zinc-600">
         <span>Kelish: {formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate)}</span>
@@ -185,10 +186,11 @@ const DeviceMobileCard = memo(function DeviceMobileCard({
 // single unbounded-in-spirit fetch capped at a fixed ceiling.
 const PER_PAGE = 25
 
-function buildRequestKey(search: string, status: DeviceStatus | 'Barchasi', page: number) {
+function buildRequestKey(search: string, status: DeviceStatus | 'Barchasi', condition: 'ALL' | 'NEW' | 'USED', page: number) {
   const params = new URLSearchParams({ paginated: '1' })
   if (search.trim()) params.set('search', search.trim())
   if (status !== 'Barchasi') params.set('status', status)
+  if (condition !== 'ALL') params.set('condition', condition)
   params.set('skip', String((page - 1) * PER_PAGE))
   params.set('take', String(PER_PAGE))
   return params.toString()
@@ -216,8 +218,9 @@ export default function QurilmalarClient({
   const [search, setSearch] = useState(initialSearch)
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch)
   const [activeStatus, setActiveStatus] = useState<DeviceStatus | 'Barchasi'>(initialStatus)
+  const [condition, setCondition] = useState<'ALL' | 'NEW' | 'USED'>('ALL')
   const initialRequestKey = useMemo(
-    () => buildRequestKey(initialSearch, initialStatus, initialPage),
+    () => buildRequestKey(initialSearch, initialStatus, 'ALL', initialPage),
     [initialPage, initialSearch, initialStatus],
   )
 
@@ -233,17 +236,18 @@ export default function QurilmalarClient({
   }, [search])
 
   const requestKey = useMemo(
-    () => buildRequestKey(debouncedSearch, activeStatus, page),
-    [debouncedSearch, activeStatus, page],
+    () => buildRequestKey(debouncedSearch, activeStatus, condition, page),
+    [debouncedSearch, activeStatus, condition, page],
   )
 
   const listQuery = useMemo<DeviceListQuery>(() => ({
     search: debouncedSearch,
     status: activeStatus,
+    condition,
     page,
     take: PER_PAGE,
     sort: 'createdAt-desc',
-  }), [activeStatus, debouncedSearch, page])
+  }), [activeStatus, condition, debouncedSearch, page])
 
   const devicesQuery = useQuery({
     queryKey: queryKeys.devices.list(scope, listQuery),
@@ -314,12 +318,13 @@ export default function QurilmalarClient({
       </div>
 
       {/* Search */}
-      <Input
-        value={search}
-        onChange={(e) => { setSearch(e.target.value); setPage(1) }}
-        placeholder="Model, IMEI, rang, xotira yoki yetkazib beruvchi bo'yicha qidirish..."
-        className="max-w-md h-9 text-sm border-zinc-200 rounded"
-      />
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <Input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Model, IMEI, rang, xotira yoki yetkazib beruvchi bo'yicha qidirish..." className="max-w-md h-9 text-sm border-zinc-200 rounded" />
+        <Select value={condition} onValueChange={(value) => { if (value) { setCondition(value as 'ALL' | 'NEW' | 'USED'); setPage(1) } }}>
+          <SelectTrigger className="h-9 w-full sm:w-40"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectItem value="ALL">Barcha holatlar</SelectItem><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
+        </Select>
+      </div>
 
       {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">{error}</div>}
 

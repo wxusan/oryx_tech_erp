@@ -75,7 +75,7 @@ export function ShopLayoutClient({ children, shopName, adminName }: { children: 
             <div className="w-8 h-8 rounded-full bg-zinc-900 text-white text-xs flex items-center justify-center font-medium shadow-sm">
               {initials(adminName)}
             </div>
-            <SessionControls callbackUrl="/shop/login" />
+            <SessionControls callbackUrl="/shop/login" idleTimeoutMs={null} />
           </div>
         </header>
 

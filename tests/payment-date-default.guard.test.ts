@@ -39,6 +39,7 @@ describe('nasiya payment modal defaults the date field to today', () => {
   })
 
   it('still submits the user-selected date (not silently overridden)', () => {
-    expect(modal).toContain('date: new Date(payDate).toISOString()')
+    expect(modal).toContain('date: payDate')
+    expect(modal).toContain('<DateInput')
   })
 })

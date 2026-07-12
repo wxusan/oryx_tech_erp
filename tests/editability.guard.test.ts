@@ -39,7 +39,8 @@ describe('device edit safety guard', () => {
   })
 
   it('validates active-IMEI uniqueness and backstops on the DB partial unique index', () => {
-    expect(src).toContain("where: { shopId: existing.shopId, imei: updateData.imei, deletedAt: null, id: { not: deviceId } }")
+    expect(src).toContain("{ imeis: { some: { normalizedValue: { in: imeiValues }, deletedAt: null } } }")
+    expect(src).toContain('tx.deviceImei.updateMany')
     expect(src).toContain("err.code === 'P2002'")
   })
 

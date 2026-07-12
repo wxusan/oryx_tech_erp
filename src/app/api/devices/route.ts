@@ -11,7 +11,7 @@ import { prisma } from '@/lib/prisma'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { addDeviceSchema } from '@/lib/validations'
 import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
-import { notifyShopAdmins } from '@/lib/notification-service'
+import { processPendingNotifications } from '@/lib/notification-service'
 import { deviceAddedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
@@ -21,6 +21,7 @@ import { normalizePhone } from '@/lib/phone'
 import { getShopDeviceListItemsByIds, getShopDevicesList, type DeviceStatusFilter } from '@/lib/server/shop-lists'
 import { latestChangeCursorForShop } from '@/lib/server/change-events'
 import type { ZodError } from 'zod'
+import { normalizeImei } from '@/lib/device-specs'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED', 'DELETED'] as const
 
@@ -46,6 +47,8 @@ export async function GET(req: NextRequest) {
       return badRequest("Qurilma statusi noto'g'ri")
     }
     const status = statusParam as (typeof deviceStatuses)[number] | undefined
+    const conditionParam = searchParams.get('condition') ?? undefined
+    if (conditionParam && conditionParam !== 'NEW' && conditionParam !== 'USED') return badRequest("Qurilma holati noto'g'ri")
     const search = searchParams.get('search') ?? undefined // IMEI / model / color / note / customer name/phone
     const searchDigits = search ? normalizePhone(search) : null
 
@@ -65,6 +68,7 @@ export async function GET(req: NextRequest) {
           ? {
               OR: [
                 { imei: { contains: search, mode: 'insensitive' as const } },
+                { imeis: { some: { deletedAt: null, value: { contains: search, mode: 'insensitive' as const } } } },
                 { model: { contains: search, mode: 'insensitive' as const } },
                 { color: { contains: search, mode: 'insensitive' as const } },
                 { storage: { contains: search, mode: 'insensitive' as const } },
@@ -118,6 +122,7 @@ export async function GET(req: NextRequest) {
       const { items, total } = await getShopDevicesList(shopId, {
         search,
         status: status as DeviceStatusFilter | undefined,
+        condition: conditionParam as 'NEW' | 'USED' | undefined,
         skip,
         take,
       })
@@ -138,6 +143,7 @@ export async function GET(req: NextRequest) {
           ? {
               OR: [
                 { imei: { contains: search, mode: 'insensitive' } },
+                { imeis: { some: { deletedAt: null, value: { contains: search, mode: 'insensitive' } } } },
                 { model: { contains: search, mode: 'insensitive' } },
                 { color: { contains: search, mode: 'insensitive' } },
                 { storage: { contains: search, mode: 'insensitive' } },
@@ -203,10 +209,11 @@ export async function POST(req: NextRequest) {
     }
 
     const {
-      model, color, storage, batteryHealth, purchasePrice,
+      model, color, storage, storageAmount, storageUnit, conditionCode, batteryHealth, purchasePrice,
       supplierName, supplierPhone, note, imageUrls,
     } = parsed.data
-    const imei = parsed.data.imei.trim()
+    const imei = normalizeImei(parsed.data.imei)!
+    const secondaryImei = parsed.data.secondaryImei ? normalizeImei(parsed.data.secondaryImei) : null
 
     const resolved = await resolveActiveShopId(
       session,
@@ -223,10 +230,30 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
+    const [shop, currency] = await Promise.all([
+      prisma.shop.findUnique({ where: { id: resolvedShopId }, select: { name: true } }),
+      getShopCurrencyContext(resolvedShopId),
+    ])
+    const notificationMessage = deviceAddedMessage({
+      shopName: shop?.name ?? '',
+      device: { deviceModel: model, storage, color, batteryHealth, imei, secondaryImei, conditionLabel: conditionCode === 'NEW' ? 'Yangi' : 'B/U' },
+      purchasePrice,
+      purchaseCurrency: purchaseInput.inputCurrency,
+      supplierPhone,
+      adminName: session.user.name,
+      currency,
+    })
 
     // Check active IMEI uniqueness within shop. Soft-deleted rows may be reused.
     const existing = await prisma.device.findFirst({
-      where: { shopId: resolvedShopId, imei, deletedAt: null },
+      where: {
+        shopId: resolvedShopId,
+        deletedAt: null,
+        OR: [
+          { imei: { in: [imei, secondaryImei].filter((value): value is string => Boolean(value)) } },
+          { imeis: { some: { normalizedValue: { in: [imei, secondaryImei].filter((value): value is string => Boolean(value)) }, deletedAt: null } } },
+        ],
+      },
     })
     if (existing) return conflict("Bu IMEI raqami allaqachon mavjud")
 
@@ -242,7 +269,7 @@ export async function POST(req: NextRequest) {
       const createdDevice = await tx.device.create({
         data: {
           shopId: resolvedShopId,
-          model, color, storage, batteryHealth,
+          model, color, storage, storageAmount, storageUnit, conditionCode, condition: conditionCode === 'NEW' ? 'Yangi' : 'B/U', batteryHealth,
           purchasePrice: purchaseInput.amountUzs,
           // Native purchase-currency context — see docs/currency-accounting-model.md.
           purchaseCurrency: purchaseInput.inputCurrency,
@@ -255,6 +282,12 @@ export async function POST(req: NextRequest) {
           imageUrls: imageUrls ?? [],
           addedBy: session.user.id,
           note,
+          imeis: {
+            create: [
+              { slot: 'PRIMARY', value: imei, normalizedValue: imei },
+              ...(secondaryImei ? [{ slot: 'SECONDARY' as const, value: secondaryImei, normalizedValue: secondaryImei }] : []),
+            ],
+          },
         },
       })
 
@@ -270,6 +303,25 @@ export async function POST(req: NextRequest) {
         },
       })
 
+      const notificationAdmins = await tx.shopAdmin.findMany({
+        where: { shopId: resolvedShopId, isActive: true, telegramId: { not: null }, telegramVerifiedAt: { not: null }, deletedAt: null },
+        select: { telegramId: true },
+      })
+      if (notificationAdmins.length) {
+        await tx.notification.createMany({
+          data: notificationAdmins.flatMap((admin) => admin.telegramId ? [{
+            shopId: resolvedShopId,
+            type: 'DEVICE_CREATED',
+            message: notificationMessage,
+            telegramId: admin.telegramId,
+            status: 'PENDING' as const,
+            scheduledAt: new Date(),
+            relatedId: createdDevice.id,
+            relatedType: 'Device',
+          }] : []),
+        })
+      }
+
       return createdDevice
     })
 
@@ -279,26 +331,7 @@ export async function POST(req: NextRequest) {
     // add-device request never waits on Telegram HTTP calls.
     after(async () => {
       try {
-        const shop = await prisma.shop.findUnique({
-          where: { id: resolvedShopId },
-          select: { name: true },
-        })
-        const currency = await getShopCurrencyContext(resolvedShopId)
-        await notifyShopAdmins(
-          resolvedShopId,
-          deviceAddedMessage({
-            shopName: shop?.name ?? '',
-            device: { deviceModel: model, storage, color, batteryHealth, imei },
-            purchasePrice,
-            purchaseCurrency: purchaseInput.inputCurrency,
-            supplierPhone,
-            adminName: session.user.name,
-            currency,
-          }),
-          'DEVICE_CREATED',
-          device.id,
-          'Device',
-        )
+        await processPendingNotifications()
       } catch (e) {
         logger.warn('device create notification failed', {
           event: 'notification.flush_failed',

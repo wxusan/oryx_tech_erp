@@ -79,6 +79,21 @@ enum CurrencyCode {
   USD
 }
 
+enum StorageUnit {
+  GB
+  TB
+}
+
+enum DeviceConditionCode {
+  NEW
+  USED
+}
+
+enum DeviceImeiSlot {
+  PRIMARY
+  SECONDARY
+}
+
 // ---------------------------------------------------------------------------
 // SuperAdmin
 // ---------------------------------------------------------------------------
@@ -252,6 +267,8 @@ model Device {
   model                          String
   color                          String?
   storage                        String?
+  storageAmount                  Decimal?     @db.Decimal(10, 2)
+  storageUnit                    StorageUnit?
   batteryHealth                  Int?
   purchasePrice                  Decimal      @db.Decimal(12, 2)
   // Native purchase-currency context, additive — `purchasePrice` above stays
@@ -270,6 +287,7 @@ model Device {
   addedBy                        String
   note                           String?
   condition                      String?
+  conditionCode                  DeviceConditionCode?
   // A device created only to carry an imported (pre-Oryx) nasiya. It is created
   // as SOLD_NASIYA (never IN_STOCK), so it never enters sellable inventory or
   // inventory-cost stats. Its purchasePrice is 0 (original cost unknown).
@@ -294,6 +312,7 @@ model Device {
   nasiya           Nasiya[]
   returns          DeviceReturn[]
   supplierPayables SupplierPayable[]
+  imeis            DeviceImei[]
 
   // ACTIVE-ONLY IMEI UNIQUENESS is enforced by a raw-SQL PARTIAL UNIQUE index
   // `Device_shopId_imei_active_key ... WHERE "deletedAt" IS NULL` created in
@@ -304,6 +323,25 @@ model Device {
   @@index([shopId, imei])
   @@index([shopId])
   @@index([status])
+  @@unique([id, shopId])
+}
+
+model DeviceImei {
+  id              String         @id @default(cuid())
+  shopId          String
+  deviceId        String
+  slot            DeviceImeiSlot
+  value           String
+  normalizedValue String?
+  isLegacy        Boolean        @default(false)
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+
+  device Device @relation(fields: [deviceId, shopId], references: [id, shopId])
+
+  @@index([deviceId, slot])
+  @@index([shopId, normalizedValue])
 }
 
 // ---------------------------------------------------------------------------
@@ -328,6 +366,7 @@ model Customer {
   // 'MEDIUM' | 'HIGH' | 'VERY_HIGH'), null = use the computed tier. Never
   // read by any automatic accounting logic — display/explainability only.
   trustOverride    String?
+  phoneNormalizationNeedsReview Boolean @default(false)
   createdAt        DateTime  @default(now())
   deletedAt        DateTime?
   deletedBy        String?
@@ -785,6 +824,13 @@ model Notification {
   lastError     String?
   relatedId     String?
   relatedType   String?
+  // Ordered, tenant-validated device-image keys captured on the first send
+  // attempt. Progress is stored per position so a later chunk can be retried
+  // without duplicating media Telegram already accepted.
+  mediaKeys          String[] @default([])
+  mediaSentPositions Int[]    @default([])
+  mediaSnapshotAt    DateTime?
+  textSentAt         DateTime?
   createdAt     DateTime           @default(now())
 
   // Relations

@@ -12,7 +12,7 @@ import {
 describe('normalizePhone (req 10)', () => {
   it('strips all non-digit characters', () => {
     expect(normalizePhone('+998 (90) 123-45-67')).toBe('998901234567')
-    expect(normalizePhone('90 123 45 67')).toBe('901234567')
+    expect(normalizePhone('90 123 45 67')).toBe('998901234567')
   })
 
   it('treats differently-formatted equal numbers as identical', () => {
@@ -84,9 +84,9 @@ describe('applyPhonePrefix (auto 998 prefix)', () => {
     expect(applyPhonePrefix('')).toBe('')
   })
 
-  it('preserves excess digits for correction, and the shared validator rejects them', () => {
-    expect(applyPhonePrefix('9012345671234')).toBe('+9989012345671234')
-    expect(isValidPhone(applyPhonePrefix('9012345671234'))).toBe(false)
+  it('caps edit input at seven subscriber digits after the two-digit operator code', () => {
+    expect(applyPhonePrefix('9012345671234')).toBe('+998901234567')
+    expect(isValidPhone(applyPhonePrefix('9012345671234'))).toBe(true)
   })
 
   it('every output stays a valid phone by the existing isValidPhone gate', () => {

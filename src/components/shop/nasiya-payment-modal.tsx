@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
@@ -298,8 +298,8 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                   { method: splitMethod2, amount: Number(splitAmount2Input) },
                 ]
               : undefined,
-          date: new Date(payDate).toISOString(),
-          delayedUntil: carryOver ? new Date(payDate).toISOString() : undefined,
+          date: payDate,
+          delayedUntil: carryOver ? payDate : undefined,
           deferredToNext: carryOver,
           note: payNote || undefined,
         }),
@@ -665,10 +665,9 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                   <label className="block text-xs font-medium text-zinc-700">
                     {carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"} <span className="text-red-500">*</span>
                   </label>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={payDate}
-                    onChange={(e) => setPayDate(e.target.value)}
+                    onValueChange={setPayDate}
                     className="h-11 rounded-lg border-zinc-200 text-sm"
                   />
                 </div>

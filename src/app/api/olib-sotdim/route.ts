@@ -14,7 +14,6 @@
  */
 
 import { NextRequest, after } from 'next/server'
-import { randomBytes } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
@@ -31,6 +30,7 @@ import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
+import { normalizeImei } from '@/lib/device-specs'
 
 // ---------------------------------------------------------------------------
 // GET /api/olib-sotdim
@@ -187,15 +187,13 @@ export async function POST(req: NextRequest) {
     const contractRemaining = contractSalePrice - contractPaid
     const deviceStatus = contractRemaining > 0 ? 'SOLD_DEBT' : 'SOLD_CASH'
 
-    // IMEI: reuse the existing active-only uniqueness rule. Missing IMEI gets a
-    // NOIMEI- placeholder — same idea as the pre-existing IMPORT- convention,
-    // hidden from every user-facing surface by displayImei()/telegramImei().
-    const imei = d.imei?.trim() || ''
-    if (imei) {
-      const existingImei = await prisma.device.findFirst({ where: { shopId, imei, deletedAt: null } })
-      if (existingImei) return conflict('Bu IMEI raqami allaqachon mavjud')
-    }
-    const storedImei = imei || `NOIMEI-${randomBytes(4).toString('hex').toUpperCase()}`
+    const imei = normalizeImei(d.imei)!
+    const secondaryImei = d.secondaryImei ? normalizeImei(d.secondaryImei) : null
+    const imeiValues = [imei, secondaryImei].filter((value): value is string => Boolean(value))
+    const existingImei = await prisma.device.findFirst({
+      where: { shopId, deletedAt: null, OR: [{ imei: { in: imeiValues } }, { imeis: { some: { normalizedValue: { in: imeiValues }, deletedAt: null } } }] },
+    })
+    if (existingImei) return conflict('Bu IMEI raqami allaqachon mavjud')
 
     const normalizedCustomerPhone = normalizePhone(d.customerPhone)
     const supplierPaidNow = d.supplierPaidNow
@@ -210,6 +208,8 @@ export async function POST(req: NextRequest) {
           model: d.model,
           color: d.color,
           storage: d.storage,
+          storageAmount: d.storageAmount,
+          storageUnit: d.storageUnit,
           batteryHealth: d.batteryHealth,
           purchasePrice: purchasePriceUzs,
           // Native purchase-currency context — see docs/currency-accounting-model.md.
@@ -217,13 +217,18 @@ export async function POST(req: NextRequest) {
           purchaseInputAmount: d.purchasePrice,
           purchaseExchangeRateAtCreation: purchaseInput.exchangeRateUsed,
           purchaseAmountUzsSnapshot: purchasePriceUzs,
-          imei: storedImei,
+          imei,
           supplierPhone: d.supplierPhone,
           imageUrls: d.imageUrls ?? [],
           status: deviceStatus,
           addedBy: session.user.id,
           note: d.deviceNote,
-          condition: d.condition,
+          condition: d.conditionCode === 'NEW' ? 'Yangi' : 'B/U',
+          conditionCode: d.conditionCode,
+          imeis: { create: [
+            { slot: 'PRIMARY', value: imei, normalizedValue: imei },
+            ...(secondaryImei ? [{ slot: 'SECONDARY' as const, value: secondaryImei, normalizedValue: secondaryImei }] : []),
+          ] },
           isExternalSourced: true,
         },
       })
@@ -323,7 +328,7 @@ export async function POST(req: NextRequest) {
       })
       const message = olibSotdimCreatedMessage({
         shopName: shop?.name ?? '',
-        device: { deviceModel: d.model, storage: d.storage, color: d.color, batteryHealth: d.batteryHealth, imei: storedImei },
+        device: { deviceModel: d.model, storage: d.storage, color: d.color, batteryHealth: d.batteryHealth, imei, secondaryImei, conditionLabel: d.conditionCode === 'NEW' ? 'Yangi' : 'B/U' },
         supplierName: d.supplierName,
         supplierPhone: d.supplierPhone,
         supplierLocation: d.supplierLocation,
@@ -361,7 +366,7 @@ export async function POST(req: NextRequest) {
           targetId: sale.id,
           newValue: {
             model: d.model,
-            imei: storedImei,
+            imei,
             purchasePrice: purchasePriceUzs,
             salePrice: salePriceUzs,
             profit: salePriceUzs - purchasePriceUzs,

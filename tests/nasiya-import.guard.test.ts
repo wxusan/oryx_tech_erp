@@ -57,7 +57,7 @@ describe('import route safety', () => {
   })
 
   it('rejects a duplicate active IMEI and backstops on P2002', () => {
-    expect(src).toContain('imei: enteredImei, deletedAt: null')
+    expect(src).toContain("{ imeis: { some: { normalizedValue: { in: imeiValues }, deletedAt: null } } }")
     expect(src).toContain("err.code === 'P2002'")
   })
 

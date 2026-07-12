@@ -6,90 +6,97 @@ import { LogOut } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { clearNavigationClientState } from '@/lib/client-events'
 
-const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000
 const LOGOUT_EVENT_KEY = 'oryx:last-logout'
+const ADMIN_ACTIVITY_KEY = 'oryx:admin-last-activity'
 
 type SessionControlsProps = {
   callbackUrl: string
-  idleTimeoutMs?: number
+  /** null disables inactivity logout while retaining explicit logout/revocation. */
+  idleTimeoutMs: number | null
 }
 
-export function SessionControls({
-  callbackUrl,
-  idleTimeoutMs = DEFAULT_IDLE_TIMEOUT_MS,
-}: SessionControlsProps) {
+export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsProps) {
   const timerRef = useRef<number | null>(null)
   const signingOutRef = useRef(false)
+  const lastBroadcastRef = useRef(0)
 
-  const logout = useCallback(
-    (broadcast = true) => {
-      if (signingOutRef.current) return
-      signingOutRef.current = true
-
-      if (broadcast) {
-        try {
-          window.localStorage.setItem(LOGOUT_EVENT_KEY, String(Date.now()))
-        } catch {
-          // localStorage can be unavailable in private/restricted browsers.
-        }
-      }
-
-      // The callback is a full document navigation, which clears Next's
-      // in-memory Router Cache. Remove our cross-tab marker before leaving too.
-      clearNavigationClientState()
-
-      void signOut({ callbackUrl })
-    },
-    [callbackUrl],
-  )
-
-  const resetIdleTimer = useCallback(() => {
-    if (timerRef.current) window.clearTimeout(timerRef.current)
-    timerRef.current = window.setTimeout(() => logout(), idleTimeoutMs)
-  }, [idleTimeoutMs, logout])
+  const logout = useCallback((broadcast = true) => {
+    if (signingOutRef.current) return
+    signingOutRef.current = true
+    if (broadcast) {
+      try { window.localStorage.setItem(LOGOUT_EVENT_KEY, String(Date.now())) } catch {}
+    }
+    clearNavigationClientState()
+    void signOut({ callbackUrl })
+  }, [callbackUrl])
 
   useEffect(() => {
-    const activityEvents: Array<keyof WindowEventMap> = [
-      'mousedown',
-      'mousemove',
-      'keydown',
-      'scroll',
-      'touchstart',
-    ]
+    const handleStorageLogout = (event: StorageEvent) => {
+      if (event.key === LOGOUT_EVENT_KEY) logout(false)
+    }
+    window.addEventListener('storage', handleStorageLogout)
+    return () => window.removeEventListener('storage', handleStorageLogout)
+  }, [logout])
 
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') resetIdleTimer()
+  useEffect(() => {
+    if (idleTimeoutMs == null) return
+
+    const scheduleFrom = (lastActivity: number) => {
+      if (timerRef.current) window.clearTimeout(timerRef.current)
+      const remaining = lastActivity + idleTimeoutMs - Date.now()
+      if (remaining <= 0) {
+        logout()
+        return
+      }
+      timerRef.current = window.setTimeout(() => logout(), remaining)
+    }
+
+    const readLastActivity = () => {
+      try {
+        const stored = Number(window.localStorage.getItem(ADMIN_ACTIVITY_KEY))
+        return Number.isFinite(stored) && stored > 0 ? stored : Date.now()
+      } catch { return Date.now() }
+    }
+
+    const recordActivity = () => {
+      const now = Date.now()
+      // Pointer movement and key repeat can be noisy; one cross-tab write per
+      // second is sufficient while the local deadline still remains exact.
+      if (now - lastBroadcastRef.current < 1000) return
+      lastBroadcastRef.current = now
+      try { window.localStorage.setItem(ADMIN_ACTIVITY_KEY, String(now)) } catch {}
+      scheduleFrom(now)
     }
 
     const handleStorage = (event: StorageEvent) => {
-      if (event.key === LOGOUT_EVENT_KEY) logout(false)
+      if (event.key !== ADMIN_ACTIVITY_KEY) return
+      const timestamp = Number(event.newValue)
+      if (Number.isFinite(timestamp)) scheduleFrom(timestamp)
     }
-
-    activityEvents.forEach((eventName) => {
-      window.addEventListener(eventName, resetIdleTimer, { passive: true })
-    })
-    document.addEventListener('visibilitychange', handleVisibilityChange)
+    const checkDeadline = () => {
+      if (document.visibilityState === 'visible') scheduleFrom(readLastActivity())
+    }
+    const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart', 'wheel']
+    activityEvents.forEach((name) => window.addEventListener(name, recordActivity, { passive: true }))
     window.addEventListener('storage', handleStorage)
-    resetIdleTimer()
+    document.addEventListener('visibilitychange', checkDeadline)
+
+    const initial = readLastActivity()
+    try {
+      if (!window.localStorage.getItem(ADMIN_ACTIVITY_KEY)) window.localStorage.setItem(ADMIN_ACTIVITY_KEY, String(initial))
+    } catch {}
+    scheduleFrom(initial)
 
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current)
-      activityEvents.forEach((eventName) => {
-        window.removeEventListener(eventName, resetIdleTimer)
-      })
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      activityEvents.forEach((name) => window.removeEventListener(name, recordActivity))
       window.removeEventListener('storage', handleStorage)
+      document.removeEventListener('visibilitychange', checkDeadline)
     }
-  }, [logout, resetIdleTimer])
+  }, [idleTimeoutMs, logout])
 
   return (
-    <Button
-      type="button"
-      variant="outline"
-      size="sm"
-      onClick={() => logout()}
-      className="border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900"
-    >
+    <Button type="button" variant="outline" size="sm" onClick={() => logout()} className="border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900">
       <LogOut className="size-4" />
       Chiqish
     </Button>

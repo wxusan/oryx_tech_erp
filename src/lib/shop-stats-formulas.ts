@@ -11,6 +11,7 @@
 
 import { convertUsdToUzs } from '@/lib/currency'
 import { contractOutstandingAsUzs, convertContractAmountToUzs } from '@/lib/nasiya-contract'
+import { isBeforeTashkentToday } from '@/lib/timezone'
 
 export interface ShopStatsRows {
   now: Date
@@ -132,9 +133,9 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
     }, 0)
   const overdueSchedules = nasiyaSchedulesForStats.filter((schedule) => {
     if (scheduleOutstandingUzs(schedule) <= 0) return false
-    return effectiveDue(schedule) < now
+    return isBeforeTashkentToday(effectiveDue(schedule), now)
   })
-  const overdueSales = unpaidSales.filter((sale) => sale.dueDate && sale.dueDate < now)
+  const overdueSales = unpaidSales.filter((sale) => sale.dueDate && isBeforeTashkentToday(sale.dueDate, now))
   const overdueMoney =
     overdueSchedules.reduce((sum, schedule) => sum + scheduleOutstandingUzs(schedule), 0) +
     overdueSales.reduce((sum, sale) => sum + saleRemainingUzs(sale), 0)

@@ -13,6 +13,9 @@ describe('validation hardening', () => {
       model: 'iPhone 15',
       purchasePrice: 10_000_000,
       imei: '123456789012345',
+      storageAmount: 256,
+      storageUnit: 'GB',
+      conditionCode: 'NEW',
     }
 
     expect(addDeviceSchema.safeParse({ ...base, imageUrls: ['https://example.com/device.jpg'] }).success).toBe(false)

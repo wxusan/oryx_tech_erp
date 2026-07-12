@@ -8,6 +8,7 @@ import { prisma } from '@/lib/prisma'
 import { deviceStatusLabel, nasiyaStatusLabel, paymentMethodLabel } from '@/lib/labels'
 import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { getShopCurrencyContext } from '@/lib/server/currency'
+import { deviceConditionLabel, formatDeviceStorage } from '@/lib/device-specs'
 import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ entity: string }> }
@@ -131,8 +132,12 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         select: {
           model: true,
           imei: true,
+          imeis: { where: { deletedAt: null }, select: { slot: true, value: true } },
           color: true,
           storage: true,
+          storageAmount: true,
+          storageUnit: true,
+          conditionCode: true,
           batteryHealth: true,
           purchasePrice: true,
           status: true,
@@ -144,8 +149,12 @@ async function exportData(entity: string, shopId: string, role: string): Promise
       headers: [
         'model',
         'imei',
+        'secondaryImei',
         'color',
         'storage',
+        'storageAmount',
+        'storageUnit',
+        'condition',
         'batteryHealth',
         'purchasePriceUzs',
         'purchasePriceDisplay',
@@ -154,9 +163,13 @@ async function exportData(entity: string, shopId: string, role: string): Promise
       ],
       rows: devices.map((d) => [
         d.model,
-        displayImei(d.imei),
+        displayImei(d.imeis.find((entry) => entry.slot === 'PRIMARY')?.value ?? d.imei),
+        displayImei(d.imeis.find((entry) => entry.slot === 'SECONDARY')?.value),
         d.color,
-        d.storage,
+        formatDeviceStorage(d),
+        d.storageAmount?.toString() ?? null,
+        d.storageUnit,
+        deviceConditionLabel(d.conditionCode),
         d.batteryHealth,
         d.purchasePrice.toString(),
         formatMoneyByCurrency(Number(d.purchasePrice), currency.currency, currency.usdUzsRate),

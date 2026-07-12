@@ -4,6 +4,7 @@ import type { DeviceStatus } from '@/lib/device-list-contract'
 export interface DeviceListQuery {
   search: string
   status: DeviceStatus | 'Barchasi'
+  condition?: 'ALL' | 'NEW' | 'USED'
   page: number
   take: number
   sort: 'createdAt-desc'

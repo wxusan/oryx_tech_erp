@@ -4,6 +4,11 @@ import { createOlibSotdimSchema, markSupplierPayablePaidSchema } from '@/lib/val
 function baseInput(overrides: Partial<Record<string, unknown>> = {}) {
   return {
     model: 'iPhone 13 Pro',
+    storage: '256GB',
+    storageAmount: 256,
+    storageUnit: 'GB',
+    conditionCode: 'NEW',
+    imei: '351234560012345',
     supplierName: 'Ali aka',
     supplierPhone: '+998901234567',
     purchasePrice: 6_500_000,
@@ -49,9 +54,14 @@ describe('createOlibSotdimSchema', () => {
     expect(result.success).toBe(true)
   })
 
-  it('IMEI is optional (bazaar reality — device may arrive without one)', () => {
+  it('requires a primary IMEI for every newly recorded device', () => {
     const result = createOlibSotdimSchema.safeParse(baseInput({ imei: undefined }))
-    expect(result.success).toBe(true)
+    expect(result.success).toBe(false)
+  })
+
+  it('accepts a distinct optional secondary IMEI and rejects cross-slot duplicates', () => {
+    expect(createOlibSotdimSchema.safeParse(baseInput({ secondaryImei: '351234560012346' })).success).toBe(true)
+    expect(createOlibSotdimSchema.safeParse(baseInput({ secondaryImei: '351234560012345' })).success).toBe(false)
   })
 
   it('requires earlyReminderDays when earlyReminderEnabled is true', () => {

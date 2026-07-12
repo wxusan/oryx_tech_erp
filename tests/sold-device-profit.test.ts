@@ -47,7 +47,7 @@ describe('qurilmalar list: sold tab, columns, and IMEI privacy', () => {
   })
 
   it('still uses displayImei so imported placeholder IMEIs stay hidden', () => {
-    expect(client).toContain('displayImei(d.imei)')
+    expect(client).toContain('displayImei(d.primaryImei)')
   })
 })
 

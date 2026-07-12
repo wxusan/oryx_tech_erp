@@ -6,11 +6,11 @@ const route = readFileSync(resolve(process.cwd(), 'src/app/api/stats/due-overdue
 
 describe('due/overdue summary query bounds', () => {
   it('filters effective nasiya due dates in PostgreSQL', () => {
-    expect(route).toContain('{ delayedUntil: { lt: now } }')
-    expect(route).toContain('{ delayedUntil: null, dueDate: { lt: now } }')
+    expect(route).toContain('{ delayedUntil: { lt: today } }')
+    expect(route).toContain('{ delayedUntil: null, dueDate: { lt: today } }')
   })
 
   it('filters sale due dates in PostgreSQL', () => {
-    expect(route).toContain('dueDate: { lt: now }')
+    expect(route).toContain('dueDate: { lt: today }')
   })
 })

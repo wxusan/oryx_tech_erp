@@ -25,6 +25,7 @@ export interface TelegramSendResult {
   ok: boolean
   errorCode?: number
   description?: string
+  retryAfterSeconds?: number
 }
 
 /**
@@ -73,10 +74,32 @@ export async function sendTelegramPhoto(
   }
 }
 
-function handleSendError(method: 'sendMessage' | 'sendPhoto', error: unknown): TelegramSendResult {
-  const anyErr = error as { error_code?: number; description?: string }
+/** Telegram albums accept 2–10 items. The caption belongs only to item one. */
+export async function sendTelegramMediaGroup(
+  telegramId: string,
+  photoUrls: string[],
+  caption?: string,
+): Promise<TelegramSendResult> {
+  try {
+    await getBot().api.sendMediaGroup(
+      telegramId,
+      photoUrls.map((media, index) => ({
+        type: 'photo' as const,
+        media,
+        ...(index === 0 && caption ? { caption, parse_mode: 'HTML' as const } : {}),
+      })),
+    )
+    return { ok: true }
+  } catch (error) {
+    return handleSendError('sendMediaGroup', error)
+  }
+}
+
+function handleSendError(method: 'sendMessage' | 'sendPhoto' | 'sendMediaGroup', error: unknown): TelegramSendResult {
+  const anyErr = error as { error_code?: number; description?: string; parameters?: { retry_after?: number } }
   const errorCode = typeof anyErr?.error_code === 'number' ? anyErr.error_code : undefined
   const description = typeof anyErr?.description === 'string' ? anyErr.description : undefined
+  const retryAfterSeconds = typeof anyErr?.parameters?.retry_after === 'number' ? anyErr.parameters.retry_after : undefined
   // Redacting logger — never prints the bot token even if it appears in a URL.
   logger.warn(`Telegram ${method} failed`, {
     event: 'telegram.send_failed',
@@ -84,5 +107,5 @@ function handleSendError(method: 'sendMessage' | 'sendPhoto', error: unknown): T
     errorCode,
     error,
   })
-  return { ok: false, errorCode, description }
+  return { ok: false, errorCode, description, retryAfterSeconds }
 }

@@ -63,6 +63,57 @@ afterAll(async () => {
 })
 
 describe('migration-managed active-only uniqueness', () => {
+  it('enforces IMEI uniqueness across primary/secondary slots and releases it on device soft-delete', async () => {
+    const firstShop = await seedShop('imei_slots_a')
+    const secondShop = await seedShop('imei_slots_b')
+    const first = await prisma.device.create({
+      data: {
+        shopId: firstShop.shop.id,
+        model: 'Dual SIM A',
+        purchasePrice: 100,
+        imei: '351234560012345',
+        addedBy: 'integration',
+        imeis: { create: [
+          { slot: 'PRIMARY', value: '351234560012345', normalizedValue: '351234560012345' },
+          { slot: 'SECONDARY', value: '351234560012346', normalizedValue: '351234560012346' },
+        ] },
+      },
+    })
+    const second = await prisma.device.create({
+      data: { shopId: firstShop.shop.id, model: 'Dual SIM B', purchasePrice: 100, imei: '351234560012347', addedBy: 'integration' },
+    })
+
+    await expect(prisma.deviceImei.create({ data: {
+      shopId: firstShop.shop.id,
+      deviceId: second.id,
+      slot: 'SECONDARY',
+      value: '351234560012345',
+      normalizedValue: '351234560012345',
+    } })).rejects.toMatchObject({ code: 'P2002' })
+
+    const otherShopDevice = await prisma.device.create({
+      data: { shopId: secondShop.shop.id, model: 'Other tenant', purchasePrice: 100, imei: '351234560012345', addedBy: 'integration' },
+    })
+    await expect(prisma.deviceImei.create({ data: {
+      shopId: firstShop.shop.id,
+      deviceId: otherShopDevice.id,
+      slot: 'PRIMARY',
+      value: '351234560012348',
+      normalizedValue: '351234560012348',
+    } })).rejects.toMatchObject({ code: 'P2003' })
+
+    await prisma.device.update({ where: { id: first.id }, data: { deletedAt: new Date() } })
+    expect(await prisma.deviceImei.count({ where: { deviceId: first.id, deletedAt: null } })).toBe(0)
+    const reused = await prisma.deviceImei.create({ data: {
+      shopId: firstShop.shop.id,
+      deviceId: second.id,
+      slot: 'SECONDARY',
+      value: '351234560012345',
+      normalizedValue: '351234560012345',
+    } })
+    expect(reused.normalizedValue).toBe('351234560012345')
+  })
+
   it('rejects a duplicate active IMEI per shop and permits reuse after soft delete', async () => {
     const { shop } = await seedShop('imei')
     const first = await prisma.device.create({
