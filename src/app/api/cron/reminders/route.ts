@@ -161,8 +161,9 @@ export async function GET(request: NextRequest): Promise<Response> {
   //    OVERDUE is included in the selection so chronically-overdue schedules
   //    keep alerting every day (deduped per day by dayKey), not just once.
   //    PAID/COMPLETED schedules fall out because their status is no longer in
-  //    this set. Cancelled/returned/reminder-off nasiyas are excluded via the
-  //    nasiya filter below.
+  //    this set. Cancelled/returned nasiyas are excluded via the parent status
+  //    filter below. reminderEnabled is intentionally NOT a selection filter:
+  //    disabling Telegram alerts must not disable the business status change.
   // -------------------------------------------------------------------------
 
   const overdue = await prisma.nasiyaSchedule.findMany({
@@ -174,7 +175,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       status: { in: ['PENDING', 'PARTIAL', 'DEFERRED', 'OVERDUE'] },
       nasiya: {
         deletedAt: null,
-        reminderEnabled: true,
+        status: { in: ['ACTIVE', 'OVERDUE'] },
         shop: { status: 'ACTIVE', deletedAt: null },
       },
     },
@@ -200,30 +201,34 @@ export async function GET(request: NextRequest): Promise<Response> {
   for (const schedule of overdue) {
     const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
     const daysLate = Math.floor((today.getTime() - effectiveDue.getTime()) / 86400000)
-    const msg = nasiyaOverdueMessage({
-      customerName: schedule.nasiya.customer.name,
-      customerPhone: schedule.nasiya.customer.phone,
-      device: presentDeviceSpecs(schedule.nasiya.device),
-      month: schedule.monthNumber,
-      amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), schedule.nasiya.contractCurrency),
-      contractCurrency: schedule.nasiya.contractCurrency,
-      dueDate: effectiveDue,
-      daysLate,
-      currency: await reminderCurrency(schedule.nasiya.shop),
-    })
-    const notifications = schedule.nasiya.shop.admins.map((admin) => {
-      const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
-      return {
-        dedupeKey,
-        message: msg,
-        telegramId: admin.telegramId!,
-        scheduledAt: scheduledReminderSendAt(dedupeKey),
-      }
-    })
+    const notifications: Array<{ dedupeKey: string; message: string; telegramId: string; scheduledAt: Date }> = []
+    if (schedule.nasiya.reminderEnabled) {
+      const msg = nasiyaOverdueMessage({
+        customerName: schedule.nasiya.customer.name,
+        customerPhone: schedule.nasiya.customer.phone,
+        device: presentDeviceSpecs(schedule.nasiya.device),
+        month: schedule.monthNumber,
+        amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), schedule.nasiya.contractCurrency),
+        contractCurrency: schedule.nasiya.contractCurrency,
+        dueDate: effectiveDue,
+        daysLate,
+        currency: await reminderCurrency(schedule.nasiya.shop),
+      })
+      notifications.push(...schedule.nasiya.shop.admins.map((admin) => {
+        const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
+        return {
+          dedupeKey,
+          message: msg,
+          telegramId: admin.telegramId!,
+          scheduledAt: scheduledReminderSendAt(dedupeKey),
+        }
+      }))
+    }
     const transitioned = await transitionNasiyaToOverdue({
       scheduleId: schedule.id,
       nasiyaId: schedule.nasiya.id,
       shopId: schedule.nasiya.shopId,
+      overdueBefore: today,
       notifications,
     })
     if (transitioned) transitionedShopIds.add(schedule.nasiya.shopId)

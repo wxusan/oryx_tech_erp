@@ -1,6 +1,6 @@
 import 'server-only'
 
-import type { Prisma } from '@/generated/prisma/client'
+import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { enrichLogsWithActors } from '@/lib/server/log-actors'
 import type { NasiyaDisplayStatus } from '@/lib/nasiya-utils'
@@ -12,6 +12,7 @@ import type { CurrencyCode } from '@/lib/currency'
 import { normalizePhone } from '@/lib/phone'
 import type { DeviceListItem, DeviceListSaleInfo } from '@/lib/device-list-contract'
 import { deviceConditionLabel, formatDeviceStorage } from '@/lib/device-specs'
+import { tashkentDayRange } from '@/lib/timezone'
 
 /**
  * Real page/skip/take pagination envelope for the devices/nasiyalar list
@@ -126,6 +127,43 @@ export interface ShopDevicesQuery {
   condition?: 'NEW' | 'USED'
   skip?: number
   take?: number
+}
+
+export function buildShopDevicesWhere(shopId: string, query: Pick<ShopDevicesQuery, 'search' | 'status' | 'condition'>): Prisma.DeviceWhereInput {
+  const search = query.search?.trim() || undefined
+  const searchDigits = search ? normalizePhone(search) : null
+  const searchImei = search?.replace(/[\s-]/g, '') || null
+
+  return {
+    shopId,
+    deletedAt: null,
+    ...(query.status ? { status: query.status } : {}),
+    ...(query.condition ? { conditionCode: query.condition } : {}),
+    ...(search
+      ? {
+          OR: [
+            { imei: { contains: search, mode: 'insensitive' as const } },
+            { imeis: { some: { deletedAt: null, OR: [{ value: { contains: search, mode: 'insensitive' as const } }, ...(searchImei ? [{ normalizedValue: { contains: searchImei } }] : [])] } } },
+            { model: { contains: search, mode: 'insensitive' as const } },
+            { color: { contains: search, mode: 'insensitive' as const } },
+            { storage: { contains: search, mode: 'insensitive' as const } },
+            { note: { contains: search, mode: 'insensitive' as const } },
+            { supplierPhone: { contains: search, mode: 'insensitive' as const } },
+            { supplier: { phone: { contains: search, mode: 'insensitive' as const } } },
+            { sales: { some: { customer: { phone: { contains: search, mode: 'insensitive' as const } } } } },
+            { sales: { some: { customer: { name: { contains: search, mode: 'insensitive' as const } } } } },
+            { nasiya: { some: { customer: { phone: { contains: search, mode: 'insensitive' as const } } } } },
+            { nasiya: { some: { customer: { name: { contains: search, mode: 'insensitive' as const } } } } },
+            ...(searchDigits
+              ? [
+                  { sales: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
+                  { nasiya: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
+                ]
+              : []),
+          ],
+        }
+      : {}),
+  }
 }
 
 const shopDeviceListSelect = {
@@ -312,41 +350,9 @@ function mapShopDeviceListRow(device: ShopDeviceListRow): ShopDeviceListItem {
  * customer name+phone).
  */
 export async function getShopDevicesList(shopId: string, query: ShopDevicesQuery = {}): Promise<ShopListPage<ShopDeviceListItem>> {
-  const search = query.search?.trim() || undefined
-  const searchDigits = search ? normalizePhone(search) : null
   const take = clampTake(query.take)
   const skip = clampSkip(query.skip)
-
-  const where: Prisma.DeviceWhereInput = {
-    shopId,
-    deletedAt: null,
-    ...(query.status ? { status: query.status } : {}),
-    ...(query.condition ? { conditionCode: query.condition } : {}),
-    ...(search
-      ? {
-          OR: [
-            { imei: { contains: search, mode: 'insensitive' as const } },
-            { imeis: { some: { deletedAt: null, OR: [{ value: { contains: search, mode: 'insensitive' as const } }, { normalizedValue: { contains: search } }] } } },
-            { model: { contains: search, mode: 'insensitive' as const } },
-            { color: { contains: search, mode: 'insensitive' as const } },
-            { storage: { contains: search, mode: 'insensitive' as const } },
-            { note: { contains: search, mode: 'insensitive' as const } },
-            { supplierPhone: { contains: search, mode: 'insensitive' as const } },
-            { supplier: { phone: { contains: search, mode: 'insensitive' as const } } },
-            { sales: { some: { customer: { phone: { contains: search, mode: 'insensitive' as const } } } } },
-            { sales: { some: { customer: { name: { contains: search, mode: 'insensitive' as const } } } } },
-            { nasiya: { some: { customer: { phone: { contains: search, mode: 'insensitive' as const } } } } },
-            { nasiya: { some: { customer: { name: { contains: search, mode: 'insensitive' as const } } } } },
-            ...(searchDigits
-              ? [
-                  { sales: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
-                  { nasiya: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
-                ]
-              : []),
-          ],
-        }
-      : {}),
-  }
+  const where = buildShopDevicesWhere(shopId, query)
 
   const [rows, total] = await Promise.all([
     prisma.device.findMany({
@@ -395,6 +401,147 @@ export interface ShopNasiyalarQuery {
   take?: number
 }
 
+export function buildShopNasiyalarWhere(shopId: string, query: Pick<ShopNasiyalarQuery, 'search'>): Prisma.NasiyaWhereInput {
+  const search = query.search?.trim() || undefined
+  const searchDigits = search ? normalizePhone(search) : null
+  const searchImei = search?.replace(/[\s-]/g, '') || null
+
+  return {
+    shopId,
+    deletedAt: null,
+    ...(search
+      ? {
+          OR: [
+            { customer: { name: { contains: search, mode: 'insensitive' as const } } },
+            { customer: { phone: { contains: search, mode: 'insensitive' as const } } },
+            { device: { model: { contains: search, mode: 'insensitive' as const } } },
+            { device: { imei: { contains: search, mode: 'insensitive' as const } } },
+            {
+              device: {
+                imeis: {
+                  some: {
+                    deletedAt: null,
+                    OR: [
+                      { value: { contains: search, mode: 'insensitive' as const } },
+                      ...(searchImei ? [{ normalizedValue: { contains: searchImei } }] : []),
+                    ],
+                  },
+                },
+              },
+            },
+            { note: { contains: search, mode: 'insensitive' as const } },
+            ...(searchDigits ? [{ customer: { additionalPhones: { has: searchDigits } } }] : []),
+          ],
+        }
+      : {}),
+  }
+}
+
+interface DerivedStatusIdRow {
+  id: string
+  total: bigint
+}
+
+/**
+ * Page a derived nasiya status in PostgreSQL instead of loading every contract
+ * and filtering in Node. The SQL mirrors deriveContractNasiyaStatus for the
+ * current non-null native contract fields and uses the same Tashkent day
+ * boundary. It returns only IDs; the canonical Prisma projection below still
+ * owns all DTO mapping and payment-score behavior.
+ */
+export async function findShopNasiyaIdsByDerivedStatus(input: {
+  shopId: string
+  status: NasiyaStatusFilter
+  search?: string
+  skip: number
+  take: number
+  now?: Date
+}) {
+  const search = input.search?.trim() || null
+  const searchDigits = search ? normalizePhone(search) : null
+  const searchImei = search?.replace(/[\s-]/g, '') || null
+  const { start } = tashkentDayRange(input.now ?? new Date())
+  const searchPredicate = search
+    ? Prisma.sql`AND (
+        c."name" ILIKE '%' || ${search} || '%'
+        OR c."phone" ILIKE '%' || ${search} || '%'
+        OR d."model" ILIKE '%' || ${search} || '%'
+        OR d."imei" ILIKE '%' || ${search} || '%'
+        OR n."note" ILIKE '%' || ${search} || '%'
+        OR EXISTS (
+          SELECT 1 FROM "DeviceImei" di
+          WHERE di."deviceId" = d."id" AND di."shopId" = n."shopId" AND di."deletedAt" IS NULL
+            AND (di."value" ILIKE '%' || ${search} || '%'
+              OR (${searchImei}::text IS NOT NULL AND di."normalizedValue" ILIKE '%' || ${searchImei} || '%'))
+        )
+        OR (${searchDigits}::text IS NOT NULL AND c."additionalPhones" @> ARRAY[${searchDigits}]::text[])
+      )`
+    : Prisma.empty
+
+  const rows = await prisma.$queryRaw<DerivedStatusIdRow[]>(Prisma.sql`
+    WITH contract_rows AS (
+      SELECT
+        n."id",
+        n."createdAt",
+        n."status",
+        n."contractCurrency",
+        n."contractRemainingAmount",
+        count(s."id") AS schedule_count,
+        coalesce(bool_and(
+          CASE WHEN n."contractCurrency" = 'USD'
+            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+          END <= 0
+        ) FILTER (WHERE s."id" IS NOT NULL), false) AS all_schedules_paid,
+        coalesce(bool_or(
+          (CASE WHEN n."contractCurrency" = 'USD'
+            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+          END > 0)
+          AND coalesce(s."delayedUntil", s."dueDate") < ${start}
+        ), false) AS has_overdue,
+        min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
+          CASE WHEN n."contractCurrency" = 'USD'
+            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+          END > 0
+        ) AS next_due
+      FROM "Nasiya" n
+      JOIN "Customer" c ON c."id" = n."customerId" AND c."shopId" = n."shopId"
+      JOIN "Device" d ON d."id" = n."deviceId" AND d."shopId" = n."shopId"
+      LEFT JOIN "NasiyaSchedule" s ON s."nasiyaId" = n."id" AND s."shopId" = n."shopId"
+      WHERE n."shopId" = ${input.shopId} AND n."deletedAt" IS NULL
+      ${searchPredicate}
+      GROUP BY n."id"
+    ), derived AS (
+      SELECT *, CASE
+        WHEN "status" = 'CANCELLED' THEN 'CANCELLED'
+        WHEN (schedule_count > 0 AND all_schedules_paid)
+          OR (schedule_count = 0 AND CASE WHEN "contractCurrency" = 'USD'
+            THEN round(greatest("contractRemainingAmount", 0), 2)
+            ELSE round(greatest("contractRemainingAmount", 0), 0)
+          END <= 0) THEN 'COMPLETED'
+        WHEN has_overdue THEN 'OVERDUE'
+        ELSE 'ACTIVE'
+      END AS display_status
+      FROM contract_rows
+    )
+    SELECT "id", count(*) OVER()::bigint AS total
+    FROM derived
+    WHERE display_status = ${input.status}
+    ORDER BY next_due ASC NULLS LAST, "createdAt" DESC, "id" ASC
+    OFFSET ${input.skip} LIMIT ${input.take}
+  `)
+
+  return {
+    ids: rows.map((row) => row.id),
+    // An offset beyond the final row yields no window-count row. The UI always
+    // clamps pages after receiving total; returning 0 here safely self-heals a
+    // stale URL without an unbounded fallback query.
+    total: rows[0] ? Number(rows[0].total) : 0,
+  }
+}
+
 /**
  * Real page/skip/take pagination for the nasiyalar list. `search` mirrors
  * the OR clause already used by GET /api/nasiya (customer name/phone,
@@ -410,36 +557,21 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
   // currency (never hardcode UZS) — see docs/nasiya-payment-scoring.md.
   const currency = await getShopCurrencyContext(shopId)
 
-  const search = query.search?.trim() || undefined
-  const searchDigits = search ? normalizePhone(search) : null
   const take = clampTake(query.take)
   const skip = clampSkip(query.skip)
-
-  const where: Prisma.NasiyaWhereInput = {
-    shopId,
-    deletedAt: null,
-    ...(search
-      ? {
-          OR: [
-            { customer: { name: { contains: search, mode: 'insensitive' as const } } },
-            { customer: { phone: { contains: search, mode: 'insensitive' as const } } },
-            { device: { model: { contains: search, mode: 'insensitive' as const } } },
-            { device: { imei: { contains: search, mode: 'insensitive' as const } } },
-            { note: { contains: search, mode: 'insensitive' as const } },
-            ...(searchDigits ? [{ customer: { additionalPhones: { has: searchDigits } } }] : []),
-          ],
-        }
-      : {}),
-  }
+  const where = buildShopNasiyalarWhere(shopId, query)
+  const derivedStatusPage = query.status
+    ? await findShopNasiyaIdsByDerivedStatus({ shopId, status: query.status, search: query.search, skip, take })
+    : null
 
   const [rows, rawTotal] = await Promise.all([
     prisma.nasiya.findMany({
-    where,
+    where: derivedStatusPage ? { ...where, id: { in: derivedStatusPage.ids } } : where,
     orderBy: { createdAt: 'desc' },
     // A requested status is itself derived from contract schedules. Fetch
     // matching search candidates first, then filter/paginate the derived
     // status below; raw status filtering here would hide P0-01 debt.
-    ...(query.status ? {} : { skip, take }),
+    ...(derivedStatusPage ? {} : { skip, take }),
     select: {
       id: true,
       totalAmount: true,
@@ -487,7 +619,7 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
       },
     },
     }),
-    prisma.nasiya.count({ where }),
+    derivedStatusPage ? Promise.resolve(derivedStatusPage.total) : prisma.nasiya.count({ where }),
   ])
 
   // Single `now` for the whole batch so all rows are judged against the same instant.
@@ -580,8 +712,8 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
     })
 
   const matchingItems = query.status ? derivedItems.filter((item) => item.displayStatus === query.status) : derivedItems
-  const items = query.status ? matchingItems.slice(skip, skip + take) : matchingItems
-  const total = query.status ? matchingItems.length : rawTotal
+  const items = matchingItems
+  const total = rawTotal
 
   return { items, total, skip, take }
 }

@@ -12,11 +12,11 @@ function read(rel: string): string {
  * with a "truncated" banner and no way to reach hidden rows. Mirrors
  * tests/mijozlar-pagination.guard.test.ts.
  */
-describe('GET /api/devices: opt-in paginated envelope, existing plain-array consumers untouched', () => {
+describe('GET /api/devices: canonical paginated envelope', () => {
   const route = read('src/app/api/devices/route.ts')
 
-  it('only returns {items, total, skip, take} when ?paginated=1 is present', () => {
-    expect(route).toContain("searchParams.get('paginated') === '1'")
+  it('returns {items, total, skip, take} by default', () => {
+    expect(route).not.toContain("searchParams.get('paginated') === '1'")
     expect(route).toContain('ok({ items, total, skip, take }')
   })
 
@@ -24,8 +24,9 @@ describe('GET /api/devices: opt-in paginated envelope, existing plain-array cons
     expect(route).toContain('getShopDevicesList(shopId, {')
   })
 
-  it('the non-paginated (default) mode is untouched: still returns the plain devices array', () => {
-    expect(route).toContain("return ok(devices, \"Qurilmalar ro'yxati\")")
+  it('does not keep a second plain-array query/DTO that can drift from the list contract', () => {
+    expect(route).not.toContain('const devices = await prisma.device.findMany')
+    expect(route).not.toContain('return ok(devices,')
   })
 })
 

@@ -31,9 +31,13 @@ describe('cron overdue-reminder guard (req 12)', () => {
     expect(src).toContain('prisma.$transaction')
   })
 
-  it('respects reminderEnabled and excludes cancelled/returned nasiyas', () => {
-    expect(src).toContain('reminderEnabled: true')
-    expect(src).toContain('deletedAt: null')
+  it('transitions active debt regardless of reminder preference, but queues alerts only when enabled', () => {
+    const overdueStart = src.indexOf('const overdue = await prisma.nasiyaSchedule.findMany')
+    const overdueLoop = src.indexOf('for (const schedule of overdue)')
+    const selection = src.slice(overdueStart, overdueLoop)
+    expect(selection).not.toContain('reminderEnabled: true')
+    expect(selection).toContain("status: { in: ['ACTIVE', 'OVERDUE'] }")
+    expect(src).toContain('if (schedule.nasiya.reminderEnabled)')
   })
 
   it('respects disabled sale reminders for both due-today and overdue sales', () => {

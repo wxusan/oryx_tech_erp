@@ -22,7 +22,7 @@ describe('server-side search covers note/comment fields', () => {
   })
 
   it('GET /api/devices searches the device note field', () => {
-    const source = read('src/app/api/devices/route.ts')
+    const source = read('src/lib/server/shop-lists.ts')
     expect(source).toMatch(/\{\s*note:\s*\{\s*contains:\s*search/)
   })
 
@@ -43,7 +43,7 @@ describe('server-side search covers note/comment fields', () => {
 
 describe('server-side search covers customer name (item 14)', () => {
   it('GET /api/devices searches the sale/nasiya customer name, not just phone', () => {
-    const source = read('src/app/api/devices/route.ts')
+    const source = read('src/lib/server/shop-lists.ts')
     expect(source).toMatch(/sales:\s*\{\s*some:\s*\{\s*customer:\s*\{\s*name:/)
     expect(source).toMatch(/nasiya:\s*\{\s*some:\s*\{\s*customer:\s*\{\s*name:/)
   })
@@ -62,7 +62,7 @@ describe('server-side search matches additional customer phones (item 4)', () =>
   })
 
   it('GET /api/devices matches additionalPhones on the sale/nasiya customer', () => {
-    const source = read('src/app/api/devices/route.ts')
+    const source = read('src/lib/server/shop-lists.ts')
     expect(source).toMatch(/customer:\s*\{\s*additionalPhones:\s*\{\s*has:\s*searchDigits/)
   })
 

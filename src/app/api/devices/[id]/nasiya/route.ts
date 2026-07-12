@@ -20,7 +20,7 @@ import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
-import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { createMoneyInputConverter, moneyInputMeta, type MoneyInputResult } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
@@ -63,14 +63,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       return badRequest("Pasport rasmi boshqa do'konga tegishli")
     }
     const normalizedPhone = normalizePhone(customerPhone)
-    let totalInput: Awaited<ReturnType<typeof moneyInputToUzs>>
-    let downPaymentInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    let totalInput: MoneyInputResult
+    let downPaymentInput: MoneyInputResult
     let monthlyPaymentOverrideUzs: number | undefined
     try {
-      totalInput = await moneyInputToUzs(totalAmount, parsed.data.inputCurrency)
-      downPaymentInput = await moneyInputToUzs(downPayment, parsed.data.inputCurrency)
+      const convertMoney = await createMoneyInputConverter(parsed.data.inputCurrency)
+      totalInput = convertMoney(totalAmount)
+      downPaymentInput = convertMoney(downPayment)
       if (useMonthlyPaymentOverride && monthlyPaymentOverrideInput !== undefined) {
-        monthlyPaymentOverrideUzs = (await moneyInputToUzs(monthlyPaymentOverrideInput, parsed.data.inputCurrency)).amountUzs
+        monthlyPaymentOverrideUzs = convertMoney(monthlyPaymentOverrideInput).amountUzs
       }
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')

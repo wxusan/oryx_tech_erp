@@ -2,11 +2,8 @@
  * GET /api/nasiya?shopId=...&status=...&search=...&skip=...&take=... — paginated nasiyalar list
  *
  * Auth: SHOP_ADMIN (scoped to their own shop) or SUPER_ADMIN (requires shopId param)
- * Returns { items, total, skip, take } (same envelope shape /api/logs and
- * /api/customers already established) — this route has no consumers besides
- * the nasiyalar list page itself, so the shape can change directly here
- * without an opt-in flag (see /api/devices for the opt-in variant, which DOES
- * have other consumers expecting a plain array).
+ * Returns { items, total, skip, take }, the same canonical bounded envelope as
+ * /api/devices, /api/logs and /api/customers.
  *
  * The actual query/derivation/scoring logic lives in
  * `getShopNasiyalarList` (src/lib/server/shop-lists.ts) — reused as-is so the

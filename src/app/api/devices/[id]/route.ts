@@ -18,7 +18,7 @@ import { Prisma } from '@/generated/prisma/client'
 import type { ZodError } from 'zod'
 import { logger } from '@/lib/logger'
 import { phoneSchema } from '@/lib/validations'
-import { deviceConditionLabel, formatDeviceStorage, normalizeImei } from '@/lib/device-specs'
+import { deviceConditionLabel, formatDeviceStorage, normalizeImei, resolveImeiPairUpdate } from '@/lib/device-specs'
 import { getShopDeviceListItemsByIds } from '@/lib/server/shop-lists'
 import { latestChangeCursorForShop } from '@/lib/server/change-events'
 
@@ -31,7 +31,6 @@ type RouteContext = { params: Promise<{ id: string }> }
 const updateDeviceSchema = z.object({
   model: z.string().min(1).optional(),
   color: z.string().optional(),
-  storage: z.string().optional(),
   storageAmount: z.number().positive().optional(),
   storageUnit: z.enum(['GB', 'TB']).optional(),
   conditionCode: z.enum(['NEW', 'USED']).optional(),
@@ -165,6 +164,9 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
           take: 1,
           select: {
             refundAmount: true,
+            refundInputAmount: true,
+            refundInputCurrency: true,
+            refundExchangeRateAtCreation: true,
             refundMethod: true,
             note: true,
             createdAt: true,
@@ -251,12 +253,20 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (!existing) return notFound("Qurilma topilmadi")
 
     const { reason, inputCurrency, secondaryImei: secondaryImeiInput, ...updateData } = parsed.data
-    if (updateData.imei) updateData.imei = normalizeImei(updateData.imei)!
-    const secondaryImei = secondaryImeiInput ? normalizeImei(secondaryImeiInput) : null
     const identityChanged = updateData.imei !== undefined || secondaryImeiInput !== undefined
-    const primaryImei = updateData.imei ?? existing.imeis.find((entry) => entry.slot === 'PRIMARY')?.value ?? existing.imei
-    if (secondaryImei && secondaryImei === primaryImei) return badRequest('Asosiy va ikkinchi IMEI bir xil bo\'lishi mumkin emas')
-    if (updateData.storageAmount !== undefined && updateData.storageUnit !== undefined) updateData.storage = `${updateData.storageAmount}${updateData.storageUnit}`
+    const imeiUpdate = resolveImeiPairUpdate(
+      {
+        primary: existing.imeis.find((entry) => entry.slot === 'PRIMARY')?.value ?? existing.imei,
+        secondary: existing.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
+      },
+      { primary: updateData.imei, secondary: secondaryImeiInput },
+    )
+    if (!imeiUpdate.ok) return badRequest(imeiUpdate.message)
+    const { primaryImei, secondaryImei } = imeiUpdate
+    if (updateData.imei !== undefined) updateData.imei = primaryImei
+    if (updateData.storageAmount !== undefined && updateData.storageUnit !== undefined) {
+      (updateData as typeof updateData & { storage?: string }).storage = formatDeviceStorage(updateData)
+    }
     if (updateData.conditionCode) (updateData as typeof updateData & { condition?: string }).condition = updateData.conditionCode === 'NEW' ? 'Yangi' : 'B/U'
     const hasDeviceChanges = identityChanged || Object.entries(updateData).some(([key, value]) => {
       if (value === undefined) return false

@@ -27,11 +27,11 @@ import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
-import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { createMoneyInputConverter, moneyInputMeta, type MoneyInputResult } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
-import { normalizeImei } from '@/lib/device-specs'
+import { formatDeviceStorage, normalizeImei } from '@/lib/device-specs'
 
 export async function POST(req: NextRequest) {
   try {
@@ -57,19 +57,21 @@ export async function POST(req: NextRequest) {
       return badRequest(firstError)
     }
     const data = parsed.data
+    const storage = formatDeviceStorage(data) || null
 
     const enteredImei = data.imei ? normalizeImei(data.imei) ?? '' : ''
     const secondaryImei = data.secondaryImei ? normalizeImei(data.secondaryImei) : null
     const normalizedPhone = normalizePhone(data.customerPhone)
-    let originalTotalInput: Awaited<ReturnType<typeof moneyInputToUzs>>
-    let alreadyPaidInput: Awaited<ReturnType<typeof moneyInputToUzs>>
-    let remainingDebtInput: Awaited<ReturnType<typeof moneyInputToUzs>>
-    let monthlyPaymentInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    let originalTotalInput: MoneyInputResult
+    let alreadyPaidInput: MoneyInputResult
+    let remainingDebtInput: MoneyInputResult
+    let monthlyPaymentInput: MoneyInputResult
     try {
-      originalTotalInput = await moneyInputToUzs(data.originalTotalAmount, data.inputCurrency)
-      alreadyPaidInput = await moneyInputToUzs(data.alreadyPaidBeforeImport, data.inputCurrency)
-      remainingDebtInput = await moneyInputToUzs(data.remainingDebt, data.inputCurrency)
-      monthlyPaymentInput = await moneyInputToUzs(data.monthlyPayment, data.inputCurrency)
+      const convertMoney = await createMoneyInputConverter(data.inputCurrency)
+      originalTotalInput = convertMoney(data.originalTotalAmount)
+      alreadyPaidInput = convertMoney(data.alreadyPaidBeforeImport)
+      remainingDebtInput = convertMoney(data.remainingDebt)
+      monthlyPaymentInput = convertMoney(data.monthlyPayment)
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
@@ -179,7 +181,7 @@ export async function POST(req: NextRequest) {
           shopId,
           model: data.deviceModel,
           color: data.color || null,
-          storage: data.storage || null,
+          storage,
           storageAmount: data.storageAmount ?? null,
           storageUnit: data.storageUnit ?? null,
           conditionCode: data.conditionCode,
@@ -294,7 +296,7 @@ export async function POST(req: NextRequest) {
         customerPhone: data.customerPhone,
         device: {
           deviceModel: data.deviceModel,
-          storage: data.storage,
+          storage,
           color: data.color,
           imei: enteredImei || null,
           secondaryImei,

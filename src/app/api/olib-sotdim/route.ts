@@ -26,7 +26,7 @@ import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
-import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { createMoneyInputConverter, moneyInputMeta, type MoneyInputResult } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
@@ -173,19 +173,21 @@ export async function POST(req: NextRequest) {
       return badRequest("Qurilma rasmi faqat shu do'kon private storage papkasidan bo'lishi kerak")
     }
 
-    let purchaseInput: Awaited<ReturnType<typeof moneyInputToUzs>>
-    let saleInput: Awaited<ReturnType<typeof moneyInputToUzs>>
-    let amountPaidInput: Awaited<ReturnType<typeof moneyInputToUzs>> | null = null
+    let purchaseInput: MoneyInputResult
+    let saleInput: MoneyInputResult
+    let amountPaidInput: MoneyInputResult | null = null
     try {
-      purchaseInput = await moneyInputToUzs(d.purchasePrice, d.inputCurrency)
-      saleInput = await moneyInputToUzs(d.salePrice, d.inputCurrency)
-      if (d.amountPaid !== undefined) amountPaidInput = await moneyInputToUzs(d.amountPaid, d.inputCurrency)
+      const convertMoney = await createMoneyInputConverter(d.inputCurrency)
+      purchaseInput = convertMoney(d.purchasePrice)
+      saleInput = convertMoney(d.salePrice)
+      if (d.amountPaid !== undefined) amountPaidInput = convertMoney(d.amountPaid)
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
     const purchasePriceUzs = purchaseInput.amountUzs
     const salePriceUzs = saleInput.amountUzs
     const amountPaidUzs = amountPaidInput?.amountUzs
+    const storage = formatDeviceStorage({ storageAmount: d.storageAmount, storageUnit: d.storageUnit })
 
     // Native contract-currency ledger — computed from the RAW inputs (not
     // UZS-converted), in the currency this operation was actually made in.
@@ -220,7 +222,7 @@ export async function POST(req: NextRequest) {
           shopId,
           model: d.model,
           color: d.color,
-          storage: d.storage,
+          storage,
           storageAmount: d.storageAmount,
           storageUnit: d.storageUnit,
           batteryHealth: d.batteryHealth,
@@ -341,7 +343,7 @@ export async function POST(req: NextRequest) {
       })
       const message = olibSotdimCreatedMessage({
         shopName: shop?.name ?? '',
-        device: { deviceModel: d.model, storage: d.storage, color: d.color, batteryHealth: d.batteryHealth, imei, secondaryImei, conditionLabel: d.conditionCode === 'NEW' ? 'Yangi' : 'B/U' },
+        device: { deviceModel: d.model, storage, color: d.color, batteryHealth: d.batteryHealth, imei, secondaryImei, conditionLabel: d.conditionCode === 'NEW' ? 'Yangi' : 'B/U' },
         supplierName: d.supplierName,
         supplierPhone: d.supplierPhone,
         supplierLocation: d.supplierLocation,
