@@ -167,10 +167,10 @@ describe('Prisma schema/migration guard: the columns this page depends on actual
   const schema = read('prisma/schema.prisma')
 
   it('Device has the purchase-currency columns', () => {
-    expect(schema).toContain('purchaseCurrency               CurrencyCode @default(UZS)')
-    expect(schema).toContain('purchaseInputAmount            Decimal      @default(0) @db.Decimal(12, 2)')
-    expect(schema).toContain('purchaseExchangeRateAtCreation Decimal?     @db.Decimal(12, 4)')
-    expect(schema).toContain('purchaseAmountUzsSnapshot      Decimal      @default(0) @db.Decimal(12, 2)')
+    expect(schema).toMatch(/purchaseCurrency\s+CurrencyCode\s+@default\(UZS\)/)
+    expect(schema).toMatch(/purchaseInputAmount\s+Decimal\s+@default\(0\) @db\.Decimal\(12, 2\)/)
+    expect(schema).toMatch(/purchaseExchangeRateAtCreation\s+Decimal\?\s+@db\.Decimal\(12, 4\)/)
+    expect(schema).toMatch(/purchaseAmountUzsSnapshot\s+Decimal\s+@default\(0\) @db\.Decimal\(12, 2\)/)
   })
 
   it('Sale has the contract-currency columns', () => {

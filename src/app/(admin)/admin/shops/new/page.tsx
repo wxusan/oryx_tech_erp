@@ -4,6 +4,7 @@ import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { navigateAfterMutation } from '@/lib/client-events'
+import { isValidPhone } from '@/lib/phone'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { Textarea } from '@/components/ui/textarea'
@@ -89,11 +90,11 @@ export default function NewShopPage() {
   const formValid =
     shopName.trim() !== '' &&
     ownerName.trim() !== '' &&
-    ownerPhone.trim() !== '' &&
+    isValidPhone(ownerPhone) &&
     shopNumber.trim() !== '' &&
     admins.every((admin) =>
       admin.name.trim() !== '' &&
-      admin.phone.trim() !== '' &&
+      isValidPhone(admin.phone) &&
       admin.login.trim() !== '' &&
       admin.password.trim() !== ''
     )

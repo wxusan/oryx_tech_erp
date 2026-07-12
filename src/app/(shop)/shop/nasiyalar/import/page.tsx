@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { StorageInput } from '@/components/ui/storage-input'
 import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
@@ -15,6 +16,7 @@ import { convertUsdToUzs, currencyLabel, formatMoneyByCurrency } from '@/lib/cur
 import { uzDate } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { navigateAfterMutation } from '@/lib/client-events'
+import { isValidPhone } from '@/lib/phone'
 
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
   if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
@@ -93,7 +95,7 @@ export default function ImportNasiyaPage() {
 
   const canSubmit =
     form.customerName.trim().length >= 2 &&
-    form.customerPhone.trim().length >= 9 &&
+    isValidPhone(form.customerPhone) &&
     form.deviceModel.trim().length >= 1 &&
     !!form.conditionCode &&
     Number(form.originalTotalAmount) > 0 &&
@@ -120,7 +122,6 @@ export default function ImportNasiyaPage() {
           deviceModel: form.deviceModel.trim(),
           imei: form.imei.trim() || undefined,
           secondaryImei: form.secondaryImei.trim() || undefined,
-          storage: form.storage.trim() ? `${form.storage}${form.storageUnit}` : undefined,
           storageAmount: form.storage.trim() ? Number(form.storage) : undefined,
           storageUnit: form.storage.trim() ? form.storageUnit : undefined,
           conditionCode: form.conditionCode,
@@ -190,15 +191,13 @@ export default function ImportNasiyaPage() {
         <Field label="Ikkinchi IMEI">
           <Input value={form.secondaryImei} onChange={(e) => set('secondaryImei')(e.target.value)} inputMode="numeric" maxLength={15} className="h-10 rounded-lg border-zinc-200 font-mono" />
         </Field>
-        <Field label="Xotira">
-          <div className="flex gap-2">
-            <Input type="number" min="0.01" step="0.01" value={form.storage} onChange={(e) => set('storage')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
-            <Select value={form.storageUnit} onValueChange={(value) => value && set('storageUnit')(value)}>
-              <SelectTrigger className="h-10 w-24"><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="GB">GB</SelectItem><SelectItem value="TB">TB</SelectItem></SelectContent>
-            </Select>
-          </div>
-        </Field>
+        <StorageInput
+          id="import-storage"
+          amount={form.storage}
+          unit={form.storageUnit}
+          onAmountChange={(value) => set('storage')(value)}
+          onUnitChange={(value) => set('storageUnit')(value)}
+        />
         <Field label="Holati" required>
           <Select value={form.conditionCode} onValueChange={(value) => value && set('conditionCode')(value)}>
             <SelectTrigger className="h-10"><SelectValue placeholder="Tanlang" /></SelectTrigger>
@@ -227,10 +226,10 @@ export default function ImportNasiyaPage() {
           <MoneyInput currency={currency.currency} value={form.monthlyPayment} onChange={set('monthlyPayment')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
         <Field label="Keyingi to'lov sanasi" required>
-          <DateInput value={form.nextPaymentDate} onValueChange={set('nextPaymentDate')} className="h-10 rounded-lg border-zinc-200" />
+          <DateInput aria-label="Keyingi to'lov sanasi" value={form.nextPaymentDate} onValueChange={set('nextPaymentDate')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
         <Field label="Eski sotuv sanasi">
-          <DateInput value={form.originalSaleDate} onValueChange={set('originalSaleDate')} className="h-10 rounded-lg border-zinc-200" />
+          <DateInput aria-label="Eski sotuv sanasi" value={form.originalSaleDate} onValueChange={set('originalSaleDate')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
       </Section>
 

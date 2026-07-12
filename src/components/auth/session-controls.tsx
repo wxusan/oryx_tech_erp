@@ -23,9 +23,10 @@ export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsP
   const logout = useCallback((broadcast = true) => {
     if (signingOutRef.current) return
     signingOutRef.current = true
-    if (broadcast) {
-      try { window.localStorage.setItem(LOGOUT_EVENT_KEY, String(Date.now())) } catch {}
-    }
+    try {
+      if (broadcast) window.localStorage.setItem(LOGOUT_EVENT_KEY, String(Date.now()))
+      window.localStorage.removeItem(ADMIN_ACTIVITY_KEY)
+    } catch {}
     clearNavigationClientState()
     void signOut({ callbackUrl })
   }, [callbackUrl])
@@ -81,9 +82,14 @@ export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsP
     window.addEventListener('storage', handleStorage)
     document.addEventListener('visibilitychange', checkDeadline)
 
-    const initial = readLastActivity()
+    // Mounting the authenticated admin shell follows a successful login,
+    // reload, or intentional navigation. Count that as real activity so a
+    // stale timestamp left by a prior session cannot immediately sign out the
+    // newly authenticated administrator.
+    const initial = Date.now()
+    lastBroadcastRef.current = initial
     try {
-      if (!window.localStorage.getItem(ADMIN_ACTIVITY_KEY)) window.localStorage.setItem(ADMIN_ACTIVITY_KEY, String(initial))
+      window.localStorage.setItem(ADMIN_ACTIVITY_KEY, String(initial))
     } catch {}
     scheduleFrom(initial)
 

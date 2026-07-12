@@ -12,6 +12,7 @@ import { displayImei } from '@/lib/device-display'
 import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
+import { DeviceConditionBadge } from '@/components/shop/device-condition-badge'
 import { replaceListUrlState } from '@/lib/list-url-state'
 import type { DeviceListItem, DeviceListPage, DeviceStatus } from '@/lib/device-list-contract'
 import { queryKeys, type DeviceListQuery } from '@/lib/query-keys'
@@ -100,7 +101,7 @@ const DeviceTableRow = memo(function DeviceTableRow({
 }) {
   return (
     <tr className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
-      <td className="px-4 py-3 font-medium text-zinc-900"><div>{d.model}</div><div className="mt-0.5 text-[11px] font-medium text-zinc-500">{d.conditionLabel}</div></td>
+      <td className="px-4 py-3 font-medium text-zinc-900"><div>{d.model}</div><DeviceConditionBadge label={d.conditionLabel} className="mt-1" /></td>
       <td className="px-4 py-3 text-zinc-600">{d.color ?? '—'}</td>
       <td className="px-4 py-3 text-zinc-600">{d.storageDisplay || '—'}</td>
       <td className="px-4 py-3 text-zinc-600">{d.batteryHealth != null ? `${d.batteryHealth}%` : '—'}</td>
@@ -147,7 +148,8 @@ const DeviceMobileCard = memo(function DeviceMobileCard({
     <div className="space-y-2 rounded border border-zinc-200 p-3">
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="font-medium text-zinc-900">{d.model} <span className="text-xs font-normal text-zinc-500">· {d.conditionLabel}</span></div>
+          <div className="font-medium text-zinc-900">{d.model}</div>
+          <DeviceConditionBadge label={d.conditionLabel} className="mt-1" />
           <div className="mt-0.5 font-mono text-xs text-zinc-500">{displayImei(d.primaryImei)}{d.secondaryImei && ` · ${displayImei(d.secondaryImei)}`}</div>
         </div>
         <StatusBadge status={d.status} />

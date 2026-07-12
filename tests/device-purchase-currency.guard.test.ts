@@ -17,11 +17,11 @@ describe('Device purchase-currency schema (additive, no drops/renames)', () => {
   const schema = read('prisma/schema.prisma')
 
   it('Device model has the new purchase* fields alongside the untouched legacy purchasePrice', () => {
-    expect(schema).toContain('purchasePrice                  Decimal      @db.Decimal(12, 2)')
-    expect(schema).toContain('purchaseCurrency               CurrencyCode @default(UZS)')
-    expect(schema).toContain('purchaseInputAmount            Decimal      @default(0) @db.Decimal(12, 2)')
-    expect(schema).toContain('purchaseExchangeRateAtCreation Decimal?     @db.Decimal(12, 4)')
-    expect(schema).toContain('purchaseAmountUzsSnapshot      Decimal      @default(0) @db.Decimal(12, 2)')
+    expect(schema).toMatch(/purchasePrice\s+Decimal\s+@db\.Decimal\(12, 2\)/)
+    expect(schema).toMatch(/purchaseCurrency\s+CurrencyCode\s+@default\(UZS\)/)
+    expect(schema).toMatch(/purchaseInputAmount\s+Decimal\s+@default\(0\) @db\.Decimal\(12, 2\)/)
+    expect(schema).toMatch(/purchaseExchangeRateAtCreation\s+Decimal\?\s+@db\.Decimal\(12, 4\)/)
+    expect(schema).toMatch(/purchaseAmountUzsSnapshot\s+Decimal\s+@default\(0\) @db\.Decimal\(12, 2\)/)
   })
 
   it('the migration is additive-only (ADD COLUMN, no DROP COLUMN/RENAME COLUMN) and backfills existing rows to UZS 1:1', () => {

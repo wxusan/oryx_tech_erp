@@ -88,3 +88,12 @@ export function validateImeiPair(primary: string, secondary?: string | null) {
   if (secondaryImei === primaryImei) return { ok: false as const, message: 'Asosiy va ikkinchi IMEI bir xil bo\'lishi mumkin emas' }
   return { ok: true as const, primaryImei, secondaryImei }
 }
+
+export function resolveImeiPairUpdate(
+  existing: { primary: string; secondary: string | null },
+  update: { primary?: string; secondary?: string | null },
+) {
+  const primary = update.primary === undefined ? existing.primary : update.primary
+  const secondary = update.secondary === undefined ? existing.secondary : update.secondary
+  return validateImeiPair(primary, secondary)
+}

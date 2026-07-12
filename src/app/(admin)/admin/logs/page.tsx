@@ -170,12 +170,14 @@ export default function LogsPage() {
         {/* Date range */}
         <div className="flex items-center gap-2">
           <DateInput
+            aria-label="Boshlanish sanasi"
             value={dateFrom}
             onValueChange={(value) => { setDateFrom(value); setPage(1) }}
             className="h-8 text-xs rounded-none border-zinc-200 w-36"
           />
           <span className="text-xs text-zinc-400">—</span>
           <DateInput
+            aria-label="Tugash sanasi"
             value={dateTo}
             onValueChange={(value) => { setDateTo(value); setPage(1) }}
             className="h-8 text-xs rounded-none border-zinc-200 w-36"

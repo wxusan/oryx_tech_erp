@@ -27,6 +27,7 @@ describe('createOlibSotdimSchema', () => {
   it('accepts a valid "paid now" operation', () => {
     const result = createOlibSotdimSchema.safeParse(baseInput())
     expect(result.success).toBe(true)
+    if (result.success) expect(result.data).not.toHaveProperty('storage')
   })
 
   it('requires supplier payment method when supplierPaidNow is true', () => {

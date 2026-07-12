@@ -666,6 +666,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                     {carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"} <span className="text-red-500">*</span>
                   </label>
                   <DateInput
+                    aria-label={carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"}
                     value={payDate}
                     onValueChange={setPayDate}
                     className="h-11 rounded-lg border-zinc-200 text-sm"
