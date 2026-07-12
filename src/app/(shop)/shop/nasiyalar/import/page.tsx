@@ -6,9 +6,11 @@ import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { convertUsdToUzs, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { uzDate } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
@@ -48,7 +50,10 @@ export default function ImportNasiyaPage() {
     customerPhone: '',
     deviceModel: '',
     imei: '',
+    secondaryImei: '',
     storage: '',
+    storageUnit: 'GB' as 'GB' | 'TB',
+    conditionCode: '' as '' | 'NEW' | 'USED',
     color: '',
     batteryHealth: '',
     originalTotalAmount: '',
@@ -90,6 +95,7 @@ export default function ImportNasiyaPage() {
     form.customerName.trim().length >= 2 &&
     form.customerPhone.trim().length >= 9 &&
     form.deviceModel.trim().length >= 1 &&
+    !!form.conditionCode &&
     Number(form.originalTotalAmount) > 0 &&
     Number(form.remainingDebt) > 0 &&
     Number(form.monthlyPayment) > 0 &&
@@ -113,7 +119,11 @@ export default function ImportNasiyaPage() {
           customerPhone: form.customerPhone.trim(),
           deviceModel: form.deviceModel.trim(),
           imei: form.imei.trim() || undefined,
-          storage: form.storage.trim() || undefined,
+          secondaryImei: form.secondaryImei.trim() || undefined,
+          storage: form.storage.trim() ? `${form.storage}${form.storageUnit}` : undefined,
+          storageAmount: form.storage.trim() ? Number(form.storage) : undefined,
+          storageUnit: form.storage.trim() ? form.storageUnit : undefined,
+          conditionCode: form.conditionCode,
           color: form.color.trim() || undefined,
           batteryHealth: form.batteryHealth.trim() ? Number(form.batteryHealth) : undefined,
           originalTotalAmount: Number(form.originalTotalAmount),
@@ -121,8 +131,8 @@ export default function ImportNasiyaPage() {
           remainingDebt: Number(form.remainingDebt),
           monthlyPayment: Number(form.monthlyPayment),
           inputCurrency: currency.currency,
-          nextPaymentDate: new Date(form.nextPaymentDate).toISOString(),
-          originalSaleDate: form.originalSaleDate ? new Date(form.originalSaleDate).toISOString() : undefined,
+          nextPaymentDate: form.nextPaymentDate,
+          originalSaleDate: form.originalSaleDate || undefined,
           importNote: form.importNote.trim() || undefined,
         }),
       })
@@ -174,11 +184,26 @@ export default function ImportNasiyaPage() {
         <Field label="Model" required>
           <Input value={form.deviceModel} onChange={(e) => set('deviceModel')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
         </Field>
-        <Field label="IMEI">
-          <Input value={form.imei} onChange={(e) => set('imei')(e.target.value)} className="h-10 rounded-lg border-zinc-200 font-mono" />
+        <Field label="Asosiy IMEI">
+          <Input value={form.imei} onChange={(e) => set('imei')(e.target.value)} inputMode="numeric" maxLength={15} className="h-10 rounded-lg border-zinc-200 font-mono" />
+        </Field>
+        <Field label="Ikkinchi IMEI">
+          <Input value={form.secondaryImei} onChange={(e) => set('secondaryImei')(e.target.value)} inputMode="numeric" maxLength={15} className="h-10 rounded-lg border-zinc-200 font-mono" />
         </Field>
         <Field label="Xotira">
-          <Input value={form.storage} onChange={(e) => set('storage')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
+          <div className="flex gap-2">
+            <Input type="number" min="0.01" step="0.01" value={form.storage} onChange={(e) => set('storage')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
+            <Select value={form.storageUnit} onValueChange={(value) => value && set('storageUnit')(value)}>
+              <SelectTrigger className="h-10 w-24"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="GB">GB</SelectItem><SelectItem value="TB">TB</SelectItem></SelectContent>
+            </Select>
+          </div>
+        </Field>
+        <Field label="Holati" required>
+          <Select value={form.conditionCode} onValueChange={(value) => value && set('conditionCode')(value)}>
+            <SelectTrigger className="h-10"><SelectValue placeholder="Tanlang" /></SelectTrigger>
+            <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
+          </Select>
         </Field>
         <Field label="Rang">
           <Input value={form.color} onChange={(e) => set('color')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
@@ -202,10 +227,10 @@ export default function ImportNasiyaPage() {
           <MoneyInput currency={currency.currency} value={form.monthlyPayment} onChange={set('monthlyPayment')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
         <Field label="Keyingi to'lov sanasi" required>
-          <Input type="date" value={form.nextPaymentDate} onChange={(e) => set('nextPaymentDate')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
+          <DateInput value={form.nextPaymentDate} onValueChange={set('nextPaymentDate')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
         <Field label="Eski sotuv sanasi">
-          <Input type="date" value={form.originalSaleDate} onChange={(e) => set('originalSaleDate')(e.target.value)} className="h-10 rounded-lg border-zinc-200" />
+          <DateInput value={form.originalSaleDate} onValueChange={set('originalSaleDate')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
       </Section>
 

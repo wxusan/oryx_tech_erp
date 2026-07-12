@@ -14,9 +14,12 @@ export interface InStockPickerDevice {
   model: string
   color: string | null
   storage: string | null
+  storageDisplay: string | null
   batteryHealth: number | null
   purchasePrice: number
   imei: string
+  secondaryImei: string | null
+  conditionLabel: string
   status: string
 }
 
@@ -43,9 +46,11 @@ interface Props {
 function deviceMeta(device: InStockPickerDevice) {
   return [
     device.color,
-    device.storage,
+    device.storageDisplay || device.storage,
     device.batteryHealth != null ? `${device.batteryHealth}%` : null,
+    device.conditionLabel,
     `IMEI: ${displayImei(device.imei)}`,
+    device.secondaryImei ? `IMEI 2: ${displayImei(device.secondaryImei)}` : null,
   ]
     .filter(Boolean)
     .join(' · ')

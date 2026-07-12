@@ -7,11 +7,12 @@ import { useRouter } from 'next/navigation'
 import { navigateAfterMutation } from '@/lib/client-events'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
+import { currencyLabel, formatUserFacingMoney } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { tashkentTodayInputValue } from '@/lib/timezone'
@@ -33,9 +34,11 @@ export default function NewOlibSotdimPage() {
   const [model, setModel] = useState('')
   const [color, setColor] = useState('')
   const [storage, setStorage] = useState('')
+  const [storageUnit, setStorageUnit] = useState<'GB' | 'TB'>('GB')
   const [battery, setBattery] = useState('')
-  const [condition, setCondition] = useState('')
+  const [conditionCode, setConditionCode] = useState<'NEW' | 'USED' | ''>('')
   const [imei, setImei] = useState('')
+  const [secondaryImei, setSecondaryImei] = useState('')
   const [deviceNote, setDeviceNote] = useState('')
   const [imageFiles, setImageFiles] = useState<File[]>([])
   const imagePreviews = useMemo(() => imageFiles.map((file) => URL.createObjectURL(file)), [imageFiles])
@@ -73,7 +76,7 @@ export default function NewOlibSotdimPage() {
   const [customerReminderEnabled, setCustomerReminderEnabled] = useState(false)
   const [note, setNote] = useState('')
 
-  const fmt = (n: number) => formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
+  const fmt = (n: number) => formatUserFacingMoney({ amount: n, amountCurrency: currency.currency, displayCurrency: currency.currency, rate: currency.usdUzsRate })
 
   function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
     const files = Array.from(e.target.files ?? [])
@@ -102,6 +105,10 @@ export default function NewOlibSotdimPage() {
 
   const step1Valid =
     model.trim().length > 0 &&
+    Number(storage) > 0 &&
+    !!conditionCode &&
+    /^\d{15}$/.test(imei) &&
+    (!secondaryImei || /^\d{15}$/.test(secondaryImei)) &&
     supplierName.trim().length >= 2 &&
     isValidPhone(supplierPhone) &&
     purchasePrice.trim().length > 0 &&
@@ -165,10 +172,13 @@ export default function NewOlibSotdimPage() {
         body: JSON.stringify({
           model: model.trim(),
           color: color.trim() || undefined,
-          storage: storage.trim() || undefined,
+          storage: `${storage}${storageUnit}`,
+          storageAmount: Number(storage),
+          storageUnit,
           batteryHealth: battery ? Number(battery) : undefined,
-          condition: condition.trim() || undefined,
-          imei: imei.trim() || undefined,
+          conditionCode,
+          imei: imei.trim(),
+          secondaryImei: secondaryImei.trim() || undefined,
           deviceNote: deviceNote.trim() || undefined,
           imageUrls,
           supplierName: supplierName.trim(),
@@ -251,13 +261,14 @@ export default function NewOlibSotdimPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Xotira (GB)</label>
-                <Input
-                  value={storage}
-                  onChange={(e) => setStorage(e.target.value)}
-                  placeholder="128, 256..."
-                  className="h-9 text-sm border-zinc-200 rounded"
-                />
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Xotira <span className="text-red-500">*</span></label>
+                <div className="flex gap-2">
+                  <Input type="number" min="0.01" step="0.01" value={storage} onChange={(e) => setStorage(e.target.value)} placeholder="256" className="h-9 text-sm border-zinc-200 rounded" />
+                  <Select value={storageUnit} onValueChange={(value) => value && setStorageUnit(value as 'GB' | 'TB')}>
+                    <SelectTrigger className="h-9 w-24"><SelectValue /></SelectTrigger>
+                    <SelectContent><SelectItem value="GB">GB</SelectItem><SelectItem value="TB">TB</SelectItem></SelectContent>
+                  </Select>
+                </div>
               </div>
               <div>
                 <label className="block text-xs font-medium text-zinc-700 mb-1.5">Akkumulyator %</label>
@@ -272,23 +283,26 @@ export default function NewOlibSotdimPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Holati</label>
-                <Input
-                  value={condition}
-                  onChange={(e) => setCondition(e.target.value)}
-                  placeholder="Yangi, A klass..."
-                  className="h-9 text-sm border-zinc-200 rounded"
-                />
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Holati <span className="text-red-500">*</span></label>
+                <Select value={conditionCode} onValueChange={(value) => value && setConditionCode(value as 'NEW' | 'USED')}>
+                  <SelectTrigger className="h-9"><SelectValue placeholder="Tanlang" /></SelectTrigger>
+                  <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
+                </Select>
               </div>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">IMEI</label>
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Asosiy IMEI <span className="text-red-500">*</span></label>
                 <Input
                   value={imei}
                   onChange={(e) => setImei(e.target.value)}
-                  placeholder="Mavjud bo'lsa kiriting"
+                  placeholder="351234560012345"
+                  inputMode="numeric"
+                  maxLength={15}
                   className="h-9 text-sm border-zinc-200 rounded font-mono"
                 />
-                <p className="mt-1 text-xs text-zinc-400">Bo&apos;sh qoldirilsa &quot;Kiritilmagan&quot; deb ko&apos;rsatiladi</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Ikkinchi IMEI</label>
+                <Input value={secondaryImei} onChange={(e) => setSecondaryImei(e.target.value)} placeholder="351234560012346" inputMode="numeric" maxLength={15} className="h-9 text-sm border-zinc-200 rounded font-mono" />
               </div>
               <div className="sm:col-span-2">
                 <div className="flex items-center justify-between gap-3 mb-2">
@@ -436,10 +450,9 @@ export default function NewOlibSotdimPage() {
                   </div>
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">To&apos;lov sanasi</label>
-                    <Input
-                      type="date"
+                    <DateInput
                       value={supplierPaidDate}
-                      onChange={(e) => setSupplierPaidDate(e.target.value)}
+                      onValueChange={setSupplierPaidDate}
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
                   </div>
@@ -452,10 +465,9 @@ export default function NewOlibSotdimPage() {
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                       To&apos;lov muddati <span className="text-red-500">*</span>
                     </label>
-                    <Input
-                      type="date"
+                    <DateInput
                       value={supplierDueDate}
-                      onChange={(e) => setSupplierDueDate(e.target.value)}
+                      onValueChange={setSupplierDueDate}
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
                   </div>
@@ -623,10 +635,9 @@ export default function NewOlibSotdimPage() {
                     <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                       Qachon to&apos;laydi <span className="text-red-500">*</span>
                     </label>
-                    <Input
-                      type="date"
+                    <DateInput
                       value={partialDate}
-                      onChange={(e) => setPartialDate(e.target.value)}
+                      onValueChange={setPartialDate}
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
                   </div>
@@ -681,9 +692,9 @@ export default function NewOlibSotdimPage() {
               <div>
                 <div className="text-xs font-semibold text-zinc-500 mb-1.5">Qurilma</div>
                 <div className="text-zinc-900">
-                  {model} {color && `· ${color}`} {storage && `· ${storage}GB`}
+                  {model} {color && `· ${color}`} {storage && `· ${storage}${storageUnit}`} · {conditionCode === 'NEW' ? 'Yangi' : 'B/U'}
                 </div>
-                <div className="text-xs text-zinc-500 mt-0.5">IMEI: {imei.trim() || 'Kiritilmagan'}</div>
+                <div className="text-xs text-zinc-500 mt-0.5">IMEI 1: {imei}{secondaryImei && ` · IMEI 2: ${secondaryImei}`}</div>
               </div>
               <div>
                 <div className="text-xs font-semibold text-zinc-500 mb-1.5">Kimdan olindi</div>

@@ -153,3 +153,29 @@ describe('item 14 — Telegram message design polish', () => {
     expect(templates).toContain("typeof data.profit === 'number' ? `📊 Foyda: ${money(data.profit)}` : null")
   })
 })
+
+describe('canonical device identity in Telegram producers', () => {
+  const producers = [
+    'src/app/api/devices/[id]/sell/route.ts',
+    'src/app/api/devices/[id]/nasiya/route.ts',
+    'src/app/api/devices/[id]/return/route.ts',
+    'src/app/api/devices/[id]/restock/route.ts',
+    'src/app/api/nasiya/[id]/payment/route.ts',
+    'src/app/api/sales/[id]/payment/route.ts',
+    'src/app/api/olib-sotdim/[id]/pay/route.ts',
+    'src/app/api/cron/reminders/route.ts',
+  ]
+
+  it('uses one shared mapper wherever an existing device is messaged', () => {
+    for (const file of producers) {
+      expect(read(file), file).toContain('presentDeviceSpecs(')
+    }
+  })
+
+  it('the shared mapper exposes structured storage, Yangi/B/U, and both active IMEIs', () => {
+    const specs = read('src/lib/device-specs.ts')
+    expect(specs).toContain('storage: formatDeviceStorage(device) || null')
+    expect(specs).toContain("entry.slot === 'SECONDARY'")
+    expect(specs).toContain('conditionLabel: deviceConditionLabel(device.conditionCode)')
+  })
+})

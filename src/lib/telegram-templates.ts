@@ -92,6 +92,8 @@ export interface DeviceSpecs {
   color?: string | null
   batteryHealth?: number | null
   imei?: string | null
+  secondaryImei?: string | null
+  conditionLabel?: string | null
 }
 
 /**
@@ -106,6 +108,8 @@ export function formatDeviceSpecs(device: DeviceSpecs, opts: { battery?: boolean
     optionalLine('Rang', device.color, '🎨'),
     includeBattery && typeof device.batteryHealth === 'number' ? `🔋 Batareya: ${escapeTelegramHtml(device.batteryHealth)}%` : null,
     optionalLine('IMEI', telegramImei(device.imei), '🔢'),
+    optionalLine('IMEI 2', telegramImei(device.secondaryImei), '🔢'),
+    optionalLine('Holati', device.conditionLabel, '🏷️'),
   ].filter((line): line is string => line !== null)
 }
 

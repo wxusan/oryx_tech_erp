@@ -16,6 +16,7 @@ import { convertPaymentToContractCurrency } from '@/lib/nasiya-contract'
 import { applySalePaymentToContractLedger } from '@/lib/sale-contract-payment'
 import { validatePaymentBreakdown, representativePaymentMethod } from '@/lib/payment-breakdown'
 import type { ZodError } from 'zod'
+import { presentDeviceSpecs } from '@/lib/device-specs'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -122,7 +123,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           const sale = await tx.sale.findFirst({
             where: { id: saleId, shopId, deletedAt: null },
             include: {
-              device: true,
+              device: { include: { imeis: { where: { deletedAt: null } } } },
               customer: true,
               shop: { select: { name: true } },
             },
@@ -253,12 +254,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             shopName: sale.shop.name,
             customerName: sale.customer.name,
             customerPhone: sale.customer.phone,
-            device: {
-              deviceModel: sale.device.model,
-              storage: sale.device.storage,
-              color: sale.device.color,
-              imei: sale.device.imei,
-            },
+            device: presentDeviceSpecs(sale.device),
             paidAmount: contractPayment.appliedAmountInContractCurrency,
             paymentMethod: effectivePaymentMethod,
             paymentBreakdown: parsed.data.paymentBreakdown,

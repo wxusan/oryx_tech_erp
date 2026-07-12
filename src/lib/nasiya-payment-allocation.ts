@@ -50,6 +50,7 @@
 import { contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'
 import { scheduleOutstanding } from '@/lib/nasiya-utils'
 import type { CurrencyCode } from '@/lib/currency'
+import { isBeforeTashkentToday } from '@/lib/timezone'
 
 /** Matches the Prisma NasiyaScheduleStatus enum's PAID/PARTIAL/OVERDUE/PENDING members. */
 export type NasiyaAllocationStatus = 'PAID' | 'PARTIAL' | 'OVERDUE' | 'PENDING'
@@ -133,7 +134,7 @@ export function allocateNasiyaPayment(params: {
 
     const isPartial = !isContractFullyPaid && !isContractCurrencyDust(newContractPaidAmount, contractCurrency)
     const effectiveDueDate = schedule.delayedUntil ?? schedule.dueDate
-    const isPastDue = effectiveDueDate < now
+    const isPastDue = isBeforeTashkentToday(effectiveDueDate, now)
     const status: NasiyaAllocationUpdate['status'] = isContractFullyPaid ? 'PAID' : isPastDue ? 'OVERDUE' : isPartial ? 'PARTIAL' : 'PENDING'
 
     updates.push({

@@ -79,7 +79,7 @@ export function AdminLayoutClient({ children, adminName }: { children: React.Rea
           <div className="flex size-8 select-none items-center justify-center rounded-full bg-zinc-900 text-[11px] font-bold text-white shadow-sm">
             {initials(displayName)}
           </div>
-          <SessionControls callbackUrl="/admin/login" />
+          <SessionControls callbackUrl="/admin/login" idleTimeoutMs={10 * 60 * 1000} />
         </header>
 
         <main className="flex-1 overflow-y-auto bg-zinc-50 p-4 md:p-8">{children}</main>

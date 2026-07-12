@@ -19,6 +19,7 @@
 
 import { convertUsdToUzs, convertUzsToUsd, formatUserFacingMoney, type CurrencyCode, type CurrencyContext } from '@/lib/currency'
 import { scheduleEffectiveDueTime, type OverdueScheduleInput } from '@/lib/nasiya-utils'
+import { isBeforeTashkentToday } from '@/lib/timezone'
 
 /** UZS contracts tolerate 500 so'm of rounding dust; USD contracts (2 decimal places) tolerate 1 cent. */
 const UZS_COMPLETION_TOLERANCE = 500
@@ -129,7 +130,7 @@ export function contractOutstandingAsUzs(
  */
 export function isContractScheduleOverdue(schedule: OverdueScheduleInput, currency: CurrencyCode, now: Date = new Date()): boolean {
   if (contractScheduleOutstanding(schedule.expectedAmount, schedule.paidAmount, currency) <= 0) return false
-  return scheduleEffectiveDueTime(schedule) < now.getTime()
+  return isBeforeTashkentToday(new Date(scheduleEffectiveDueTime(schedule)), now)
 }
 
 interface ContractNasiyaLike {

@@ -20,8 +20,8 @@ describe('disposable PostgreSQL migration foundation', () => {
       ORDER BY migration_name
     `
 
-    expect(rows).toHaveLength(25)
-    expect(rows.at(-1)?.migration_name).toBe('202607120001_incremental_change_events')
+    expect(rows).toHaveLength(28)
+    expect(rows.at(-1)?.migration_name).toBe('202607120004_phone_canonicalization')
   })
 
   it('preserves the migration-managed active-only unique indexes', async () => {
@@ -31,6 +31,7 @@ describe('disposable PostgreSQL migration foundation', () => {
       WHERE schemaname = 'public'
         AND indexname IN (
           'Device_shopId_imei_active_key',
+          'DeviceImei_shopId_normalizedValue_active_key',
           'Customer_shopId_normalizedPhone_active_key'
         )
       ORDER BY indexname
@@ -38,6 +39,7 @@ describe('disposable PostgreSQL migration foundation', () => {
 
     expect(indexes.map((index) => index.indexname)).toEqual([
       'Customer_shopId_normalizedPhone_active_key',
+      'DeviceImei_shopId_normalizedValue_active_key',
       'Device_shopId_imei_active_key',
     ])
     expect(indexes.every((index) => index.indexdef.includes('WHERE'))).toBe(true)

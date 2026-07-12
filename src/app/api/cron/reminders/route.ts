@@ -46,6 +46,7 @@ import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
 import { cleanupExpiredChangeEvents } from '@/lib/server/change-events'
 import { transitionNasiyaToOverdue } from '@/lib/server/overdue-transition'
+import { presentDeviceSpecs } from '@/lib/device-specs'
 import {
   nasiyaDueTodayMessage,
   nasiyaOverdueMessage,
@@ -113,7 +114,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       nasiya: {
         include: {
           customer: true,
-          device: true,
+          device: { include: { imeis: { where: { deletedAt: null } } } },
           shop: {
             include: {
               admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
@@ -129,12 +130,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     const msg = nasiyaDueTodayMessage({
       customerName: nasiya.customer.name,
       customerPhone: nasiya.customer.phone,
-      device: {
-        deviceModel: nasiya.device.model,
-        storage: nasiya.device.storage,
-        color: nasiya.device.color,
-        imei: nasiya.device.imei,
-      },
+      device: presentDeviceSpecs(nasiya.device),
       month: schedule.monthNumber,
       amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency),
       contractCurrency: nasiya.contractCurrency,
@@ -186,7 +182,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       nasiya: {
         include: {
           customer: true,
-          device: true,
+          device: { include: { imeis: { where: { deletedAt: null } } } },
           shop: {
             include: {
               admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
@@ -207,12 +203,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     const msg = nasiyaOverdueMessage({
       customerName: schedule.nasiya.customer.name,
       customerPhone: schedule.nasiya.customer.phone,
-      device: {
-        deviceModel: schedule.nasiya.device.model,
-        storage: schedule.nasiya.device.storage,
-        color: schedule.nasiya.device.color,
-        imei: schedule.nasiya.device.imei,
-      },
+      device: presentDeviceSpecs(schedule.nasiya.device),
       month: schedule.monthNumber,
       amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), schedule.nasiya.contractCurrency),
       contractCurrency: schedule.nasiya.contractCurrency,
@@ -278,7 +269,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       nasiya: {
         include: {
           customer: true,
-          device: true,
+          device: { include: { imeis: { where: { deletedAt: null } } } },
           shop: {
             include: {
               admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
@@ -299,12 +290,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     const msg = nasiyaEarlyReminderMessage({
       customerName: nasiya.customer.name,
       customerPhone: nasiya.customer.phone,
-      device: {
-        deviceModel: nasiya.device.model,
-        storage: nasiya.device.storage,
-        color: nasiya.device.color,
-        imei: nasiya.device.imei,
-      },
+      device: presentDeviceSpecs(nasiya.device),
       month: schedule.monthNumber,
       amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency),
       contractCurrency: nasiya.contractCurrency,
@@ -342,7 +328,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     },
     include: {
       customer: true,
-      device: true,
+      device: { include: { imeis: { where: { deletedAt: null } } } },
       shop: {
         include: {
           admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
@@ -355,12 +341,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     const msg = saleDueTodayMessage({
       customerName: sale.customer.name,
       customerPhone: sale.customer.phone,
-      device: {
-        deviceModel: sale.device.model,
-        storage: sale.device.storage,
-        color: sale.device.color,
-        imei: sale.device.imei,
-      },
+      device: presentDeviceSpecs(sale.device),
       remainingAmount: Number(sale.remainingAmount),
       dueDate: sale.dueDate ?? new Date(),
       currency: await reminderCurrency(sale.shop),
@@ -395,7 +376,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     },
     include: {
       customer: true,
-      device: true,
+      device: { include: { imeis: { where: { deletedAt: null } } } },
       shop: {
         include: {
           admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
@@ -409,12 +390,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     const msg = saleOverdueMessage({
       customerName: sale.customer.name,
       customerPhone: sale.customer.phone,
-      device: {
-        deviceModel: sale.device.model,
-        storage: sale.device.storage,
-        color: sale.device.color,
-        imei: sale.device.imei,
-      },
+      device: presentDeviceSpecs(sale.device),
       remainingAmount: Number(sale.remainingAmount),
       dueDate: sale.dueDate ?? new Date(),
       daysLate,
@@ -456,7 +432,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     },
     include: {
       customer: true,
-      device: true,
+      device: { include: { imeis: { where: { deletedAt: null } } } },
       shop: {
         include: {
           admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
@@ -474,12 +450,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     const msg = saleEarlyReminderMessage({
       customerName: sale.customer.name,
       customerPhone: sale.customer.phone,
-      device: {
-        deviceModel: sale.device.model,
-        storage: sale.device.storage,
-        color: sale.device.color,
-        imei: sale.device.imei,
-      },
+      device: presentDeviceSpecs(sale.device),
       remainingAmount: Number(sale.remainingAmount),
       dueDate: sale.dueDate,
       daysLeft: daysUntil,
@@ -521,7 +492,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       shop: { status: 'ACTIVE', deletedAt: null },
     },
     include: {
-      device: true,
+      device: { include: { imeis: { where: { deletedAt: null } } } },
       shop: {
         include: {
           admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
@@ -532,12 +503,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   for (const payable of supplierPayableDueToday) {
     const msg = supplierPayableDueTodayMessage({
-      device: {
-        deviceModel: payable.device.model,
-        storage: payable.device.storage,
-        color: payable.device.color,
-        imei: payable.device.imei,
-      },
+      device: presentDeviceSpecs(payable.device),
       supplierName: payable.supplierName,
       supplierPhone: payable.supplierPhone,
       amount: Number(payable.contractAmount),
@@ -573,7 +539,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       shop: { status: 'ACTIVE', deletedAt: null },
     },
     include: {
-      device: true,
+      device: { include: { imeis: { where: { deletedAt: null } } } },
       shop: {
         include: {
           admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
@@ -585,12 +551,7 @@ export async function GET(request: NextRequest): Promise<Response> {
   for (const payable of supplierPayableOverdue) {
     const daysLate = Math.floor((today.getTime() - payable.dueDate.getTime()) / 86400000)
     const msg = supplierPayableOverdueMessage({
-      device: {
-        deviceModel: payable.device.model,
-        storage: payable.device.storage,
-        color: payable.device.color,
-        imei: payable.device.imei,
-      },
+      device: presentDeviceSpecs(payable.device),
       supplierName: payable.supplierName,
       supplierPhone: payable.supplierPhone,
       amount: Number(payable.contractAmount),
@@ -649,7 +610,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       shop: { status: 'ACTIVE', deletedAt: null },
     },
     include: {
-      device: true,
+      device: { include: { imeis: { where: { deletedAt: null } } } },
       shop: {
         include: {
           admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
@@ -664,12 +625,7 @@ export async function GET(request: NextRequest): Promise<Response> {
     if (!matchesEarlyReminderDay(daysUntil, payable.earlyReminderDays)) continue
     supplierPayableEarlyReminderCount++
     const msg = supplierPayableEarlyReminderMessage({
-      device: {
-        deviceModel: payable.device.model,
-        storage: payable.device.storage,
-        color: payable.device.color,
-        imei: payable.device.imei,
-      },
+      device: presentDeviceSpecs(payable.device),
       supplierName: payable.supplierName,
       supplierPhone: payable.supplierPhone,
       amount: Number(payable.contractAmount),

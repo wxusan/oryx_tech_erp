@@ -22,9 +22,16 @@ export interface DeviceListItem {
   model: string
   color: string | null
   storage: string | null
+  storageAmount: number | null
+  storageUnit: 'GB' | 'TB' | null
+  storageDisplay: string
+  conditionCode: 'NEW' | 'USED' | null
+  conditionLabel: 'Yangi' | 'B/U' | 'Belgilanmagan'
   batteryHealth: number | null
   purchasePrice: number
   imei: string
+  primaryImei: string
+  secondaryImei: string | null
   status: DeviceStatus
   createdAt: string
   note: string | null

@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
@@ -33,9 +34,11 @@ function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']
 function deviceMeta(device: Device) {
   return [
     device.color,
-    device.storage,
+    device.storageDisplay || device.storage,
     device.batteryHealth != null ? `${device.batteryHealth}%` : null,
-    `IMEI: ${displayImei(device.imei)}`,
+    device.conditionLabel,
+    `IMEI 1: ${displayImei(device.imei)}`,
+    device.secondaryImei ? `IMEI 2: ${displayImei(device.secondaryImei)}` : null,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -362,10 +365,9 @@ export default function NewSotuvPage() {
                   <label className="block text-xs font-medium text-zinc-700 mb-1.5">
                     Qachon to&apos;laydi <span className="text-red-500">*</span>
                   </label>
-                  <Input
-                    type="date"
+                  <DateInput
                     value={partialDate}
-                    onChange={(e) => setPartialDate(e.target.value)}
+                    onValueChange={setPartialDate}
                     className="h-9 text-sm border-zinc-200 rounded"
                   />
                 </div>

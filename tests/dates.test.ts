@@ -6,8 +6,9 @@ import { uzMonthYear, uzMonth, uzDate, uzDateTime, uzLongDate, UZ_MONTHS } from 
 // hardcoded Uzbek month names and stable numeric dates on every environment.
 
 describe('uz date formatters', () => {
-  // 2026-09-30 (month index 8 = Sentabr). Build in local time to match getMonth().
-  const d = new Date(2026, 8, 30, 14, 5)
+  // Absolute instant corresponding to 14:05 in Asia/Tashkent. The formatter
+  // must not depend on the test runner's host timezone (CI runs in UTC).
+  const d = new Date('2026-09-30T09:05:00.000Z')
 
   it('uzMonthYear gives a real Uzbek month name, never "M09"', () => {
     expect(uzMonthYear(d)).toBe('Sentabr 2026')
@@ -20,7 +21,7 @@ describe('uz date formatters', () => {
 
   it('uzDate is unambiguous zero-padded day.month.year', () => {
     expect(uzDate(d)).toBe('30.09.2026')
-    expect(uzDate(new Date(2026, 0, 5))).toBe('05.01.2026')
+    expect(uzDate(new Date('2026-01-05T00:00:00.000Z'))).toBe('05.01.2026')
   })
 
   it('uzDateTime appends zero-padded time', () => {

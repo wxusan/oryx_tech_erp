@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import {
   Table,
   TableBody,
@@ -169,17 +169,15 @@ export default function LogsPage() {
 
         {/* Date range */}
         <div className="flex items-center gap-2">
-          <Input
-            type="date"
+          <DateInput
             value={dateFrom}
-            onChange={(e) => { setDateFrom(e.target.value); setPage(1) }}
+            onValueChange={(value) => { setDateFrom(value); setPage(1) }}
             className="h-8 text-xs rounded-none border-zinc-200 w-36"
           />
           <span className="text-xs text-zinc-400">—</span>
-          <Input
-            type="date"
+          <DateInput
             value={dateTo}
-            onChange={(e) => { setDateTo(e.target.value); setPage(1) }}
+            onValueChange={(value) => { setDateTo(value); setPage(1) }}
             className="h-8 text-xs rounded-none border-zinc-200 w-36"
           />
         </div>

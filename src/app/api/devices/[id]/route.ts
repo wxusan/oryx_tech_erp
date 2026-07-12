@@ -18,6 +18,9 @@ import { Prisma } from '@/generated/prisma/client'
 import type { ZodError } from 'zod'
 import { logger } from '@/lib/logger'
 import { phoneSchema } from '@/lib/validations'
+import { deviceConditionLabel, formatDeviceStorage, normalizeImei } from '@/lib/device-specs'
+import { getShopDeviceListItemsByIds } from '@/lib/server/shop-lists'
+import { latestChangeCursorForShop } from '@/lib/server/change-events'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -29,15 +32,22 @@ const updateDeviceSchema = z.object({
   model: z.string().min(1).optional(),
   color: z.string().optional(),
   storage: z.string().optional(),
+  storageAmount: z.number().positive().optional(),
+  storageUnit: z.enum(['GB', 'TB']).optional(),
+  conditionCode: z.enum(['NEW', 'USED']).optional(),
   batteryHealth: z.number().int().min(0).max(100).optional(),
   purchasePrice: z.number().positive("Kelish narxi 0 dan katta bo'lishi kerak").optional(),
   // Display/input currency of purchasePrice. UZS by default (back-compatible);
   // USD is converted to UZS server-side — UZS remains the stored value.
   inputCurrency: z.enum(['UZS', 'USD']).optional(),
-  imei: z.string().trim().min(1, 'IMEI kiritilishi shart').optional(),
+  imei: z.string().trim().refine((value) => normalizeImei(value) !== null, 'IMEI 15 ta raqamdan iborat bo\'lishi kerak').optional(),
+  secondaryImei: z.string().trim().refine((value) => !value || normalizeImei(value) !== null, 'Ikkinchi IMEI 15 ta raqamdan iborat bo\'lishi kerak').optional(),
   supplierPhone: phoneSchema.or(z.literal('')).optional(),
   note: z.string().optional(),
   reason: z.string().optional(),
+}).refine((data) => (data.storageAmount === undefined) === (data.storageUnit === undefined), {
+  message: 'Xotira hajmi va birligi birga kiritilishi kerak',
+  path: ['storageUnit'],
 })
 
 const deleteDeviceSchema = z.object({
@@ -69,16 +79,26 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
           model: true,
           color: true,
           storage: true,
+          storageAmount: true,
+          storageUnit: true,
+          conditionCode: true,
           batteryHealth: true,
           purchasePrice: true,
           imei: true,
+          imeis: { where: { deletedAt: null }, select: { slot: true, value: true } },
           status: true,
         },
       })
 
       if (!pickerDevice) return notFound("Qurilma topilmadi")
       return ok(
-        { ...pickerDevice, purchasePrice: Number(pickerDevice.purchasePrice) },
+        {
+          ...pickerDevice,
+          purchasePrice: Number(pickerDevice.purchasePrice),
+          storageDisplay: formatDeviceStorage(pickerDevice) || null,
+          secondaryImei: pickerDevice.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
+          conditionLabel: deviceConditionLabel(pickerDevice.conditionCode),
+        },
         "Qurilma ma'lumotlari",
       )
     }
@@ -91,6 +111,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         ...(session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}),
       },
       include: {
+        imeis: { where: { deletedAt: null }, orderBy: { slot: 'asc' } },
         supplier: {
           select: {
             name: true,
@@ -224,12 +245,20 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         shop: { status: 'ACTIVE', deletedAt: null },
         ...(session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}),
       },
+      include: { imeis: { where: { deletedAt: null } } },
     })
 
     if (!existing) return notFound("Qurilma topilmadi")
 
-    const { reason, inputCurrency, ...updateData } = parsed.data
-    const hasDeviceChanges = Object.entries(updateData).some(([key, value]) => {
+    const { reason, inputCurrency, secondaryImei: secondaryImeiInput, ...updateData } = parsed.data
+    if (updateData.imei) updateData.imei = normalizeImei(updateData.imei)!
+    const secondaryImei = secondaryImeiInput ? normalizeImei(secondaryImeiInput) : null
+    const identityChanged = updateData.imei !== undefined || secondaryImeiInput !== undefined
+    const primaryImei = updateData.imei ?? existing.imeis.find((entry) => entry.slot === 'PRIMARY')?.value ?? existing.imei
+    if (secondaryImei && secondaryImei === primaryImei) return badRequest('Asosiy va ikkinchi IMEI bir xil bo\'lishi mumkin emas')
+    if (updateData.storageAmount !== undefined && updateData.storageUnit !== undefined) updateData.storage = `${updateData.storageAmount}${updateData.storageUnit}`
+    if (updateData.conditionCode) (updateData as typeof updateData & { condition?: string }).condition = updateData.conditionCode === 'NEW' ? 'Yangi' : 'B/U'
+    const hasDeviceChanges = identityChanged || Object.entries(updateData).some(([key, value]) => {
       if (value === undefined) return false
       return String(existing[key as keyof typeof existing] ?? '') !== String(value)
     })
@@ -262,10 +291,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     // IMEI uniqueness among the shop's ACTIVE devices (mirrors the DB partial
     // unique index). A blank/duplicate IMEI would corrupt device identity.
-    const imeiChanged = updateData.imei !== undefined && updateData.imei !== existing.imei
-    if (imeiChanged) {
+    if (identityChanged) {
+      const imeiValues = [primaryImei, secondaryImei].filter((value): value is string => Boolean(value))
       const duplicate = await prisma.device.findFirst({
-        where: { shopId: existing.shopId, imei: updateData.imei, deletedAt: null, id: { not: deviceId } },
+        where: { shopId: existing.shopId, deletedAt: null, id: { not: deviceId }, OR: [{ imei: { in: imeiValues } }, { imeis: { some: { normalizedValue: { in: imeiValues }, deletedAt: null } } }] },
         select: { id: true },
       })
       if (duplicate) return conflict('Bu IMEI bilan faol qurilma allaqachon mavjud')
@@ -302,6 +331,15 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         },
       })
 
+      if (identityChanged) {
+        const deletedAt = new Date()
+        await tx.deviceImei.updateMany({ where: { deviceId, deletedAt: null }, data: { deletedAt } })
+        await tx.deviceImei.createMany({ data: [
+          { shopId: existing.shopId, deviceId, slot: 'PRIMARY', value: primaryImei, normalizedValue: primaryImei },
+          ...(secondaryImei ? [{ shopId: existing.shopId, deviceId, slot: 'SECONDARY' as const, value: secondaryImei, normalizedValue: secondaryImei }] : []),
+        ] })
+      }
+
       await tx.log.create({
         data: {
           shopId: existing.shopId,
@@ -334,7 +372,12 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     invalidateShopDeviceMutation(existing.shopId)
 
-    return ok(device, "Qurilma muvaffaqiyatli yangilandi")
+    const [item, changeCursor] = await Promise.all([
+      getShopDeviceListItemsByIds(existing.shopId, [device.id]).then((items) => items[0]),
+      latestChangeCursorForShop(existing.shopId),
+    ])
+    if (!item) throw new Error('UPDATED_DEVICE_DTO_NOT_FOUND')
+    return ok({ item, changeCursor, affectedDomains: ['devices', 'reports', 'logs'], mutationId: `device.updated:${device.id}:${changeCursor}` }, "Qurilma muvaffaqiyatli yangilandi")
   } catch (err) {
     // Backstop for the active-IMEI partial unique index if two edits race.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {

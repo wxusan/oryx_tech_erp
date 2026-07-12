@@ -1,6 +1,10 @@
 export function normalizePhone(phone: string) {
   const digits = phone.replace(/\D/g, '')
-  return digits || null
+  if (!digits) return null
+  if (digits.length === 9) return `998${digits}`
+  if (digits.length === 10 && digits.startsWith('8')) return `998${digits.slice(1)}`
+  if (digits.length === 12 && digits.startsWith(UZ_COUNTRY_CODE)) return digits
+  return digits
 }
 
 // User-facing message for an invalid phone. Kept here so the client form and any
@@ -10,7 +14,7 @@ export const PHONE_ERROR = "Telefon raqam noto'g'ri. Masalan: +998 90 123 45 67"
 const UZ_COUNTRY_CODE = '998'
 const UZ_LOCAL_PHONE_LENGTH = 9
 
-function uzLocalDigits(raw: string) {
+function uzLocalDigits(raw: string, clamp = false) {
   let digits = raw.replace(/\D/g, '')
   if (!digits) return ''
 
@@ -28,7 +32,7 @@ function uzLocalDigits(raw: string) {
     digits = digits.slice(1)
   }
 
-  return digits
+  return clamp ? digits.slice(0, UZ_LOCAL_PHONE_LENGTH) : digits
 }
 
 /**
@@ -37,7 +41,7 @@ function uzLocalDigits(raw: string) {
  * never contain spaces or a duplicated country code.
  */
 export function normalizeUzPhoneInput(raw: string): string {
-  const local = uzLocalDigits(raw)
+  const local = uzLocalDigits(raw, true)
   return local ? `+${UZ_COUNTRY_CODE}${local}` : ''
 }
 

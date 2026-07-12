@@ -11,13 +11,18 @@ function normalizedSearch(value: string) {
 
 export function deviceMatchesListQuery(device: DeviceListItem, query: DeviceListQuery) {
   if (query.status !== 'Barchasi' && device.status !== query.status) return false
+  if (query.condition && query.condition !== 'ALL' && device.conditionCode !== query.condition) return false
   const search = normalizedSearch(query.search)
   if (!search) return true
   return [
     device.model,
     device.imei,
+    device.primaryImei,
+    device.secondaryImei,
     device.color,
     device.storage,
+    device.storageDisplay,
+    device.conditionLabel,
     device.note,
     device.supplierName,
     device.supplierPhone,

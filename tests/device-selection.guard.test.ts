@@ -102,6 +102,23 @@ describe('bounded server-side device picker', () => {
     expect(src).toContain('?view=picker')
     expect(src).toContain("json.data.status !== 'IN_STOCK'")
   })
+
+  it('shows structured storage, exact condition label, and both IMEIs', () => {
+    expect(src).toContain('device.storageDisplay || device.storage')
+    expect(src).toContain('device.conditionLabel')
+    expect(src).toContain('device.secondaryImei')
+  })
+})
+
+describe('picker API projection', () => {
+  for (const route of ['src/app/api/devices/route.ts', 'src/app/api/devices/[id]/route.ts']) {
+    const src = read(route)
+    it(`${route} returns the canonical second-IMEI, storage, and condition fields`, () => {
+      expect(src).toContain('storageDisplay: formatDeviceStorage(')
+      expect(src).toContain("entry.slot === 'SECONDARY'")
+      expect(src).toContain('conditionLabel: deviceConditionLabel(')
+    })
+  }
 })
 
 describe('submit payloads still carry the selected device id', () => {

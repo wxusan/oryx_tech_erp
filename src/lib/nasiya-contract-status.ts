@@ -11,6 +11,7 @@
 
 import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import { isCurrencyCode, type CurrencyCode } from '@/lib/currency'
+import { isBeforeTashkentToday } from '@/lib/timezone'
 import {
   deriveNasiyaOverdue,
   scheduleEffectiveDueTime,
@@ -79,7 +80,7 @@ export function deriveContractScheduleStatus(
     const legacyExpected = finiteMoney(schedule.expectedAmount) ?? 0
     const legacyPaid = finiteMoney(schedule.paidAmount) ?? 0
     const outstanding = Math.max(0, legacyExpected - legacyPaid)
-    const isOverdue = outstanding > 0 && scheduleEffectiveDueTime(schedule) < now.getTime()
+    const isOverdue = outstanding > 0 && isBeforeTashkentToday(new Date(scheduleEffectiveDueTime(schedule)), now)
     return {
       displayStatus: outstanding <= 0 ? 'PAID' : isOverdue ? 'OVERDUE' : legacyPaid > 0 ? 'PARTIAL' : 'PENDING',
       outstanding,
@@ -90,7 +91,7 @@ export function deriveContractScheduleStatus(
   const outstanding = contractScheduleOutstanding(expected, paid, currency)
   if (outstanding <= 0) return { displayStatus: 'PAID', outstanding: 0, isOverdue: false }
 
-  const isOverdue = scheduleEffectiveDueTime(schedule) < now.getTime()
+  const isOverdue = isBeforeTashkentToday(new Date(scheduleEffectiveDueTime(schedule)), now)
   return {
     displayStatus: isOverdue ? 'OVERDUE' : paid > 0 ? 'PARTIAL' : schedule.status === 'DEFERRED' ? 'DEFERRED' : 'PENDING',
     outstanding,

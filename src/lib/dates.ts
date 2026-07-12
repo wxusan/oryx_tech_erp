@@ -33,37 +33,55 @@ function pad(value: number) {
   return String(value).padStart(2, '0')
 }
 
+function tashkentParts(date: Date) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Tashkent',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(date)
+  const value = (type: Intl.DateTimeFormatPartTypes) => parts.find((part) => part.type === type)?.value ?? ''
+  return { year: Number(value('year')), month: Number(value('month')), day: Number(value('day')), hour: Number(value('hour')), minute: Number(value('minute')) }
+}
+
 /** `Sentabr 2026` — month name + year. */
 export function uzMonthYear(value: Date | string | number | null | undefined, fallback = '-') {
   const date = toDate(value)
   if (!date) return fallback
-  return `${UZ_MONTHS[date.getMonth()]} ${date.getFullYear()}`
+  const part = tashkentParts(date)
+  return `${UZ_MONTHS[part.month - 1]} ${part.year}`
 }
 
 /** `Sentabr` — month name only. */
 export function uzMonth(value: Date | string | number | null | undefined, fallback = '-') {
   const date = toDate(value)
   if (!date) return fallback
-  return UZ_MONTHS[date.getMonth()]
+  return UZ_MONTHS[tashkentParts(date).month - 1]
 }
 
 /** `30.09.2026` — unambiguous numeric day.month.year. */
 export function uzDate(value: Date | string | number | null | undefined, fallback = '-') {
   const date = toDate(value)
   if (!date) return fallback
-  return `${pad(date.getDate())}.${pad(date.getMonth() + 1)}.${date.getFullYear()}`
+  const part = tashkentParts(date)
+  return `${pad(part.day)}.${pad(part.month)}.${part.year}`
 }
 
 /** `30.09.2026, 14:30` — date with time. */
 export function uzDateTime(value: Date | string | number | null | undefined, fallback = '-') {
   const date = toDate(value)
   if (!date) return fallback
-  return `${uzDate(date)}, ${pad(date.getHours())}:${pad(date.getMinutes())}`
+  const part = tashkentParts(date)
+  return `${uzDate(date)}, ${pad(part.hour)}:${pad(part.minute)}`
 }
 
 /** `30 Sentabr 2026` — long, human day + month name + year. */
 export function uzLongDate(value: Date | string | number | null | undefined, fallback = '-') {
   const date = toDate(value)
   if (!date) return fallback
-  return `${date.getDate()} ${UZ_MONTHS[date.getMonth()]} ${date.getFullYear()}`
+  const part = tashkentParts(date)
+  return `${part.day} ${UZ_MONTHS[part.month - 1]} ${part.year}`
 }

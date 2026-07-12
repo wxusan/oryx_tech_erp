@@ -21,7 +21,7 @@ describe('import placeholder IMEI user-facing guard', () => {
     const src = read('src/app/api/export/[entity]/route.ts')
 
     expect(src).toContain("import { displayImei } from '@/lib/device-display'")
-    expect(src).toContain('displayImei(d.imei)')
+    expect(src).toContain("displayImei(d.imeis.find((entry) => entry.slot === 'PRIMARY')?.value ?? d.imei)")
     expect(src).toContain('displayImei(item.device.imei)')
     expect(src).not.toContain(' d.imei,')
     expect(src).not.toContain(' item.device.imei,')

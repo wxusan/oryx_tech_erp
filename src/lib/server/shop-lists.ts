@@ -11,6 +11,7 @@ import { computeSaleContractMargin, type PurchaseCostLike } from '@/lib/nasiya-c
 import type { CurrencyCode } from '@/lib/currency'
 import { normalizePhone } from '@/lib/phone'
 import type { DeviceListItem, DeviceListSaleInfo } from '@/lib/device-list-contract'
+import { deviceConditionLabel, formatDeviceStorage } from '@/lib/device-specs'
 
 /**
  * Real page/skip/take pagination envelope for the devices/nasiyalar list
@@ -122,6 +123,7 @@ export type DeviceStatusFilter = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_
 export interface ShopDevicesQuery {
   search?: string
   status?: DeviceStatusFilter
+  condition?: 'NEW' | 'USED'
   skip?: number
   take?: number
 }
@@ -131,12 +133,16 @@ const shopDeviceListSelect = {
   model: true,
   color: true,
   storage: true,
+  storageAmount: true,
+  storageUnit: true,
+  conditionCode: true,
   batteryHealth: true,
   purchasePrice: true,
   purchaseCurrency: true,
   purchaseInputAmount: true,
   purchaseAmountUzsSnapshot: true,
   imei: true,
+  imeis: { where: { deletedAt: null }, orderBy: { slot: 'asc' as const }, select: { slot: true, value: true, normalizedValue: true } },
   status: true,
   createdAt: true,
   note: true,
@@ -271,14 +277,23 @@ function buildDeviceSaleInfo(device: {
 }
 
 function mapShopDeviceListRow(device: ShopDeviceListRow): ShopDeviceListItem {
+  const primaryImei = device.imeis.find((entry) => entry.slot === 'PRIMARY')?.value ?? device.imei
+  const secondaryImei = device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null
   return {
     id: device.id,
     model: device.model,
     color: device.color,
     storage: device.storage,
+    storageAmount: device.storageAmount == null ? null : Number(device.storageAmount),
+    storageUnit: device.storageUnit,
+    storageDisplay: formatDeviceStorage(device),
+    conditionCode: device.conditionCode,
+    conditionLabel: deviceConditionLabel(device.conditionCode) as 'Yangi' | 'B/U' | 'Belgilanmagan',
     batteryHealth: device.batteryHealth,
     purchasePrice: Number(device.purchasePrice),
-    imei: device.imei,
+    imei: primaryImei,
+    primaryImei,
+    secondaryImei,
     status: device.status,
     createdAt: device.createdAt.toISOString(),
     note: device.note,
@@ -306,10 +321,12 @@ export async function getShopDevicesList(shopId: string, query: ShopDevicesQuery
     shopId,
     deletedAt: null,
     ...(query.status ? { status: query.status } : {}),
+    ...(query.condition ? { conditionCode: query.condition } : {}),
     ...(search
       ? {
           OR: [
             { imei: { contains: search, mode: 'insensitive' as const } },
+            { imeis: { some: { deletedAt: null, OR: [{ value: { contains: search, mode: 'insensitive' as const } }, { normalizedValue: { contains: search } }] } } },
             { model: { contains: search, mode: 'insensitive' as const } },
             { color: { contains: search, mode: 'insensitive' as const } },
             { storage: { contains: search, mode: 'insensitive' as const } },

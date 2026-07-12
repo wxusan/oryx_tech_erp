@@ -5,6 +5,7 @@ import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { DateInput } from '@/components/ui/date-input'
 import { Textarea } from '@/components/ui/textarea'
 import {
   Dialog,
@@ -22,7 +23,7 @@ import {
 } from '@/components/ui/select'
 import { displayImei } from '@/lib/device-display'
 import { uzDate } from '@/lib/dates'
-import { formatMoneyByCurrency } from '@/lib/currency'
+import { formatUserFacingMoney } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { formatUzPhoneDisplay } from '@/lib/phone'
 import { tashkentTodayInputValue } from '@/lib/timezone'
@@ -59,7 +60,18 @@ interface OlibSotdimRow {
   supplierPhone: string
   supplierLocation: string | null
   createdAt: string
-  device: { id: string; model: string; imei: string; color: string | null; storage: string | null; purchasePrice: number; purchaseCurrency: 'UZS' | 'USD' }
+  device: {
+    id: string
+    model: string
+    imei: string
+    secondaryImei: string | null
+    color: string | null
+    storage: string | null
+    storageDisplay: string | null
+    conditionLabel: string
+    purchasePrice: number
+    purchaseCurrency: 'UZS' | 'USD'
+  }
   sale: { id: string; salePrice: number; contractCurrency: 'UZS' | 'USD'; customer: { name: string; phone: string } }
   profit: number
 }
@@ -78,7 +90,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
   const [paySubmitting, setPaySubmitting] = useState(false)
 
   function fmt(n: number, valueCurrency: 'UZS' | 'USD' = currency.currency) {
-    return formatMoneyByCurrency(n, valueCurrency, currency.usdUzsRate)
+    return formatUserFacingMoney({ amount: n, amountCurrency: valueCurrency, displayCurrency: currency.currency, rate: currency.usdUzsRate })
   }
 
   const pageSize = 25
@@ -137,7 +149,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           paymentMethod: payMethod,
-          paidAt: payDate ? new Date(payDate).toISOString() : undefined,
+          paidAt: payDate || undefined,
           note: payNote.trim() || undefined,
         }),
       })
@@ -207,7 +219,8 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
             <div className="flex items-start justify-between gap-3">
               <div>
                 <div className="font-medium text-zinc-900">{row.device.model}</div>
-                <div className="font-mono text-xs text-zinc-400">{displayImei(row.device.imei)}</div>
+                <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'} · {row.device.conditionLabel}</div>
+                <div className="font-mono text-xs text-zinc-400">IMEI 1: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · IMEI 2: ${displayImei(row.device.secondaryImei)}` : ''}</div>
               </div>
               <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${statusStyles[row.status]}`}>
                 {statusLabels[row.status]}
@@ -252,7 +265,8 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                   <td className="px-4 py-3 text-zinc-500">{uzDate(row.createdAt)}</td>
                   <td className="px-4 py-3">
                     <div className="font-medium text-zinc-900">{row.device.model}</div>
-                    <div className="text-xs text-zinc-400 font-mono">{displayImei(row.device.imei)}</div>
+                    <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'} · {row.device.conditionLabel}</div>
+                    <div className="text-xs text-zinc-400 font-mono">IMEI 1: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · IMEI 2: ${displayImei(row.device.secondaryImei)}` : ''}</div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="text-zinc-900">{row.supplierName}</div>
@@ -318,7 +332,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
               </div>
               <div>
                 <label htmlFor="supplier-payment-date" className="block text-xs font-medium text-zinc-700 mb-1.5">Sana</label>
-                <Input id="supplier-payment-date" type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
+                <DateInput id="supplier-payment-date" value={payDate} onValueChange={setPayDate} className="h-9 text-sm border-zinc-200 rounded" />
               </div>
               <div>
                 <label htmlFor="supplier-payment-note" className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>

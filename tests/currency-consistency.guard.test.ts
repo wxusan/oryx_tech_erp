@@ -65,9 +65,9 @@ describe('sold devices list and olib-sotdim use the shared formatter, not manual
   ]
 
   for (const file of files) {
-    it(`${file} imports formatMoneyByCurrency`, () => {
+    it(`${file} imports a shared currency-aware formatter`, () => {
       const source = read(file)
-      expect(source).toContain('formatMoneyByCurrency')
+      expect(source).toMatch(/formatMoneyByCurrency|formatUserFacingMoney/)
     })
   }
 })

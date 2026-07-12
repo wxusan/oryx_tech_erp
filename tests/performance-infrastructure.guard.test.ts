@@ -13,7 +13,7 @@ describe('bounded background and storage work', () => {
   it('drains notifications with bounded concurrency and keeps atomic claims', () => {
     expect(notifications).toContain('const NOTIFICATION_BATCH_SIZE = 100')
     expect(notifications).toContain('const NOTIFICATION_SEND_CONCURRENCY = 5')
-    expect(notifications).toContain('await Promise.all(batch.map(async (notification) => {')
+    expect(notifications).toContain('await Promise.all(pending.slice(offset, offset + NOTIFICATION_SEND_CONCURRENCY).map(async (notification) => {')
     expect(notifications).toContain('const claim = await prisma.notification.updateMany')
   })
 

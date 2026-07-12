@@ -6,6 +6,7 @@ import { addMonths } from 'date-fns'
 import type { PaymentScheduleItem, NasiyaSchedule } from '@/types'
 import { NasiyaScheduleStatus } from '@/types'
 import type { CurrencyCode } from '@/lib/currency'
+import { isBeforeTashkentToday } from '@/lib/timezone'
 
 export const MAX_NASIYA_INTEREST_PERCENT = 300
 
@@ -291,7 +292,7 @@ export function isOverdue(schedules: NasiyaSchedule[]): boolean {
   return schedules.some(
     (s) =>
       UNPAID_STATUSES.includes(s.status) &&
-      (s.status === NasiyaScheduleStatus.OVERDUE || (s.delayedUntil ?? s.dueDate) < now),
+      (s.status === NasiyaScheduleStatus.OVERDUE || isBeforeTashkentToday(s.delayedUntil ?? s.dueDate, now)),
   )
 }
 
@@ -402,7 +403,7 @@ export function scheduleEffectiveDueTime(schedule: {
 export function isScheduleOverdue(schedule: OverdueScheduleInput, now: Date = new Date()): boolean {
   if (schedule.status === 'PAID') return false
   if (scheduleOutstanding(schedule.expectedAmount, schedule.paidAmount) <= 0) return false
-  return scheduleEffectiveDueTime(schedule) < now.getTime()
+  return isBeforeTashkentToday(new Date(scheduleEffectiveDueTime(schedule)), now)
 }
 
 /**

@@ -25,6 +25,7 @@ export const PhoneInput = React.forwardRef<HTMLInputElement, PhoneInputProps>(
         value={formatUzPhoneDisplay(value)}
         onChange={(e) => onChange(normalizeUzPhoneInput(e.target.value))}
         autoComplete="tel"
+        maxLength={17}
         placeholder={placeholder ?? '+998 90 123 45 67'}
         {...props}
       />

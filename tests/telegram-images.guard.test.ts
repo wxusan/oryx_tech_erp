@@ -10,9 +10,11 @@ describe('centralized image-aware Telegram delivery', () => {
   const telegram = read('src/lib/telegram.ts')
   const service = read('src/lib/notification-service.ts')
 
-  it('telegram.ts exposes a sendPhoto helper alongside sendMessage', () => {
+  it('telegram.ts exposes photo and media-group helpers alongside sendMessage', () => {
     expect(telegram).toContain('export async function sendTelegramPhoto')
     expect(telegram).toContain('api.sendPhoto(')
+    expect(telegram).toContain('export async function sendTelegramMediaGroup')
+    expect(telegram).toContain('api.sendMediaGroup(')
   })
 
   it('uses Telegram HTML parse mode for messages and photo captions', () => {
@@ -20,14 +22,16 @@ describe('centralized image-aware Telegram delivery', () => {
     expect(telegram).toContain("caption ? { caption, parse_mode: 'HTML' } : undefined")
   })
 
-  it('the queue processor resolves a safe image and chooses photo vs message', () => {
-    expect(service).toContain('resolveNotificationImageUrl(notification)')
-    expect(service).toContain('chooseTelegramDelivery({ imageUrl, caption: notification.message })')
+  it('the queue processor snapshots every safe image and plans every chunk', () => {
+    expect(service).toContain('resolveNotificationImageKeys(notification)')
+    expect(service).toContain('resolveNotificationImageUrls(notification.shopId, mediaKeys, pendingPositions)')
+    expect(service).toContain('planTelegramDelivery({ images, caption: notification.message')
     expect(service).toContain('sendTelegramPhoto(')
+    expect(service).toContain('sendTelegramMediaGroup(')
   })
 
   it('a failed photo send falls back to a plain text message (never drops the notification)', () => {
-    expect(service).toContain("if (plan.method === 'photo' && !result.ok)")
+    expect(service).toContain('if ((firstError || unresolvedCount > 0)')
     expect(service).toContain('sendTelegramMessage(notification.telegramId, notification.message)')
   })
 })
@@ -43,8 +47,8 @@ describe('notification image privacy', () => {
   })
 
   it('signs only keys under the device path (a passport key can never match)', () => {
-    expect(img).toContain('/^shops\\/[^/]+\\/devices\\/[^/]+$/')
-    expect(img).toContain('DEVICE_KEY_PATTERN.test(key)')
+    expect(img).toContain('const prefix = `shops/${shopId}/devices/`')
+    expect(img).toContain("!objectName.includes('/')")
   })
 
   it('uses a short-lived signed URL and never persists a permanent public URL', () => {

@@ -10,6 +10,7 @@ import { logger } from '@/lib/logger'
 import { deviceReturnedMessage } from '@/lib/telegram-templates'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
+import { presentDeviceSpecs } from '@/lib/device-specs'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -57,6 +58,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         where: { id: deviceId, shopId, deletedAt: null },
         include: {
           shop: { select: { name: true } },
+          imeis: { where: { deletedAt: null } },
           sales: { where: { deletedAt: null }, orderBy: { createdAt: 'desc' }, take: 1 },
           nasiya: { where: { deletedAt: null, status: { not: 'CANCELLED' } }, orderBy: { createdAt: 'desc' }, take: 1 },
         },
@@ -165,13 +167,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (shopAdmins.length > 0) {
         const message = deviceReturnedMessage({
           shopName: device.shop.name,
-          device: {
-            deviceModel: device.model,
-            storage: device.storage,
-            color: device.color,
-            batteryHealth: device.batteryHealth,
-            imei: device.imei,
-          },
+          device: presentDeviceSpecs(device),
           refundAmount: refundAmountUzs,
           refundMethod: parsed.data.refundMethod,
           note: parsed.data.note,

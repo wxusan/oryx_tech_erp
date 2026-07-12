@@ -21,6 +21,7 @@ import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
+import { presentDeviceSpecs } from '@/lib/device-specs'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -51,7 +52,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const payable = await prisma.supplierPayable.findFirst({
       where: { id, shopId, deletedAt: null },
       include: {
-        device: { select: { model: true, storage: true, color: true, batteryHealth: true, imei: true } },
+        device: { include: { imeis: { where: { deletedAt: null } } } },
       },
     })
     if (!payable) return notFound('Yozuv topilmadi')
@@ -83,13 +84,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       })
       const message = supplierPayablePaidMessage({
         shopName: shop?.name ?? '',
-        device: {
-          deviceModel: payable.device.model,
-          storage: payable.device.storage,
-          color: payable.device.color,
-          batteryHealth: payable.device.batteryHealth,
-          imei: payable.device.imei,
-        },
+        device: presentDeviceSpecs(payable.device),
         supplierName: payable.supplierName,
         supplierPhone: payable.supplierPhone,
         amount: Number(payable.contractAmount),

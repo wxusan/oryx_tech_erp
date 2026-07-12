@@ -27,6 +27,7 @@ import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
 import { validatePaymentBreakdown, representativePaymentMethod } from '@/lib/payment-breakdown'
 import type { ZodError } from 'zod'
+import { presentDeviceSpecs } from '@/lib/device-specs'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -125,7 +126,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               shop: { select: { name: true } },
               customer: { select: { name: true, phone: true } },
               device: {
-                select: { model: true, storage: true, color: true, imei: true },
+                include: { imeis: { where: { deletedAt: null } } },
               },
             },
           })
@@ -439,12 +440,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               shopName: nasiya.shop.name,
               customerName: nasiya.customer.name,
               customerPhone: nasiya.customer.phone,
-              device: {
-                deviceModel: nasiya.device.model,
-                storage: nasiya.device.storage,
-                color: nasiya.device.color,
-                imei: nasiya.device.imei,
-              },
+              device: presentDeviceSpecs(nasiya.device),
               month: allocations.length === 1 ? selectedSchedule.monthNumber : 'MULTIPLE',
               paidAmount: appliedAmountInContractCurrency,
               contractCurrency,
@@ -466,12 +462,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                   shopName: nasiya.shop.name,
                   customerName: nasiya.customer.name,
                   customerPhone: nasiya.customer.phone,
-                  device: {
-                    deviceModel: nasiya.device.model,
-                    storage: nasiya.device.storage,
-                    color: nasiya.device.color,
-                    imei: nasiya.device.imei,
-                  },
+                  device: presentDeviceSpecs(nasiya.device),
                   finalNasiyaAmount: Number(nasiya.contractFinalAmount),
                   contractCurrency,
                   adminName: session.user.name,

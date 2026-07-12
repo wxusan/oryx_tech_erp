@@ -25,9 +25,10 @@ describe('olib-sotdim device lifecycle: never IN_STOCK, never normal-sale-availa
     expect(route).not.toContain("status: 'IN_STOCK'")
   })
 
-  it('reuses the active-only IMEI uniqueness check and NOIMEI- placeholder convention', () => {
+  it('requires normalized IMEI identity and checks duplicates across both slots', () => {
     expect(route).toContain("Bu IMEI raqami allaqachon mavjud")
-    expect(route).toContain('NOIMEI-')
+    expect(route).toContain('normalizeImei(d.imei)')
+    expect(route).toContain('normalizedValue: { in: imeiValues }')
   })
 
   it('creates a real Sale row so existing sold-device/profit UI and reports pick it up unchanged', () => {
@@ -123,7 +124,8 @@ describe('Telegram: photo pipeline covers SupplierPayable, never touches passpor
 
   it('resolves SupplierPayable images through its linked Device, same signed-URL pipeline', () => {
     expect(notificationImage).toContain("case 'SupplierPayable':")
-    expect(notificationImage).toContain('prisma.supplierPayable.findUnique')
+    expect(notificationImage).toContain('prisma.supplierPayable.findFirst')
+    expect(notificationImage).toContain('where: { id: relatedId, shopId }')
   })
 
   it('never references passportPhotoUrl anywhere in the image resolver', () => {
