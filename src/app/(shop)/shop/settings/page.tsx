@@ -2,6 +2,7 @@
 
 import { type FormEvent, useEffect, useMemo, useState } from 'react'
 import { signOut } from 'next-auth/react'
+import { commitNavigationMutation } from '@/lib/client-events'
 import { CheckCircle2, KeyRound, Link2, Loader2, Send, ShieldCheck, UserRound } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -182,6 +183,11 @@ export default function ShopSettingsPage() {
       })
       if (!response.ok) throw new Error(await readApiError(response))
       const json: ApiResponse<ShopAdminProfile> = await response.json()
+      const invalidated = await commitNavigationMutation({ kind: 'shopAdmin.profileUpdated' })
+      if (!invalidated) {
+        window.location.reload()
+        return
+      }
       setProfile(json.data ?? null)
       setAccountSuccess('Profil yangilandi.')
     } catch (err) {
@@ -225,6 +231,14 @@ export default function ShopSettingsPage() {
       })
       if (!response.ok) throw new Error(await readApiError(response))
       const json: ApiResponse<ShopProfile> = await response.json()
+      const currencyChanged = json.data?.preferredCurrency !== shop?.preferredCurrency
+      const invalidated = await commitNavigationMutation({
+        kind: currencyChanged ? 'shop.currencyUpdated' : 'shop.profileUpdated',
+      })
+      if (!invalidated) {
+        window.location.reload()
+        return
+      }
       if (json.data) {
         setShop(json.data)
         setCurrency({ currency: json.data.preferredCurrency, usdUzsRate: json.data.usdUzsRate })
@@ -294,6 +308,11 @@ export default function ShopSettingsPage() {
       if (!response.ok) throw new Error(await readApiError(response))
 
       const json: ApiResponse<ShopAdminProfile> = await response.json()
+      const invalidated = await commitNavigationMutation({ kind: 'shopAdmin.profileUpdated' })
+      if (!invalidated) {
+        window.location.reload()
+        return
+      }
       setProfile(json.data ?? null)
       setTelegramId(json.data?.telegramId ?? '')
       setTelegramSuccess(json.message ?? 'Telegram ID yangilandi.')

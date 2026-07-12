@@ -2,6 +2,7 @@
 
 import { type FormEvent, useEffect, useState } from 'react'
 import { signOut } from 'next-auth/react'
+import { commitNavigationMutation } from '@/lib/client-events'
 import { CheckCircle2, CircleDollarSign, KeyRound, Loader2, Send, ServerCog, ShieldCheck, UserRound } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -206,6 +207,11 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       })
       if (!response.ok) throw new Error(await readApiError(response))
       const json: ApiResponse<SuperAdminProfile> = await response.json()
+      const invalidated = await commitNavigationMutation({ kind: 'admin.profileUpdated' })
+      if (!invalidated) {
+        window.location.reload()
+        return
+      }
       setProfile(json.data ?? null)
       setName(json.data?.name ?? '')
       setNameSuccess('Profil yangilandi.')
@@ -238,6 +244,11 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       if (!response.ok) throw new Error(await readApiError(response))
 
       const json: ApiResponse<SuperAdminProfile> = await response.json()
+      const invalidated = await commitNavigationMutation({ kind: 'admin.profileUpdated' })
+      if (!invalidated) {
+        window.location.reload()
+        return
+      }
       setProfile(json.data ?? null)
       setTelegramId(json.data?.telegramId ?? '')
       setTelegramSuccess(json.message ?? 'Telegram ID yangilandi.')
@@ -268,6 +279,11 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       })
       if (!response.ok) throw new Error(await readApiError(response))
       const json: ApiResponse<CurrencyRateRecord> = await response.json()
+      const invalidated = await commitNavigationMutation({ kind: 'currency.updated' })
+      if (!invalidated) {
+        window.location.reload()
+        return
+      }
       const savedRate = json.data ?? null
       if (savedRate) {
         setCurrencyRate((current) => ({

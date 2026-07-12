@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatUzPhoneDisplay } from '@/lib/phone'
+import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 import {
   Table,
   TableBody,
@@ -212,13 +213,12 @@ export default function ShopsPage() {
                       {formatDate(shop.subscriptionDue)}
                     </TableCell>
                     <TableCell className="pr-5 text-right">
-                      <Link
+                      <IntentPrefetchLink
                         href={`/admin/shops/${shop.id}`}
-                        prefetch={false}
                         className="text-xs text-zinc-500 hover:text-zinc-900 border border-zinc-200 px-2.5 py-1 hover:bg-zinc-50 transition-colors"
                       >
                         Ko&apos;rish
-                      </Link>
+                      </IntentPrefetchLink>
                     </TableCell>
                   </TableRow>
                 )

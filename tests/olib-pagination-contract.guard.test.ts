@@ -3,7 +3,7 @@ import { resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const api = readFileSync(resolve(process.cwd(), 'src/app/api/olib-sotdim/route.ts'), 'utf8')
-const page = readFileSync(resolve(process.cwd(), 'src/app/(shop)/shop/olib-sotdim/page.tsx'), 'utf8')
+const page = readFileSync(resolve(process.cwd(), 'src/app/(shop)/shop/olib-sotdim/olib-sotdim-client.tsx'), 'utf8')
 
 describe('Olib-sotdim bounded native-currency list', () => {
   it('returns a real pagination envelope', () => {

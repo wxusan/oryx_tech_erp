@@ -64,6 +64,14 @@ function buildCsp(): string {
 
 const nextConfig: NextConfig = {
   poweredByHeader: false,
+  experimental: {
+    // Client Router Cache only. Operational writes still validate PostgreSQL
+    // transactionally and explicitly invalidate affected routes on success.
+    // Fully prefetched high-probability sidebar routes use `static`; keeping
+    // both buckets at 30s prevents a targeted prefetch from silently becoming
+    // a five-minute user-specific cache entry.
+    staleTimes: { dynamic: 30, static: 30 },
+  },
   async headers() {
     return [
       {

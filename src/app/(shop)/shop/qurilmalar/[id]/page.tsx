@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { formatUzPhoneDisplay } from '@/lib/phone'
@@ -27,7 +27,8 @@ import { useShopCurrency } from '@/lib/use-shop-currency'
 import { getDeviceImageSrc } from '@/lib/device-image'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 import { ArrowLeft, Pencil, Trash2 } from 'lucide-react'
-import { markFinancialDataChanged } from '@/lib/client-events'
+import { commitNavigationMutation, navigateAfterMutation } from '@/lib/client-events'
+import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 
 interface Supplier {
   name: string
@@ -317,6 +318,11 @@ export default function QurilmaDetailPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Saqlashda xatolik')
+      const invalidated = await commitNavigationMutation({ kind: 'device.updated', deviceId: id })
+      if (!invalidated) {
+        window.location.reload()
+        return
+      }
       setEditOpen(false)
       await fetchDevice()
     } catch (err) {
@@ -338,7 +344,7 @@ export default function QurilmaDetailPage() {
       })
       const json = await res.json()
       if (json.success) {
-        router.push('/shop/qurilmalar')
+        await navigateAfterMutation(router, '/shop/qurilmalar', { kind: 'device.deleted', deviceId: id })
       } else {
         setDeleteError(json.error || "O'chirishda xatolik")
       }
@@ -418,7 +424,14 @@ export default function QurilmaDetailPage() {
       if (!res.ok || !json.success) {
         throw new Error(json.error || "To'lovni saqlashda xatolik")
       }
-      markFinancialDataChanged()
+      const invalidated = await commitNavigationMutation({
+        kind: 'sale.paymentRecorded',
+        deviceId: id,
+      })
+      if (!invalidated) {
+        window.location.reload()
+        return
+      }
       setSalePaymentOpen(false)
       setSalePayAmount('')
       setSalePayMethod('')
@@ -468,6 +481,11 @@ export default function QurilmaDetailPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Sotuvni yangilashda xatolik')
+      const invalidated = await commitNavigationMutation({ kind: 'sale.updated', deviceId: id })
+      if (!invalidated) {
+        window.location.reload()
+        return
+      }
       setSaleEditOpen(false)
       await fetchDevice()
     } catch (err) {
@@ -502,7 +520,11 @@ export default function QurilmaDetailPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Qaytarishda xatolik')
-      router.push('/shop/qurilmalar')
+      await navigateAfterMutation(router, '/shop/qurilmalar', {
+        kind: 'return.created',
+        deviceId: id,
+        nasiyaId: latestNasiya?.id,
+      })
     } catch (err) {
       setReturnError(err instanceof Error ? err.message : 'Qaytarishda xatolik')
     } finally {
@@ -522,6 +544,11 @@ export default function QurilmaDetailPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Omborga qaytarishda xatolik')
+      const invalidated = await commitNavigationMutation({ kind: 'device.restocked', deviceId: id })
+      if (!invalidated) {
+        window.location.reload()
+        return
+      }
       // Local refetch: status becomes IN_STOCK and the sell / nasiya actions
       // reappear without a full page reload.
       setRestockModalOpen(false)
@@ -988,11 +1015,12 @@ export default function QurilmaDetailPage() {
                   To'lov qabul qilish
                 </Button>
               )}
-              <Link href={`/shop/nasiyalar/${latestNasiya.id}`} prefetch={false}>
-                <Button variant="outline" className="text-sm border-zinc-200 text-zinc-700 rounded">
-                  Nasiyani ko'rish
-                </Button>
-              </Link>
+              <IntentPrefetchLink
+                href={`/shop/nasiyalar/${latestNasiya.id}`}
+                className={buttonVariants({ variant: 'outline', className: 'rounded border-zinc-200 text-sm text-zinc-700' })}
+              >
+                Nasiyani ko'rish
+              </IntentPrefetchLink>
             </div>
           </div>
         </div>

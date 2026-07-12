@@ -59,7 +59,7 @@ describe('qurilmalar device detail page: no dead-code UZS fallback', () => {
 describe('sold devices list and olib-sotdim use the shared formatter, not manual UZS text', () => {
   const files = [
     'src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx',
-    'src/app/(shop)/shop/olib-sotdim/page.tsx',
+    'src/app/(shop)/shop/olib-sotdim/olib-sotdim-client.tsx',
     'src/app/(shop)/shop/olib-sotdim/new/page.tsx',
     'src/app/(shop)/shop/hisobot/page.tsx',
   ]

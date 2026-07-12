@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
+import { commitNavigationMutation } from '@/lib/client-events'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
@@ -20,6 +21,7 @@ import { useShopCurrency } from '@/lib/use-shop-currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 import { TrustBadge } from '@/components/shop/trust-badge'
 import { ArrowLeft, Pencil } from 'lucide-react'
+import { paymentAmountDisplay, type NasiyaPaymentDisplayRecord } from '@/lib/payment-history-display'
 
 interface NasiyaSchedule {
   id: string
@@ -33,27 +35,7 @@ interface NasiyaSchedule {
   contractPaidAmount: number
 }
 
-export interface NasiyaPayment {
-  id: string
-  amount: number
-  paymentMethod: string | null
-  paidAt: string
-  note: string | null
-  nasiyaScheduleId: string | null
-  // What the customer actually entered at payment time — preserved so this
-  // never gets silently redisplayed with today's exchange rate. Null for
-  // older payments recorded before this was tracked.
-  paymentInputAmount: number | null
-  paymentInputCurrency: 'UZS' | 'USD' | null
-  paymentExchangeRate: number | null
-  // The amount actually applied to this nasiya's contract-currency debt —
-  // see docs/currency-accounting-model.md. Differs from `amount` (UZS) only
-  // when contractCurrency is USD.
-  appliedAmountInContractCurrency: number | null
-  // Item 12 — split-payment breakdown (e.g. half cash, half card). Null for
-  // a normal single-method payment.
-  paymentBreakdown?: { method: string; amount: number }[] | null
-}
+type NasiyaPayment = NasiyaPaymentDisplayRecord
 
 interface NasiyaLog {
   id: string
@@ -166,31 +148,6 @@ function RowBadge({ status }: { status: RowStatus }) {
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
   if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
   return Number(n).toLocaleString('ru-RU')
-}
-
-/**
- * Payment history shows exactly one user-facing currency: the shop's selected
- * display currency. For tracked payments we convert the original input amount
- * with the payment-time rate, never today's rate. `payment.amount` stays the
- * UZS compatibility snapshot, used only as a fallback for older payments
- * recorded before payment input currency/rate was tracked.
- */
-export function paymentAmountDisplay(
-  payment: NasiyaPayment,
-  contractCurrency: 'UZS' | 'USD',
-  currency: ReturnType<typeof useShopCurrency>['currency'],
-): string {
-  if (payment.paymentInputCurrency != null && payment.paymentInputAmount != null) {
-    return formatUserFacingMoney({
-      amount: payment.paymentInputAmount,
-      amountCurrency: payment.paymentInputCurrency,
-      displayCurrency: currency.currency,
-      rate: payment.paymentExchangeRate ?? currency.usdUzsRate,
-    })
-  }
-  // Older payment recorded before payment-time currency was tracked — same
-  // fallback behavior as before this fix (today's display currency).
-  return fmt(payment.amount, currency)
 }
 
 function ImportField({ label, value }: { label: string; value: string }) {
@@ -355,7 +312,15 @@ export default function NasiyaDetailPage() {
         }),
       })
       const json = await res.json()
-      if (json.success) {
+      if (res.ok && json.success) {
+        const invalidated = await commitNavigationMutation({
+          kind: 'nasiya.updated',
+          nasiyaId: nasiya.id,
+        })
+        if (!invalidated) {
+          window.location.reload()
+          return
+        }
         setEditOpen(false)
         fetchNasiya()
       } else {
@@ -378,7 +343,17 @@ export default function NasiyaDetailPage() {
         body: JSON.stringify({ reminderEnabled: !nasiya.reminderEnabled }),
       })
       const json = await res.json()
-      if (json.success) fetchNasiya()
+      if (res.ok && json.success) {
+        const invalidated = await commitNavigationMutation({
+          kind: 'nasiya.reminderUpdated',
+          nasiyaId: nasiya.id,
+        })
+        if (!invalidated) {
+          window.location.reload()
+          return
+        }
+        fetchNasiya()
+      }
     } catch {
       // silent — state is re-derived from server on next fetch
     } finally {

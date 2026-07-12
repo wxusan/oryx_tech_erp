@@ -22,7 +22,7 @@ import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, gener
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { TrustBadge, type TrustBadgeData } from '@/components/shop/trust-badge'
 import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
-import { markFinancialDataChanged } from '@/lib/client-events'
+import { navigateAfterMutation } from '@/lib/client-events'
 
 type Device = InStockPickerDevice
 
@@ -287,8 +287,11 @@ export default function NewNasiyaPage() {
       if (!res.ok || !json.success) {
         throw new Error(json.error || 'Nasiyani saqlashda xatolik')
       }
-      markFinancialDataChanged()
-      router.push(`/shop/qurilmalar/${selectedDevice.id}`)
+      await navigateAfterMutation(router, `/shop/qurilmalar/${selectedDevice.id}`, {
+        kind: 'nasiya.created',
+        deviceId: selectedDevice.id,
+        nasiyaId: json.data?.nasiyaId,
+      })
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Nasiyani saqlashda xatolik')
     } finally {

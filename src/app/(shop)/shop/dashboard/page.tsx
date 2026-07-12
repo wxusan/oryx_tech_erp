@@ -9,6 +9,7 @@ import { getShopStats } from '@/lib/server/shop-stats'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
 import { uzDate, uzMonthYear } from '@/lib/dates'
+import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 
 interface UpcomingPayment {
   nasiya: {
@@ -32,7 +33,7 @@ function fmtBase(n: number, currency: CurrencyContext) {
 
 function KoLink({ href, label = "Ko'rish" }: { href: string; label?: string }) {
   return (
-    <Link href={href} className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900">
+    <Link prefetch={false} href={href} className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900">
       {label} <ArrowRight className="size-3" />
     </Link>
   )
@@ -157,7 +158,7 @@ export default async function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Link href="/shop/nasiyalar?status=OVERDUE" className="block">
+          <Link prefetch={false} href="/shop/nasiyalar?status=OVERDUE" className="block">
             <Card className="rounded-lg border-red-200 bg-red-50/40 transition-colors hover:border-red-300 hover:bg-red-50">
               <CardHeader>
                 <CardDescription className="text-red-700">Kechikkan to'lovlar</CardDescription>
@@ -233,7 +234,7 @@ export default async function DashboardPage() {
             <CardTitle>Yaqin to'lov sanalari</CardTitle>
             <CardDescription>Nasiya bo'yicha eng yaqin va kechikkan oyliklar</CardDescription>
             <CardAction>
-              <Link href="/shop/nasiyalar" className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900">
+              <Link prefetch={false} href="/shop/nasiyalar" className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900">
                 Barchasini ko'rish <ArrowRight className="size-3" />
               </Link>
             </CardAction>
@@ -241,10 +242,9 @@ export default async function DashboardPage() {
           <CardContent className="space-y-2">
             {stats.upcomingPayments.length > 0 ? (
               stats.upcomingPayments.map((p, i) => (
-                <Link
+                <IntentPrefetchLink
                   key={i}
                   href={`/shop/nasiyalar/${p.nasiya.id}`}
-                  prefetch={false}
                   className="flex items-center justify-between gap-3 py-3 border-b border-zinc-100 last:border-0 hover:bg-zinc-50 -mx-2 px-2 rounded transition-colors"
                 >
                   <div>
@@ -260,7 +260,7 @@ export default async function DashboardPage() {
                     <div className="text-sm font-semibold text-zinc-900">{fmt(outstanding(p), currency)}</div>
                     <div className="mt-0.5 text-xs text-zinc-400">qolgan</div>
                   </div>
-                </Link>
+                </IntentPrefetchLink>
               ))
             ) : (
               <div className="text-sm text-zinc-400 py-4 text-center">To'lovlar yo'q</div>
@@ -273,7 +273,7 @@ export default async function DashboardPage() {
             <CardTitle>Oxirgi operatsiyalar</CardTitle>
             <CardDescription>Do'kon ichidagi oxirgi harakatlar</CardDescription>
             <CardAction>
-              <Link href="/shop/logs" className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900">
+              <Link prefetch={false} href="/shop/logs" className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900">
                 Barchasini ko'rish <ArrowRight className="size-3" />
               </Link>
             </CardAction>

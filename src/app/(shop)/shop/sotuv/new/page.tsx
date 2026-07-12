@@ -20,7 +20,7 @@ import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, Check } from 'lucide-react'
 import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
-import { markFinancialDataChanged } from '@/lib/client-events'
+import { navigateAfterMutation } from '@/lib/client-events'
 
 type Device = InStockPickerDevice
 
@@ -142,8 +142,10 @@ export default function NewSotuvPage() {
       if (!res.ok || !json.success) {
         throw new Error(json.error || 'Sotuvni saqlashda xatolik')
       }
-      markFinancialDataChanged()
-      router.push(`/shop/qurilmalar/${selectedDevice.id}`)
+      await navigateAfterMutation(router, `/shop/qurilmalar/${selectedDevice.id}`, {
+        kind: 'sale.created',
+        deviceId: selectedDevice.id,
+      })
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Sotuvni saqlashda xatolik')
     } finally {

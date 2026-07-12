@@ -15,6 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { actionLabel, actorLabel, formatLogValue, targetLabel } from '@/lib/log-format'
 import { logCategoryFor, logCategoryLabel, logCategoryOptions, type LogCategory } from '@/lib/log-categories'
 import type { CurrencyContext } from '@/lib/currency'
+import { replaceListUrlState } from '@/lib/list-url-state'
 
 type ActorType = 'SUPER_ADMIN' | 'SHOP_ADMIN'
 
@@ -95,9 +96,17 @@ interface ShopLogsClientProps {
   initialPayload: LogsPayload
   initialRequestKey: string
   currency: CurrencyContext
+  initialState: {
+    search: string
+    dateFrom: string
+    dateTo: string
+    category: LogCategory
+    actorId: string
+    page: number
+  }
 }
 
-export default function ShopLogsClient({ initialPayload, initialRequestKey, currency }: ShopLogsClientProps) {
+export default function ShopLogsClient({ initialPayload, initialRequestKey, currency, initialState }: ShopLogsClientProps) {
   const router = useRouter()
   const [logs, setLogs] = useState<DisplayLog[]>(() => initialPayload.logs.map((log) => displayLog(log, currency)))
   const [loadedKey, setLoadedKey] = useState(initialRequestKey)
@@ -126,13 +135,13 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
     }
   }
   const [totalLogs, setTotalLogs] = useState(initialPayload.total)
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
-  const [category, setCategory] = useState<LogCategory>('all')
-  const [actorId, setActorId] = useState('')
-  const [page, setPage] = useState(1)
+  const [search, setSearch] = useState(initialState.search)
+  const [debouncedSearch, setDebouncedSearch] = useState(initialState.search)
+  const [dateFrom, setDateFrom] = useState(initialState.dateFrom)
+  const [dateTo, setDateTo] = useState(initialState.dateTo)
+  const [category, setCategory] = useState<LogCategory>(initialState.category)
+  const [actorId, setActorId] = useState(initialState.actorId)
+  const [page, setPage] = useState(initialState.page)
   // Item 1 — admin filter. Built from real Log.actorId/actorName values seen
   // across every page loaded so far (never invented) — a shop typically has
   // only a handful of admins, so this fills in quickly as pages load.
@@ -163,6 +172,17 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
 
     return params.toString()
   }, [debouncedSearch, dateFrom, dateTo, category, actorId, page])
+
+  useEffect(() => {
+    replaceListUrlState({
+      q: debouncedSearch,
+      category,
+      actorId,
+      from: dateFrom,
+      to: dateTo,
+      page,
+    })
+  }, [actorId, category, dateFrom, dateTo, debouncedSearch, page])
 
   useEffect(() => {
     if (loadedKey === requestKey) return

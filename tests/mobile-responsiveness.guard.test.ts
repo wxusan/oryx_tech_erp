@@ -26,8 +26,8 @@ describe('page headers with multiple action buttons wrap/stack on mobile instead
   const headerFiles = [
     'src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx',
     'src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx',
-    'src/app/(shop)/shop/olib-sotdim/page.tsx',
-    'src/app/(shop)/shop/mijozlar/page.tsx',
+    'src/app/(shop)/shop/olib-sotdim/olib-sotdim-client.tsx',
+    'src/app/(shop)/shop/mijozlar/customers-client.tsx',
   ]
 
   it.each(headerFiles)('%s: header stacks on mobile and wraps its action buttons', (file) => {

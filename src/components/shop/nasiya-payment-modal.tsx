@@ -20,7 +20,7 @@ import {
 import { uzDate, uzMonthYear } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { tashkentTodayInputValue } from '@/lib/timezone'
-import { markFinancialDataChanged } from '@/lib/client-events'
+import { commitNavigationMutation } from '@/lib/client-events'
 
 /**
  * The single receive-payment modal used by BOTH the nasiya detail page and the
@@ -305,8 +305,15 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
         }),
       })
       const json = await res.json()
-      if (json.success) {
-        markFinancialDataChanged()
+      if (res.ok && json.success) {
+        const invalidated = await commitNavigationMutation({
+          kind: 'nasiya.paymentRecorded',
+          nasiyaId,
+        })
+        if (!invalidated) {
+          window.location.reload()
+          return
+        }
         onOpenChange(false)
         onSuccess()
       } else {

@@ -2,13 +2,15 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import Link from 'next/link'
-import { Button } from '@/components/ui/button'
+import { Button, buttonVariants } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { exportUrl } from '@/lib/api-client'
 import { uzDate } from '@/lib/dates'
 import { displayImei } from '@/lib/device-display'
 import { formatMoneyByCurrency, type CurrencyContext, type CurrencyCode } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
+import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
+import { replaceListUrlState } from '@/lib/list-url-state'
 
 type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA' | 'RETURNED' | 'DELETED'
 type DisplayStatus = 'Omborda' | 'Sotilgan' | 'Qarz' | 'Nasiyada' | 'Qaytarilgan (eski holat)' | "O'chirilgan"
@@ -139,20 +141,24 @@ export default function QurilmalarClient({
   initialTotal,
   currency,
   initialStatus = 'Barchasi',
+  initialSearch = '',
+  initialPage = 1,
 }: {
   initialDevices: Device[]
   initialTotal: number
   currency: CurrencyContext
   initialStatus?: DeviceStatus | 'Barchasi'
+  initialSearch?: string
+  initialPage?: number
 }) {
   const [devices, setDevices] = useState<Device[]>(initialDevices)
   const [total, setTotal] = useState(initialTotal)
-  const [page, setPage] = useState(1)
-  const [search, setSearch] = useState('')
-  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [page, setPage] = useState(initialPage)
+  const [search, setSearch] = useState(initialSearch)
+  const [debouncedSearch, setDebouncedSearch] = useState(initialSearch)
   const [activeStatus, setActiveStatus] = useState<DeviceStatus | 'Barchasi'>(initialStatus)
   const [error, setError] = useState('')
-  const [loadedKey, setLoadedKey] = useState(() => buildRequestKey('', initialStatus, 1))
+  const [loadedKey, setLoadedKey] = useState(() => buildRequestKey(initialSearch, initialStatus, initialPage))
 
   // Debounce the free-text search so typing doesn't fire a request per keystroke.
   useEffect(() => {
@@ -164,6 +170,10 @@ export default function QurilmalarClient({
     () => buildRequestKey(debouncedSearch, activeStatus, page),
     [debouncedSearch, activeStatus, page],
   )
+
+  useEffect(() => {
+    replaceListUrlState({ q: debouncedSearch, status: activeStatus, page })
+  }, [activeStatus, debouncedSearch, page])
 
   useEffect(() => {
     if (loadedKey === requestKey) return
@@ -221,12 +231,12 @@ export default function QurilmalarClient({
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 border-b border-zinc-200">
+      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200">
         {filterTabs.map((tab) => (
           <button
             key={tab.value}
             onClick={() => { setActiveStatus(tab.value); setPage(1) }}
-            className={`px-3 py-2 text-sm transition-colors border-b-2 -mb-px ${
+            className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors ${
               activeStatus === tab.value
                 ? 'border-zinc-900 text-zinc-900 font-medium'
                 : 'border-transparent text-zinc-500 hover:text-zinc-700'
@@ -325,11 +335,12 @@ export default function QurilmalarClient({
                     {uzDate(d.createdAt)}
                   </td>
                   <td className="px-4 py-3">
-                    <Link href={`/shop/qurilmalar/${d.id}`} prefetch={false}>
-                      <button className="text-xs px-3 py-1.5 border border-zinc-200 rounded hover:bg-zinc-100 text-zinc-700 transition-colors">
-                        Ko'rish
-                      </button>
-                    </Link>
+                    <IntentPrefetchLink
+                      href={`/shop/qurilmalar/${d.id}`}
+                      className="inline-flex rounded border border-zinc-200 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100"
+                    >
+                      Ko'rish
+                    </IntentPrefetchLink>
                   </td>
                 </tr>
                 ))
@@ -374,18 +385,19 @@ export default function QurilmalarClient({
                 </div>
               )}
               <div className="text-xs text-zinc-400">{uzDate(d.createdAt)}</div>
-              <Link href={`/shop/qurilmalar/${d.id}`} prefetch={false} className="block">
-                <Button variant="outline" className="h-8 w-full rounded border-zinc-200 text-xs">
-                  Ko&apos;rish
-                </Button>
-              </Link>
+              <IntentPrefetchLink
+                href={`/shop/qurilmalar/${d.id}`}
+                className={buttonVariants({ variant: 'outline', className: 'h-8 w-full rounded border-zinc-200 text-xs' })}
+              >
+                Ko&apos;rish
+              </IntentPrefetchLink>
             </div>
           ))
         )}
       </div>
 
       {total > 0 && (
-        <div className="flex items-center justify-between text-sm text-zinc-500">
+        <div className="flex flex-col gap-2 text-sm text-zinc-500 sm:flex-row sm:items-center sm:justify-between">
           <span>
             {total} ta qurilmadan {Math.min((page - 1) * PER_PAGE + 1, total)}-{Math.min(page * PER_PAGE, total)} ko&apos;rsatilmoqda
           </span>
