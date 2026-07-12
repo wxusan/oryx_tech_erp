@@ -22,6 +22,11 @@ export interface NavigationMutationBroadcast {
   cursor?: string | null
 }
 
+export interface NavigationMutationEventDetail {
+  mutation: NavigationMutation
+  impact: NavigationImpact
+}
+
 let clientInstanceId: string | null = null
 
 function mutationId() {
@@ -84,8 +89,12 @@ export async function navigateAfterMutation(
   href: string,
   mutation: NavigationMutation,
 ) {
-  await commitNavigationMutation(mutation)
+  // Local targeted invalidation happens synchronously before the commit's
+  // first await. Start the durable sync/broadcast work, navigate immediately,
+  // and only then await completion so a slow /api/sync cannot hold the UI.
+  const commit = commitNavigationMutation(mutation)
   router.push(href)
+  await commit
 }
 
 export async function refreshAfterMutation(router: NavigationRouter, mutation: NavigationMutation) {
@@ -110,6 +119,18 @@ export function subscribeToNavigationMutations(listener: (message: NavigationMut
     channel?.close()
     window.removeEventListener('storage', storageListener)
   }
+}
+
+export function subscribeToLocalNavigationMutationImpacts(
+  listener: (detail: NavigationMutationEventDetail) => void,
+) {
+  const eventListener = (event: Event) => {
+    const detail = (event as CustomEvent<NavigationMutationEventDetail>).detail
+    if (!detail?.mutation || !detail.impact) return
+    listener(detail)
+  }
+  window.addEventListener(NAVIGATION_MUTATION_EVENT, eventListener)
+  return () => window.removeEventListener(NAVIGATION_MUTATION_EVENT, eventListener)
 }
 
 export function clearNavigationClientState() {

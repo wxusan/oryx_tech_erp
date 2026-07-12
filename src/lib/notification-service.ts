@@ -8,6 +8,8 @@ import { recordOpsEvent } from '@/lib/server/ops-events'
 const MAX_NOTIFICATION_ATTEMPTS = 5
 const NOTIFICATION_BATCH_SIZE = 100
 const NOTIFICATION_SEND_CONCURRENCY = 5
+const NOTIFICATION_MAX_BATCHES_PER_RUN = 5
+const NOTIFICATION_RUN_BUDGET_MS = 8_000
 const STALE_PROCESSING_MS = 5 * 60 * 1000
 
 function nextAttemptDelayMs(attemptCount: number, retryAfterSeconds?: number): number {
@@ -68,9 +70,15 @@ async function saveTextDelivered(id: string) {
   await prisma.notification.update({ where: { id }, data: { textSentAt: new Date() } })
 }
 
-async function saveMediaDelivered(id: string, positions: number[]) {
+async function saveMediaDelivered(id: string, positions: number[], textDelivered = false) {
   if (!positions.length) return
-  await prisma.notification.update({ where: { id }, data: { mediaSentPositions: { push: positions } } })
+  await prisma.notification.update({
+    where: { id },
+    data: {
+      mediaSentPositions: { push: positions },
+      ...(textDelivered ? { textSentAt: new Date() } : {}),
+    },
+  })
 }
 
 async function deliverNotification(notification: PendingNotification): Promise<{
@@ -101,23 +109,33 @@ async function deliverNotification(notification: PendingNotification): Promise<{
   let imagesSent = 0
   let groupsSent = 0
   let firstError: TelegramSendResult | undefined
+  // Keep delivery progress in memory as well as in the database. The
+  // notification object is the snapshot loaded before this attempt, so reading
+  // notification.textSentAt again after a successful step would be stale and
+  // could resend a caption/message as a fallback in the same attempt.
+  let textDelivered = Boolean(notification.textSentAt)
   for (const step of steps) {
     let result: TelegramSendResult
     if (step.method === 'message') {
       result = await sendTelegramMessage(notification.telegramId, step.text)
-      if (result.ok) await saveTextDelivered(notification.id)
+      if (result.ok) {
+        await saveTextDelivered(notification.id)
+        textDelivered = true
+      }
     } else if (step.method === 'photo') {
       result = await sendTelegramPhoto(notification.telegramId, step.item.imageUrl, step.caption)
       if (result.ok) {
         imagesSent++
-        await saveMediaDelivered(notification.id, [step.item.position])
+        await saveMediaDelivered(notification.id, [step.item.position], Boolean(step.caption))
+        if (step.caption) textDelivered = true
       }
     } else {
       result = await sendTelegramMediaGroup(notification.telegramId, step.items.map((item) => item.imageUrl), step.caption)
       if (result.ok) {
         imagesSent += step.items.length
         groupsSent++
-        await saveMediaDelivered(notification.id, step.items.map((item) => item.position))
+        await saveMediaDelivered(notification.id, step.items.map((item) => item.position), Boolean(step.caption))
+        if (step.caption) textDelivered = true
       }
     }
     if (!result.ok) {
@@ -127,9 +145,12 @@ async function deliverNotification(notification: PendingNotification): Promise<{
   }
 
   // If media/signing failed, guarantee the business message still arrives.
-  if ((firstError || unresolvedCount > 0) && !notification.textSentAt) {
+  if ((firstError || unresolvedCount > 0) && !textDelivered) {
     const fallback = await sendTelegramMessage(notification.telegramId, notification.message)
-    if (fallback.ok) await saveTextDelivered(notification.id)
+    if (fallback.ok) {
+      await saveTextDelivered(notification.id)
+      textDelivered = true
+    }
     else firstError ??= fallback
   }
 
@@ -151,16 +172,18 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
   try {
     const now = new Date()
     const staleBefore = new Date(now.getTime() - STALE_PROCESSING_MS)
-    const pending = await prisma.notification.findMany({
-      where: { OR: [
-        { status: { in: ['PENDING', 'FAILED'] }, scheduledAt: { lte: now }, OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }] },
-        { status: 'PROCESSING', lastAttemptAt: { lte: staleBefore } },
-      ] },
-      orderBy: { scheduledAt: 'asc' },
-      take: NOTIFICATION_BATCH_SIZE,
-    })
+    for (let batch = 0; batch < NOTIFICATION_MAX_BATCHES_PER_RUN; batch++) {
+      if (Date.now() - startedAt >= NOTIFICATION_RUN_BUDGET_MS) break
+      const pending = await prisma.notification.findMany({
+        where: { OR: [
+          { status: { in: ['PENDING', 'FAILED'] }, scheduledAt: { lte: now }, OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }] },
+          { status: 'PROCESSING', lastAttemptAt: { lte: staleBefore } },
+        ] },
+        orderBy: { scheduledAt: 'asc' },
+        take: NOTIFICATION_BATCH_SIZE,
+      })
 
-    for (let offset = 0; offset < pending.length; offset += NOTIFICATION_SEND_CONCURRENCY) {
+      for (let offset = 0; offset < pending.length; offset += NOTIFICATION_SEND_CONCURRENCY) {
       await Promise.all(pending.slice(offset, offset + NOTIFICATION_SEND_CONCURRENCY).map(async (notification) => {
         const claim = await prisma.notification.updateMany({
           where: { id: notification.id, OR: [{ status: { in: ['PENDING', 'FAILED'] } }, { status: 'PROCESSING', lastAttemptAt: { lte: staleBefore } }] },
@@ -202,6 +225,11 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
           await recordOpsEvent({ level: 'ERROR', event: exhausted ? 'notification.cancelled' : 'notification.process_error', message: 'Error while processing a notification', shopId: notification.shopId, entityType: 'Notification', entityId: notification.id, status: notification.type, metadata: { attempts: attemptCount, error: error instanceof Error ? error.message : String(error) } })
         }
       }))
+      }
+      // A short batch proves the due backlog is drained. A full batch loops
+      // again (within a strict time/batch budget) instead of leaving rows until
+      // the next daily cron or user mutation.
+      if (pending.length < NOTIFICATION_BATCH_SIZE) break
     }
     if (counters.attempted) logger.info('notification run complete', { event: 'notification.run', status: counters.failed + counters.cancelled ? 'partial' : 'ok', ...finalize() })
   } catch (error) {
