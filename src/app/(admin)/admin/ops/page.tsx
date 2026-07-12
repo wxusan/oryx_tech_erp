@@ -1,10 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { Activity, AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { uzDateTime } from '@/lib/dates'
 import type { ApiResponse } from '@/types'
+import { queryKeys } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 
 interface OpsEvent {
   id: string
@@ -56,33 +58,21 @@ function metaSummary(metadata: unknown) {
 }
 
 export default function AdminOpsPage() {
-  const [data, setData] = useState<OpsPayload | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  // Only sets state inside async callbacks, so it is safe to run from an effect
-  // (no synchronous setState in the effect body).
-  const runFetch = useCallback(() => {
-    return fetch('/api/admin/ops')
-      .then(async (res) => {
-        if (!res.ok) throw new Error('Yuklashda xatolik')
-        const json: ApiResponse<OpsPayload> = await res.json()
-        setData(json.data ?? null)
-        setError('')
-      })
-      .catch((err: Error) => setError(err.message || 'Xatolik'))
-      .finally(() => setLoading(false))
-  }, [])
-
-  const refresh = useCallback(() => {
-    setLoading(true)
-    setError('')
-    void runFetch()
-  }, [runFetch])
-
-  useEffect(() => {
-    void runFetch()
-  }, [runFetch])
+  const scope = useAuthenticatedQueryScope()
+  const opsQuery = useQuery({
+    queryKey: queryKeys.domain(scope, 'adminOps'),
+    queryFn: async ({ signal }) => {
+      const response = await fetch('/api/admin/ops', { signal, cache: 'no-store' })
+      if (!response.ok) throw new Error('Yuklashda xatolik')
+      const json: ApiResponse<OpsPayload> = await response.json()
+      if (!json.success || !json.data) throw new Error(json.error || 'Xatolik')
+      return json.data
+    },
+  })
+  const data = opsQuery.data ?? null
+  const loading = opsQuery.isPending || opsQuery.isFetching
+  const error = opsQuery.error instanceof Error ? opsQuery.error.message : ''
+  const refresh = () => { void opsQuery.refetch() }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">

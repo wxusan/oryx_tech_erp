@@ -101,6 +101,7 @@ async function resetExistingDemoData() {
 
   if (!shopIds.length) return
 
+  await client.query('delete from "ChangeEvent" where "scopeType" = \'SHOP\' and "scopeId" = any($1)', [shopIds])
   await client.query('delete from "Log" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Notification" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "NasiyaPayment" where "shopId" = any($1)', [shopIds])
@@ -268,7 +269,6 @@ async function seedShop(superAdminId, index, shop) {
       startDate: dateFromNow(plan.startDays),
       status: plan.status,
       reminderEnabled: true,
-      appleIdNote: plan.appleIdNote,
       note: plan.note,
       createdAt: dateFromNow(plan.startDays),
       createdBy: adminId,

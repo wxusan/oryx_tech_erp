@@ -5,6 +5,8 @@ import { getShopCurrencyContext } from '@/lib/server/currency'
 import ShopLogsClient from './logs-client'
 import { positivePage, scalarParam } from '@/lib/list-url-state'
 import { logCategoryOptions, type LogCategory } from '@/lib/log-categories'
+import { latestChangeCursorForSession } from '@/lib/server/change-events'
+import { IncrementalSnapshotBoundary } from '@/components/incremental-snapshot-boundary'
 
 export default async function ShopLogsPage({
   searchParams,
@@ -14,6 +16,7 @@ export default async function ShopLogsPage({
   const guarded = await requireApiSession()
   if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
 
+  const cursor = await latestChangeCursorForSession(guarded.session)
   const [payload, currency] = await Promise.all([
     getShopLogsInitial(guarded.shopId),
     getShopCurrencyContext(guarded.shopId),
@@ -26,6 +29,8 @@ export default async function ShopLogsPage({
     : 'all'
 
   return (
+    <>
+    <IncrementalSnapshotBoundary cursor={cursor} />
     <ShopLogsClient
       initialPayload={payload}
       initialRequestKey={initialLogsRequestKey()}
@@ -39,5 +44,6 @@ export default async function ShopLogsPage({
         page: positivePage(params?.page),
       }}
     />
+    </>
   )
 }

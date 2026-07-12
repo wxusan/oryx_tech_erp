@@ -24,8 +24,8 @@ describe('P1 money/report clarity guard', () => {
   })
 
   it('dashboard/report labels distinguish gross turnover, net cash, refunds and sales profit', () => {
-    const dashboard = read('src/app/(shop)/shop/dashboard/page.tsx')
-    const report = read('src/app/(shop)/shop/hisobot/page.tsx')
+    const dashboard = read('src/app/(shop)/shop/dashboard/dashboard-client.tsx')
+    const report = read('src/app/(shop)/shop/hisobot/hisobot-client.tsx')
 
     // "Umumiy aylanma" = gross turnover, "Sof tushum" = net cash after refunds,
     // "Sotuv foydasi" = sale price minus purchase cost (not full net profit).

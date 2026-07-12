@@ -10,7 +10,7 @@ function routeExists(rel: string): boolean {
   return existsSync(resolve(process.cwd(), rel))
 }
 
-const DASHBOARD = 'src/app/(shop)/shop/dashboard/page.tsx'
+const DASHBOARD = 'src/app/(shop)/shop/dashboard/dashboard-client.tsx'
 const NASIYALAR_CLIENT = 'src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx'
 const DETAIL = 'src/app/(shop)/shop/nasiyalar/[id]/page.tsx'
 const MODAL = 'src/components/shop/nasiya-payment-modal.tsx'
@@ -64,17 +64,13 @@ describe('nasiyalar list payment action', () => {
     expect(src).toContain("To&apos;lov qabul qilish")
   })
 
-  it('opens the shared modal for the selected nasiya and revalidates on success', () => {
+  it('opens the shared modal and refetches only the active nasiya query on success', () => {
     expect(src).toContain('onClick={() => setPayFor(n)}')
     expect(src).toContain('<NasiyaPaymentModal')
-    // The list is now a client-fetch-paginated component (owns its own
-    // nasiyalar/total state), so router.refresh() alone would no longer
-    // update what's on screen — handlePaymentSuccess both refreshes the
-    // server-rendered surfaces (router.refresh()) AND refetches the
-    // currently displayed page directly.
     expect(src).toContain('onSuccess={handlePaymentSuccess}')
     expect(src).toContain('function handlePaymentSuccess()')
-    expect(src).toContain('router.refresh()')
+    expect(src).toContain('nasiyalarQuery.refetch()')
+    expect(src).not.toContain('router.refresh()')
   })
 })
 

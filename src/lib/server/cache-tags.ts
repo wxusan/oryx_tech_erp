@@ -1,6 +1,6 @@
 import 'server-only'
 
-import { revalidatePath, revalidateTag } from 'next/cache'
+import { revalidateTag } from 'next/cache'
 
 export const shopCacheTag = {
   stats: (shopId: string) => `shop:${shopId}:stats`,
@@ -14,27 +14,19 @@ export const shopCacheTag = {
   returns: (shopId: string) => `shop:${shopId}:returns`,
 }
 
-function revalidateShopPaths(paths: string[]) {
-  for (const path of paths) {
-    revalidatePath(path)
-  }
-}
-
 export function invalidateShopCache(
   shopId: string,
   tags: Array<(id: string) => string>,
-  paths: string[] = [],
 ) {
   for (const tag of tags) {
     // Route handlers mutate operational data. Expire immediately so the next
     // navigation after a payment/sale/return does not show stale money/status.
     revalidateTag(tag(shopId), { expire: 0 })
   }
-  revalidateShopPaths(paths)
 }
 
 export function invalidateShopStats(shopId: string) {
-  invalidateShopCache(shopId, [shopCacheTag.stats, shopCacheTag.reports], ['/shop/dashboard', '/shop/hisobot'])
+  invalidateShopCache(shopId, [shopCacheTag.stats, shopCacheTag.reports])
 }
 
 export function invalidateShopDeviceMutation(shopId: string) {
@@ -46,7 +38,6 @@ export function invalidateShopDeviceMutation(shopId: string) {
       shopCacheTag.reports,
       shopCacheTag.logs,
     ],
-    ['/shop/qurilmalar', '/shop/sotuv/new', '/shop/nasiyalar/new', '/shop/dashboard', '/shop/hisobot', '/shop/logs'],
   )
 }
 
@@ -61,7 +52,6 @@ export function invalidateShopSaleMutation(shopId: string) {
       shopCacheTag.reports,
       shopCacheTag.logs,
     ],
-    ['/shop/qurilmalar', '/shop/sotuv/new', '/shop/mijozlar', '/shop/dashboard', '/shop/hisobot', '/shop/logs'],
   )
 }
 
@@ -77,7 +67,6 @@ export function invalidateShopNasiyaMutation(shopId: string) {
       shopCacheTag.reports,
       shopCacheTag.logs,
     ],
-    ['/shop/qurilmalar', '/shop/nasiyalar', '/shop/nasiyalar/new', '/shop/mijozlar', '/shop/dashboard', '/shop/hisobot', '/shop/logs'],
   )
 }
 
@@ -92,7 +81,6 @@ export function invalidateShopPaymentMutation(shopId: string) {
       shopCacheTag.reports,
       shopCacheTag.logs,
     ],
-    ['/shop/nasiyalar', '/shop/qurilmalar', '/shop/dashboard', '/shop/hisobot', '/shop/logs'],
   )
 }
 
@@ -109,7 +97,6 @@ export function invalidateShopReturnMutation(shopId: string) {
       shopCacheTag.reports,
       shopCacheTag.logs,
     ],
-    ['/shop/qurilmalar', '/shop/nasiyalar', '/shop/dashboard', '/shop/hisobot', '/shop/logs'],
   )
 }
 
@@ -123,12 +110,11 @@ export function invalidateShopCustomerMutation(shopId: string) {
       shopCacheTag.reports,
       shopCacheTag.logs,
     ],
-    ['/shop/mijozlar', '/shop/nasiyalar', '/shop/dashboard', '/shop/hisobot', '/shop/logs'],
   )
 }
 
 export function invalidateShopReminderMutation(shopId: string) {
-  invalidateShopCache(shopId, [shopCacheTag.nasiyalar, shopCacheTag.logs], ['/shop/nasiyalar', '/shop/logs'])
+  invalidateShopCache(shopId, [shopCacheTag.nasiyalar, shopCacheTag.logs])
 }
 
 /**
@@ -145,14 +131,13 @@ export function invalidateShopOverdueCron(shopId: string) {
       shopCacheTag.stats,
       shopCacheTag.reports,
     ],
-    ['/shop/nasiyalar', '/shop/dashboard', '/shop/hisobot'],
   )
 }
 
 export function invalidateShopLogMutation(shopId: string) {
-  invalidateShopCache(shopId, [shopCacheTag.logs], ['/shop/logs'])
+  invalidateShopCache(shopId, [shopCacheTag.logs])
 }
 
 export function invalidateShopProfileMutation(shopId: string) {
-  invalidateShopCache(shopId, [shopCacheTag.logs], ['/shop/settings', '/shop/dashboard', '/shop/logs'])
+  invalidateShopCache(shopId, [shopCacheTag.logs])
 }

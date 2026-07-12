@@ -291,24 +291,22 @@ Set the variables from `.env.example` in Vercel. Production must include
   host shown earlier was `ap-south-1`; that distance adds latency to every DB
   round trip. Co-locating them is a deployment setting, not a code change.
 
-**Migrations run automatically on `Production` builds only.** `vercel.json`'s
-`buildCommand` is `if [ "$VERCEL_ENV" = "production" ]; then npx prisma migrate
-deploy; fi && npm run build` — `VERCEL_ENV` is set by Vercel itself, so preview
-deployments (which may point at the same shared database) never run
-migrations, only the actual `Production` build does. This was previously a
-fully manual step (see history), which meant migrations could silently go
-un-applied for days if nobody remembered to run them — the schema and the
-deployed code then drift apart with no build failure to signal it. You can
-still run it manually against production out-of-band if needed:
+**Builds never run migrations.** `vercel.json` runs only `npm run build`.
+Production uses the artifact-first workflow in
+`.github/workflows/release-production.yml`: build the immutable artifact,
+apply reviewed backward-compatible migrations, then deploy that exact prebuilt
+artifact. This prevents a failed build from leaving the database ahead of the
+application. An authorized operator can still apply migrations out-of-band
+when following the recovery runbook:
 
 ```bash
 # From a trusted environment pointed at the PRODUCTION database:
 npm run prisma:migrate:deploy
 ```
 
-Use `DIRECT_URL` (non-pooled) for migrations. Scope preview deployments to a
-separate database if you want an extra layer of isolation beyond the
-`VERCEL_ENV` gate above.
+Use `DIRECT_URL` (non-pooled) for migrations. Preview deployments must not
+mutate a shared database; use a separate preview database when runtime preview
+testing requires unreleased schema.
 
 ### Cron auth
 

@@ -103,26 +103,28 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       statusChangeReason = auditNote
     }
 
-    const updated = await prisma.shop.update({
-      where: { id },
-      data: updateData,
-    })
-
-    await prisma.log.create({
-      data: {
-        shopId: id,
-        actorId: session.user.id,
-        actorType: 'SUPER_ADMIN',
-        action: 'UPDATE',
-        targetType: 'Shop',
-        targetId: id,
-        oldValue: existing as object,
-        newValue: {
-          ...updateData,
-          ...(statusChangeReason ? { statusChangeReason } : {}),
+    const updated = await prisma.$transaction(async (tx) => {
+      const shop = await tx.shop.update({
+        where: { id },
+        data: updateData,
+      })
+      await tx.log.create({
+        data: {
+          shopId: id,
+          actorId: session.user.id,
+          actorType: 'SUPER_ADMIN',
+          action: 'UPDATE',
+          targetType: 'Shop',
+          targetId: id,
+          oldValue: existing as object,
+          newValue: {
+            ...updateData,
+            ...(statusChangeReason ? { statusChangeReason } : {}),
+          },
+          note: statusChangeReason,
         },
-        note: statusChangeReason,
-      },
+      })
+      return shop
     })
 
     return ok(updated, "Do'kon muvaffaqiyatli yangilandi")

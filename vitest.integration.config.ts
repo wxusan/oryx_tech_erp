@@ -12,6 +12,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(process.cwd(), 'src'),
+      'server-only': resolve(process.cwd(), 'node_modules/next/dist/compiled/server-only/empty.js'),
     },
   },
 })

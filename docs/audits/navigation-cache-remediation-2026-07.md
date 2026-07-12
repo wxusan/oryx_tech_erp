@@ -1,5 +1,7 @@
 # Mutation-aware navigation cache remediation — 2026-07
 
+> Historical 30-second baseline. The current two-minute incremental architecture is documented in `docs/architecture/incremental-navigation-sync.md`.
+
 ## Scope and decision
 
 This change was measured against `4ab1c8c` (the merge commit at the tip of `main` when the work began) and implemented on `codex/mutation-aware-navigation-cache`.

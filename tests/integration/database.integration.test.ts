@@ -20,8 +20,8 @@ describe('disposable PostgreSQL migration foundation', () => {
       ORDER BY migration_name
     `
 
-    expect(rows).toHaveLength(24)
-    expect(rows.at(-1)?.migration_name).toBe('202607110001_add_sold_debt_device_status')
+    expect(rows).toHaveLength(25)
+    expect(rows.at(-1)?.migration_name).toBe('202607120001_incremental_change_events')
   })
 
   it('preserves the migration-managed active-only unique indexes', async () => {

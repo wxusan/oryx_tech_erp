@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
@@ -25,6 +26,8 @@ import {
   SelectTrigger as TrustSelectTrigger,
   SelectValue as TrustSelectValue,
 } from '@/components/ui/select'
+import { queryKeys } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 
 const TRUST_TIER_LABELS: Record<TrustTier, string> = {
   NEW: 'Yangi mijoz',
@@ -54,12 +57,10 @@ interface Customer {
 const PER_PAGE = 25
 
 export default function CustomersClient({ initialSearch, initialPage }: { initialSearch: string; initialPage: number }) {
-  const [customers, setCustomers] = useState<Customer[]>([])
-  const [total, setTotal] = useState(0)
+  const scope = useAuthenticatedQueryScope()
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState(initialSearch)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
+  const [committedSearch, setCommittedSearch] = useState(initialSearch)
   const [editing, setEditing] = useState<Customer | null>(null)
   const [name, setName] = useState('')
   const [phone, setPhone] = useState('')
@@ -69,55 +70,45 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
   const [trustOverride, setTrustOverride] = useState<TrustTier | ''>('')
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState('')
-  const listRequestRef = useRef<AbortController | null>(null)
-  const requestGenerationRef = useRef(0)
-
-  function requestCustomers(query: string, pageNum: number) {
-    listRequestRef.current?.abort()
-    const controller = new AbortController()
-    listRequestRef.current = controller
-    const generation = ++requestGenerationRef.current
+  const customersQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'customers', {
+      search: committedSearch,
+      page,
+      take: PER_PAGE,
+      sort: 'createdAt-desc',
+    }),
+    queryFn: async ({ signal }) => {
     const params = new URLSearchParams({
-      search: query,
-      skip: String((pageNum - 1) * PER_PAGE),
+        search: committedSearch,
+        skip: String((page - 1) * PER_PAGE),
       take: String(PER_PAGE),
     })
-    fetch(`/api/customers?${params.toString()}`, { signal: controller.signal })
-      .then((res) => res.json())
-      .then((json) => {
-        if (generation !== requestGenerationRef.current) return
-        if (json.success) {
-          setCustomers(json.data.items)
-          setTotal(json.data.total)
-        } else {
-          setError(json.error || 'Mijozlar yuklanmadi')
-        }
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-        if (generation === requestGenerationRef.current) setError('Mijozlar yuklanmadi')
-      })
-      .finally(() => {
-        if (generation === requestGenerationRef.current) setLoading(false)
-      })
-  }
+      const response = await fetch(`/api/customers?${params.toString()}`, { signal, cache: 'no-store' })
+      const json = await response.json() as { success: boolean; data?: { items: Customer[]; total: number }; error?: string }
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Mijozlar yuklanmadi')
+      return json.data
+    },
+    placeholderData: keepPreviousData,
+  })
 
   function loadCustomers(query: string, pageNum: number) {
     replaceListUrlState({ q: query, page: pageNum })
+    setCommittedSearch(query)
     setPage(pageNum)
-    requestCustomers(query, pageNum)
   }
 
   useEffect(() => {
-    requestCustomers(initialSearch, initialPage)
-    return () => listRequestRef.current?.abort()
-  }, [initialPage, initialSearch])
+    replaceListUrlState({ q: committedSearch, page })
+  }, [committedSearch, page])
 
   function submitSearch() {
-    setPage(1)
     loadCustomers(search, 1)
   }
 
+  const customers = customersQuery.data?.items ?? []
+  const total = customersQuery.data?.total ?? 0
+  const loading = customersQuery.isPending && !customersQuery.data
+  const error = customersQuery.error instanceof Error ? customersQuery.error.message : ''
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
 
   function openEdit(customer: Customer) {
@@ -161,14 +152,10 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Saqlashda xatolik')
-      const invalidated = await commitNavigationMutation({ kind: 'customer.updated' })
-      if (!invalidated) {
-        window.location.reload()
-        return
-      }
+      await commitNavigationMutation({ kind: 'customer.updated' })
       setEditing(null)
       setReason('')
-      loadCustomers(search, page)
+      void customersQuery.refetch()
     } catch (err) {
       setSaveError(err instanceof Error ? err.message : 'Saqlashda xatolik')
     } finally {

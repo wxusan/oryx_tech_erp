@@ -89,6 +89,7 @@ describe('mark supplier payable as paid stops reminders', () => {
 
 describe('supplier payable reminders: cron + jitter + idempotency', () => {
   const cron = read('src/app/api/cron/reminders/route.ts')
+  const overdueTransition = read('src/lib/server/overdue-transition.ts')
 
   it('has due-today, overdue, and early-reminder blocks for SupplierPayable', () => {
     expect(cron).toContain('supplierPayableDueToday')
@@ -110,7 +111,8 @@ describe('supplier payable reminders: cron + jitter + idempotency', () => {
   })
 
   it('upsert-by-dedupeKey guarantees no duplicates across repeated cron runs', () => {
-    const count = cron.split('.notification.upsert({').length - 1
+    const count = [cron, overdueTransition]
+      .reduce((total, source) => total + source.split('.notification.upsert({').length - 1, 0)
     expect(count).toBeGreaterThanOrEqual(9) // one per planned reminder type, all upsert not create
   })
 })

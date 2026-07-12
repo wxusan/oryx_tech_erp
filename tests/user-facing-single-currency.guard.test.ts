@@ -8,7 +8,7 @@ function read(rel: string): string {
 
 describe('shop-facing UI uses one selected display currency', () => {
   it('dashboard and hisobot do not use the mixed base-money formatter', () => {
-    for (const rel of ['src/app/(shop)/shop/dashboard/page.tsx', 'src/app/(shop)/shop/hisobot/page.tsx']) {
+    for (const rel of ['src/app/(shop)/shop/dashboard/dashboard-client.tsx', 'src/app/(shop)/shop/hisobot/hisobot-client.tsx']) {
       const source = read(rel)
       expect(source).not.toContain('formatMoneyWithBase')
       expect(source).toContain('formatMoneyByCurrency')

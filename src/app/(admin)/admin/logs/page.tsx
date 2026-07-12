@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useMemo, useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Input } from '@/components/ui/input'
 import {
   Table,
@@ -11,6 +12,8 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { actionLabel, actorLabel, formatLogValue, targetLabel } from '@/lib/log-format'
+import { queryKeys } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 
 type ActorType = 'SUPER_ADMIN' | 'SHOP_ADMIN'
 type TabFilter = 'barchasi' | ActorType
@@ -49,17 +52,6 @@ interface LogsPayload {
   total: number
 }
 
-interface DisplayLog {
-  id: string
-  datetime: string
-  actor: string
-  actorType: ActorType
-  shop: string
-  action: string
-  target: string
-  note: string
-}
-
 const tabs: { key: TabFilter; label: string }[] = [
   { key: 'barchasi', label: 'Barchasi' },
   { key: 'SUPER_ADMIN', label: 'Bosh admin' },
@@ -78,11 +70,7 @@ function formatDateTime(value: string) {
 }
 
 export default function LogsPage() {
-  const [logs, setLogs] = useState<DisplayLog[]>([])
-  const [shops, setShops] = useState<ShopOption[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [totalLogs, setTotalLogs] = useState(0)
+  const scope = useAuthenticatedQueryScope()
   const [activeTab, setActiveTab] = useState<TabFilter>('barchasi')
   const [shopFilter, setShopFilter] = useState('all')
   const [dateFrom, setDateFrom] = useState('')
@@ -90,39 +78,37 @@ export default function LogsPage() {
   const [page, setPage] = useState(1)
   const perPage = 10
 
-  useEffect(() => {
-    fetch('/api/shops')
-      .then((r) => r.json())
-      .then((json: ApiResponse<ShopOption[]>) => {
-        if (json.success && json.data) {
-          setShops(json.data.map(({ id, name }) => ({ id, name })))
-        }
-      })
-      .catch(() => {})
-  }, [])
+  const shopsQuery = useQuery({
+    queryKey: queryKeys.domain(scope, 'adminShops'),
+    queryFn: async ({ signal }) => {
+      const response = await fetch('/api/shops', { signal, cache: 'no-store' })
+      const json: ApiResponse<ShopOption[]> = await response.json()
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error || "Do'konlar yuklanmadi")
+      return json.data
+    },
+  })
 
-  useEffect(() => {
-    const params = new URLSearchParams()
-    if (activeTab !== 'barchasi') params.set('actorType', activeTab)
-    if (shopFilter !== 'all') params.set('shopId', shopFilter)
-    if (dateFrom) params.set('from', dateFrom)
-    if (dateTo) params.set('to', dateTo)
-    params.set('skip', String((page - 1) * perPage))
-    params.set('take', String(perPage))
+  const logsQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'adminLogs', { activeTab, shopFilter, dateFrom, dateTo, page, take: perPage }),
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams()
+      if (activeTab !== 'barchasi') params.set('actorType', activeTab)
+      if (shopFilter !== 'all') params.set('shopId', shopFilter)
+      if (dateFrom) params.set('from', dateFrom)
+      if (dateTo) params.set('to', dateTo)
+      params.set('skip', String((page - 1) * perPage))
+      params.set('take', String(perPage))
 
-    fetch(`/api/logs?${params.toString()}`)
-      .then((r) => r.json())
-      .then((json: ApiResponse<LogsPayload>) => {
-        if (!json.success || !json.data) {
-          setError(json.error ?? 'Loglar yuklanmadi')
-          setLogs([])
-          setTotalLogs(0)
-          return
-        }
+      const response = await fetch(`/api/logs?${params.toString()}`, { signal, cache: 'no-store' })
+      const json: ApiResponse<LogsPayload> = await response.json()
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error ?? 'Loglar yuklanmadi')
+      return json.data
+    },
+    placeholderData: keepPreviousData,
+  })
 
-        setError(null)
-        setTotalLogs(json.data.total)
-        setLogs(json.data.logs.map((log) => ({
+  const shops = shopsQuery.data?.map(({ id, name }) => ({ id, name })) ?? []
+  const logs = useMemo(() => (logsQuery.data?.logs ?? []).map((log) => ({
           id: log.id,
           datetime: formatDateTime(log.createdAt),
           actor: log.actorName || log.actorLogin || actorLabel(log.actorType),
@@ -131,15 +117,10 @@ export default function LogsPage() {
           action: actionLabel(log.action, log.targetType),
           target: log.shop?.name ?? targetLabel(log.targetType, log.targetId, log.newValue),
           note: log.note || formatLogValue(log.newValue),
-        })))
-      })
-      .catch(() => {
-        setError('Xatolik yuz berdi')
-        setLogs([])
-        setTotalLogs(0)
-      })
-      .finally(() => setLoading(false))
-  }, [activeTab, shopFilter, dateFrom, dateTo, page])
+        })), [logsQuery.data?.logs])
+  const totalLogs = logsQuery.data?.total ?? 0
+  const loading = logsQuery.isPending && !logsQuery.data
+  const error = logsQuery.error instanceof Error ? logsQuery.error.message : null
 
   const totalPages = Math.max(1, Math.ceil(totalLogs / perPage))
   const paginated = logs

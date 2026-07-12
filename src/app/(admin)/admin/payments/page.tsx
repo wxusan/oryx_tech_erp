@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Table,
   TableBody,
@@ -9,6 +9,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { queryKeys } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 
 interface Payment {
   id: string
@@ -70,23 +72,16 @@ function monthKey(date: Date) {
 }
 
 export default function PaymentsPage() {
-  const [payments, setPayments] = useState<Payment[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    fetch('/api/shops')
-      .then((r) => r.json())
-      .then((json: ApiResponse<ShopWithPayments[]>) => {
-        if (!json.success || !json.data) {
-          setError(json.error ?? "To'lovlar yuklanmadi")
-          setPayments([])
-          return
-        }
-
-        const rows = json.data
-          .flatMap((shop) =>
-            (shop.payments ?? []).map((payment) => ({
+  const scope = useAuthenticatedQueryScope()
+  const paymentsQuery = useQuery({
+    queryKey: queryKeys.domain(scope, 'adminPayments'),
+    queryFn: async ({ signal }) => {
+      const response = await fetch('/api/shops', { signal, cache: 'no-store' })
+      const json: ApiResponse<ShopWithPayments[]> = await response.json()
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error ?? "To'lovlar yuklanmadi")
+      return json.data
+        .flatMap((shop) =>
+          (shop.payments ?? []).map((payment) => ({
               id: payment.id,
               shop: shop.name,
               amount: Number(payment.amount),
@@ -99,18 +94,14 @@ export default function PaymentsPage() {
                 : payment.recordedById
                   ? payment.recordedById.slice(0, 8)
                   : '—',
-            }))
-          )
-          .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
-
-        setPayments(rows)
-      })
-      .catch(() => {
-        setError('Xatolik yuz berdi')
-        setPayments([])
-      })
-      .finally(() => setLoading(false))
-  }, [])
+          })),
+        )
+        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+    },
+  })
+  const payments = paymentsQuery.data ?? []
+  const loading = paymentsQuery.isPending && !paymentsQuery.data
+  const error = paymentsQuery.error instanceof Error ? paymentsQuery.error.message : null
 
   const now = new Date()
   const currentMonth = monthKey(now)

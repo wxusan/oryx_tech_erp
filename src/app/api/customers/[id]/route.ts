@@ -140,36 +140,38 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       ...(parsed.data.trustOverride !== undefined ? { trustOverride: parsed.data.trustOverride } : {}),
     }
 
-    const customer = await prisma.customer.update({
-      where: { id },
-      data: customerUpdate,
-      select: {
-        id: true,
-        shopId: true,
-        name: true,
-        phone: true,
-        additionalPhones: true,
-        trustOverride: true,
-        note: true,
-        createdAt: true,
-      },
-    })
-
-    await prisma.log.create({
-      data: {
-        shopId: resolved.shopId,
-        actorId: session.user.id,
-        actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
-        action: 'UPDATE',
-        targetType: 'Customer',
-        targetId: id,
-        oldValue: { name: existing.name, phone: existing.phone, note: existing.note },
-        newValue: {
-          ...customerUpdate,
-          ...(identityChangeReason ? { identityChangeReason } : {}),
+    const customer = await prisma.$transaction(async (tx) => {
+      const updated = await tx.customer.update({
+        where: { id },
+        data: customerUpdate,
+        select: {
+          id: true,
+          shopId: true,
+          name: true,
+          phone: true,
+          additionalPhones: true,
+          trustOverride: true,
+          note: true,
+          createdAt: true,
         },
-        note: identityChangeReason,
-      },
+      })
+      await tx.log.create({
+        data: {
+          shopId: resolved.shopId,
+          actorId: session.user.id,
+          actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
+          action: 'UPDATE',
+          targetType: 'Customer',
+          targetId: id,
+          oldValue: { name: existing.name, phone: existing.phone, note: existing.note },
+          newValue: {
+            ...customerUpdate,
+            ...(identityChangeReason ? { identityChangeReason } : {}),
+          },
+          note: identityChangeReason,
+        },
+      })
+      return updated
     })
 
     invalidateShopCustomerMutation(resolved.shopId)

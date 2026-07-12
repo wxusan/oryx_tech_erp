@@ -34,8 +34,8 @@ describe('logs page: admin filter dropdown built from real seen actors', () => {
   })
 
   it('accumulates actors across every page loaded (not just the current page)', () => {
-    expect(source).toContain('setKnownActors((prev) => {')
-    expect(source).toContain('const next = new Map(prev)')
+    expect(source).toContain('queryClient.getQueriesData<LogsPayload>')
+    expect(source).toContain("queryKey: queryKeys.domain(scope, 'logs')")
   })
 
   it('selecting an admin resets to page 1 and includes actorId in the request', () => {

@@ -1,87 +1,167 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
-import { refreshAuthenticatedNavigation } from '@/app/actions/navigation-cache'
+import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { useRouter } from 'next/navigation'
+import { patchDeviceDelete, patchDeviceUpsert } from '@/lib/device-query-cache'
+import { queryKeys } from '@/lib/query-keys'
+import { registerIncrementalSyncRunner } from '@/lib/client-sync-runtime'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import type { IncrementalSyncResponse } from '@/lib/sync-contract'
 import {
-  NAVIGATION_CACHE_TTL_MS,
-  type NavigationMutation,
-} from '@/lib/navigation-cache-policy'
-import {
-  NAVIGATION_MUTATION_EVENT,
   navigationClientInstanceId,
   subscribeToNavigationMutations,
   type NavigationMutationBroadcast,
 } from '@/lib/client-events'
 
-export function NavigationCacheCoordinator({ scopeKey }: { scopeKey: string }) {
-  const lastFreshAtRef = useRef(0)
-  const refreshRunningRef = useRef(false)
-  const refreshQueuedRef = useRef(false)
-  const seenRef = useRef(new Set<string>())
+const SYNC_INTERVAL_MS = 25_000
+const MAX_BACKOFF_MS = 120_000
+
+export function NavigationCacheCoordinator({
+  scopeKey,
+  initialCursor,
+}: {
+  scopeKey: string
+  initialCursor: string
+}) {
+  const queryClient = useQueryClient()
+  const scope = useAuthenticatedQueryScope()
+  const router = useRouter()
+  const cursorRef = useRef(initialCursor)
+  const runningRef = useRef<Promise<string | null> | null>(null)
+  const controllerRef = useRef<AbortController | null>(null)
+  const failureCountRef = useRef(0)
+  const nextAllowedAtRef = useRef(0)
+  const [showSyncing, setShowSyncing] = useState(false)
 
   useEffect(() => {
-    lastFreshAtRef.current = Date.now()
+    let disposed = false
+    let slowTimer: number | null = null
     const sourceId = navigationClientInstanceId()
 
-    async function refreshNow() {
-      if (refreshRunningRef.current) {
-        refreshQueuedRef.current = true
-        return
+    function applyDelta(delta: IncrementalSyncResponse) {
+      for (const device of delta.upserts.devices) patchDeviceUpsert(queryClient, scope, device)
+      for (const tombstone of delta.tombstones) {
+        if (tombstone.entityType === 'Device') patchDeviceDelete(queryClient, scope, tombstone.entityId)
       }
-      refreshRunningRef.current = true
+
+      // Query-backed domains keep their existing data visible while only the
+      // affected active query revalidates. Device lists are patched precisely
+      // above and therefore do not need a broad refetch.
+      for (const domain of delta.invalidatedDomains) {
+        if (domain === 'devices') continue
+        void queryClient.invalidateQueries({
+          queryKey: queryKeys.domain(scope, domain),
+          refetchType: 'active',
+        })
+      }
+    }
+
+    async function executeSync(): Promise<string | null> {
+      if (disposed || document.visibilityState !== 'visible') return cursorRef.current
+      if (Date.now() < nextAllowedAtRef.current) return null
+      controllerRef.current?.abort()
+      const controller = new AbortController()
+      controllerRef.current = controller
+      slowTimer = window.setTimeout(() => setShowSyncing(true), 500)
+
       try {
-        const result = await refreshAuthenticatedNavigation()
-        if (result.scopeKey !== scopeKey) {
-          window.location.reload()
-          return
+        let hasMore = true
+        let cursor = cursorRef.current
+        while (hasMore && !disposed) {
+          const response = await fetch(`/api/sync?cursor=${encodeURIComponent(cursor)}`, {
+            cache: 'no-store',
+            credentials: 'same-origin',
+            signal: controller.signal,
+          })
+          if (response.status === 401 || response.status === 403) {
+            queryClient.clear()
+            window.location.reload()
+            return null
+          }
+          if (!response.ok) throw new Error(`SYNC_${response.status}`)
+          const delta = await response.json() as IncrementalSyncResponse
+          if (delta.resetRequired) {
+            queryClient.clear()
+            router.refresh()
+            cursorRef.current = delta.nextCursor
+            return delta.nextCursor
+          }
+          applyDelta(delta)
+          cursor = delta.nextCursor
+          cursorRef.current = cursor
+          hasMore = delta.hasMore
         }
-        lastFreshAtRef.current = Date.now()
-      } catch {
-        // A revoked/changed session must be rechecked by a real document request.
-        window.location.reload()
+        failureCountRef.current = 0
+        nextAllowedAtRef.current = 0
+        return cursorRef.current
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') return null
+        failureCountRef.current += 1
+        nextAllowedAtRef.current = Date.now() + Math.min(
+          SYNC_INTERVAL_MS * 2 ** (failureCountRef.current - 1),
+          MAX_BACKOFF_MS,
+        )
+        return null
       } finally {
-        refreshRunningRef.current = false
-        if (refreshQueuedRef.current) {
-          refreshQueuedRef.current = false
-          void refreshNow()
-        }
+        if (slowTimer != null) window.clearTimeout(slowTimer)
+        slowTimer = null
+        if (!disposed) setShowSyncing(false)
+        if (controllerRef.current === controller) controllerRef.current = null
       }
     }
 
-    function receive(message: NavigationMutationBroadcast) {
-      if (message.sourceId === sourceId || message.scopeKey !== scopeKey || seenRef.current.has(message.id)) return
-      seenRef.current.add(message.id)
-      if (seenRef.current.size > 100) {
-        const first = seenRef.current.values().next().value
-        if (first) seenRef.current.delete(first)
-      }
-      void refreshNow()
+    function runSync() {
+      if (runningRef.current) return runningRef.current
+      const promise = executeSync().finally(() => {
+        if (runningRef.current === promise) runningRef.current = null
+      })
+      runningRef.current = promise
+      return promise
     }
 
+    const unregisterRunner = registerIncrementalSyncRunner(
+      scopeKey,
+      runSync,
+      () => queryClient.clear(),
+      (cursor) => {
+        if (BigInt(cursor) < BigInt(cursorRef.current)) cursorRef.current = cursor
+      },
+    )
+    const receive = (message: NavigationMutationBroadcast) => {
+      if (message.sourceId === sourceId || message.scopeKey !== scopeKey) return
+      void runSync()
+    }
     const unsubscribe = subscribeToNavigationMutations(receive)
-    const localMutation = () => {
-      lastFreshAtRef.current = Date.now()
+    const visibleSync = () => {
+      if (document.visibilityState === 'visible') void runSync()
     }
-    const refreshIfStale = () => {
-      if (document.visibilityState === 'visible' && Date.now() - lastFreshAtRef.current >= NAVIGATION_CACHE_TTL_MS) {
-        void refreshNow()
-      }
-    }
+    const interval = window.setInterval(visibleSync, SYNC_INTERVAL_MS)
+    window.addEventListener('focus', visibleSync)
+    window.addEventListener('online', visibleSync)
+    document.addEventListener('visibilitychange', visibleSync)
 
-    window.addEventListener(NAVIGATION_MUTATION_EVENT, localMutation)
-    window.addEventListener('focus', refreshIfStale)
-    window.addEventListener('online', refreshIfStale)
-    document.addEventListener('visibilitychange', refreshIfStale)
     return () => {
+      disposed = true
+      if (slowTimer != null) window.clearTimeout(slowTimer)
+      controllerRef.current?.abort()
+      unregisterRunner()
       unsubscribe()
-      window.removeEventListener(NAVIGATION_MUTATION_EVENT, localMutation)
-      window.removeEventListener('focus', refreshIfStale)
-      window.removeEventListener('online', refreshIfStale)
-      document.removeEventListener('visibilitychange', refreshIfStale)
+      window.clearInterval(interval)
+      window.removeEventListener('focus', visibleSync)
+      window.removeEventListener('online', visibleSync)
+      document.removeEventListener('visibilitychange', visibleSync)
     }
-  }, [scopeKey])
+  }, [queryClient, router, scope, scopeKey])
 
-  return null
+  if (!showSyncing) return null
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      className="fixed bottom-3 right-3 z-50 rounded-full border border-zinc-200 bg-white/95 px-3 py-1.5 text-xs text-zinc-500 shadow-sm"
+    >
+      Sinxronlanmoqda…
+    </div>
+  )
 }
-
-export type { NavigationMutation }

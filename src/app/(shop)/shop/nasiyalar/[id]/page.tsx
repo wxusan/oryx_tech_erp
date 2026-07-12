@@ -313,14 +313,10 @@ export default function NasiyaDetailPage() {
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        const invalidated = await commitNavigationMutation({
+        await commitNavigationMutation({
           kind: 'nasiya.updated',
           nasiyaId: nasiya.id,
         })
-        if (!invalidated) {
-          window.location.reload()
-          return
-        }
         setEditOpen(false)
         fetchNasiya()
       } else {
@@ -344,14 +340,10 @@ export default function NasiyaDetailPage() {
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        const invalidated = await commitNavigationMutation({
+        await commitNavigationMutation({
           kind: 'nasiya.reminderUpdated',
           nasiyaId: nasiya.id,
         })
-        if (!invalidated) {
-          window.location.reload()
-          return
-        }
         fetchNasiya()
       }
     } catch {

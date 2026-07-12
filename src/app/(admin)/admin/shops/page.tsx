@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useEffect, useSyncExternalStore } from 'react'
+import { useState, useSyncExternalStore } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,6 +15,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { queryKeys } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 
 type ShopStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED'
 type FilterTab = 'barchasi' | ShopStatus
@@ -83,9 +86,7 @@ function getPaymentViewSnapshot(): PaymentView {
 }
 
 export default function ShopsPage() {
-  const [shops, setShops] = useState<Shop[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const scope = useAuthenticatedQueryScope()
   const [search, setSearch] = useState('')
   const [activeTab, setActiveTab] = useState<FilterTab>('barchasi')
   const paymentView = useSyncExternalStore(
@@ -94,16 +95,18 @@ export default function ShopsPage() {
     () => 'all',
   )
 
-  useEffect(() => {
-    fetch('/api/shops?includeDeleted=true')
-      .then((r) => r.json())
-      .then((json) => {
-        if (json.success) setShops(json.data)
-        else setError(json.error ?? "Do'konlar yuklanmadi")
-      })
-      .catch(() => setError('Xatolik yuz berdi'))
-      .finally(() => setLoading(false))
-  }, [])
+  const shopsQuery = useQuery({
+    queryKey: queryKeys.domain(scope, 'adminShops'),
+    queryFn: async ({ signal }) => {
+      const response = await fetch('/api/shops?includeDeleted=true', { signal, cache: 'no-store' })
+      const json = await response.json() as { success: boolean; data?: Shop[]; error?: string }
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error ?? "Do'konlar yuklanmadi")
+      return json.data
+    },
+  })
+  const shops = shopsQuery.data ?? []
+  const loading = shopsQuery.isPending && !shopsQuery.data
+  const error = shopsQuery.error instanceof Error ? shopsQuery.error.message : null
 
   const filtered = shops
     .filter((s) => {

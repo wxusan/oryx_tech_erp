@@ -68,9 +68,9 @@ const nextConfig: NextConfig = {
     // Client Router Cache only. Operational writes still validate PostgreSQL
     // transactionally and explicitly invalidate affected routes on success.
     // Fully prefetched high-probability sidebar routes use `static`; keeping
-    // both buckets at 30s prevents a targeted prefetch from silently becoming
-    // a five-minute user-specific cache entry.
-    staleTimes: { dynamic: 30, static: 30 },
+    // both buckets at two minutes makes warm return navigation instant while
+    // the authenticated delta coordinator supplies precise freshness.
+    staleTimes: { dynamic: 120, static: 120 },
   },
   async headers() {
     return [

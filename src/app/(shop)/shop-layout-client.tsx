@@ -6,7 +6,6 @@ import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, Scroll
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
 import { DueOverdueBanner } from '@/components/shop/due-overdue-banner'
-import { NavigationCacheCoordinator } from '@/components/navigation-cache-coordinator'
 
 const navLinks = [
   { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard, prefetch: true },
@@ -23,12 +22,11 @@ function initials(name: string) {
   return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'DA'
 }
 
-export function ShopLayoutClient({ children, shopName, adminName, navigationScope }: { children: React.ReactNode; shopName: string; adminName: string; navigationScope: string }) {
+export function ShopLayoutClient({ children, shopName, adminName }: { children: React.ReactNode; shopName: string; adminName: string }) {
   const pathname = usePathname()
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 md:h-screen md:flex-row md:overflow-hidden">
-      <NavigationCacheCoordinator scopeKey={navigationScope} />
       <aside className="flex w-full flex-shrink-0 flex-col border-b border-zinc-200 bg-white/95 md:w-64 md:border-b-0 md:border-r">
         <div className="px-4 py-5 border-b border-zinc-200">
           <div className="flex items-center justify-between gap-2">

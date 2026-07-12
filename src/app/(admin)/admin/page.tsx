@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { AlertTriangle, Building2, CalendarClock, CreditCard, TrendingUp } from 'lucide-react'
 import {
@@ -24,6 +24,8 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { queryKeys } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 
 type ShopStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED'
 
@@ -72,33 +74,32 @@ function StatusBadge({ status }: { status: ShopStatus }) {
 }
 
 export default function DashboardPage() {
-  const [stats, setStats] = useState<AdminStats | null>(null)
-  const [shops, setShops] = useState<ShopRow[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    Promise.all([
-      fetch('/api/stats/admin').then((r) => r.json()),
-      fetch('/api/shops').then((r) => r.json()),
-    ])
-      .then(([statsJson, shopsJson]) => {
-        if (statsJson.success) setStats(statsJson.data)
-        else setError(statsJson.error ?? 'Statistika yuklanmadi')
-
-        if (shopsJson.success) {
-          const sorted = [...shopsJson.data].sort(
-            (a: ShopRow, b: ShopRow) =>
-              new Date(a.subscriptionDue).getTime() - new Date(b.subscriptionDue).getTime()
-          )
-          setShops(sorted)
-        } else {
-          setError(shopsJson.error ?? "Do'konlar yuklanmadi")
-        }
-      })
-      .catch(() => setError('Xatolik yuz berdi'))
-      .finally(() => setLoading(false))
-  }, [])
+  const scope = useAuthenticatedQueryScope()
+  const dashboardQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'adminReports', { view: 'dashboard' }),
+    queryFn: async ({ signal }) => {
+      const [statsResponse, shopsResponse] = await Promise.all([
+        fetch('/api/stats/admin', { signal, cache: 'no-store' }),
+        fetch('/api/shops', { signal, cache: 'no-store' }),
+      ])
+      const [statsJson, shopsJson] = await Promise.all([statsResponse.json(), shopsResponse.json()]) as [
+        { success: boolean; data?: AdminStats; error?: string },
+        { success: boolean; data?: ShopRow[]; error?: string },
+      ]
+      if (!statsResponse.ok || !statsJson.success || !statsJson.data) throw new Error(statsJson.error ?? 'Statistika yuklanmadi')
+      if (!shopsResponse.ok || !shopsJson.success || !shopsJson.data) throw new Error(shopsJson.error ?? "Do'konlar yuklanmadi")
+      return {
+        stats: statsJson.data,
+        shops: shopsJson.data.toSorted(
+          (a, b) => new Date(a.subscriptionDue).getTime() - new Date(b.subscriptionDue).getTime(),
+        ),
+      }
+    },
+  })
+  const stats = dashboardQuery.data?.stats ?? null
+  const shops = dashboardQuery.data?.shops ?? []
+  const loading = dashboardQuery.isPending && !dashboardQuery.data
+  const error = dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null
 
   const collectionRate = stats && stats.expectedRevenue > 0
     ? Math.min(100, Math.round((stats.thisMonthRevenue / stats.expectedRevenue) * 100))

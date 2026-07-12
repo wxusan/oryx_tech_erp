@@ -306,14 +306,10 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        const invalidated = await commitNavigationMutation({
+        await commitNavigationMutation({
           kind: 'nasiya.paymentRecorded',
           nasiyaId,
         })
-        if (!invalidated) {
-          window.location.reload()
-          return
-        }
         onOpenChange(false)
         onSuccess()
       } else {

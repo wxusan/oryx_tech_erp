@@ -31,7 +31,7 @@ describe('retired device reservation status', () => {
   })
 
   it('uses short dashboard descriptions for profit and inventory', () => {
-    const dashboard = read('src/app/(shop)/shop/dashboard/page.tsx')
+    const dashboard = read('src/app/(shop)/shop/dashboard/dashboard-client.tsx')
     expect(dashboard).toContain('Sotuv narxidan tannarx ayiriladi')
     expect(dashboard).toContain('Omborda turgan qurilmalar tannarxi')
     expect(dashboard).not.toContain('band qilingan')

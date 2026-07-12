@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import {
@@ -16,6 +17,8 @@ import { actionLabel, actorLabel, formatLogValue, targetLabel } from '@/lib/log-
 import { logCategoryFor, logCategoryLabel, logCategoryOptions, type LogCategory } from '@/lib/log-categories'
 import type { CurrencyContext } from '@/lib/currency'
 import { replaceListUrlState } from '@/lib/list-url-state'
+import { queryKeys } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 
 type ActorType = 'SUPER_ADMIN' | 'SHOP_ADMIN'
 
@@ -108,9 +111,8 @@ interface ShopLogsClientProps {
 
 export default function ShopLogsClient({ initialPayload, initialRequestKey, currency, initialState }: ShopLogsClientProps) {
   const router = useRouter()
-  const [logs, setLogs] = useState<DisplayLog[]>(() => initialPayload.logs.map((log) => displayLog(log, currency)))
-  const [loadedKey, setLoadedKey] = useState(initialRequestKey)
-  const [error, setError] = useState<string | null>(null)
+  const scope = useAuthenticatedQueryScope()
+  const queryClient = useQueryClient()
   const [resolvingLogId, setResolvingLogId] = useState<string | null>(null)
 
   // Item 8 — clicking a log row opens the related sale/nasiya/device profile.
@@ -134,7 +136,6 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
       setResolvingLogId(null)
     }
   }
-  const [totalLogs, setTotalLogs] = useState(initialPayload.total)
   const [search, setSearch] = useState(initialState.search)
   const [debouncedSearch, setDebouncedSearch] = useState(initialState.search)
   const [dateFrom, setDateFrom] = useState(initialState.dateFrom)
@@ -142,17 +143,6 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
   const [category, setCategory] = useState<LogCategory>(initialState.category)
   const [actorId, setActorId] = useState(initialState.actorId)
   const [page, setPage] = useState(initialState.page)
-  // Item 1 — admin filter. Built from real Log.actorId/actorName values seen
-  // across every page loaded so far (never invented) — a shop typically has
-  // only a handful of admins, so this fills in quickly as pages load.
-  const [knownActors, setKnownActors] = useState<Map<string, string>>(() => {
-    const map = new Map<string, string>()
-    for (const log of initialPayload.logs) {
-      map.set(log.actorId, log.actorName || log.actorLogin || actorLabel(log.actorType))
-    }
-    return map
-  })
-
   // Debounce the free-text search so typing doesn't fire a request per keystroke.
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search), 300)
@@ -184,46 +174,50 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
     })
   }, [actorId, category, dateFrom, dateTo, debouncedSearch, page])
 
-  useEffect(() => {
-    if (loadedKey === requestKey) return
+  const logsQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'logs', {
+      search: debouncedSearch,
+      category,
+      actorId,
+      dateFrom,
+      dateTo,
+      page,
+      take: PER_PAGE,
+      sort: 'createdAt-desc',
+    }),
+    queryFn: async ({ signal }) => {
+      const response = await fetch(`/api/logs?${requestKey}`, { signal, cache: 'no-store' })
+      const json = await response.json() as ApiResponse<LogsPayload>
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error ?? 'Loglar yuklanmadi')
+      return json.data
+    },
+    initialData: requestKey === initialRequestKey ? initialPayload : undefined,
+    placeholderData: keepPreviousData,
+  })
 
-    const controller = new AbortController()
-
-    fetch(`/api/logs?${requestKey}`, { signal: controller.signal })
-      .then((r) => r.json())
-      .then((json: ApiResponse<LogsPayload>) => {
-        if (!json.success || !json.data) {
-          setError(json.error ?? 'Loglar yuklanmadi')
-          setLogs([])
-          setTotalLogs(0)
-          setLoadedKey(requestKey)
-          return
-        }
-
-        setError(null)
-        setTotalLogs(json.data.total)
-        setLogs(json.data.logs.map((log) => displayLog(log, currency)))
-        setLoadedKey(requestKey)
-        setKnownActors((prev) => {
-          const next = new Map(prev)
-          for (const log of json.data!.logs) {
-            next.set(log.actorId, log.actorName || log.actorLogin || actorLabel(log.actorType))
-          }
-          return next
-        })
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === 'AbortError') return
-        setError('Xatolik yuz berdi')
-        setLogs([])
-        setTotalLogs(0)
-        setLoadedKey(requestKey)
-      })
-
-    return () => controller.abort()
-  }, [currency, loadedKey, requestKey])
-
-  const loading = loadedKey !== requestKey
+  const logs = useMemo(
+    () => (logsQuery.data?.logs ?? []).map((log) => displayLog(log, currency)),
+    [currency, logsQuery.data?.logs],
+  )
+  const totalLogs = logsQuery.data?.total ?? 0
+  const currentLogsPayload = logsQuery.data
+  const error = logsQuery.error instanceof Error ? logsQuery.error.message : null
+  const loading = logsQuery.isPending && !logsQuery.data
+  const knownActors = useMemo(() => {
+    const map = new Map<string, string>()
+    const cachedPages = queryClient.getQueriesData<LogsPayload>({ queryKey: queryKeys.domain(scope, 'logs') })
+    const payloads = [
+      initialPayload,
+      ...(currentLogsPayload ? [currentLogsPayload] : []),
+      ...cachedPages.flatMap(([, value]) => value ? [value] : []),
+    ]
+    for (const payload of payloads) {
+      for (const log of payload.logs) {
+        map.set(log.actorId, log.actorName || log.actorLogin || actorLabel(log.actorType))
+      }
+    }
+    return map
+  }, [currentLogsPayload, initialPayload, queryClient, scope])
   const totalPages = Math.max(1, Math.ceil(totalLogs / PER_PAGE))
 
   return (

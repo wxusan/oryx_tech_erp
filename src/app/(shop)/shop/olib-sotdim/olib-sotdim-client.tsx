@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -27,6 +28,8 @@ import { formatUzPhoneDisplay } from '@/lib/phone'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import { commitNavigationMutation } from '@/lib/client-events'
 import { replaceListUrlState } from '@/lib/list-url-state'
+import { queryKeys } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 
 type PayableStatus = 'PENDING' | 'PAID' | 'CANCELLED' | 'OVERDUE'
 type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
@@ -63,19 +66,16 @@ interface OlibSotdimRow {
 
 export default function OlibSotdimClient({ initialSearch, initialPage }: { initialSearch: string; initialPage: number }) {
   const { currency } = useShopCurrency()
-  const [rows, setRows] = useState<OlibSotdimRow[]>([])
+  const scope = useAuthenticatedQueryScope()
   const [search, setSearch] = useState(initialSearch)
+  const [committedSearch, setCommittedSearch] = useState(initialSearch)
   const [page, setPage] = useState(initialPage)
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
   const [payFor, setPayFor] = useState<OlibSotdimRow | null>(null)
   const [payMethod, setPayMethod] = useState<PaymentMethod | ''>('')
   const [payDate, setPayDate] = useState('')
   const [payNote, setPayNote] = useState('')
   const [payError, setPayError] = useState('')
   const [paySubmitting, setPaySubmitting] = useState(false)
-  const requestGenerationRef = useRef(0)
 
   function fmt(n: number, valueCurrency: 'UZS' | 'USD' = currency.currency) {
     return formatMoneyByCurrency(n, valueCurrency, currency.usdUzsRate)
@@ -83,60 +83,41 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
 
   const pageSize = 25
 
+  const rowsQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'olibSotdim', {
+      search: committedSearch,
+      page: page + 1,
+      take: pageSize,
+      sort: 'createdAt-desc',
+    }),
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({
+        search: committedSearch,
+        skip: String(page * pageSize),
+        take: String(pageSize),
+      })
+      const response = await fetch(`/api/olib-sotdim?${params.toString()}`, { signal, cache: 'no-store' })
+      const json = await response.json() as { success: boolean; data?: { items: OlibSotdimRow[]; total: number }; error?: string }
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error || "Ro'yxat yuklanmadi")
+      return json.data
+    },
+    placeholderData: keepPreviousData,
+  })
+
   function load(query = search, nextPage = page) {
-    const generation = ++requestGenerationRef.current
-    setLoading(true)
-    setError('')
     replaceListUrlState({ q: query, page: nextPage + 1 })
-    const params = new URLSearchParams({ search: query, skip: String(nextPage * pageSize), take: String(pageSize) })
-    fetch(`/api/olib-sotdim?${params.toString()}`)
-      .then((res) => res.json())
-      .then((json) => {
-        if (generation !== requestGenerationRef.current) return
-        if (json.success) {
-          setRows(json.data.items)
-          setTotal(json.data.total)
-          setPage(nextPage)
-        }
-        else setError(json.error || "Ro'yxat yuklanmadi")
-      })
-      .catch(() => {
-        if (generation === requestGenerationRef.current) setError("Ro'yxat yuklanmadi")
-      })
-      .finally(() => {
-        if (generation === requestGenerationRef.current) setLoading(false)
-      })
+    setCommittedSearch(query)
+    setPage(nextPage)
   }
 
   useEffect(() => {
-    let ignore = false
-    const generation = ++requestGenerationRef.current
-    replaceListUrlState({ q: initialSearch, page: initialPage + 1 })
-    const initialParams = new URLSearchParams({
-      search: initialSearch,
-      skip: String(initialPage * pageSize),
-      take: String(pageSize),
-    })
-    fetch(`/api/olib-sotdim?${initialParams.toString()}`)
-      .then((res) => res.json())
-      .then((json) => {
-        if (ignore || generation !== requestGenerationRef.current) return
-        if (json.success) {
-          setRows(json.data.items)
-          setTotal(json.data.total)
-        }
-        else setError(json.error || "Ro'yxat yuklanmadi")
-      })
-      .catch(() => {
-        if (!ignore && generation === requestGenerationRef.current) setError("Ro'yxat yuklanmadi")
-      })
-      .finally(() => {
-        if (!ignore && generation === requestGenerationRef.current) setLoading(false)
-      })
-    return () => {
-      ignore = true
-    }
-  }, [initialPage, initialSearch])
+    replaceListUrlState({ q: committedSearch, page: page + 1 })
+  }, [committedSearch, page])
+
+  const rows = rowsQuery.data?.items ?? []
+  const total = rowsQuery.data?.total ?? 0
+  const loading = rowsQuery.isPending && !rowsQuery.data
+  const error = rowsQuery.error instanceof Error ? rowsQuery.error.message : ''
 
   function openPay(row: OlibSotdimRow) {
     setPayFor(row)
@@ -162,16 +143,12 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || "To'lovni saqlashda xatolik")
-      const invalidated = await commitNavigationMutation({
+      await commitNavigationMutation({
         kind: 'olibSotdim.paymentRecorded',
         deviceId: payFor.device.id,
       })
-      if (!invalidated) {
-        window.location.reload()
-        return
-      }
       setPayFor(null)
-      load()
+      void rowsQuery.refetch()
     } catch (err) {
       setPayError(err instanceof Error ? err.message : "To'lovni saqlashda xatolik")
     } finally {
