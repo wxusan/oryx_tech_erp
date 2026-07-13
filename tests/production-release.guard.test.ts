@@ -78,6 +78,16 @@ describe('production release guard', () => {
     expect(releaseWorkflow).not.toContain('curl --fail --silent --show-error --retry 3')
   })
 
+  it('promotes the verified immutable deployment inside the configured Vercel scope', () => {
+    expect(releaseWorkflow).toContain('--format=json --scope="$VERCEL_ORG_ID"')
+    expect(releaseWorkflow).toContain("deployment_id=\"$(jq -r '.id // empty'")
+    expect(releaseWorkflow).toContain('[[ "$deployment_id" == dpl_* ]]')
+    expect(releaseWorkflow).toContain(
+      'promote "${{ steps.verify.outputs.deployment_id }}" --yes --scope="$VERCEL_ORG_ID"',
+    )
+    expect(releaseWorkflow).not.toContain('promote "${{ steps.deploy.outputs.url }}"')
+  })
+
   it('pins the declared Node and npm major/tool version in CI and release', () => {
     expect(releaseWorkflow).toContain('node-version: 24.x')
     expect(releaseWorkflow).toContain('npm install --global npm@10.9.4')

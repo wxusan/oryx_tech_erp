@@ -50,12 +50,16 @@ jobs:
           deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions --meta releaseCommit="$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
           echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
       - name: Inspect and smoke the exact production artifact
+        id: verify
         run: |
-          npx vercel@51.7.0 inspect "${{ steps.deploy.outputs.url }}" --token="${{ secrets.VERCEL_TOKEN }}"
+          inspect_json="$(npx vercel@51.7.0 inspect "${{ steps.deploy.outputs.url }}" --format=json --scope="$VERCEL_ORG_ID" --token="${{ secrets.VERCEL_TOKEN }}")"
+          deployment_id="$(jq -r '.id // empty' <<< "$inspect_json")"
+          [[ "$deployment_id" == dpl_* ]]
+          echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
           health_json="$(npx vercel@51.7.0 curl /api/health --deployment "${{ steps.deploy.outputs.url }}" --yes --token="${{ secrets.VERCEL_TOKEN }}" -- --fail --silent --show-error --retry 3 --retry-all-errors)"
           jq -e --arg commit "${GITHUB_SHA:0:7}" '.ok == true and .database == "ok" and .commit == $commit' <<< "$health_json"
       - name: Recheck main and promote the verified artifact
         run: |
           remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
           test "$remote_main" = "$GITHUB_SHA"
-          npx vercel@51.7.0 promote "${{ steps.deploy.outputs.url }}" --yes --token="${{ secrets.VERCEL_TOKEN }}"
+          npx vercel@51.7.0 promote "${{ steps.verify.outputs.deployment_id }}" --yes --scope="$VERCEL_ORG_ID" --token="${{ secrets.VERCEL_TOKEN }}"
