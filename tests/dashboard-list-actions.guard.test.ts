@@ -81,7 +81,7 @@ describe('payment modal is the single shared implementation', () => {
 
   it('the modal posts to the existing payment endpoint with idempotency + inputCurrency', () => {
     expect(modal).toContain('/payment')
-    expect(modal).toContain("'Idempotency-Key': idempotencyKey")
+    expect(modal).toContain("'Idempotency-Key': paymentCommand.keyFor(payload)")
     expect(modal).toContain('inputCurrency: currency.currency')
   })
 

@@ -40,7 +40,7 @@ export interface ContractNasiyaStatusInput {
 }
 
 export interface ContractScheduleStatusDerivation {
-  displayStatus: 'PAID' | 'PARTIAL' | 'OVERDUE' | 'PENDING' | 'DEFERRED'
+  displayStatus: 'PAID' | 'PARTIAL' | 'OVERDUE' | 'PENDING' | 'DEFERRED' | 'CANCELLED'
   outstanding: number
   isOverdue: boolean
 }
@@ -70,6 +70,9 @@ export function deriveContractScheduleStatus(
   currency: CurrencyCode,
   now: Date = new Date(),
 ): ContractScheduleStatusDerivation {
+  if (schedule.status === 'CANCELLED') {
+    return { displayStatus: 'CANCELLED', outstanding: 0, isOverdue: false }
+  }
   const expected = finiteMoney(schedule.contractExpectedAmount)
   const paid = finiteMoney(schedule.contractPaidAmount)
 

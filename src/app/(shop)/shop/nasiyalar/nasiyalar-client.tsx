@@ -15,8 +15,8 @@ import { replaceListUrlState } from '@/lib/list-url-state'
 import type { PaymentScoreColor, PaymentScoreLabel } from '@/lib/nasiya-payment-score'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import type { NasiyaStatus } from '@/lib/domain-types'
 
-type NasiyaStatus = 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
 type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan' | 'Bekor qilingan'
 
 interface NasiyaSchedule {

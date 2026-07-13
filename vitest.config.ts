@@ -1,9 +1,8 @@
 import { defineConfig } from 'vitest/config'
 import { resolve } from 'node:path'
 
-// Minimal Vitest setup. Tests live in tests/ and cover pure money/date/phone
-// logic plus source/migration regression guards. DB-backed integration tests
-// are listed as it.todo (see tests/integration.todo.test.ts).
+// Unit/component/source-guard suite. Real PostgreSQL route and invariant tests
+// live under tests/integration and run separately through test:integration.
 export default defineConfig({
   test: {
     environment: 'node',

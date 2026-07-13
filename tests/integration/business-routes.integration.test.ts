@@ -1,0 +1,1303 @@
+import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { PrismaPg } from '@prisma/adapter-pg'
+import { PrismaClient } from '@/generated/prisma/client'
+
+const authState = vi.hoisted(() => ({ session: null as unknown }))
+
+vi.mock('@/lib/auth', () => ({
+  auth: vi.fn(async () => authState.session),
+}))
+
+vi.mock('next/server', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('next/server')>()
+  return { ...actual, after: vi.fn() }
+})
+
+vi.mock('@/lib/server/cache-tags', () => ({
+  invalidateShopCustomerMutation: vi.fn(),
+  invalidateShopDeviceMutation: vi.fn(),
+  invalidateShopNasiyaMutation: vi.fn(),
+  invalidateShopPaymentMutation: vi.fn(),
+  invalidateShopSaleMutation: vi.fn(),
+  invalidateShopReturnMutation: vi.fn(),
+}))
+
+const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
+if (!databaseUrl) throw new Error('TEST_DATABASE_URL or DATABASE_URL is required')
+
+const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl, max: 6 }) })
+
+async function resetBusinessData() {
+  await prisma.$executeRawUnsafe(`
+    TRUNCATE TABLE
+      "ReminderGenerationState", "AuthSession", "ChangeEvent", "OpsEvent", "Log", "Notification", "DeviceReturn",
+      "NasiyaDeferral", "NasiyaPayment", "NasiyaSchedule", "Nasiya",
+      "SupplierPayable", "SalePayment", "Sale", "Customer", "Device",
+      "Supplier", "ShopAdmin", "ShopPayment", "CurrencyRate", "Shop", "SuperAdmin"
+    RESTART IDENTITY CASCADE
+  `)
+}
+
+async function seedActor(suffix: string) {
+  const owner = await prisma.superAdmin.create({
+    data: { name: `Owner ${suffix}`, login: `owner_route_${suffix}`, passwordHash: 'audit-only' },
+  })
+  const shop = await prisma.shop.create({
+    data: {
+      name: `Route shop ${suffix}`,
+      ownerName: `Owner ${suffix}`,
+      ownerPhone: `+99897${suffix.padStart(7, '0').slice(-7)}`,
+      shopNumber: suffix,
+      address: 'Disposable route audit',
+      preferredCurrency: 'UZS',
+      subscriptionDue: new Date('2099-01-01T00:00:00.000Z'),
+      createdById: owner.id,
+    },
+  })
+  const admin = await prisma.shopAdmin.create({
+    data: {
+      shopId: shop.id,
+      name: `Admin ${suffix}`,
+      phone: `+99896${suffix.padStart(7, '0').slice(-7)}`,
+      login: `admin_route_${suffix}`,
+      passwordHash: 'audit-only',
+    },
+  })
+  const authSession = await prisma.authSession.create({
+    data: {
+      id: `route-session-${suffix}`,
+      actorId: admin.id,
+      actorType: 'SHOP_ADMIN',
+      shopId: shop.id,
+      sessionVersion: admin.sessionVersion,
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+    },
+  })
+  return { owner, shop, admin, authSession }
+}
+
+function useShopAdmin(actor: Awaited<ReturnType<typeof seedActor>>) {
+  authState.session = {
+    user: {
+      id: actor.admin.id,
+      name: actor.admin.name,
+      role: 'SHOP_ADMIN',
+      shopId: actor.shop.id,
+      sessionVersion: actor.admin.sessionVersion,
+      sessionId: actor.authSession.id,
+    },
+    expires: '2099-01-01T00:00:00.000Z',
+  }
+}
+
+async function useSuperAdmin(actor: Awaited<ReturnType<typeof seedActor>>) {
+  const authSession = await prisma.authSession.create({
+    data: {
+      id: `super-route-session-${actor.owner.id}`,
+      actorId: actor.owner.id,
+      actorType: 'SUPER_ADMIN',
+      sessionVersion: actor.owner.sessionVersion,
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+    },
+  })
+  authState.session = {
+    user: {
+      id: actor.owner.id,
+      name: actor.owner.name,
+      role: 'SUPER_ADMIN',
+      shopId: null,
+      sessionVersion: actor.owner.sessionVersion,
+      sessionId: authSession.id,
+    },
+    expires: '2099-01-01T00:00:00.000Z',
+  }
+}
+
+async function seedNasiya(actor: Awaited<ReturnType<typeof seedActor>>, suffix: string, amount: number) {
+  const customer = await prisma.customer.create({
+    data: {
+      shopId: actor.shop.id,
+      name: `Route customer ${suffix}`,
+      phone: `+99895${suffix.padStart(7, '0').slice(-7)}`,
+      normalizedPhone: `99895${suffix.padStart(7, '0').slice(-7)}`,
+    },
+  })
+  const device = await prisma.device.create({
+    data: {
+      shopId: actor.shop.id,
+      model: `Route phone ${suffix}`,
+      purchasePrice: amount / 2,
+      purchaseInputAmount: amount / 2,
+      purchaseAmountUzsSnapshot: amount / 2,
+      imei: `ROUTE-NASIYA-${suffix}`,
+      addedBy: actor.admin.id,
+      status: 'SOLD_NASIYA',
+    },
+  })
+  const nasiya = await prisma.nasiya.create({
+    data: {
+      shopId: actor.shop.id,
+      deviceId: device.id,
+      customerId: customer.id,
+      totalAmount: amount,
+      downPayment: 0,
+      baseRemainingAmount: amount,
+      finalNasiyaAmount: amount,
+      remainingAmount: amount,
+      months: 1,
+      monthlyPayment: amount,
+      startDate: new Date('2026-07-01T00:00:00.000Z'),
+      contractCurrency: 'UZS',
+      contractTotalAmount: amount,
+      contractBaseRemainingAmount: amount,
+      contractFinalAmount: amount,
+      contractMonthlyPayment: amount,
+      contractRemainingAmount: amount,
+      contractPaidAmount: 0,
+      createdBy: actor.admin.id,
+    },
+  })
+  const schedule = await prisma.nasiyaSchedule.create({
+    data: {
+      nasiyaId: nasiya.id,
+      shopId: actor.shop.id,
+      monthNumber: 1,
+      dueDate: new Date('2026-08-01T00:00:00.000Z'),
+      expectedAmount: amount,
+      contractCurrency: 'UZS',
+      contractExpectedAmount: amount,
+      contractRemainingAmount: amount,
+    },
+  })
+  return { customer, device, nasiya, schedule }
+}
+
+async function nasiyaPaymentRequest(input: {
+  nasiyaId: string
+  scheduleId: string
+  amount: number
+  key: string
+  note?: string
+  date?: string
+  delayedUntil?: string
+  deferredToNext?: boolean
+}) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/nasiya/[id]/payment/route')
+  const request = new NextRequest(`http://localhost/api/nasiya/${input.nasiyaId}/payment`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': input.key },
+    body: JSON.stringify({
+      nasiyaScheduleId: input.scheduleId,
+      amount: input.amount,
+      paymentMethod: input.deferredToNext ? undefined : 'CASH',
+      date: input.date ?? '2026-07-13T08:00:00.000Z',
+      delayedUntil: input.delayedUntil,
+      deferredToNext: input.deferredToNext,
+      note: input.note ?? 'Audit payment reason',
+      inputCurrency: 'UZS',
+    }),
+  })
+  return POST(request, { params: Promise.resolve({ id: input.nasiyaId }) })
+}
+
+async function salePaymentRequest(input: {
+  saleId: string
+  amount: number
+  key: string
+  note?: string
+  paidAt?: string
+  nextDueDate?: string
+}) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/sales/[id]/payment/route')
+  return POST(new NextRequest(`http://localhost/api/sales/${input.saleId}/payment`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': input.key },
+    body: JSON.stringify({
+      amount: input.amount,
+      paymentMethod: 'CASH',
+      paidAt: input.paidAt,
+      nextDueDate: input.nextDueDate,
+      note: input.note ?? 'Sale payment reason',
+      inputCurrency: 'UZS',
+    }),
+  }), { params: Promise.resolve({ id: input.saleId }) })
+}
+
+async function shopPaymentRequest(input: {
+  shopId: string
+  amount: number
+  months: number
+  key: string
+  note?: string
+}) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/shops/[id]/payment/route')
+  return POST(new NextRequest(`http://localhost/api/shops/${input.shopId}/payment`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': input.key },
+    body: JSON.stringify({
+      shopId: input.shopId,
+      amount: input.amount,
+      months: input.months,
+      paymentMethod: 'CASH',
+      note: input.note ?? 'Subscription payment',
+    }),
+  }), { params: Promise.resolve({ id: input.shopId }) })
+}
+
+async function returnDeviceRequest(input: {
+  deviceId: string
+  key: string
+  refundAmount: number
+  refundMethod?: 'CASH' | 'TRANSFER' | 'CARD' | 'OTHER'
+  note?: string
+}) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/devices/[id]/return/route')
+  const request = new NextRequest(`http://localhost/api/devices/${input.deviceId}/return`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': input.key },
+    body: JSON.stringify({
+      refundAmount: input.refundAmount,
+      refundMethod: input.refundMethod,
+      inputCurrency: 'UZS',
+      note: input.note ?? 'Qurilma qaytarildi',
+    }),
+  })
+  return POST(request, { params: Promise.resolve({ id: input.deviceId }) })
+}
+
+async function supplierPayablePaymentRequest(payableId: string, note: string) {
+  const { NextRequest } = await import('next/server')
+  const { PATCH } = await import('@/app/api/olib-sotdim/[id]/pay/route')
+  return PATCH(new NextRequest(`http://localhost/api/olib-sotdim/${payableId}/pay`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ paymentMethod: 'CASH', paidAt: '2026-07-13T08:00:00.000Z', note }),
+  }), { params: Promise.resolve({ id: payableId }) })
+}
+
+async function cashSaleRequest(deviceId: string, phone: string) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/devices/[id]/sell/route')
+  return POST(new NextRequest(`http://localhost/api/devices/${deviceId}/sell`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      deviceId,
+      customerName: 'Lifecycle customer',
+      customerPhone: phone,
+      salePrice: 2_000_000,
+      paymentMethod: 'CASH',
+      paidFully: true,
+      inputCurrency: 'UZS',
+    }),
+  }), { params: Promise.resolve({ id: deviceId }) })
+}
+
+async function createNasiyaRequest(deviceId: string, phone: string, shopId: string) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/devices/[id]/nasiya/route')
+  return POST(new NextRequest(`http://localhost/api/devices/${deviceId}/nasiya`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      deviceId,
+      customerName: 'Lifecycle nasiya customer',
+      customerPhone: phone,
+      passportPhotoUrl: `shops/${shopId}/passports/integration.jpg`,
+      totalAmount: 2_000_000,
+      downPayment: 500_000,
+      months: 2,
+      interestPercent: 0,
+      startDate: '2026-08-01T00:00:00.000Z',
+      paymentMethod: 'CASH',
+      inputCurrency: 'UZS',
+    }),
+  }), { params: Promise.resolve({ id: deviceId }) })
+}
+
+async function restockDeviceRequest(deviceId: string) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/devices/[id]/restock/route')
+  return POST(new NextRequest(`http://localhost/api/devices/${deviceId}/restock`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ note: 'Legacy qaytarilgan qurilmani qayta omborga olish' }),
+  }), { params: Promise.resolve({ id: deviceId }) })
+}
+
+beforeEach(async () => {
+  authState.session = null
+  await resetBusinessData()
+})
+
+afterAll(async () => {
+  await prisma.$disconnect()
+})
+
+describe('real-PostgreSQL route evidence', () => {
+  it('preserves the original Sale and receipts while posting an allocated return event', async () => {
+    const actor = await seedActor('immutable_return')
+    useShopAdmin(actor)
+    await prisma.shopAdmin.update({
+      where: { id: actor.admin.id },
+      data: { telegramId: '800000001', telegramVerifiedAt: new Date('2026-07-01T00:00:00.000Z') },
+    })
+    await prisma.shopAdmin.createMany({ data: [
+      {
+        shopId: actor.shop.id,
+        name: 'Inactive return recipient',
+        phone: '+998901111131',
+        login: 'inactive_return_recipient',
+        passwordHash: 'audit-only',
+        telegramId: '800000002',
+        telegramVerifiedAt: new Date('2026-07-01T00:00:00.000Z'),
+        isActive: false,
+      },
+      {
+        shopId: actor.shop.id,
+        name: 'Unverified return recipient',
+        phone: '+998901111132',
+        login: 'unverified_return_recipient',
+        passwordHash: 'audit-only',
+        telegramId: '800000003',
+      },
+    ] })
+    const customer = await prisma.customer.create({
+      data: { shopId: actor.shop.id, name: 'Return customer', phone: '+998901234567', normalizedPhone: '998901234567' },
+    })
+    const device = await prisma.device.create({
+      data: { shopId: actor.shop.id, model: 'Return phone', purchasePrice: 600, imei: 'RETURN-ROUTE-1', addedBy: actor.admin.id, status: 'SOLD_DEBT' },
+    })
+    const sale = await prisma.sale.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        salePrice: 1_000,
+        amountPaid: 700,
+        remainingAmount: 300,
+        contractSalePrice: 1_000,
+        contractAmountPaid: 700,
+        contractRemainingAmount: 300,
+        paidFully: false,
+        paymentMethod: 'CASH',
+        createdBy: actor.admin.id,
+      },
+    })
+    await prisma.salePayment.create({
+      data: {
+        shopId: actor.shop.id,
+        saleId: sale.id,
+        amount: 700,
+        appliedAmountInContractCurrency: 700,
+        paymentMethod: 'CASH',
+        createdBy: actor.admin.id,
+      },
+    })
+
+    const response = await returnDeviceRequest({
+      deviceId: device.id,
+      key: 'immutable-return-route-key',
+      refundAmount: 500,
+      refundMethod: 'CASH',
+    })
+    expect(response.status).toBe(200)
+
+    const [storedSale, storedDevice, returned] = await Promise.all([
+      prisma.sale.findUniqueOrThrow({ where: { id: sale.id } }),
+      prisma.device.findUniqueOrThrow({ where: { id: device.id } }),
+      prisma.deviceReturn.findFirstOrThrow({
+        where: { saleId: sale.id },
+        include: { refundAllocations: true },
+      }),
+    ])
+    expect(storedSale).toMatchObject({ deletedAt: null })
+    expect(storedSale.returnedAt).not.toBeNull()
+    expect(Number(storedSale.salePrice)).toBe(1_000)
+    expect(Number(storedSale.contractRemainingAmount)).toBe(300)
+    expect(storedDevice.status).toBe('IN_STOCK')
+    expect(returned.refundAllocations).toHaveLength(1)
+    expect(Number(returned.contractReceiptsAtReturn)).toBe(700)
+    expect(Number(returned.contractRefundAmount)).toBe(500)
+    expect(Number(returned.contractRetainedAmount)).toBe(200)
+    expect(Number(returned.contractCancelledDebt)).toBe(300)
+    expect(Number(returned.revenueReversalAmountUzs)).toBe(1_000)
+    expect(Number(returned.inventoryCostRecoveryUzs)).toBe(600)
+
+    const replay = await returnDeviceRequest({
+      deviceId: device.id,
+      key: 'immutable-return-route-key',
+      refundAmount: 500,
+      refundMethod: 'CASH',
+    })
+    expect(replay.status).toBe(200)
+    expect(await prisma.deviceReturn.count({ where: { saleId: sale.id } })).toBe(1)
+    expect(await prisma.notification.findMany({
+      where: { shopId: actor.shop.id, type: 'RETURN', relatedId: returned.id },
+      select: { telegramId: true },
+    })).toEqual([{ telegramId: '800000001' }])
+  })
+
+  it('cancels Nasiya operational debt without deleting its contract or payments', async () => {
+    const actor = await seedActor('nasiya_return')
+    useShopAdmin(actor)
+    const contract = await seedNasiya(actor, 'nasiya_return', 1_000)
+    await prisma.nasiyaPayment.create({
+      data: {
+        shopId: actor.shop.id,
+        nasiyaId: contract.nasiya.id,
+        amount: 400,
+        appliedAmountInContractCurrency: 400,
+        paymentMethod: 'CARD',
+        createdBy: actor.admin.id,
+      },
+    })
+    await prisma.nasiya.update({
+      where: { id: contract.nasiya.id },
+      data: { contractPaidAmount: 400, contractRemainingAmount: 600, remainingAmount: 600 },
+    })
+
+    const response = await returnDeviceRequest({
+      deviceId: contract.device.id,
+      key: 'nasiya-immutable-return-key',
+      refundAmount: 400,
+      refundMethod: 'CARD',
+    })
+    expect(response.status).toBe(200)
+
+    const [nasiya, schedule, paymentCount, returned] = await Promise.all([
+      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
+      prisma.nasiyaSchedule.findUniqueOrThrow({ where: { id: contract.schedule.id } }),
+      prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } }),
+      prisma.deviceReturn.findFirstOrThrow({ where: { nasiyaId: contract.nasiya.id } }),
+    ])
+    expect(nasiya.status).toBe('CANCELLED')
+    expect(nasiya.deletedAt).toBeNull()
+    expect(nasiya.returnedAt).not.toBeNull()
+    expect(Number(nasiya.contractRemainingAmount)).toBe(600)
+    expect(schedule.status).toBe('CANCELLED')
+    expect(paymentCount).toBe(1)
+    expect(Number(returned.contractCancelledDebt)).toBe(600)
+  })
+
+  it('rejects a refund method that cannot be reconciled to original receipts', async () => {
+    const actor = await seedActor('return_method')
+    useShopAdmin(actor)
+    const customer = await prisma.customer.create({
+      data: { shopId: actor.shop.id, name: 'Method customer', phone: '+998907654321', normalizedPhone: '998907654321' },
+    })
+    const device = await prisma.device.create({
+      data: { shopId: actor.shop.id, model: 'Method phone', purchasePrice: 500, imei: 'RETURN-METHOD-1', addedBy: actor.admin.id, status: 'SOLD_CASH' },
+    })
+    const sale = await prisma.sale.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        salePrice: 1_000,
+        amountPaid: 1_000,
+        contractSalePrice: 1_000,
+        contractAmountPaid: 1_000,
+        paymentMethod: 'CARD',
+        createdBy: actor.admin.id,
+      },
+    })
+    await prisma.salePayment.create({
+      data: { shopId: actor.shop.id, saleId: sale.id, amount: 1_000, appliedAmountInContractCurrency: 1_000, paymentMethod: 'CARD', createdBy: actor.admin.id },
+    })
+
+    const response = await returnDeviceRequest({
+      deviceId: device.id,
+      key: 'return-method-mismatch-key',
+      refundAmount: 100,
+      refundMethod: 'CASH',
+    })
+    expect(response.status).toBe(400)
+    expect((await prisma.device.findUniqueOrThrow({ where: { id: device.id } })).status).toBe('SOLD_CASH')
+    expect(await prisma.deviceReturn.count()).toBe(0)
+  })
+
+  it('records a zero-refund return without inventing a refund method or allocation', async () => {
+    const actor = await seedActor('zero_refund')
+    useShopAdmin(actor)
+    const customer = await prisma.customer.create({
+      data: {
+        shopId: actor.shop.id,
+        name: 'Zero refund customer',
+        phone: '+998907171717',
+        normalizedPhone: '998907171717',
+      },
+    })
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Zero refund phone',
+        purchasePrice: 500,
+        imei: 'RETURN-ZERO-REFUND',
+        addedBy: actor.admin.id,
+        status: 'SOLD_DEBT',
+      },
+    })
+    const sale = await prisma.sale.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        salePrice: 1_000,
+        amountPaid: 700,
+        remainingAmount: 300,
+        contractSalePrice: 1_000,
+        contractAmountPaid: 700,
+        contractRemainingAmount: 300,
+        paidFully: false,
+        paymentMethod: 'CASH',
+        createdBy: actor.admin.id,
+      },
+    })
+    await prisma.salePayment.create({
+      data: {
+        shopId: actor.shop.id,
+        saleId: sale.id,
+        amount: 700,
+        appliedAmountInContractCurrency: 700,
+        paymentMethod: 'CASH',
+        createdBy: actor.admin.id,
+      },
+    })
+
+    const response = await returnDeviceRequest({
+      deviceId: device.id,
+      key: 'zero-refund-return-key',
+      refundAmount: 0,
+    })
+    expect(response.status).toBe(200)
+
+    const returned = await prisma.deviceReturn.findFirstOrThrow({
+      where: { saleId: sale.id },
+      include: { refundAllocations: true },
+    })
+    expect(returned.refundMethod).toBeNull()
+    expect(Number(returned.contractRefundAmount)).toBe(0)
+    expect(Number(returned.contractReceiptsAtReturn)).toBe(700)
+    expect(Number(returned.contractRetainedAmount)).toBe(700)
+    expect(Number(returned.contractCancelledDebt)).toBe(300)
+    expect(returned.refundAllocations).toHaveLength(0)
+  })
+
+  it('serializes a Nasiya payment racing a return without losing receipts or cancelled debt', async () => {
+    const actor = await seedActor('payment_return_race')
+    useShopAdmin(actor)
+    const contract = await seedNasiya(actor, 'payment_return_race', 1_000)
+
+    const [paymentResponse, returnResponse] = await Promise.all([
+      nasiyaPaymentRequest({
+        nasiyaId: contract.nasiya.id,
+        scheduleId: contract.schedule.id,
+        amount: 400,
+        key: 'payment-return-race-payment',
+      }),
+      returnDeviceRequest({
+        deviceId: contract.device.id,
+        key: 'payment-return-race-return',
+        refundAmount: 0,
+      }),
+    ])
+
+    expect(returnResponse.status).toBe(200)
+    expect([200, 404, 409]).toContain(paymentResponse.status)
+    const [nasiya, returned, payments] = await Promise.all([
+      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
+      prisma.deviceReturn.findFirstOrThrow({ where: { nasiyaId: contract.nasiya.id } }),
+      prisma.nasiyaPayment.findMany({ where: { nasiyaId: contract.nasiya.id } }),
+    ])
+    const paid = payments.reduce(
+      (sum, payment) => sum + Number(payment.appliedAmountInContractCurrency),
+      0,
+    )
+    expect(nasiya.status).toBe('CANCELLED')
+    expect(nasiya.returnedAt).not.toBeNull()
+    expect(paid).toBe(paymentResponse.status === 200 ? 400 : 0)
+    expect(Number(returned.contractReceiptsAtReturn)).toBe(paid)
+    expect(Number(returned.contractCancelledDebt)).toBe(1_000 - paid)
+    expect(Number(returned.contractRefundAmount)).toBe(0)
+  })
+
+  it('rejects both cash and nasiya sales while a legacy device is still RETURNED', async () => {
+    const actor = await seedActor('returned_rejected')
+    useShopAdmin(actor)
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Legacy returned phone',
+        purchasePrice: 1_000_000,
+        purchaseInputAmount: 1_000_000,
+        purchaseAmountUzsSnapshot: 1_000_000,
+        imei: 'RETURNED-REJECTED-1',
+        addedBy: actor.admin.id,
+        status: 'RETURNED',
+      },
+    })
+
+    const [sale, nasiya] = await Promise.all([
+      cashSaleRequest(device.id, '+998901111121'),
+      createNasiyaRequest(device.id, '+998901111122', actor.shop.id),
+    ])
+    expect(sale.status).toBe(409)
+    expect(nasiya.status, JSON.stringify(await nasiya.clone().json())).toBe(409)
+    expect((await prisma.device.findUniqueOrThrow({ where: { id: device.id } })).status).toBe('RETURNED')
+    expect(await prisma.sale.count({ where: { deviceId: device.id } })).toBe(0)
+    expect(await prisma.nasiya.count({ where: { deviceId: device.id } })).toBe(0)
+  })
+
+  it('allows a legacy RETURNED device to be sold only after the audited restock transition', async () => {
+    const actor = await seedActor('returned_restocked')
+    useShopAdmin(actor)
+    await prisma.shopAdmin.update({
+      where: { id: actor.admin.id },
+      data: { telegramId: '810000001', telegramVerifiedAt: new Date('2026-07-01T00:00:00.000Z') },
+    })
+    await prisma.shopAdmin.create({
+      data: {
+        shopId: actor.shop.id,
+        name: 'Inactive restock recipient',
+        phone: '+998901111133',
+        login: 'inactive_restock_recipient',
+        passwordHash: 'audit-only',
+        telegramId: '810000002',
+        telegramVerifiedAt: new Date('2026-07-01T00:00:00.000Z'),
+        isActive: false,
+      },
+    })
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Legacy restock phone',
+        purchasePrice: 1_000_000,
+        purchaseInputAmount: 1_000_000,
+        purchaseAmountUzsSnapshot: 1_000_000,
+        imei: 'RETURNED-RESTOCKED-1',
+        addedBy: actor.admin.id,
+        status: 'RETURNED',
+      },
+    })
+
+    expect((await restockDeviceRequest(device.id)).status).toBe(200)
+    expect((await cashSaleRequest(device.id, '+998901111123')).status).toBe(201)
+    expect((await prisma.device.findUniqueOrThrow({ where: { id: device.id } })).status).toBe('SOLD_CASH')
+    expect(await prisma.log.count({ where: { targetType: 'Device', targetId: device.id, action: 'RESTOCK' } })).toBe(1)
+    expect(await prisma.sale.count({ where: { deviceId: device.id } })).toBe(1)
+    expect(await prisma.notification.findMany({
+      where: { shopId: actor.shop.id, type: 'RESTOCK', relatedId: device.id },
+      select: { telegramId: true },
+    })).toEqual([{ telegramId: '810000001' }])
+  })
+
+  it('replays the successful final Nasiya payment before the completed-state guard', async () => {
+    const actor = await seedActor('final_retry')
+    useShopAdmin(actor)
+    const contract = await seedNasiya(actor, 'final_retry', 1_000)
+
+    const first = await nasiyaPaymentRequest({
+      nasiyaId: contract.nasiya.id,
+      scheduleId: contract.schedule.id,
+      amount: 1_000,
+      key: 'final-payment-retry-key',
+    })
+    expect(first.status).toBe(200)
+    expect(await prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(1)
+    expect((await prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } })).status).toBe('COMPLETED')
+
+    const retry = await nasiyaPaymentRequest({
+      nasiyaId: contract.nasiya.id,
+      scheduleId: contract.schedule.id,
+      amount: 1_000,
+      key: 'final-payment-retry-key',
+    })
+    const retryBody = await retry.json() as { success: boolean; data: { amount: number; remaining: number; duplicate: boolean } }
+    expect(retry.status).toBe(200)
+    expect(retryBody.success).toBe(true)
+    expect(retryBody.data).toMatchObject({ amount: 1_000, remaining: 0, duplicate: true })
+    expect(await prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(1)
+    expect(await prisma.log.count({ where: { targetType: 'NasiyaSchedule', targetId: contract.schedule.id } })).toBe(1)
+  })
+
+  it('allocates a payment to the selected month first, then the oldest remaining month', async () => {
+    const actor = await seedActor('selected_month')
+    useShopAdmin(actor)
+    const contract = await seedNasiya(actor, 'selected_month', 3_000_000)
+    await prisma.nasiyaSchedule.update({
+      where: { id: contract.schedule.id },
+      data: {
+        expectedAmount: 1_000_000,
+        contractExpectedAmount: 1_000_000,
+        contractRemainingAmount: 1_000_000,
+      },
+    })
+    const selected = await prisma.nasiyaSchedule.create({
+      data: {
+        nasiyaId: contract.nasiya.id,
+        shopId: actor.shop.id,
+        monthNumber: 2,
+        dueDate: new Date('2026-09-01T00:00:00.000Z'),
+        expectedAmount: 1_000_000,
+        contractCurrency: 'UZS',
+        contractExpectedAmount: 1_000_000,
+        contractRemainingAmount: 1_000_000,
+      },
+    })
+    const third = await prisma.nasiyaSchedule.create({
+      data: {
+        nasiyaId: contract.nasiya.id,
+        shopId: actor.shop.id,
+        monthNumber: 3,
+        dueDate: new Date('2026-10-01T00:00:00.000Z'),
+        expectedAmount: 1_000_000,
+        contractCurrency: 'UZS',
+        contractExpectedAmount: 1_000_000,
+        contractRemainingAmount: 1_000_000,
+      },
+    })
+
+    const response = await nasiyaPaymentRequest({
+      nasiyaId: contract.nasiya.id,
+      scheduleId: selected.id,
+      amount: 1_500_000,
+      key: 'selected-month-first-key',
+    })
+    expect(response.status).toBe(200)
+
+    const rows = await prisma.nasiyaSchedule.findMany({
+      where: { nasiyaId: contract.nasiya.id },
+      orderBy: { monthNumber: 'asc' },
+      select: { id: true, contractPaidAmount: true },
+    })
+    expect(rows.map((row) => [row.id, Number(row.contractPaidAmount)])).toEqual([
+      [contract.schedule.id, 500_000],
+      [selected.id, 1_000_000],
+      [third.id, 0],
+    ])
+    expect((await prisma.nasiyaPayment.findFirstOrThrow({ where: { nasiyaId: contract.nasiya.id } })).nasiyaScheduleId)
+      .toBe(selected.id)
+  })
+
+  it('serializes two concurrent payments without losing or duplicating balance updates', async () => {
+    const actor = await seedActor('concurrent_payment')
+    useShopAdmin(actor)
+    const contract = await seedNasiya(actor, 'concurrent_payment', 1_000_000)
+
+    const responses = await Promise.all([
+      nasiyaPaymentRequest({
+        nasiyaId: contract.nasiya.id,
+        scheduleId: contract.schedule.id,
+        amount: 400_000,
+        key: 'concurrent-payment-a',
+      }),
+      nasiyaPaymentRequest({
+        nasiyaId: contract.nasiya.id,
+        scheduleId: contract.schedule.id,
+        amount: 600_000,
+        key: 'concurrent-payment-b',
+      }),
+    ])
+
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 200])
+    const [nasiya, schedule, payments] = await Promise.all([
+      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
+      prisma.nasiyaSchedule.findUniqueOrThrow({ where: { id: contract.schedule.id } }),
+      prisma.nasiyaPayment.findMany({ where: { nasiyaId: contract.nasiya.id } }),
+    ])
+    expect(nasiya.status).toBe('COMPLETED')
+    expect(Number(nasiya.contractRemainingAmount)).toBe(0)
+    expect(Number(schedule.contractPaidAmount)).toBe(1_000_000)
+    expect(payments).toHaveLength(2)
+    expect(payments.reduce((sum, payment) => sum + Number(payment.appliedAmountInContractCurrency), 0)).toBe(1_000_000)
+  })
+
+  it('rejects the same Nasiya payment idempotency key when the submitted amount changes', async () => {
+    const actor = await seedActor('payload_retry')
+    useShopAdmin(actor)
+    const contract = await seedNasiya(actor, 'payload_retry', 2_000)
+
+    const first = await nasiyaPaymentRequest({
+      nasiyaId: contract.nasiya.id,
+      scheduleId: contract.schedule.id,
+      amount: 500,
+      key: 'payload-mismatch-key',
+    })
+    expect(first.status).toBe(200)
+
+    const changedPayload = await nasiyaPaymentRequest({
+      nasiyaId: contract.nasiya.id,
+      scheduleId: contract.schedule.id,
+      amount: 600,
+      key: 'payload-mismatch-key',
+    })
+    const body = await changedPayload.json() as { success: boolean; error?: string }
+    expect(changedPayload.status).toBe(409)
+    expect(body.success).toBe(false)
+    expect(body.error).toContain("Idempotency-Key")
+    expect(await prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(1)
+    expect(Number((await prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } })).contractRemainingAmount)).toBe(1_500)
+  })
+
+  it('rejects a changed Nasiya deferral payload under the same idempotency key', async () => {
+    const actor = await seedActor('deferral_payload_retry')
+    useShopAdmin(actor)
+    const contract = await seedNasiya(actor, 'deferral_payload_retry', 2_000)
+    const key = 'deferral-payload-mismatch-key'
+
+    const first = await nasiyaPaymentRequest({
+      nasiyaId: contract.nasiya.id,
+      scheduleId: contract.schedule.id,
+      amount: 0,
+      key,
+      date: '2026-09-01T00:00:00.000Z',
+      delayedUntil: '2026-09-01T00:00:00.000Z',
+      deferredToNext: true,
+      note: 'Customer requested September',
+    })
+    expect(first.status).toBe(200)
+
+    const changed = await nasiyaPaymentRequest({
+      nasiyaId: contract.nasiya.id,
+      scheduleId: contract.schedule.id,
+      amount: 0,
+      key,
+      date: '2026-10-01T00:00:00.000Z',
+      delayedUntil: '2026-10-01T00:00:00.000Z',
+      deferredToNext: true,
+      note: 'Customer requested October',
+    })
+    expect(changed.status).toBe(409)
+    expect(await prisma.nasiyaDeferral.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(1)
+    expect((await prisma.nasiyaSchedule.findUniqueOrThrow({ where: { id: contract.schedule.id } })).delayedUntil)
+      .toEqual(new Date('2026-09-01T00:00:00.000Z'))
+  })
+
+  it('replays only the exact Sale payment command and rejects changed durable fields', async () => {
+    const actor = await seedActor('sale_payload_retry')
+    useShopAdmin(actor)
+    const customer = await prisma.customer.create({
+      data: { shopId: actor.shop.id, name: 'Sale replay customer', phone: '+998903838383', normalizedPhone: '998903838383' },
+    })
+    const device = await prisma.device.create({
+      data: { shopId: actor.shop.id, model: 'Sale replay phone', purchasePrice: 500, imei: 'SALE-REPLAY-PAYLOAD', addedBy: actor.admin.id, status: 'SOLD_DEBT' },
+    })
+    const sale = await prisma.sale.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        salePrice: 1_000,
+        amountPaid: 0,
+        remainingAmount: 1_000,
+        contractSalePrice: 1_000,
+        contractAmountPaid: 0,
+        contractRemainingAmount: 1_000,
+        paidFully: false,
+        paymentMethod: 'CASH',
+        dueDate: new Date('2026-08-01T00:00:00.000Z'),
+        createdBy: actor.admin.id,
+      },
+    })
+    const key = 'sale-payment-payload-key'
+    const command = {
+      saleId: sale.id,
+      amount: 400,
+      key,
+      note: 'First exact payment',
+      paidAt: '2026-07-13T08:00:00.000Z',
+      nextDueDate: '2026-09-01T00:00:00.000Z',
+    }
+
+    expect((await salePaymentRequest(command)).status).toBe(200)
+    expect((await salePaymentRequest(command)).status).toBe(200)
+    expect((await salePaymentRequest({ ...command, amount: 500 })).status).toBe(409)
+    expect((await salePaymentRequest({ ...command, nextDueDate: '2026-10-01T00:00:00.000Z' })).status).toBe(409)
+    expect(await prisma.salePayment.count({ where: { saleId: sale.id } })).toBe(1)
+    const stored = await prisma.sale.findUniqueOrThrow({ where: { id: sale.id } })
+    expect(Number(stored.contractRemainingAmount)).toBe(600)
+    expect(stored.dueDate).toEqual(new Date('2026-09-01T00:00:00.000Z'))
+  })
+
+  it('replays only the exact shop subscription payment command', async () => {
+    const actor = await seedActor('shop_payment_retry')
+    await useSuperAdmin(actor)
+    const key = 'shop-payment-payload-key'
+    const command = { shopId: actor.shop.id, amount: 1_000, months: 1, key, note: 'One month paid' }
+
+    expect((await shopPaymentRequest(command)).status).toBe(200)
+    expect((await shopPaymentRequest(command)).status).toBe(200)
+    expect((await shopPaymentRequest({ ...command, months: 2 })).status).toBe(409)
+    expect((await shopPaymentRequest({ ...command, note: 'Changed note' })).status).toBe(409)
+    expect(await prisma.shopPayment.count({ where: { shopId: actor.shop.id } })).toBe(1)
+  })
+
+  it('does not let a shop admin pay another shop Nasiya', async () => {
+    const first = await seedActor('tenant_a')
+    const second = await seedActor('tenant_b')
+    const foreign = await seedNasiya(second, 'foreign', 1_000)
+    useShopAdmin(first)
+
+    const response = await nasiyaPaymentRequest({
+      nasiyaId: foreign.nasiya.id,
+      scheduleId: foreign.schedule.id,
+      amount: 500,
+      key: 'foreign-tenant-key',
+    })
+    expect(response.status).toBe(404)
+    expect(await prisma.nasiyaPayment.count()).toBe(0)
+    expect(Number((await prisma.nasiya.findUniqueOrThrow({ where: { id: foreign.nasiya.id } })).contractRemainingAmount)).toBe(1_000)
+  })
+
+  it('does not let a shop admin read or modify another shop device, customer, or Nasiya', async () => {
+    const first = await seedActor('tenant_matrix_a')
+    const second = await seedActor('tenant_matrix_b')
+    const foreign = await seedNasiya(second, 'tenant_matrix_foreign', 1_000)
+    useShopAdmin(first)
+    const { NextRequest } = await import('next/server')
+    const deviceRoute = await import('@/app/api/devices/[id]/route')
+    const customerRoute = await import('@/app/api/customers/[id]/route')
+    const nasiyaRoute = await import('@/app/api/nasiya/[id]/route')
+
+    const [deviceGet, devicePatch, customerGet, customerPatch, nasiyaGet, nasiyaPatch] = await Promise.all([
+      deviceRoute.GET(
+        new NextRequest(`http://localhost/api/devices/${foreign.device.id}`),
+        { params: Promise.resolve({ id: foreign.device.id }) },
+      ),
+      deviceRoute.PATCH(
+        new NextRequest(`http://localhost/api/devices/${foreign.device.id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ model: 'Cross-tenant edit attempt' }),
+        }),
+        { params: Promise.resolve({ id: foreign.device.id }) },
+      ),
+      customerRoute.GET(
+        new NextRequest(`http://localhost/api/customers/${foreign.customer.id}`),
+        { params: Promise.resolve({ id: foreign.customer.id }) },
+      ),
+      customerRoute.PATCH(
+        new NextRequest(`http://localhost/api/customers/${foreign.customer.id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ note: 'Cross-tenant edit attempt' }),
+        }),
+        { params: Promise.resolve({ id: foreign.customer.id }) },
+      ),
+      nasiyaRoute.GET(
+        new NextRequest(`http://localhost/api/nasiya/${foreign.nasiya.id}`),
+        { params: Promise.resolve({ id: foreign.nasiya.id }) },
+      ),
+      nasiyaRoute.PATCH(
+        new NextRequest(`http://localhost/api/nasiya/${foreign.nasiya.id}`, {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ note: 'Cross-tenant edit attempt' }),
+        }),
+        { params: Promise.resolve({ id: foreign.nasiya.id }) },
+      ),
+    ])
+
+    expect([deviceGet, devicePatch, customerGet, customerPatch, nasiyaGet, nasiyaPatch].map(({ status }) => status))
+      .toEqual([404, 404, 404, 404, 404, 404])
+    expect((await prisma.device.findUniqueOrThrow({ where: { id: foreign.device.id } })).model).toBe('Route phone tenant_matrix_foreign')
+    expect((await prisma.customer.findUniqueOrThrow({ where: { id: foreign.customer.id } })).note).toBeNull()
+    expect((await prisma.nasiya.findUniqueOrThrow({ where: { id: foreign.nasiya.id } })).note).toBeNull()
+  })
+
+  it('allows the supplier payable PENDING and OVERDUE transitions to PAID', async () => {
+    const actor = await seedActor('open_payables')
+    useShopAdmin(actor)
+    const customer = await prisma.customer.create({
+      data: { shopId: actor.shop.id, name: 'Open payable customer', phone: '+998909292929', normalizedPhone: '998909292929' },
+    })
+
+    for (const [index, status] of (['PENDING', 'OVERDUE'] as const).entries()) {
+      const device = await prisma.device.create({
+        data: {
+          shopId: actor.shop.id,
+          model: `Open payable phone ${status}`,
+          purchasePrice: 500,
+          imei: `ROUTE-OPEN-PAYABLE-${index}`,
+          addedBy: actor.admin.id,
+          status: 'SOLD_CASH',
+        },
+      })
+      const sale = await prisma.sale.create({
+        data: {
+          shopId: actor.shop.id,
+          deviceId: device.id,
+          customerId: customer.id,
+          salePrice: 1_000,
+          amountPaid: 1_000,
+          contractSalePrice: 1_000,
+          contractAmountPaid: 1_000,
+          paymentMethod: 'CASH',
+          createdBy: actor.admin.id,
+        },
+      })
+      const payable = await prisma.supplierPayable.create({
+        data: {
+          shopId: actor.shop.id,
+          deviceId: device.id,
+          saleId: sale.id,
+          supplierName: `${status} supplier`,
+          supplierPhone: '+998908282828',
+          amount: 500,
+          contractAmount: 500,
+          status,
+          dueDate: new Date('2026-07-01T00:00:00.000Z'),
+          createdBy: actor.admin.id,
+        },
+      })
+
+      const response = await supplierPayablePaymentRequest(payable.id, `${status} transition proof`)
+      expect(response.status).toBe(200)
+      expect((await prisma.supplierPayable.findUniqueOrThrow({ where: { id: payable.id } })).status).toBe('PAID')
+      expect(await prisma.log.count({ where: { targetType: 'SupplierPayable', targetId: payable.id } })).toBe(1)
+    }
+  })
+
+  it('never transitions a CANCELLED supplier payable to PAID', async () => {
+    const actor = await seedActor('cancelled_payable')
+    useShopAdmin(actor)
+    const customer = await prisma.customer.create({
+      data: { shopId: actor.shop.id, name: 'Payable customer', phone: '+998909191919', normalizedPhone: '998909191919' },
+    })
+    const device = await prisma.device.create({
+      data: { shopId: actor.shop.id, model: 'Payable phone', purchasePrice: 500, imei: 'ROUTE-PAYABLE', addedBy: actor.admin.id, status: 'SOLD_CASH' },
+    })
+    const sale = await prisma.sale.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        salePrice: 1_000,
+        amountPaid: 1_000,
+        contractSalePrice: 1_000,
+        contractAmountPaid: 1_000,
+        paymentMethod: 'CASH',
+        createdBy: actor.admin.id,
+      },
+    })
+    const payable = await prisma.supplierPayable.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        saleId: sale.id,
+        supplierName: 'Cancelled supplier',
+        supplierPhone: '+998908181818',
+        amount: 500,
+        contractAmount: 500,
+        status: 'CANCELLED',
+        dueDate: new Date('2026-07-01T00:00:00.000Z'),
+        createdBy: actor.admin.id,
+      },
+    })
+
+    const response = await supplierPayablePaymentRequest(payable.id, 'Cancelled transition audit')
+
+    expect(response.status).toBe(409)
+    expect((await prisma.supplierPayable.findUniqueOrThrow({ where: { id: payable.id } })).status).toBe('CANCELLED')
+    expect(await prisma.log.count({ where: { targetType: 'SupplierPayable', targetId: payable.id } })).toBe(0)
+    expect(await prisma.notification.count({ where: { relatedType: 'SupplierPayable', relatedId: payable.id } })).toBe(0)
+  })
+
+  it('exports a device purchase in its frozen native currency with its creation-rate and UZS snapshot', async () => {
+    const actor = await seedActor('device_export_native')
+    useShopAdmin(actor)
+    await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'USD purchase export phone',
+        purchasePrice: 1_250_000,
+        purchaseCurrency: 'USD',
+        purchaseInputAmount: 100,
+        purchaseExchangeRateAtCreation: 12_500,
+        purchaseAmountUzsSnapshot: 1_250_000,
+        imei: 'ROUTE-USD-EXPORT-DEVICE',
+        addedBy: actor.admin.id,
+      },
+    })
+
+    const { NextRequest } = await import('next/server')
+    const { GET } = await import('@/app/api/export/[entity]/route')
+    const response = await GET(
+      new NextRequest('http://localhost/api/export/devices?format=csv'),
+      { params: Promise.resolve({ entity: 'devices' }) },
+    )
+    const csv = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(csv).toContain('purchaseAmountNative')
+    expect(csv).toContain('purchaseCurrency')
+    expect(csv).toContain('purchaseExchangeRateAtCreation')
+    expect(csv).toContain('purchaseAmountUzsSnapshot')
+    expect(csv).toContain('purchasePriceCurrentShopDisplay')
+    expect(csv).toContain('USD purchase export phone')
+    expect(csv).toContain('"100","USD","12500","1250000","1250000"')
+  })
+
+  it('exports the frozen native Sale ledger alongside clearly labelled UZS snapshots', async () => {
+    const actor = await seedActor('sale_export_native')
+    useShopAdmin(actor)
+    const customer = await prisma.customer.create({
+      data: {
+        shopId: actor.shop.id,
+        name: 'USD export customer',
+        phone: '+998901919191',
+        normalizedPhone: '998901919191',
+      },
+    })
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'USD export phone',
+        purchasePrice: 500_000,
+        purchaseInputAmount: 500_000,
+        purchaseAmountUzsSnapshot: 500_000,
+        imei: 'ROUTE-USD-EXPORT-SALE',
+        addedBy: actor.admin.id,
+        status: 'SOLD_DEBT',
+      },
+    })
+    await prisma.sale.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        salePrice: 1_250_000,
+        amountPaid: 500_000,
+        remainingAmount: 750_000,
+        contractCurrency: 'USD',
+        contractExchangeRateAtCreation: 12_500,
+        contractSalePrice: 100,
+        contractAmountPaid: 40,
+        contractRemainingAmount: 60,
+        paidFully: false,
+        paymentMethod: 'CASH',
+        dueDate: new Date('2026-08-01T00:00:00.000Z'),
+        createdBy: actor.admin.id,
+      },
+    })
+
+    const { NextRequest } = await import('next/server')
+    const { GET } = await import('@/app/api/export/[entity]/route')
+    const response = await GET(
+      new NextRequest('http://localhost/api/export/sales?format=csv'),
+      { params: Promise.resolve({ entity: 'sales' }) },
+    )
+    const csv = await response.text()
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/csv')
+    expect(csv).toContain('contractCurrency')
+    expect(csv).toContain('contractExchangeRateAtCreation')
+    expect(csv).toContain('contractRemainingAmount')
+    expect(csv).toContain('salePriceUzsSnapshot')
+    expect(csv).toContain('USD export customer')
+    expect(csv).toContain('$100.00')
+    expect(csv).toContain('$60.00')
+    expect(csv).toContain('1250000')
+  })
+
+  it('exports frozen native Nasiya fields to CSV and produces the XLSX from the same projection', async () => {
+    const actor = await seedActor('nasiya_export_native')
+    useShopAdmin(actor)
+    const customer = await prisma.customer.create({
+      data: {
+        shopId: actor.shop.id,
+        name: 'USD nasiya export customer',
+        phone: '+998902929292',
+        normalizedPhone: '998902929292',
+      },
+    })
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'USD nasiya export phone',
+        purchasePrice: 750_000,
+        purchaseInputAmount: 750_000,
+        purchaseAmountUzsSnapshot: 750_000,
+        imei: 'ROUTE-USD-EXPORT-NASIYA',
+        addedBy: actor.admin.id,
+        status: 'SOLD_NASIYA',
+      },
+    })
+    const nasiya = await prisma.nasiya.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        totalAmount: 1_500_000,
+        downPayment: 250_000,
+        baseRemainingAmount: 1_250_000,
+        interestAmount: 250_000,
+        finalNasiyaAmount: 1_500_000,
+        remainingAmount: 1_000_000,
+        months: 1,
+        monthlyPayment: 1_500_000,
+        startDate: new Date('2026-07-01T00:00:00.000Z'),
+        contractCurrency: 'USD',
+        contractExchangeRateAtCreation: 12_500,
+        contractTotalAmount: 120,
+        contractDownPayment: 20,
+        contractBaseRemainingAmount: 100,
+        contractInterestAmount: 20,
+        contractFinalAmount: 120,
+        contractMonthlyPayment: 120,
+        contractPaidAmount: 40,
+        contractRemainingAmount: 80,
+        createdBy: actor.admin.id,
+      },
+    })
+    await prisma.nasiyaSchedule.create({
+      data: {
+        nasiyaId: nasiya.id,
+        shopId: actor.shop.id,
+        monthNumber: 1,
+        dueDate: new Date('2026-08-01T00:00:00.000Z'),
+        expectedAmount: 1_500_000,
+        paidAmount: 500_000,
+        contractCurrency: 'USD',
+        contractExpectedAmount: 120,
+        contractPaidAmount: 40,
+        contractRemainingAmount: 80,
+        status: 'PARTIAL',
+      },
+    })
+
+    const { NextRequest } = await import('next/server')
+    const { GET } = await import('@/app/api/export/[entity]/route')
+    const csvResponse = await GET(
+      new NextRequest('http://localhost/api/export/nasiya?format=csv'),
+      { params: Promise.resolve({ entity: 'nasiya' }) },
+    )
+    const csv = await csvResponse.text()
+    expect(csvResponse.status).toBe(200)
+    expect(csv).toContain('contractTotalAmount')
+    expect(csv).toContain('contractInterestAmount')
+    expect(csv).toContain('contractPaidAmount')
+    expect(csv).toContain('remainingAmountUzsSnapshot')
+    expect(csv).toContain('USD nasiya export customer')
+    expect(csv).toContain('$120.00')
+    expect(csv).toContain('$80.00')
+
+    const xlsxResponse = await GET(
+      new NextRequest('http://localhost/api/export/nasiya?format=xlsx'),
+      { params: Promise.resolve({ entity: 'nasiya' }) },
+    )
+    const xlsx = new Uint8Array(await xlsxResponse.arrayBuffer())
+    expect(xlsxResponse.status).toBe(200)
+    expect(xlsxResponse.headers.get('content-type')).toContain(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    )
+    expect(xlsx.byteLength).toBeGreaterThan(1_000)
+    expect(String.fromCharCode(xlsx[0] ?? 0, xlsx[1] ?? 0)).toBe('PK')
+  })
+})

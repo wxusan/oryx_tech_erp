@@ -22,18 +22,15 @@ const securityHeaders = [
   { key: 'Strict-Transport-Security', value: 'max-age=63072000; includeSubDomains' },
 ]
 
-// Content-Security-Policy, enforced in production responses. Enumerated the app's own
-// external origins: Next.js's inline hydration/RSC payload scripts and the
-// Tailwind/Radix-style UI primitives' inline styles both need
-// 'unsafe-inline' (this app doesn't yet wire a nonce through middleware —
-// that's the concrete blocking issue standing between this and a strictly
-// enforcing policy); device/passport photos are fetched by the browser
+// Baseline Content-Security-Policy for public/unmatched responses. Protected
+// admin/shop pages receive a per-request script nonce from src/proxy.ts. The
+// baseline keeps inline hydration compatible for responses that never pass
+// through that authenticated page matcher; device/passport photos are fetched
 // directly from Supabase Storage via short-lived signed URLs, so img-src
 // must allow that origin; next/font/google self-hosts fonts at build time
 // (no external font-src needed); there is no analytics/telemetry origin.
-// The policy still allows inline Next hydration/styles until nonce wiring is
-// added, but blocks unapproved external scripts, objects, frames and form
-// targets now instead of merely reporting them.
+// Protected pages block executable inline script while retaining inline style
+// attributes required by the current Base UI overlay primitives.
 function buildCsp(): string {
   let supabaseOrigin = ''
   try {
@@ -43,11 +40,10 @@ function buildCsp(): string {
   }
   const directives = [
     `default-src 'self'`,
-    // Blocking issue: Next.js injects inline hydration/RSC scripts with no
-    // nonce wired up yet — 'unsafe-inline' is required until that's added.
+    // Protected admin/shop pages override this baseline with a per-request
+    // nonce in src/proxy.ts.
     `script-src 'self' 'unsafe-inline'`,
-    // Blocking issue: several UI primitives (Radix/Base UI, Tailwind
-    // utilities) set inline styles — same nonce gap as script-src.
+    // Several Base UI primitives position overlays with inline style attrs.
     `style-src 'self' 'unsafe-inline'`,
     `img-src 'self' data: blob:${supabaseOrigin ? ` ${supabaseOrigin}` : ''}`,
     `font-src 'self' data:`,

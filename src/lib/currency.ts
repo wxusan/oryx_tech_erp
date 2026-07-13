@@ -6,6 +6,7 @@ export interface CurrencyContext {
 }
 
 export const BASE_CURRENCY: CurrencyCode = 'UZS'
+export const MAX_STORABLE_MONEY = 9_999_999_999
 
 export function isCurrencyCode(value: unknown): value is CurrencyCode {
   return value === 'UZS' || value === 'USD'
@@ -47,6 +48,7 @@ export function normalizeMoneyInput(
   inputCurrency: CurrencyCode
   exchangeRateUsed: number | null
 } {
+  assertMinorUnits(amount, currency)
   if (currency === 'UZS') {
     assertMoney(amount, 'UZS amount')
     return {
@@ -60,6 +62,21 @@ export function normalizeMoneyInput(
     amountUzs: convertUsdToUzs(amount, rate),
     inputCurrency: 'USD',
     exchangeRateUsed: rate,
+  }
+}
+
+export function hasValidMinorUnits(value: number, currency: CurrencyCode): boolean {
+  if (!Number.isFinite(value) || value < 0 || value > MAX_STORABLE_MONEY) return false
+  return currency === 'UZS'
+    ? Number.isInteger(value)
+    : Math.abs(value * 100 - Math.round(value * 100)) < 1e-8
+}
+
+export function assertMinorUnits(value: number, currency: CurrencyCode): void {
+  if (!Number.isFinite(value) || value < 0) throw new Error('Summa noto\'g\'ri')
+  if (value > MAX_STORABLE_MONEY) throw new Error('Summa saqlash chegarasidan oshib ketdi')
+  if (!hasValidMinorUnits(value, currency)) {
+    throw new Error(currency === 'UZS' ? "UZS summasi butun so'mda kiritilishi kerak" : 'USD summasi ko\'pi bilan 2 kasr xonali bo\'lishi kerak')
   }
 }
 
@@ -105,6 +122,37 @@ export function formatUserFacingMoney({
 
 export function currencyLabel(currency: CurrencyCode) {
   return currency === 'USD' ? 'USD' : "so'm"
+}
+
+/**
+ * Format an aggregate that can contain both UZS and USD without ever adding
+ * unlike units. With a valid rate it renders one preferred-currency total;
+ * without a rate it honestly renders the two native partitions.
+ */
+export function formatPartitionedMoney({
+  amountUzs,
+  amountUsd,
+  displayCurrency,
+  rate,
+}: {
+  amountUzs: number | string | null | undefined
+  amountUsd: number | string | null | undefined
+  displayCurrency: CurrencyCode
+  rate?: number | string | null
+}): string {
+  const uzs = Number(amountUzs ?? 0)
+  const usd = Number(amountUsd ?? 0)
+  const parsedRate = rate == null ? null : Number(rate)
+  if (!Number.isFinite(uzs) || !Number.isFinite(usd)) return '—'
+  if (usd === 0) return displayCurrency === 'USD' && parsedRate
+    ? formatUsd(convertUzsToUsd(uzs, parsedRate))
+    : formatUzs(uzs)
+  if (uzs === 0 && displayCurrency === 'USD') return formatUsd(usd)
+  if (parsedRate && parsedRate > 0 && Number.isFinite(parsedRate)) {
+    const totalUzs = uzs + convertUsdToUzs(usd, parsedRate)
+    return displayCurrency === 'USD' ? formatUsd(convertUzsToUsd(totalUzs, parsedRate)) : formatUzs(totalUzs)
+  }
+  return [uzs !== 0 ? formatUzs(uzs) : null, usd !== 0 ? formatUsd(usd) : null].filter(Boolean).join(' + ')
 }
 
 function formatUzs(value: number) {

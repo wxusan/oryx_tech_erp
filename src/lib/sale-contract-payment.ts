@@ -8,7 +8,7 @@
  * accounting decision is directly regression-testable without a database.
  */
 
-import { contractScheduleOutstanding, isContractCurrencyDust, roundContractMoney } from '@/lib/nasiya-contract'
+import { contractScheduleOutstanding, roundContractMoney } from '@/lib/nasiya-contract'
 import type { CurrencyCode } from '@/lib/currency'
 
 export interface SaleContractPaymentInput {
@@ -41,11 +41,9 @@ export type SaleContractPaymentResult =
 /**
  * Applies a single converted payment to a Sale's native ledger.
  *
- * A real overpayment is rejected. An excess strictly below the currency's
- * dust threshold is accepted but not credited beyond the outstanding debt;
- * the original customer-entered amount remains preserved on SalePayment by
- * the caller. Exactly $0.01 / 500 so'm remain meaningful and therefore are
- * not silently forgiven.
+ * Every overpayment is rejected. The operator must enter the exact amount to
+ * apply; the system never silently keeps change or creates an unexplained
+ * customer credit.
  */
 export function applySalePaymentToContractLedger(input: SaleContractPaymentInput): SaleContractPaymentResult {
   const currency = input.contractCurrency
@@ -79,7 +77,7 @@ export function applySalePaymentToContractLedger(input: SaleContractPaymentInput
   }
 
   const rawOverpayment = requestedApplied - currentOutstanding
-  if (rawOverpayment > 0 && !isContractCurrencyDust(rawOverpayment, currency)) {
+  if (rawOverpayment > 0) {
     return {
       accepted: false,
       reason: 'OVERPAYMENT',
@@ -90,9 +88,7 @@ export function applySalePaymentToContractLedger(input: SaleContractPaymentInput
     }
   }
 
-  // Do not credit dust past the true balance. The payment record retains the
-  // exact input value/rate, while this value means exactly "applied to debt".
-  const appliedAmountInContractCurrency = roundContractMoney(Math.min(requestedApplied, currentOutstanding), currency)
+  const appliedAmountInContractCurrency = roundContractMoney(requestedApplied, currency)
   const newContractRemainingAmount = contractScheduleOutstanding(currentOutstanding, appliedAmountInContractCurrency, currency)
   const isFullyPaid = newContractRemainingAmount <= 0
   const newContractAmountPaid = isFullyPaid

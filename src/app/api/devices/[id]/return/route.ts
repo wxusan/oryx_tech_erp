@@ -7,16 +7,23 @@ import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpe
 import { invalidateShopReturnMutation } from '@/lib/server/cache-tags'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { logger } from '@/lib/logger'
+import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { deviceReturnedMessage } from '@/lib/telegram-templates'
-import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
-import { getShopCurrencyContext } from '@/lib/server/currency'
+import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
+import { normalizeMoneyInput, convertUzsToUsd, type CurrencyCode } from '@/lib/currency'
+import { roundContractMoney } from '@/lib/nasiya-contract'
+import {
+  allocateReturnRefund,
+  resolveAppliedContractAmount,
+  type ReturnReceiptSource,
+} from '@/lib/return-accounting'
 import { presentDeviceSpecs } from '@/lib/device-specs'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 const returnDeviceSchema = z.object({
-  note: z.string({ error: 'Sabab kiritilishi shart' }).min(5, 'Sabab kamida 5 ta belgidan iborat bo\'lishi kerak'),
-  refundAmount: z.number().min(0, "Qaytarilgan summa manfiy bo'lmasligi kerak").optional().default(0),
+  note: z.string({ error: 'Sabab kiritilishi shart' }).trim().min(5, "Sabab kamida 5 ta belgidan iborat bo'lishi kerak").max(1_000),
+  refundAmount: z.number().finite().min(0, "Qaytarilgan summa manfiy bo'lmasligi kerak").optional().default(0),
   refundMethod: z.enum(['CASH', 'TRANSFER', 'CARD', 'OTHER']).optional(),
   shopId: z.string().optional(),
   inputCurrency: z.enum(['UZS', 'USD']).optional(),
@@ -25,6 +32,34 @@ const returnDeviceSchema = z.object({
   path: ['refundMethod'],
 })
 
+function paymentSource(
+  kind: 'SALE' | 'NASIYA',
+  payment: {
+    id: string
+    paidAt: Date
+    paymentMethod: 'CASH' | 'TRANSFER' | 'CARD' | 'OTHER' | null
+    paymentBreakdown: Prisma.JsonValue | null
+    amount: Prisma.Decimal
+    paymentInputAmount: Prisma.Decimal | null
+    paymentExchangeRate: Prisma.Decimal | null
+    appliedAmountInContractCurrency: Prisma.Decimal | null
+  },
+): ReturnReceiptSource {
+  return {
+    id: payment.id,
+    kind,
+    paidAt: payment.paidAt,
+    paymentMethod: payment.paymentMethod,
+    paymentBreakdown: payment.paymentBreakdown,
+    amountUzs: Number(payment.amount),
+    paymentInputAmount: payment.paymentInputAmount === null ? null : Number(payment.paymentInputAmount),
+    paymentExchangeRate: payment.paymentExchangeRate === null ? null : Number(payment.paymentExchangeRate),
+    appliedContractAmount: payment.appliedAmountInContractCurrency === null
+      ? null
+      : Number(payment.appliedAmountInContractCurrency),
+  }
+}
+
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
     const guarded = await requireApiSession()
@@ -32,6 +67,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const { session } = guarded
 
     const { id: deviceId } = await ctx.params
+    const idempotencyKey = req.headers.get('idempotency-key')?.trim()
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
+    }
+
     const body: unknown = await req.json()
     const parsed = returnDeviceSchema.safeParse(body)
     if (!parsed.success) {
@@ -42,25 +82,52 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, parsed.data.shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
-    const currency = await getShopCurrencyContext(shopId)
-    let refundInput: Awaited<ReturnType<typeof moneyInputToUzs>>
-    try {
-      refundInput = parsed.data.refundAmount > 0
-        ? await moneyInputToUzs(parsed.data.refundAmount, parsed.data.inputCurrency)
-        : { amountUzs: 0, inputCurrency: parsed.data.inputCurrency ?? 'UZS', exchangeRateUsed: null }
-    } catch (err) {
-      return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
-    }
-    const refundAmountUzs = refundInput.amountUzs
 
-    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    // One rate snapshot is reused for settlement conversion and display. A
+    // pure UZS return can still proceed if no USD rate exists.
+    const [displayCurrency, liveUsdUzsRate] = await Promise.all([
+      getShopCurrencyContext(shopId),
+      parsed.data.refundAmount > 0 ? getUsdUzsRate().catch(() => null) : Promise.resolve(null),
+    ])
+
+    const runTransaction = () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const replay = await tx.deviceReturn.findUnique({
+        where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+      })
+      if (replay) {
+        const samePayload = (
+          replay.deviceId === deviceId &&
+          Number(replay.refundInputAmount ?? replay.refundAmount) === parsed.data.refundAmount &&
+          (replay.refundInputCurrency ?? 'UZS') === (parsed.data.inputCurrency ?? replay.contractCurrency) &&
+          (replay.refundMethod ?? undefined) === parsed.data.refundMethod &&
+          replay.note === parsed.data.note
+        )
+        if (!samePayload) {
+          throw { status: 409, message: 'Idempotency-Key boshqa qaytarish ma\'lumoti uchun ishlatilgan' }
+        }
+        return {
+          device: await tx.device.findFirst({ where: { id: deviceId, shopId } }),
+          duplicate: true,
+        }
+      }
+
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
         include: {
           shop: { select: { name: true } },
           imeis: { where: { deletedAt: null } },
-          sales: { where: { deletedAt: null }, orderBy: { createdAt: 'desc' }, take: 1 },
-          nasiya: { where: { deletedAt: null, status: { not: 'CANCELLED' } }, orderBy: { createdAt: 'desc' }, take: 1 },
+          sales: {
+            where: { deletedAt: null, returnedAt: null },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            include: { payments: { where: { deletedAt: null }, orderBy: { paidAt: 'asc' } } },
+          },
+          nasiya: {
+            where: { deletedAt: null, returnedAt: null, status: { not: 'CANCELLED' } },
+            orderBy: { createdAt: 'desc' },
+            take: 1,
+            include: { payments: { where: { deletedAt: null }, orderBy: { paidAt: 'asc' } } },
+          },
         },
       })
       if (!device) throw { status: 404, message: 'Qurilma topilmadi' }
@@ -70,26 +137,63 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       const sale = device.sales[0]
       const nasiya = device.nasiya[0]
-      const maxRefund = sale
-        ? Number(sale.amountPaid)
-        : nasiya
-          ? Number(
-              (
-                await tx.nasiyaPayment.aggregate({
-                  where: { nasiyaId: nasiya.id, shopId, deletedAt: null },
-                  _sum: { amount: true },
-                })
-              )._sum.amount ?? 0,
-            )
-          : 0
-
-      if (refundAmountUzs > maxRefund) {
-        throw { status: 400, message: 'Qaytariladigan summa mijozdan olingan summadan oshmasligi kerak.' }
+      if ((sale ? 1 : 0) + (nasiya ? 1 : 0) !== 1) {
+        throw { status: 409, message: 'Qurilmaning faol sotuv shartnomasi yagona emas. Avval ma\'lumotni tekshiring.' }
       }
+
+      const contractCurrency: CurrencyCode = sale?.contractCurrency ?? nasiya!.contractCurrency
+      const frozenRate = Number(sale?.contractExchangeRateAtCreation ?? nasiya?.contractExchangeRateAtCreation ?? 0) || null
+      const settlementCurrency = parsed.data.inputCurrency ?? contractCurrency
+      if (parsed.data.refundAmount > 0 && (settlementCurrency === 'USD' || contractCurrency === 'USD') && !liveUsdUzsRate) {
+        throw { status: 400, message: 'USD kursi mavjud emas. Qaytarish summasini hozir hisoblab bo\'lmaydi.' }
+      }
+
+      let refundAmountUzs = 0
+      let contractRefundAmount = 0
+      if (parsed.data.refundAmount > 0) {
+        const normalized = normalizeMoneyInput(parsed.data.refundAmount, settlementCurrency, liveUsdUzsRate)
+        refundAmountUzs = normalized.amountUzs
+        contractRefundAmount = settlementCurrency === contractCurrency
+          ? roundContractMoney(parsed.data.refundAmount, contractCurrency)
+          : contractCurrency === 'UZS'
+            ? roundContractMoney(refundAmountUzs, 'UZS')
+            : roundContractMoney(convertUzsToUsd(refundAmountUzs, liveUsdUzsRate!), 'USD')
+      }
+
+      const sources = sale
+        ? sale.payments.map((payment) => paymentSource('SALE', payment))
+        : nasiya!.payments.map((payment) => paymentSource('NASIYA', payment))
+      const contractReceiptsAtReturn = roundContractMoney(
+        sources.reduce(
+          (sum, source) => sum + resolveAppliedContractAmount(source, contractCurrency, frozenRate),
+          0,
+        ),
+        contractCurrency,
+      )
+      if (contractRefundAmount > contractReceiptsAtReturn) {
+        throw { status: 400, message: 'Qaytariladigan summa mijozdan amalda olingan summadan oshmasligi kerak.' }
+      }
+
+      const allocations = contractRefundAmount > 0
+        ? allocateReturnRefund({
+            sources,
+            contractCurrency,
+            frozenUsdUzsRate: frozenRate,
+            refundMethod: parsed.data.refundMethod!,
+            refundContractAmount: contractRefundAmount,
+            refundAmountUzs,
+          })
+        : []
+      const contractRetainedAmount = roundContractMoney(
+        contractReceiptsAtReturn - contractRefundAmount,
+        contractCurrency,
+      )
+      const receiptsUzs = sources.reduce((sum, source) => sum + source.amountUzs, 0)
+      const now = new Date()
 
       const guardedReturn = await tx.device.updateMany({
         where: { id: deviceId, shopId, deletedAt: null, status: { in: ['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'] } },
-        data: { status: 'IN_STOCK', updatedAt: new Date(), note: parsed.data.note },
+        data: { status: 'IN_STOCK', updatedAt: now, note: parsed.data.note },
       })
       if (guardedReturn.count !== 1) {
         throw { status: 409, message: 'Qurilma qaytarish amali allaqachon bajarilgan' }
@@ -98,27 +202,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (sale) {
         await tx.sale.update({
           where: { id: sale.id },
-          data: {
-            deletedAt: new Date(),
-            deletedBy: session.user.id,
-            deleteNote: `RETURN: ${parsed.data.note}`,
-          },
+          data: { returnedAt: now, returnedBy: session.user.id },
         })
       }
-
       if (nasiya) {
         await tx.nasiya.update({
           where: { id: nasiya.id },
-          data: {
-            status: 'CANCELLED',
-            deletedAt: new Date(),
-            deletedBy: session.user.id,
-            deleteNote: `RETURN: ${parsed.data.note}`,
-          },
+          data: { status: 'CANCELLED', returnedAt: now, returnedBy: session.user.id },
         })
         await tx.nasiyaSchedule.updateMany({
           where: { nasiyaId: nasiya.id, shopId, status: { not: 'PAID' } },
-          data: { status: 'DEFERRED', note: `Bekor qilindi: ${parsed.data.note}` },
+          data: { status: 'CANCELLED', note: `Qurilma qaytarildi: ${parsed.data.note}` },
         })
       }
 
@@ -128,15 +222,35 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           deviceId,
           saleId: sale?.id,
           nasiyaId: nasiya?.id,
+          idempotencyKey,
+          ledgerVersion: 2,
           refundAmount: refundAmountUzs,
           refundInputAmount: parsed.data.refundAmount,
-          refundInputCurrency: refundInput.inputCurrency,
-          refundExchangeRateAtCreation: refundInput.exchangeRateUsed,
+          refundInputCurrency: settlementCurrency,
+          refundExchangeRateAtCreation: settlementCurrency === 'USD' || contractCurrency === 'USD' ? liveUsdUzsRate : null,
           refundMethod: refundAmountUzs > 0 ? parsed.data.refundMethod : undefined,
+          contractCurrency,
+          contractAmount: sale
+            ? Number(sale.contractSalePrice)
+            : Number(nasiya!.contractDownPayment) + Number(nasiya!.contractFinalAmount),
+          contractReceiptsAtReturn,
+          contractRefundAmount,
+          contractRetainedAmount,
+          contractCancelledDebt: Number(sale?.contractRemainingAmount ?? nasiya?.contractRemainingAmount ?? 0),
+          revenueReversalAmountUzs: Number(sale?.salePrice ?? nasiya?.totalAmount ?? 0),
+          interestReversalAmountUzs: Number(nasiya?.interestAmount ?? 0),
+          inventoryCostRecoveryUzs: Number(device.purchasePrice),
+          retainedValueAmountUzs: Math.max(0, receiptsUzs - refundAmountUzs),
           note: parsed.data.note,
           createdBy: session.user.id,
         },
       })
+
+      if (allocations.length > 0) {
+        await tx.returnRefundAllocation.createMany({
+          data: allocations.map((allocation) => ({ ...allocation, shopId, deviceReturnId: returnRecord.id })),
+        })
+      }
 
       await tx.log.create({
         data: {
@@ -150,19 +264,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           newValue: {
             status: 'IN_STOCK',
             returnId: returnRecord.id,
-            refundAmount: refundAmountUzs,
-            inputRefundAmount: parsed.data.refundAmount,
+            refundAmountUzs,
+            refundInputAmount: parsed.data.refundAmount,
+            refundInputCurrency: settlementCurrency,
+            contractCurrency,
+            contractReceiptsAtReturn,
+            contractRefundAmount,
+            contractRetainedAmount,
+            contractCancelledDebt: Number(sale?.contractRemainingAmount ?? nasiya?.contractRemainingAmount ?? 0),
             refundMethod: parsed.data.refundMethod,
-            note: parsed.data.note,
-            ...moneyInputMeta(refundInput),
+            allocationCount: allocations.length,
           },
           note: parsed.data.note,
         },
       })
 
-      // Notify the shop's verified Telegram admins. Rows are committed with the
-      // transaction (behind the atomic return-to-stock guard above, so a double-click
-      // that 409s never reaches here) and flushed after the response.
       const shopAdmins = await tx.shopAdmin.findMany({
         where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
         select: { telegramId: true },
@@ -175,39 +291,69 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           refundMethod: parsed.data.refundMethod,
           note: parsed.data.note,
           adminName: session.user.name,
-          currency,
+          currency: displayCurrency,
         })
-        for (const admin of shopAdmins) {
-          await tx.notification.create({
-            data: {
-              shopId,
-              type: 'RETURN',
-              message,
-              telegramId: admin.telegramId!,
-              scheduledAt: new Date(),
-              relatedId: returnRecord.id,
-              relatedType: 'DeviceReturn',
-            },
-          })
-        }
+        await tx.notification.createMany({
+          data: shopAdmins.map((admin) => ({
+            shopId,
+            type: 'RETURN',
+            message,
+            telegramId: admin.telegramId!,
+            scheduledAt: now,
+            relatedId: returnRecord.id,
+            relatedType: 'DeviceReturn',
+          })),
+        })
       }
 
-      return tx.device.findFirst({ where: { id: deviceId, shopId } })
+      return {
+        device: await tx.device.findFirst({ where: { id: deviceId, shopId } }),
+        duplicate: false,
+      }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
+    let result: Awaited<ReturnType<typeof runTransaction>> | null = null
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        result = await runTransaction()
+        break
+      } catch (err) {
+        if (isRetryableTransactionError(err) && attempt < 2) continue
+        throw err
+      }
+    }
+    if (!result) throw new Error('RETURN_TRANSACTION_RETRY_EXHAUSTED')
+
     invalidateShopReturnMutation(shopId)
+    if (!result.duplicate) {
+      after(() => processPendingNotifications().catch((error) => logger.warn('notification flush failed', {
+        event: 'notification.flush_failed',
+        error,
+      })))
+    }
 
-    // Flush freshly-queued notifications after the response (non-blocking).
-    // Rows are already committed, so cron is the backstop if this misses.
-    after(() => processPendingNotifications().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
-
-    return ok(result, 'Qurilma qaytarildi, omborga joylandi va bog\'langan sotuv/nasiya bekor qilindi')
+    return ok(
+      result.device,
+      result.duplicate
+        ? 'Qaytarish avval muvaffaqiyatli saqlangan'
+        : "Qurilma omborga qaytarildi; asl shartnoma va to'lov tarixi saqlandi",
+    )
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }
       if (e.status === 400) return badRequest(e.message)
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
+    }
+    if (err instanceof Error && (
+      err.message.includes('asl to\'lov') ||
+      err.message.includes('Tanlangan usul') ||
+      err.message.includes('saqlangan kursi')
+    )) {
+      return badRequest(err.message)
+    }
+    if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
+      return conflict('Qaytarish amali avval saqlangan. Sahifani yangilang.')
     }
     logger.error('[POST /api/devices/[id]/return]', { event: 'api.route_error', error: err })
     return serverError()

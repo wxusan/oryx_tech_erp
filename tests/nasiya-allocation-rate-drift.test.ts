@@ -201,21 +201,24 @@ describe('allocateNasiyaPayment — ignores contract-currency rounding dust', ()
     expect(updates).toHaveLength(0)
   })
 
-  it('does not allocate tiny 1–499 so‘m UZS dust to the next schedule', () => {
+  it('allocates one whole so‘m to the next schedule because it is real UZS debt', () => {
     const schedule1 = schedule({ id: 's1', monthNumber: 1, contractExpectedAmount: 500_000, expectedAmount: 500_000 })
     const schedule2 = schedule({ id: 's2', monthNumber: 2, contractExpectedAmount: 500_000, expectedAmount: 500_000 })
 
     const updates = allocateNasiyaPayment({
       schedules: [schedule1, schedule2],
-      amountUzs: 500_499,
-      appliedAmountInContractCurrency: 500_499,
+      amountUzs: 500_001,
+      appliedAmountInContractCurrency: 500_001,
       contractCurrency: 'UZS',
       now: NOW,
     })
 
-    expect(updates).toHaveLength(1)
+    expect(updates).toHaveLength(2)
     expect(updates[0].scheduleId).toBe('s1')
     expect(updates[0].appliedContract).toBe(500_000)
+    expect(updates[1].scheduleId).toBe('s2')
+    expect(updates[1].appliedContract).toBe(1)
+    expect(updates[1].status).toBe('PARTIAL')
   })
 
   it('still allocates a real USD overpayment of one cent or more to the next schedule', () => {

@@ -46,6 +46,7 @@ enum NasiyaScheduleStatus {
   PARTIAL
   OVERDUE
   DEFERRED
+  CANCELLED
 }
 
 enum NotificationStatus {
@@ -435,6 +436,11 @@ model Sale {
   contractRemainingAmount        Decimal       @default(0) @db.Decimal(12, 2)
   createdAt                      DateTime      @default(now())
   createdBy                      String
+  // A physical return closes the operational debt without deleting or
+  // rewriting the original contract. The immutable DeviceReturn records the
+  // financial reversal in the return period.
+  returnedAt                     DateTime?
+  returnedBy                     String?
   deletedAt                      DateTime?
   deletedBy                      String?
   deleteNote                     String?
@@ -492,6 +498,10 @@ model SalePayment {
   // purely additive display/audit detail. Null for a normal single-method
   // payment (the common case).
   paymentBreakdown                Json?
+  // Durable replay metadata: distinguishes a server-assigned payment time
+  // from an explicitly supplied one and freezes the requested next due date.
+  paymentDateExplicit             Boolean       @default(false)
+  requestedNextDueDate            DateTime?
   createdBy                       String
   createdAt                       DateTime      @default(now())
   deletedAt                       DateTime?
@@ -499,9 +509,11 @@ model SalePayment {
   deleteNote                      String?
 
   // Relations
-  sale Sale @relation(fields: [saleId], references: [id])
+  sale              Sale                     @relation(fields: [saleId], references: [id])
+  returnAllocations ReturnRefundAllocation[]
 
   @@unique([shopId, idempotencyKey])
+  @@unique([id, shopId])
   @@index([saleId])
   @@index([shopId])
   @@index([paidAt])
@@ -630,6 +642,10 @@ model Nasiya {
   createdAt                      DateTime      @default(now())
   createdBy                      String
   updatedAt                      DateTime      @updatedAt
+  // See Sale.returnedAt. CANCELLED remains the operational terminal status;
+  // these fields distinguish a physical return from other cancellations.
+  returnedAt                     DateTime?
+  returnedBy                     String?
   deletedAt                      DateTime?
   deletedBy                      String?
   deleteNote                     String?
@@ -659,6 +675,11 @@ model Nasiya {
   returns   DeviceReturn[]
 
   @@unique([id, shopId])
+  // Supports the database-enforced schedule/parent currency invariant. The
+  // corresponding composite FK is installed by the financial-invariants SQL
+  // migration because Prisma cannot express the additional relationship
+  // without replacing the existing ergonomic relation.
+  @@unique([id, shopId, contractCurrency])
   @@index([shopId])
   @@index([status])
   @@index([deviceId])
@@ -701,6 +722,9 @@ model NasiyaSchedule {
   payments NasiyaPayment[]
 
   @@unique([id, shopId])
+  // Lets NasiyaPayment prove that an optional schedule belongs to this exact
+  // contract, not merely to another contract in the same shop.
+  @@unique([id, shopId, nasiyaId])
   @@index([nasiyaId])
   @@index([shopId])
   @@index([status])
@@ -770,10 +794,12 @@ model NasiyaPayment {
   deleteNote                      String?
 
   // Relations
-  nasiya   Nasiya          @relation(fields: [nasiyaId], references: [id])
-  schedule NasiyaSchedule? @relation(fields: [nasiyaScheduleId], references: [id])
+  nasiya            Nasiya                   @relation(fields: [nasiyaId], references: [id])
+  schedule          NasiyaSchedule?          @relation(fields: [nasiyaScheduleId], references: [id])
+  returnAllocations ReturnRefundAllocation[]
 
   @@unique([shopId, idempotencyKey])
+  @@unique([id, shopId])
   @@index([nasiyaId])
   @@index([nasiyaScheduleId])
   @@index([shopId])
@@ -790,6 +816,12 @@ model DeviceReturn {
   deviceId                     String
   saleId                       String?
   nasiyaId                     String?
+  // One key identifies one physical-sale cycle. Replaying a lost HTTP
+  // response returns the same immutable event instead of duplicating it.
+  idempotencyKey               String
+  // Version 1 is reserved for historic/compatibility-window rows created by
+  // the pre-ledger application. Every new writer must explicitly store 2.
+  ledgerVersion                Int
   refundAmount                 Decimal        @default(0) @db.Decimal(12, 2)
   // Frozen native refund entry. `refundAmount` remains the UZS accounting
   // snapshot for compatibility; these fields preserve exactly what the user
@@ -798,21 +830,65 @@ model DeviceReturn {
   refundInputCurrency          CurrencyCode?
   refundExchangeRateAtCreation Decimal?       @db.Decimal(12, 4)
   refundMethod                 PaymentMethod?
+  // Contract-native disposition snapshot. These amounts never use a later
+  // exchange rate and make refunds, retained value, and cancelled debt
+  // independently auditable.
+  contractCurrency             CurrencyCode   @default(UZS)
+  contractAmount               Decimal        @default(0) @db.Decimal(12, 2)
+  contractReceiptsAtReturn     Decimal        @default(0) @db.Decimal(12, 2)
+  contractRefundAmount         Decimal        @default(0) @db.Decimal(12, 2)
+  contractRetainedAmount       Decimal        @default(0) @db.Decimal(12, 2)
+  contractCancelledDebt        Decimal        @default(0) @db.Decimal(12, 2)
+  // Return-period accounting entries in the UZS reporting ledger. The
+  // original-period Sale/Nasiya is preserved unchanged.
+  revenueReversalAmountUzs     Decimal        @default(0) @db.Decimal(12, 2)
+  interestReversalAmountUzs    Decimal        @default(0) @db.Decimal(12, 2)
+  inventoryCostRecoveryUzs     Decimal        @default(0) @db.Decimal(12, 2)
+  retainedValueAmountUzs       Decimal        @default(0) @db.Decimal(12, 2)
   note                         String
   createdBy                    String
   createdAt                    DateTime       @default(now())
 
   // Relations
-  shop   Shop    @relation(fields: [shopId], references: [id])
-  device Device  @relation(fields: [deviceId], references: [id])
-  sale   Sale?   @relation(fields: [saleId], references: [id])
-  nasiya Nasiya? @relation(fields: [nasiyaId], references: [id])
+  shop              Shop                     @relation(fields: [shopId], references: [id])
+  device            Device                   @relation(fields: [deviceId], references: [id])
+  sale              Sale?                    @relation(fields: [saleId], references: [id])
+  nasiya            Nasiya?                  @relation(fields: [nasiyaId], references: [id])
+  refundAllocations ReturnRefundAllocation[]
 
+  @@unique([shopId, idempotencyKey])
+  @@unique([id, shopId])
   @@index([shopId])
   @@index([deviceId])
   @@index([saleId])
   @@index([nasiyaId])
   @@index([createdAt])
+}
+
+// Every non-zero refund is allocated back to immutable receipt rows. Exactly
+// one payment parent is required by a PostgreSQL CHECK constraint in the
+// migration because Prisma cannot express that XOR relationship.
+model ReturnRefundAllocation {
+  id                  String        @id @default(cuid())
+  shopId              String
+  deviceReturnId      String
+  salePaymentId       String?
+  nasiyaPaymentId     String?
+  sourcePaymentMethod PaymentMethod
+  refundMethod        PaymentMethod
+  contractCurrency    CurrencyCode
+  contractAmount      Decimal       @db.Decimal(12, 2)
+  amountUzs           Decimal       @db.Decimal(12, 2)
+  createdAt           DateTime      @default(now())
+
+  deviceReturn  DeviceReturn   @relation(fields: [deviceReturnId], references: [id])
+  salePayment   SalePayment?   @relation(fields: [salePaymentId], references: [id])
+  nasiyaPayment NasiyaPayment? @relation(fields: [nasiyaPaymentId], references: [id])
+
+  @@index([shopId])
+  @@index([deviceReturnId])
+  @@index([salePaymentId])
+  @@index([nasiyaPaymentId])
 }
 
 // ---------------------------------------------------------------------------
@@ -854,6 +930,25 @@ model Notification {
   @@index([status, scheduledAt, nextAttemptAt])
 }
 
+// Durable progress for the daily reminder generator. `completedThrough` is an
+// exclusive Tashkent-day boundary; an in-progress catch-up window checkpoints
+// its phase + keyset cursor after every bounded page. The short lease prevents
+// overlapping Vercel/external cron invocations from racing the watermark.
+model ReminderGenerationState {
+  id               String    @id
+  completedThrough DateTime
+  windowStart      DateTime?
+  windowEnd        DateTime?
+  phase            String?
+  cursor           String?
+  leaseToken       String?
+  leaseExpiresAt   DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@index([leaseExpiresAt])
+}
+
 // ---------------------------------------------------------------------------
 // Log
 // ---------------------------------------------------------------------------
@@ -869,6 +964,8 @@ model Log {
   oldValue   Json?
   newValue   Json?
   note       String?
+  requestId  String?
+  // Privacy-safe HMAC network fingerprint, not a raw client IP address.
   ipAddress  String?
   createdAt  DateTime  @default(now())
 
@@ -903,6 +1000,7 @@ model OpsEvent {
   entityId   String?
   status     String?
   errorCode  String?
+  requestId  String?
   metadata   Json?
   createdAt  DateTime   @default(now())
 
@@ -937,4 +1035,27 @@ model ChangeEvent {
   @@index([scopeType, scopeId, sequence])
   @@index([scopeType, scopeId, domain, sequence])
   @@index([createdAt])
+}
+
+// ---------------------------------------------------------------------------
+// AuthSession — durable server-side session state for explicit revocation and
+// role-specific inactivity enforcement. The signed Auth.js JWT remains the
+// browser credential; this record is the authoritative live-session check.
+// actorId intentionally has no FK because it can reference either actor table.
+// ---------------------------------------------------------------------------
+
+model AuthSession {
+  id             String    @id
+  actorId        String
+  actorType      ActorType
+  shopId         String?
+  sessionVersion Int
+  lastSeenAt     DateTime  @default(now())
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  createdAt      DateTime  @default(now())
+
+  @@index([actorType, actorId, revokedAt])
+  @@index([expiresAt])
+  @@index([revokedAt, lastSeenAt])
 }

@@ -4,10 +4,9 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Boxes, CalendarClock, CircleDollarSign, RotateCcw, TrendingUp } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import type { ChartConfig } from '@/components/ui/chart'
 import type { getShopStats } from '@/lib/server/shop-stats'
-import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
+import { formatMoneyByCurrency, formatPartitionedMoney, type CurrencyContext } from '@/lib/currency'
 import HisobotChartsLoader from './hisobot-charts-loader'
 import HisobotFilters from './hisobot-filters'
 import { queryKeys } from '@/lib/query-keys'
@@ -69,11 +68,25 @@ export default function HisobotClient({
   const expected = stats.expectedThisMonth
   const overdue = stats.overdueMoney
   const refunds = stats.returnRefundsThisMonth
+  const reversedRevenue = stats.returnRevenueReversalsThisMonth ?? 0
+  const recoveredInventoryCost = stats.returnInventoryCostRecoveriesThisMonth ?? 0
+  const retainedReturnValue = stats.returnRetainedValueThisMonth ?? 0
   const inventory = stats.inventoryPurchaseCost
   const grossProfit = stats.accrualGrossProfitThisMonth ?? stats.realProfitThisMonth
   const interestProfit = stats.nasiyaInterestThisMonth ?? 0
-  const collectionBase = collected + expected
-  const collectionRate = collectionBase > 0 ? Math.round((collected / collectionBase) * 100) : 0
+  const currencyTotalsComplete = stats.expectedThisMonthComplete && stats.overdueMoneyComplete
+  const expectedText = formatPartitionedMoney({
+    amountUzs: stats.expectedThisMonthUzs,
+    amountUsd: stats.expectedThisMonthUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+  const overdueText = formatPartitionedMoney({
+    amountUzs: stats.overdueMoneyUzs,
+    amountUsd: stats.overdueMoneyUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
 
   const cashFlowData = [
     {
@@ -136,11 +149,8 @@ export default function HisobotClient({
             admins={shopAdmins}
             selectedAdmin={stats.filteredByAdmin}
           />
-          <div className="grid grid-cols-1 gap-2 rounded-lg border border-zinc-200 bg-white p-2 text-xs text-zinc-500 sm:flex">
-            <div className="rounded-md bg-zinc-50 px-3 py-2">
-              <div>Yig'ish darajasi</div>
-              <div className="mt-0.5 text-sm font-semibold text-zinc-900">{collectionRate}%</div>
-            </div>
+          <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500">
+            Pul tushumi va ochiq majburiyatlar alohida hisoblanadi
           </div>
         </div>
       </div>
@@ -165,13 +175,9 @@ export default function HisobotClient({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-zinc-900">{fmt(collected, currency)}</div>
-            <div className="mt-3 space-y-2">
-              <div className="flex justify-between text-xs text-zinc-500">
-                <span>Kutilgan pulga nisbatan</span>
-                <span className="font-semibold text-zinc-800">{collectionRate}%</span>
-              </div>
-              <Progress value={collectionRate} className="[&_[data-slot=progress-fill]]:bg-blue-600" />
-            </div>
+            <p className="mt-3 text-xs text-zinc-500">
+              Shu oy haqiqatda qabul qilingan barcha to'lovlar; ochiq majburiyatlar bilan foizga aylantirilmaydi.
+            </p>
           </CardContent>
         </Card>
 
@@ -183,7 +189,7 @@ export default function HisobotClient({
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-900">{fmt(expected, currency)}</div>
+            <div className="text-2xl font-bold text-zinc-900">{expectedText}</div>
             <p className="mt-3 text-xs text-zinc-500">Nasiya va qisman sotuvlardan qolgan oy ichidagi summa · joriy kurs bo'yicha</p>
           </CardContent>
         </Card>
@@ -197,7 +203,10 @@ export default function HisobotClient({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-zinc-900">{fmt(refunds, currency)}</div>
-            <p className="mt-3 text-xs text-zinc-500">Bu oy {stats.returnsThisMonth} ta qaytarish bo'yicha yozilgan summa</p>
+            <p className="mt-3 text-xs text-zinc-500">
+              Bu oy {stats.returnsThisMonth} ta qaytarish · sotuvdan bekor qilindi: {fmt(reversedRevenue, currency)} · saqlab qolindi:{' '}
+              {fmt(retainedReturnValue, currency)}
+            </p>
           </CardContent>
         </Card>
 
@@ -209,7 +218,7 @@ export default function HisobotClient({
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-700">{fmt(overdue, currency)}</div>
+            <div className="text-2xl font-bold text-red-700">{overdueText}</div>
             <p className="mt-3 text-xs text-red-700/70">Bugun ko'rib chiqilishi kerak bo'lgan qarzdorlik · joriy kurs bo'yicha</p>
           </CardContent>
         </Card>
@@ -228,7 +237,14 @@ export default function HisobotClient({
         </Card>
       </div>
 
-      <HisobotChartsLoader cashFlowData={cashFlowData} businessData={businessData} chartConfig={chartConfig} currency={currency} />
+      {currencyTotalsComplete ? (
+        <HisobotChartsLoader cashFlowData={cashFlowData} businessData={businessData} chartConfig={chartConfig} currency={currency} />
+      ) : (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          USD kursi mavjud emasligi sababli aralash-valyuta diagrammasi yashirildi. Kutilayotgan: {expectedText}; kechikkan: {overdueText}.
+          Hech qaysi USD va UZS summa bir-biriga xom holda qo'shilmadi.
+        </div>
+      )}
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="rounded-lg">
@@ -241,8 +257,8 @@ export default function HisobotClient({
           <CardContent>
             <div className="text-2xl font-bold text-zinc-900">{fmt(grossProfit, currency)}</div>
             <p className="mt-3 text-xs text-zinc-500">
-              Sotilgan qurilmalar narxidan tannarx ayirilgandagi foyda · sotuv amalga oshirilgan zahoti hisoblanadi, to'lov holatidan qat'iy
-              nazar
+              Sotuv davridagi foyda va shu oy qaytarilgan savdolarning alohida reversali. Qaytarishda {fmt(recoveredInventoryCost, currency)}
+              {' '}tannarx omborga qaytdi; eski oyning natijasi o'zgartirilmadi.
             </p>
           </CardContent>
         </Card>
@@ -254,9 +270,12 @@ export default function HisobotClient({
           <CardContent className="space-y-3">
             {[
               ["Yig'ilgan", fmtBase(collected, currency)],
-              ['Kutilayotgan', fmt(expected, currency)],
-              ['Kechikkan', fmt(overdue, currency)],
+              ['Kutilayotgan', expectedText],
+              ['Kechikkan', overdueText],
               ['Nasiya foizi', fmt(interestProfit, currency)],
+              ['Qaytarish reversali', fmt(reversedRevenue, currency)],
+              ['Qaytgan tannarx', fmt(recoveredInventoryCost, currency)],
+              ['Saqlab qolingan qiymat', fmt(retainedReturnValue, currency)],
               ['Ombor', fmt(inventory, currency)],
             ].map(([label, value]) => (
               <div key={label} className="flex items-center justify-between border-b border-zinc-100 pb-2 last:border-0 last:pb-0">

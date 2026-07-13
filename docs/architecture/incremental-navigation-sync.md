@@ -104,7 +104,11 @@ Reconsider a shared server cache only if production traces show sustained databa
 
 Monitor structured `sync.bootstrap`, `sync.delta`, and `sync.failed` logs for duration, response bytes, event counts, batch draining, and resets. Also monitor PostgreSQL query latency, event table size/oldest timestamp, cron cleanup count, Vercel function errors, browser request count, and mutation-to-visible-row latency. Never add PII to these logs.
 
-The release is migration-sensitive. Use `.github/workflows/release-production.yml`: build the immutable production artifact, apply the reviewed backward-compatible migration with `prisma migrate deploy`, then deploy that exact prebuilt artifact. `vercel.json` intentionally never migrates during a build.
+The release is migration-sensitive. Use `.github/workflows/release-production.yml`.
+The remote Vercel builder compiles the artifact first, runs count-only read-only
+preflight checks, applies the reviewed backward-compatible migrations with
+`prisma migrate deploy`, verifies their recorded state, and only then publishes
+the already-built artifact. Local and preview builds never migrate a database.
 
 Rollback procedure:
 

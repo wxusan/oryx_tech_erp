@@ -12,44 +12,21 @@ import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { paymentMethodLabel } from '@/lib/labels'
-import { deriveContractScheduleStatus } from '@/lib/nasiya-contract-status'
-import { formatMoneyByCurrency, formatUserFacingMoney } from '@/lib/currency'
+import { formatMoneyByCurrency } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
-import { uzDate, uzDateTime } from '@/lib/dates'
+import { uzDate } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 import { TrustBadge } from '@/components/shop/trust-badge'
 import { ArrowLeft, Pencil } from 'lucide-react'
-import { paymentAmountDisplay, type NasiyaPaymentDisplayRecord } from '@/lib/payment-history-display'
-
-interface NasiyaSchedule {
-  id: string
-  monthNumber: number
-  dueDate: string
-  delayedUntil: string | null
-  expectedAmount: number
-  paidAmount: number
-  status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED'
-  contractExpectedAmount: number
-  contractPaidAmount: number
-}
+import type { NasiyaPaymentDisplayRecord } from '@/lib/payment-history-display'
+import {
+  NasiyaHistorySections,
+  type NasiyaActionLog as NasiyaLog,
+  type NasiyaScheduleRow as NasiyaSchedule,
+} from '@/components/shop/nasiya-history-sections'
 
 type NasiyaPayment = NasiyaPaymentDisplayRecord
-
-interface NasiyaLog {
-  id: string
-  action: string
-  note: string | null
-  targetType: string
-  targetId: string
-  createdAt: string
-  newValue?: {
-    oldDueDate?: string
-    newDueDate?: string
-    reminderEnabled?: boolean
-  } | null
-}
 
 interface Nasiya {
   id: string
@@ -119,32 +96,6 @@ const scoreCardStyles: Record<'green' | 'yellow' | 'red' | 'gray', string> = {
   gray: 'bg-zinc-100 text-zinc-500',
 }
 
-type RowStatus = 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED'
-
-const scheduleStatusLabels: Record<RowStatus, string> = {
-  PAID: "To'landi",
-  PENDING: 'Kutilmoqda',
-  PARTIAL: "Qisman to'landi",
-  OVERDUE: "Muddati o'tgan",
-  DEFERRED: "Keyinga o'tkazilgan",
-}
-
-const scheduleStatusStyles: Record<RowStatus, string> = {
-  PAID: 'bg-zinc-900 text-white',
-  PENDING: 'bg-zinc-100 text-zinc-600',
-  PARTIAL: 'bg-zinc-200 text-zinc-700',
-  OVERDUE: 'bg-red-100 text-red-700',
-  DEFERRED: 'bg-yellow-100 text-yellow-800',
-}
-
-function RowBadge({ status }: { status: RowStatus }) {
-  return (
-    <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${scheduleStatusStyles[status]}`}>
-      {scheduleStatusLabels[status]}
-    </span>
-  )
-}
-
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
   if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
   return Number(n).toLocaleString('ru-RU')
@@ -157,42 +108,6 @@ function ImportField({ label, value }: { label: string; value: string }) {
       <div className="mt-0.5 font-medium text-amber-900">{value}</div>
     </div>
   )
-}
-
-function nasiyaLogLabel(log: NasiyaLog): string {
-  const { action, newValue } = log
-  if (action === 'CREATE_NASIYA') return 'Nasiya yaratildi'
-  if (action === 'IMPORT_NASIYA') return 'Eski nasiya import qilindi'
-  if (action === 'PAYMENT') return "To'lov qabul qilindi"
-  if (action === 'NASIYA_DEFER') return 'Muddat uzaytirildi'
-  if (action === 'NASIYA_COMPLETED') return 'Nasiya yakunlandi'
-  if (action === 'UPDATE_REMINDER') {
-    const enabled = (newValue as { reminderEnabled?: boolean } | null | undefined)?.reminderEnabled
-    if (enabled === true) return 'Eslatma yoqildi'
-    if (enabled === false) return "Eslatma o'chirildi"
-    return "Eslatma o'zgartirildi"
-  }
-  if (action === 'UPDATE') return 'Nasiya tahrirlandi'
-  if (action === 'DELETE') return "O'chirildi"
-  if (action === 'RETURN') return 'Qaytarildi'
-  return action
-}
-
-/** Extra detail line under a log's title — currently only the defer old/new due dates. */
-function nasiyaLogDetail(log: NasiyaLog): string | null {
-  if (log.action === 'NASIYA_DEFER' && log.newValue?.oldDueDate && log.newValue?.newDueDate) {
-    return `${uzDate(log.newValue.oldDueDate)} → ${uzDate(log.newValue.newDueDate)}`
-  }
-  return null
-}
-
-/**
- * Effective status shown for a schedule row. An unpaid row past its effective
- * due date reads as OVERDUE even before cron flips the stored status, so the
- * detail page agrees with the list and dashboard.
- */
-function rowDisplayStatus(row: NasiyaSchedule, contractCurrency: 'UZS' | 'USD'): RowStatus {
-  return deriveContractScheduleStatus(row, contractCurrency).displayStatus
 }
 
 export default function NasiyaDetailPage() {
@@ -377,7 +292,6 @@ export default function NasiyaDetailPage() {
   const contractMonthlyPayment = nasiya.schedules?.length > 0 ? nasiya.schedules[0].contractExpectedAmount : nasiya.contractMonthlyPayment
   const dfmt = (n: number) => formatDisplayMoneyFromContract(n, nasiya.contractCurrency, currency.currency, currency.usdUzsRate)
 
-  const sortedSchedules = [...(nasiya.schedules ?? [])].sort((a, b) => a.monthNumber - b.monthNumber)
 
   // Server-derived (src/lib/nasiya-contract-status.ts) so this page
   // can never disagree with the nasiyalar list about completed/overdue state
@@ -600,110 +514,14 @@ export default function NasiyaDetailPage() {
         </div>
       </div>
 
-      {/* Payment schedule */}
-      <div className="border border-zinc-200 rounded overflow-hidden">
-        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">To'lov jadvali</div>
-        <div className="overflow-x-auto">
-          <table className="min-w-[640px] w-full text-sm">
-            <thead className="border-b border-zinc-200">
-              <tr>
-                {['#', 'Sana', 'Miqdor', "To'langan", 'Status'].map((h) => (
-                  <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide bg-zinc-50">
-                    {h}
-                  </th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {sortedSchedules.map((row) => (
-                <tr key={row.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
-                  <td className="px-4 py-3 text-zinc-500">{row.monthNumber}</td>
-                  <td className="px-4 py-3 text-zinc-700">{uzDate(row.dueDate)}</td>
-                  <td className="px-4 py-3 font-medium text-zinc-900">{dfmt(row.contractExpectedAmount)}</td>
-                  <td className="px-4 py-3 text-zinc-700">{dfmt(row.contractPaidAmount)}</td>
-                  <td className="px-4 py-3">
-                    <RowBadge status={rowDisplayStatus(row, nasiya.contractCurrency)} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      <div className="border border-zinc-200 rounded overflow-hidden">
-        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">To'lov tarixi</div>
-        {nasiya.payments?.length ? (
-          <div className="overflow-x-auto">
-            <table className="min-w-[560px] w-full text-sm">
-              <thead className="border-b border-zinc-200">
-                <tr>
-                  {['Sana', 'Miqdor', 'Usul', 'Izoh'].map((h) => (
-                    <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide bg-zinc-50">
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {nasiya.payments.map((payment) => (
-                  <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
-                    <td className="px-4 py-3 text-zinc-700">{uzDate(payment.paidAt)}</td>
-                    <td className="px-4 py-3 font-medium text-zinc-900">
-                      {paymentAmountDisplay(payment, nasiya.contractCurrency, currency)}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-700">
-                      {payment.paymentBreakdown?.length ? (
-                        <div className="space-y-0.5">
-                          {payment.paymentBreakdown.map((p, i) => (
-                            <div key={i}>
-                              {paymentMethodLabel(p.method)}:{' '}
-                              <span className="font-medium text-zinc-900">
-                                {formatUserFacingMoney({
-                                  amount: p.amount,
-                                  amountCurrency: payment.paymentInputCurrency ?? 'UZS',
-                                  displayCurrency: currency.currency,
-                                  rate: payment.paymentExchangeRate ?? currency.usdUzsRate,
-                                })}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        paymentMethodLabel(payment.paymentMethod)
-                      )}
-                    </td>
-                    <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="px-4 py-6 text-sm text-zinc-500">To'lov tarixi hali yo'q</div>
-        )}
-      </div>
-
-      {/* Action logs */}
-      <div className="border border-zinc-200 rounded overflow-hidden">
-        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">Amallar tarixi</div>
-        {logs.length ? (
-          <ul className="divide-y divide-zinc-100">
-            {logs.map((l) => (
-              <li key={l.id} className="px-4 py-3 flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="text-sm text-zinc-900">{nasiyaLogLabel(l)}</div>
-                  {nasiyaLogDetail(l) && <div className="text-xs text-zinc-500 mt-0.5">{nasiyaLogDetail(l)}</div>}
-                  {l.note && <div className="text-xs text-zinc-500 mt-0.5">{l.note}</div>}
-                </div>
-                <div className="text-xs text-zinc-400 whitespace-nowrap flex-shrink-0">{uzDateTime(l.createdAt)}</div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="px-4 py-6 text-sm text-zinc-500">Amallar tarixi yo'q</div>
-        )}
-      </div>
+      <NasiyaHistorySections
+        schedules={nasiya.schedules ?? []}
+        payments={nasiya.payments ?? []}
+        logs={logs}
+        contractCurrency={nasiya.contractCurrency}
+        currency={currency}
+        formatContractAmount={dfmt}
+      />
 
       {/* Payment modal — shared component, also used on the nasiyalar list */}
       <NasiyaPaymentModal
@@ -731,16 +549,18 @@ export default function NasiyaDetailPage() {
             {editError && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{editError}</div>}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-zinc-700">Mijoz ismi</label>
+                <label htmlFor="nasiya-edit-customer" className="mb-1.5 block text-xs font-medium text-zinc-700">Mijoz ismi</label>
                 <Input
+                  id="nasiya-edit-customer"
                   value={editCustomerName}
                   onChange={(e) => setEditCustomerName(e.target.value)}
                   className="h-9 rounded-lg border-zinc-200 text-sm"
                 />
               </div>
               <div>
-                <label className="mb-1.5 block text-xs font-medium text-zinc-700">Telefon</label>
+                <label htmlFor="nasiya-edit-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">Telefon</label>
                 <PhoneInput
+                  id="nasiya-edit-phone"
                   value={editCustomerPhone}
                   onChange={setEditCustomerPhone}
                   className="h-9 rounded-lg border-zinc-200 text-sm"
@@ -748,6 +568,7 @@ export default function NasiyaDetailPage() {
               </div>
             </div>
             <Textarea
+              aria-label="Nasiya izohi"
               value={editNote}
               onChange={(e) => setEditNote(e.target.value)}
               placeholder="Nasiya bo'yicha izoh..."
@@ -755,14 +576,16 @@ export default function NasiyaDetailPage() {
             />
             {nasiya?.isImported && (
               <Textarea
+                aria-label="Import izohi"
                 value={editImportNote}
                 onChange={(e) => setEditImportNote(e.target.value)}
                 placeholder="Import izohi..."
                 className="min-h-[80px] rounded-lg border-zinc-200 text-sm"
               />
             )}
-            <label className="flex items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+            <label htmlFor="edit-nasiya-reminder" className="flex items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
               <input
+                id="edit-nasiya-reminder"
                 type="checkbox"
                 checked={editReminderEnabled}
                 onChange={(e) => setEditReminderEnabled(e.target.checked)}

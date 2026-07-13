@@ -8,6 +8,7 @@ import { isValidPhone } from '@/lib/phone'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { Textarea } from '@/components/ui/textarea'
+import { Field } from '@/components/ui/field'
 
 interface AdminForm {
   id: string
@@ -27,31 +28,6 @@ function makeAdmin(): AdminForm {
     login: '',
     password: '',
   }
-}
-
-function Field({
-  label,
-  required,
-  error,
-  children,
-  span2,
-}: {
-  label: string
-  required?: boolean
-  error?: boolean
-  children: React.ReactNode
-  span2?: boolean
-}) {
-  return (
-    <div className={span2 ? 'sm:col-span-2' : ''}>
-      <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-        {label}
-        {required && <span className="text-red-500 ml-0.5">*</span>}
-      </label>
-      {children}
-      {error && <p className="text-xs text-red-500 mt-1">Bu maydon to&apos;ldirilishi shart</p>}
-    </div>
-  )
 }
 
 export default function NewShopPage() {
@@ -96,7 +72,7 @@ export default function NewShopPage() {
       admin.name.trim() !== '' &&
       isValidPhone(admin.phone) &&
       admin.login.trim() !== '' &&
-      admin.password.trim() !== ''
+      admin.password.length >= 10
     )
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -174,7 +150,7 @@ export default function NewShopPage() {
             <h2 className="text-sm font-semibold text-zinc-900">Do&apos;kon ma&apos;lumotlari</h2>
           </div>
           <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Do'kon nomi" required error={err(shopName)}>
+            <Field label="Do'kon nomi" required error={err(shopName) ? "Bu maydon to'ldirilishi shart" : undefined}>
               <Input
                 placeholder="Masalan: Malika Electronics"
                 value={shopName}
@@ -185,7 +161,7 @@ export default function NewShopPage() {
                 ].join(' ')}
               />
             </Field>
-            <Field label="Egasining ismi" required error={err(ownerName)}>
+            <Field label="Egasining ismi" required error={err(ownerName) ? "Bu maydon to'ldirilishi shart" : undefined}>
               <Input
                 placeholder="To'liq ism"
                 value={ownerName}
@@ -196,7 +172,7 @@ export default function NewShopPage() {
                 ].join(' ')}
               />
             </Field>
-            <Field label="Tel raqami" required error={err(ownerPhone)}>
+            <Field label="Tel raqami" required error={submitted && !isValidPhone(ownerPhone) ? "Telefon raqami noto'g'ri" : undefined}>
               <PhoneInput
                 value={ownerPhone}
                 onChange={setOwnerPhone}
@@ -206,7 +182,7 @@ export default function NewShopPage() {
                 ].join(' ')}
               />
             </Field>
-            <Field label="Do'kon raqami" required error={err(shopNumber)}>
+            <Field label="Do'kon raqami" required error={err(shopNumber) ? "Bu maydon to'ldirilishi shart" : undefined}>
               <Input
                 placeholder="Masalan: 42"
                 value={shopNumber}
@@ -217,7 +193,7 @@ export default function NewShopPage() {
                 ].join(' ')}
               />
             </Field>
-            <Field label="Manzil" span2>
+            <Field label="Manzil" className="sm:col-span-2">
               <Input
                 placeholder="Tuman, ko'cha, uy raqami"
                 value={address}
@@ -225,7 +201,7 @@ export default function NewShopPage() {
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
             </Field>
-            <Field label="Izoh" span2>
+            <Field label="Izoh" className="sm:col-span-2">
               <Textarea
                 placeholder="Qo'shimcha ma'lumot..."
                 value={note}
@@ -272,7 +248,7 @@ export default function NewShopPage() {
                   </button>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Ism" required error={err(admin.name)}>
+                  <Field label="Ism" required error={err(admin.name) ? "Bu maydon to'ldirilishi shart" : undefined}>
                     <Input
                       placeholder="To'liq ism"
                       value={admin.name}
@@ -283,7 +259,7 @@ export default function NewShopPage() {
                       ].join(' ')}
                     />
                   </Field>
-                  <Field label="Tel" required error={err(admin.phone)}>
+                  <Field label="Tel" required error={submitted && !isValidPhone(admin.phone) ? "Telefon raqami noto'g'ri" : undefined}>
                     <PhoneInput
                       value={admin.phone}
                       onChange={(phone) => updateAdmin(admin.id, 'phone', phone)}
@@ -301,7 +277,7 @@ export default function NewShopPage() {
                       className="h-8 text-sm rounded-none border-zinc-200"
                     />
                   </Field>
-                  <Field label="Login" required error={err(admin.login)}>
+                  <Field label="Login" required error={err(admin.login) ? "Bu maydon to'ldirilishi shart" : undefined}>
                     <Input
                       placeholder="login"
                       value={admin.login}
@@ -312,10 +288,10 @@ export default function NewShopPage() {
                       ].join(' ')}
                     />
                   </Field>
-                  <Field label="Parol" required error={err(admin.password)} span2>
+                  <Field label="Parol" required error={submitted && admin.password.length < 10 ? "Parol kamida 10 ta belgidan iborat bo'lishi kerak" : undefined} className="sm:col-span-2">
                     <Input
                       type="password"
-                      placeholder="Kamida 8 ta belgi"
+                      placeholder="Kamida 10 ta belgi"
                       value={admin.password}
                       onChange={(e) => updateAdmin(admin.id, 'password', e.target.value)}
                       className={[

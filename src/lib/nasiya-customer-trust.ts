@@ -115,6 +115,30 @@ export function computeCustomerTrustRating(
     hasCurrentOverdue,
   }
 
+  return computeCustomerTrustRatingFromFactors(factors, adminOverride)
+}
+
+/**
+ * Produce the exact same rating from a bounded aggregate projection. List
+ * routes use this form so a mature customer's entire contract/schedule
+ * history does not have to cross the database boundary just to render a badge.
+ */
+export function computeCustomerTrustRatingFromFactors(
+  factors: CustomerTrustFactors,
+  adminOverride?: TrustTier | null,
+): CustomerTrustRating {
+  const {
+    totalNasiyaCount,
+    completedNasiyaCount,
+    cancelledNasiyaCount,
+    paidInstallmentCount,
+    onTimeRatio,
+    lateInstallmentCount,
+    maxDaysLate,
+    currentOverdueScheduleCount,
+    hasCurrentOverdue,
+  } = factors
+
   const reasons: string[] = []
   let tier: TrustTier
 

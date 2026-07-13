@@ -20,8 +20,8 @@ import {
 } from '@/lib/nasiya-contract'
 
 describe('getCompletionToleranceForCurrency', () => {
-  it("UZS contracts tolerate 500 so'm", () => {
-    expect(getCompletionToleranceForCurrency('UZS')).toBe(500)
+  it("UZS contracts use one whole so'm as the smallest meaningful unit", () => {
+    expect(getCompletionToleranceForCurrency('UZS')).toBe(1)
   })
   it("USD contracts tolerate 1 cent, not 500 so'm", () => {
     expect(getCompletionToleranceForCurrency('USD')).toBe(0.01)
@@ -134,8 +134,8 @@ describe('contractOutstandingAsUzs — report aggregates must convert per-row, n
     expect(correctUzsToday).toBe(8_100_000)
   })
 
-  it('falls back to the raw contract-currency number when no rate is available (never throws)', () => {
-    expect(contractOutstandingAsUzs('1000', '400', 'USD', null)).toBe(600)
+  it('returns null for USD when no conversion rate is available instead of leaking raw USD into UZS totals', () => {
+    expect(contractOutstandingAsUzs('1000', '400', 'USD', null)).toBeNull()
   })
 
   it("keeps one exact USD cent meaningful when converting the native outstanding balance", () => {
@@ -257,8 +257,8 @@ describe('convertContractAmountToUzs', () => {
     expect(convertContractAmountToUzs(100, 'USD', 12_500)).toBe(1_250_000)
   })
 
-  it('USD with no rate available returns the raw number rather than throwing', () => {
-    expect(convertContractAmountToUzs(100, 'USD', null)).toBe(100)
+  it('USD with no rate returns null instead of raw-adding unlike currencies', () => {
+    expect(convertContractAmountToUzs(100, 'USD', null)).toBeNull()
   })
 })
 

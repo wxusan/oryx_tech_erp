@@ -22,10 +22,9 @@ import { useShopCurrency } from '@/lib/use-shop-currency'
 import { ArrowLeft, Check } from 'lucide-react'
 import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
 import { navigateAfterMutation } from '@/lib/client-events'
+import type { PaymentMethod } from '@/lib/domain-types'
 
 type Device = InStockPickerDevice
-
-type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
 
 function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']) {
   return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
@@ -260,10 +259,12 @@ export default function NewSotuvPage() {
             </div>
             <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                <label htmlFor="sale-customer-name" className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Mijoz ismi <span className="text-red-500">*</span>
                 </label>
                 <Input
+                  id="sale-customer-name"
+                  aria-required="true"
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
                   placeholder="To'liq ism"
@@ -271,10 +272,11 @@ export default function NewSotuvPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                <label htmlFor="sale-customer-phone" className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Mijoz tel <span className="text-red-500">*</span>
                 </label>
                 <PhoneInput
+                  id="sale-customer-phone"
                   ref={phoneRef}
                   value={customerPhone}
                   onChange={(value) => {
@@ -282,15 +284,19 @@ export default function NewSotuvPage() {
                     if (phoneError) setPhoneError('')
                   }}
                   aria-invalid={!!phoneError}
+                  aria-required="true"
+                  aria-describedby={phoneError ? 'sale-customer-phone-error' : undefined}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-                {phoneError && <p className="mt-1 text-xs text-red-600">{phoneError}</p>}
+                {phoneError && <p id="sale-customer-phone-error" role="alert" className="mt-1 text-xs text-red-600">{phoneError}</p>}
               </div>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                <label htmlFor="sale-price" className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Sotuv narxi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                 </label>
                 <MoneyInput
+                  id="sale-price"
+                  aria-required="true"
                   currency={currency.currency}
                   value={salePrice}
                   onChange={setSalePriceInput}
@@ -299,11 +305,11 @@ export default function NewSotuvPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                <label htmlFor="sale-payment-method" className="block text-xs font-medium text-zinc-700 mb-1.5">
                   To&apos;lov usuli <span className="text-red-500">*</span>
                 </label>
                 <Select value={payMethod} onValueChange={(v) => v && setPayMethod(v as PaymentMethod)}>
-                  <SelectTrigger className="h-9 text-sm border-zinc-200 rounded">
+                  <SelectTrigger id="sale-payment-method" aria-required="true" className="h-9 text-sm border-zinc-200 rounded">
                     <SelectValue placeholder="Tanlang" />
                   </SelectTrigger>
                   <SelectContent>
@@ -319,13 +325,14 @@ export default function NewSotuvPage() {
 
           {/* Fully paid */}
           <div className="border border-zinc-200 rounded p-4">
-            <div className="text-xs font-medium text-zinc-700 mb-2.5">
+            <div id="sale-fully-paid-label" className="text-xs font-medium text-zinc-700 mb-2.5">
               To&apos;liq to&apos;ladimi? <span className="text-red-500">*</span>
             </div>
-            <div className="flex gap-2">
+            <div className="flex gap-2" role="group" aria-labelledby="sale-fully-paid-label">
               <button
                 type="button"
                 onClick={() => setFullyPaid(true)}
+                aria-pressed={fullyPaid === true}
                 className={`px-4 py-2 text-sm rounded border transition-colors ${
                   fullyPaid === true
                     ? 'bg-zinc-900 text-white border-zinc-900'
@@ -337,6 +344,7 @@ export default function NewSotuvPage() {
               <button
                 type="button"
                 onClick={() => setFullyPaid(false)}
+                aria-pressed={fullyPaid === false}
                 className={`px-4 py-2 text-sm rounded border transition-colors ${
                   fullyPaid === false
                     ? 'bg-zinc-900 text-white border-zinc-900'
@@ -350,10 +358,12 @@ export default function NewSotuvPage() {
             {fullyPaid === false && (
               <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 pt-4 border-t border-zinc-100">
                 <div>
-                  <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  <label htmlFor="sale-partial-amount" className="block text-xs font-medium text-zinc-700 mb-1.5">
                     Qancha to&apos;ladi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                   </label>
                   <MoneyInput
+                    id="sale-partial-amount"
+                    aria-required="true"
                     currency={currency.currency}
                     value={partialAmount}
                     onChange={setPartialAmount}
@@ -362,10 +372,11 @@ export default function NewSotuvPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  <label htmlFor="sale-partial-date" className="block text-xs font-medium text-zinc-700 mb-1.5">
                     Qachon to&apos;laydi <span className="text-red-500">*</span>
                   </label>
                   <DateInput
+                    id="sale-partial-date"
                     aria-label="Qachon to'laydi"
                     value={partialDate}
                     onValueChange={setPartialDate}
@@ -400,10 +411,11 @@ export default function NewSotuvPage() {
                 )}
                 {reminder && earlyReminder && (
                   <div className="sm:col-span-2">
-                    <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                    <label htmlFor="sale-early-days" className="block text-xs font-medium text-zinc-700 mb-1.5">
                       Necha kun oldin? <span className="text-red-500">*</span>
                     </label>
                     <Input
+                      id="sale-early-days"
                       type="number"
                       min={1}
                       max={60}
@@ -421,8 +433,9 @@ export default function NewSotuvPage() {
 
           {/* Note */}
           <div>
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
+            <label htmlFor="sale-note" className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
             <Textarea
+              id="sale-note"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Ixtiyoriy izoh..."

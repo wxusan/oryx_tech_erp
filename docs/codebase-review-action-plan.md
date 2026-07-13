@@ -1,5 +1,9 @@
 # Codebase review action plan — 2026-07-10
 
+> **Historical plan:** implementation status and current release evidence now
+> live in `docs/remediation/remediation-matrix.md`. Preserve the rows below as
+> the dated decision trail; do not use them as the current release checklist.
+
 This plan is intentionally implementation-free. It prioritizes the review findings in `docs/codebase-review-2026-07.md`.
 
 | Order | Priority | What to fix | Reason | Risk if delayed | Estimated effort |

@@ -8,6 +8,7 @@ import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
+import { Field } from '@/components/ui/field'
 import {
   Select,
   SelectContent,
@@ -25,10 +26,10 @@ import { TrustBadge, type TrustBadgeData } from '@/components/shop/trust-badge'
 import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
 import { navigateAfterMutation } from '@/lib/client-events'
 import { tashkentTodayInputValue } from '@/lib/timezone'
+import type { PaymentMethod } from '@/lib/domain-types'
+import { NasiyaSchedulePreview } from '@/components/shop/nasiya-schedule-preview'
 
 type Device = InStockPickerDevice
-
-type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
 
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
   if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
@@ -403,10 +404,7 @@ export default function NewNasiyaPage() {
               <span className="text-sm font-semibold text-zinc-900">Mijoz ma&apos;lumotlari</span>
             </div>
             <div className="p-4 space-y-4">
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Mijoz ismi <span className="text-red-500">*</span>
-                </label>
+              <Field label="Mijoz ismi" required error={nameError || undefined}>
                 <Input
                   value={customerName}
                   onChange={(e) => {
@@ -414,15 +412,10 @@ export default function NewNasiyaPage() {
                     if (nameError) setNameError('')
                   }}
                   placeholder="To'liq ism"
-                  aria-invalid={!!nameError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-                {nameError && <p className="mt-1 text-xs text-red-600">{nameError}</p>}
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Mijoz tel raqami <span className="text-red-500">*</span>
-                </label>
+              </Field>
+              <Field label="Mijoz tel raqami" required error={phoneError || undefined}>
                 <PhoneInput
                   ref={phoneRef}
                   value={customerPhone}
@@ -430,25 +423,26 @@ export default function NewNasiyaPage() {
                     setCustomerPhone(value)
                     if (phoneError) setPhoneError('')
                   }}
-                  aria-invalid={!!phoneError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-                {phoneError && <p className="mt-1 text-xs text-red-600">{phoneError}</p>}
-                {existingCustomerTrust && (
-                  <div className="mt-1.5 flex items-center gap-1.5">
-                    <span className="text-xs text-zinc-500">Mavjud mijoz:</span>
-                    <TrustBadge trust={existingCustomerTrust} />
-                  </div>
-                )}
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Pasport rasmi <span className="text-red-500">*</span>
-                </label>
-                <label className="flex items-center justify-center w-full h-24 border-2 border-dashed border-zinc-200 rounded cursor-pointer hover:border-zinc-400 hover:bg-zinc-50 transition-colors">
+              </Field>
+              {existingCustomerTrust && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <span className="text-xs text-zinc-500">Mavjud mijoz:</span>
+                  <TrustBadge trust={existingCustomerTrust} />
+                </div>
+              )}
+              <fieldset>
+                <legend className="mb-1.5 block text-xs font-medium text-zinc-700">
+                  Pasport rasmi <span aria-hidden="true" className="text-red-500">*</span>
+                </legend>
+                <label htmlFor="nasiya-passport-image" className="flex items-center justify-center w-full h-24 border-2 border-dashed border-zinc-200 rounded cursor-pointer hover:border-zinc-400 hover:bg-zinc-50 transition-colors">
                   <input
+                    id="nasiya-passport-image"
                     type="file"
                     accept="image/*"
+                    required
+                    aria-required="true"
                     className="sr-only"
                     onChange={(e) => setPassportFile(e.target.files?.[0] ?? null)}
                   />
@@ -463,7 +457,7 @@ export default function NewNasiyaPage() {
                     )}
                   </div>
                 </label>
-              </div>
+              </fieldset>
             </div>
           </div>
 
@@ -508,19 +502,16 @@ export default function NewNasiyaPage() {
             </div>
             <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
               {selectedDevice && (
-                <div className="sm:col-span-2">
-                  <label className="block text-xs font-medium text-zinc-700 mb-1.5">
+                <div className="sm:col-span-2" role="group" aria-labelledby="nasiya-device-cost-label">
+                  <div id="nasiya-device-cost-label" className="block text-xs font-medium text-zinc-700 mb-1.5">
                     Kelish narxi (qurilma tannarxi)
-                  </label>
+                  </div>
                   <div className="flex h-9 items-center rounded border border-zinc-200 bg-zinc-50 px-2.5 text-sm text-zinc-500">
                     {currencyLabel(currency.currency)} {priceFor(selectedDevice)}
                   </div>
                 </div>
               )}
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Sotilish narxi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
-                </label>
+              <Field label={`Sotilish narxi (${currencyLabel(currency.currency)})`} required>
                 <MoneyInput
                   currency={currency.currency}
                   value={totalPrice}
@@ -528,11 +519,8 @@ export default function NewNasiyaPage() {
                   placeholder={currency.currency === 'USD' ? '700.00' : '9500000'}
                   className="h-9 text-sm font-bold border-zinc-200 rounded"
                 />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Boshlang&apos;ich to&apos;lov ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
-                </label>
+              </Field>
+              <Field label={<>Boshlang&apos;ich to&apos;lov ({currencyLabel(currency.currency)})</>} required>
                 <MoneyInput
                   currency={currency.currency}
                   value={downPayment}
@@ -540,21 +528,19 @@ export default function NewNasiyaPage() {
                   placeholder={currency.currency === 'USD' ? '150.00' : '2000000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Qolgan summa
-                </label>
+              </Field>
+              <Field label="Qolgan summa">
                 <Input
                   readOnly
                   value={remaining > 0 ? fmt(remaining, currency) : '0'}
                   className="h-9 text-sm border-zinc-200 rounded bg-zinc-50 text-zinc-500"
                 />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Nasiya foizi (%) <span className="text-red-500">*</span>
-                </label>
+              </Field>
+              <Field
+                label="Nasiya foizi (%)"
+                required
+                help={monthlyPaymentInput !== null ? <>Qo&apos;lda kiritilgan oylik to&apos;lovdan hisoblandi</> : undefined}
+              >
                 <Input
                   type="number"
                   min={0}
@@ -571,16 +557,13 @@ export default function NewNasiyaPage() {
                   placeholder="0"
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-                {monthlyPaymentInput !== null && (
-                  <p className="mt-1 text-xs text-zinc-400">Qo&apos;lda kiritilgan oylik to&apos;lovdan hisoblandi</p>
-                )}
-              </div>
+              </Field>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Oylar <span className="text-red-500">*</span>
+                <label htmlFor="nasiya-months" className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  Oylar <span aria-hidden="true" className="text-red-500">*</span>
                 </label>
                 <Select value={months} onValueChange={(v) => v && setMonths(v)}>
-                  <SelectTrigger className="h-9 text-sm border-zinc-200 rounded">
+                  <SelectTrigger id="nasiya-months" aria-required="true" className="h-9 w-full text-sm border-zinc-200 rounded">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -592,30 +575,21 @@ export default function NewNasiyaPage() {
                   </SelectContent>
                 </Select>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Foiz summasi
-                </label>
+              <Field label="Foiz summasi">
                 <Input
                   readOnly
                   value={interestAmount > 0 ? fmt(interestAmount, currency) : '0'}
                   className="h-9 text-sm border-zinc-200 rounded bg-zinc-50 text-zinc-500"
                 />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Nasiya jami
-                </label>
+              </Field>
+              <Field label="Nasiya jami">
                 <Input
                   readOnly
                   value={finalNasiyaAmount > 0 ? fmt(finalNasiyaAmount, currency) : '0'}
                   className="h-9 text-sm border-zinc-200 rounded bg-zinc-50 text-zinc-500"
                 />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Oylik to&apos;lov
-                </label>
+              </Field>
+              <Field label={<>Oylik to&apos;lov</>} help={<>O&apos;zgartirsangiz, foiz avtomatik moslashadi</>}>
                 <MoneyInput
                   currency={currency.currency}
                   value={
@@ -630,25 +604,20 @@ export default function NewNasiyaPage() {
                   placeholder={currency.currency === 'USD' ? '150.00' : '2000000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-                <p className="mt-1 text-xs text-zinc-400">O&apos;zgartirsangiz, foiz avtomatik moslashadi</p>
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Boshlanish sanasi <span className="text-red-500">*</span>
-                </label>
+              </Field>
+              <Field label="Boshlanish sanasi" required>
                 <DateInput
-                  aria-label="Boshlanish sanasi"
                   value={startDate}
                   onValueChange={setStartDate}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-              </div>
+              </Field>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  To&apos;lov usuli <span className="text-red-500">*</span>
+                <label htmlFor="nasiya-payment-method" className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  To&apos;lov usuli <span aria-hidden="true" className="text-red-500">*</span>
                 </label>
                 <Select value={payMethod} onValueChange={(v) => v && setPayMethod(v as PaymentMethod)}>
-                  <SelectTrigger className="h-9 text-sm border-zinc-200 rounded">
+                  <SelectTrigger id="nasiya-payment-method" aria-required="true" className="h-9 w-full text-sm border-zinc-200 rounded">
                     <SelectValue placeholder="Tanlang" />
                   </SelectTrigger>
                   <SelectContent>
@@ -672,10 +641,7 @@ export default function NewNasiyaPage() {
                 </label>
               </div>
               {earlyReminder && (
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                    Necha kun oldin? <span className="text-red-500">*</span>
-                  </label>
+                <Field label="Necha kun oldin?" required>
                   <Input
                     type="number"
                     min={1}
@@ -686,51 +652,20 @@ export default function NewNasiyaPage() {
                     placeholder="3"
                     className="h-9 text-sm border-zinc-200 rounded"
                   />
-                </div>
+                </Field>
               )}
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
+              <Field label="Izoh" className="sm:col-span-2">
                 <Textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   placeholder={"Qo'shimcha ma'lumot..."}
                   className="text-sm border-zinc-200 rounded min-h-[60px]"
                 />
-              </div>
+              </Field>
             </div>
           </div>
 
-          {/* Payment schedule preview */}
-          {schedule.length > 0 && (
-            <div className="border border-zinc-200 rounded overflow-hidden">
-              <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 flex items-center justify-between">
-                <span className="text-sm font-semibold text-zinc-900">To&apos;lov jadvali</span>
-                <span className="text-xs text-zinc-500">{schedule.length} oy</span>
-              </div>
-              <div className="max-h-52 overflow-auto">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-zinc-50 border-b border-zinc-200">
-                    <tr>
-                      {['#', 'Sana', 'Miqdor'].map((h) => (
-                        <th key={h} className="text-left px-4 py-2 text-xs font-semibold text-zinc-500">
-                          {h}
-                        </th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {schedule.map((row) => (
-                      <tr key={row.month} className="border-b border-zinc-100 last:border-0">
-                        <td className="px-4 py-2 text-zinc-400">{row.month}</td>
-                        <td className="px-4 py-2 text-zinc-700">{row.date}</td>
-                        <td className="px-4 py-2 font-medium text-zinc-900">{fmt(row.amount, currency)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+          <NasiyaSchedulePreview rows={schedule} formatAmount={(amount) => fmt(amount, currency)} />
 
           {submitError && (
             <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">

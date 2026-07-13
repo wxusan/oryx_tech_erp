@@ -1,5 +1,10 @@
 {
   "buildCommand": "node scripts/vercel-build.mjs",
+  "git": {
+    "deploymentEnabled": {
+      "main": false
+    }
+  },
   "crons": [
     {
       "path": "/api/cron/reminders",

@@ -1,6 +1,7 @@
 'use client'
 
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   Table,
   TableBody,
@@ -23,21 +24,34 @@ interface Payment {
   addedBy: string
 }
 
-interface ShopPayment {
+interface ShopPaymentItem {
   id: string
-  amount: number | string
+  shopId: string
+  shop: string
+  amount: number
   months: number
   paymentMethod: string
   paidAt: string
-  recordedById?: string
-  recordedBy?: { name: string; login: string } | null
+  nextPaymentDate: string
+  recordedBy: { id: string; name: string; login: string }
 }
 
-interface ShopWithPayments {
-  id: string
-  name: string
-  subscriptionDue: string
-  payments?: ShopPayment[]
+interface PaymentPeriodSummary {
+  amount: number
+  count: number
+}
+
+interface ShopPaymentsPage {
+  items: ShopPaymentItem[]
+  total: number
+  skip: number
+  take: number
+  summary: {
+    currentMonth: PaymentPeriodSummary
+    previousMonth: PaymentPeriodSummary
+    currentYear: PaymentPeriodSummary
+    currentYearNumber: number
+  }
 }
 
 interface ApiResponse<T> {
@@ -67,56 +81,44 @@ function formatDate(value: string) {
   return value ? new Date(value).toLocaleDateString('ru-RU') : '—'
 }
 
-function monthKey(date: Date) {
-  return `${date.getFullYear()}-${date.getMonth()}`
-}
-
 export default function PaymentsPage() {
   const scope = useAuthenticatedQueryScope()
+  const [page, setPage] = useState(1)
+  const perPage = 25
   const paymentsQuery = useQuery({
-    queryKey: queryKeys.domain(scope, 'adminPayments'),
+    queryKey: queryKeys.list(scope, 'adminPayments', { page, take: perPage }),
     queryFn: async ({ signal }) => {
-      const response = await fetch('/api/shops', { signal, cache: 'no-store' })
-      const json: ApiResponse<ShopWithPayments[]> = await response.json()
+      const params = new URLSearchParams({
+        skip: String((page - 1) * perPage),
+        take: String(perPage),
+      })
+      const response = await fetch(`/api/admin/payments?${params.toString()}`, { signal, cache: 'no-store' })
+      const json: ApiResponse<ShopPaymentsPage> = await response.json()
       if (!response.ok || !json.success || !json.data) throw new Error(json.error ?? "To'lovlar yuklanmadi")
       return json.data
-        .flatMap((shop) =>
-          (shop.payments ?? []).map((payment) => ({
-              id: payment.id,
-              shop: shop.name,
-              amount: Number(payment.amount),
-              months: payment.months,
-              method: methodFromEnum(payment.paymentMethod),
-              date: payment.paidAt,
-              nextPaymentDate: shop.subscriptionDue,
-              addedBy: payment.recordedBy
-                ? `${payment.recordedBy.name} (${payment.recordedBy.login})`
-                : payment.recordedById
-                  ? payment.recordedById.slice(0, 8)
-                  : '—',
-          })),
-        )
-        .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
     },
+    placeholderData: keepPreviousData,
   })
-  const payments = paymentsQuery.data ?? []
+  const payments: Payment[] = (paymentsQuery.data?.items ?? []).map((payment) => ({
+    id: payment.id,
+    shop: payment.shop,
+    amount: payment.amount,
+    months: payment.months,
+    method: methodFromEnum(payment.paymentMethod),
+    date: payment.paidAt,
+    nextPaymentDate: payment.nextPaymentDate,
+    addedBy: `${payment.recordedBy.name} (${payment.recordedBy.login})`,
+  }))
+  const total = paymentsQuery.data?.total ?? 0
+  const summary = paymentsQuery.data?.summary
+  const totalPages = Math.max(1, Math.ceil(total / perPage))
   const loading = paymentsQuery.isPending && !paymentsQuery.data
   const error = paymentsQuery.error instanceof Error ? paymentsQuery.error.message : null
 
-  const now = new Date()
-  const currentMonth = monthKey(now)
-  const prevMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
-  const prevMonth = monthKey(prevMonthDate)
-  const currentYear = now.getFullYear()
-  const thisMonthPayments = payments.filter((p) => monthKey(new Date(p.date)) === currentMonth)
-  const prevMonthPayments = payments.filter((p) => monthKey(new Date(p.date)) === prevMonth)
-  const yearPayments = payments.filter((p) => new Date(p.date).getFullYear() === currentYear)
-  const sum = (rows: Payment[]) => rows.reduce((total, p) => total + p.amount, 0)
-
   const statCards = [
-    { label: "Bu oy jami", value: formatMoney(sum(thisMonthPayments)), sub: `${thisMonthPayments.length} ta to'lov` },
-    { label: "O'tgan oy", value: formatMoney(sum(prevMonthPayments)), sub: `${prevMonthPayments.length} ta to'lov` },
-    { label: "Yil davomida", value: formatMoney(sum(yearPayments)), sub: `${currentYear}-yil` },
+    { label: "Bu oy jami", value: formatMoney(summary?.currentMonth.amount ?? 0), sub: `${summary?.currentMonth.count ?? 0} ta to'lov` },
+    { label: "O'tgan oy", value: formatMoney(summary?.previousMonth.amount ?? 0), sub: `${summary?.previousMonth.count ?? 0} ta to'lov` },
+    { label: "Yil davomida", value: formatMoney(summary?.currentYear.amount ?? 0), sub: summary ? `${summary.currentYearNumber}-yil` : 'Yuklanmoqda...' },
   ]
 
   return (
@@ -147,7 +149,7 @@ export default function PaymentsPage() {
       <div className="bg-white border border-zinc-200">
         <div className="px-5 py-4 border-b border-zinc-200 flex items-center justify-between">
           <h2 className="text-sm font-semibold text-zinc-900">To&apos;lovlar ro&apos;yxati</h2>
-          <span className="text-xs text-zinc-400">{payments.length} ta yozuv</span>
+          <span className="text-xs text-zinc-400">{total} ta yozuv</span>
         </div>
         <Table>
           <TableHeader>
@@ -200,6 +202,33 @@ export default function PaymentsPage() {
             )}
           </TableBody>
         </Table>
+      </div>
+
+      <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <span className="text-xs text-zinc-400">
+          {total} ta yozuvdan {total === 0 ? 0 : Math.min((page - 1) * perPage + 1, total)}-{Math.min(page * perPage, total)} ko&apos;rsatilmoqda
+        </span>
+        <div className="flex items-center border border-zinc-200">
+          <button
+            type="button"
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+            disabled={page === 1 || paymentsQuery.isFetching}
+            className="h-8 border-r border-zinc-200 px-4 text-xs text-zinc-600 transition-colors hover:bg-zinc-50 disabled:pointer-events-none disabled:opacity-40"
+          >
+            Oldingi
+          </button>
+          <span className="flex h-8 items-center px-4 text-xs text-zinc-500">
+            {page} / {totalPages}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+            disabled={page === totalPages || paymentsQuery.isFetching}
+            className="h-8 border-l border-zinc-200 px-4 text-xs text-zinc-600 transition-colors hover:bg-zinc-50 disabled:pointer-events-none disabled:opacity-40"
+          >
+            Keyingi
+          </button>
+        </div>
       </div>
     </div>
   )

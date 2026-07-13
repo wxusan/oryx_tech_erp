@@ -5,20 +5,12 @@ import { cn } from '@/lib/utils'
 import { cleanMoneyInput, formatMoneyInput } from '@/lib/money-input-format'
 import type { CurrencyCode } from '@/lib/currency'
 
-interface MoneyInputProps {
+interface MoneyInputProps extends Omit<React.InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'type'> {
   /** Clean numeric string held in form state (no spaces), e.g. "1200000" or "1200.5". */
   value: string
   /** Receives the clean numeric string (space-free). Submit with Number(value). */
   onChange: (value: string) => void
   currency?: CurrencyCode
-  placeholder?: string
-  disabled?: boolean
-  className?: string
-  required?: boolean
-  min?: number
-  id?: string
-  name?: string
-  'aria-invalid'?: boolean
 }
 
 /**
@@ -79,12 +71,12 @@ export function MoneyInput({
       placeholder={placeholder}
       disabled={disabled}
       required={required}
-      aria-invalid={rest['aria-invalid']}
       data-slot="money-input"
       className={cn(
         'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:pointer-events-none disabled:cursor-not-allowed disabled:bg-input/50 disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-3 aria-invalid:ring-destructive/20 md:text-sm dark:bg-input/30',
         className,
       )}
+      {...rest}
     />
   )
 }

@@ -168,6 +168,13 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
             refundInputCurrency: true,
             refundExchangeRateAtCreation: true,
             refundMethod: true,
+            contractCurrency: true,
+            contractReceiptsAtReturn: true,
+            contractRefundAmount: true,
+            contractRetainedAmount: true,
+            contractCancelledDebt: true,
+            revenueReversalAmountUzs: true,
+            inventoryCostRecoveryUzs: true,
             note: true,
             createdAt: true,
           },
@@ -323,8 +330,19 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     }
 
     const device = await prisma.$transaction(async (tx) => {
-      const updatedDevice = await tx.device.update({
-        where: { id: deviceId },
+      const guardedUpdate = await tx.device.updateMany({
+        where: {
+          id: deviceId,
+          shopId: existing.shopId,
+          deletedAt: null,
+          ...(purchaseMeta
+            ? {
+                status: 'IN_STOCK' as const,
+                sales: { none: { deletedAt: null } },
+                nasiya: { none: { deletedAt: null } },
+              }
+            : {}),
+        },
         data: {
           ...updateData,
           // Native purchase-currency context, dual-written in lockstep with
@@ -340,6 +358,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
           updatedAt: new Date(),
         },
       })
+      if (guardedUpdate.count !== 1) {
+        throw { status: 409, message: "Qurilma sotilgan paytda kelish narxini o'zgartirib bo'lmaydi" }
+      }
+      const updatedDevice = await tx.device.findFirstOrThrow({ where: { id: deviceId, shopId: existing.shopId } })
 
       if (identityChanged) {
         const deletedAt = new Date()
@@ -389,6 +411,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (!item) throw new Error('UPDATED_DEVICE_DTO_NOT_FOUND')
     return ok({ item, changeCursor, affectedDomains: ['devices', 'reports', 'logs'], mutationId: `device.updated:${device.id}:${changeCursor}` }, "Qurilma muvaffaqiyatli yangilandi")
   } catch (err) {
+    if (typeof err === 'object' && err !== null && 'status' in err) {
+      const structured = err as { status: number; message: string }
+      if (structured.status === 409) return conflict(structured.message)
+    }
     // Backstop for the active-IMEI partial unique index if two edits race.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict('Bu IMEI bilan faol qurilma allaqachon mavjud')
@@ -446,8 +472,15 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
     }
 
     const device = await prisma.$transaction(async (tx) => {
-      const deletedDevice = await tx.device.update({
-        where: { id: deviceId },
+      const guardedDelete = await tx.device.updateMany({
+        where: {
+          id: deviceId,
+          shopId: existing.shopId,
+          deletedAt: null,
+          status: 'IN_STOCK',
+          sales: { none: { deletedAt: null } },
+          nasiya: { none: { deletedAt: null } },
+        },
         data: {
           deletedAt: new Date(),
           deletedBy: session.user.id,
@@ -456,6 +489,10 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
           updatedAt: new Date(),
         },
       })
+      if (guardedDelete.count !== 1) {
+        throw { status: 409, message: "Qurilma sotilgan yoki moliyaviy tarixga bog'langan; o'chirish bekor qilindi" }
+      }
+      const deletedDevice = await tx.device.findFirstOrThrow({ where: { id: deviceId, shopId: existing.shopId } })
 
       await tx.log.create({
         data: {
@@ -478,6 +515,10 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
 
     return ok(device, "Qurilma muvaffaqiyatli o'chirildi")
   } catch (err) {
+    if (typeof err === 'object' && err !== null && 'status' in err) {
+      const structured = err as { status: number; message: string }
+      if (structured.status === 409) return conflict(structured.message)
+    }
     logger.error('[DELETE /api/devices/[id]]', { event: 'api.route_error', error: err })
     return serverError()
   }

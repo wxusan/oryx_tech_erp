@@ -17,6 +17,9 @@ if (!connectionString) {
 if (!confirm) {
   throw new Error('Refusing to seed demo data. Re-run with SEED_DEMO_CONFIRM=yes')
 }
+if (Buffer.byteLength(password, 'utf8') > 72) {
+  throw new Error('SEED_DEMO_PASSWORD must not exceed bcrypt\'s 72-byte UTF-8 limit')
+}
 
 const client = new Client({ connectionString })
 const now = new Date()

@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { AlertTriangle } from 'lucide-react'
-import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
+import { formatPartitionedMoney, type CurrencyContext } from '@/lib/currency'
 import { FINANCIAL_DATA_CHANGED_EVENT } from '@/lib/client-events'
 
 const FALLBACK_REFRESH_MS = 5 * 60_000
@@ -11,6 +11,9 @@ const FALLBACK_REFRESH_MS = 5 * 60_000
 interface DueOverdueSummary {
   overdueDealCount: number
   overdueMoneyUzs: number
+  overdueNativeUzs: number
+  overdueNativeUsd: number
+  overdueMoneyComplete: boolean
   currency: CurrencyContext
   singleDeal: { type: 'nasiya' | 'sale'; id: string } | null
 }
@@ -65,7 +68,12 @@ export function DueOverdueBanner() {
 
   if (!summary || summary.overdueDealCount === 0) return null
 
-  const amountText = formatMoneyByCurrency(summary.overdueMoneyUzs, summary.currency.currency, summary.currency.usdUzsRate)
+  const amountText = formatPartitionedMoney({
+    amountUzs: summary.overdueNativeUzs,
+    amountUsd: summary.overdueNativeUsd,
+    displayCurrency: summary.currency.currency,
+    rate: summary.currency.usdUzsRate,
+  })
   const href = summary.singleDeal
     ? summary.singleDeal.type === 'nasiya'
       ? `/shop/nasiyalar/${summary.singleDeal.id}`

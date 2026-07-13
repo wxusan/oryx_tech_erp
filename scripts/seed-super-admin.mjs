@@ -15,6 +15,9 @@ if (!connectionString) {
 if (!password) {
   throw new Error('SEED_SUPER_ADMIN_PASSWORD is required and must be provided explicitly')
 }
+if (Buffer.byteLength(password, 'utf8') > 72) {
+  throw new Error('SEED_SUPER_ADMIN_PASSWORD must not exceed bcrypt\'s 72-byte UTF-8 limit')
+}
 
 function normalizeLogin(value) {
   return value.trim().toLowerCase()

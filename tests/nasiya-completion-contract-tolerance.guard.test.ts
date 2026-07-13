@@ -25,9 +25,10 @@ describe('nasiya completion is decided from the contract-currency ledger', () =>
 })
 
 describe('currency-aware completion tolerance (nasiya-contract.ts)', () => {
-  it('UZS tolerates 500 so\'m of rounding dust', () => {
-    expect(contractScheduleOutstanding(10_000_000, 9_999_600, 'UZS')).toBe(0) // 400 so'm short -> snapped
-    expect(contractScheduleOutstanding(10_000_000, 9_999_000, 'UZS')).toBe(1000) // 1000 so'm short -> real debt
+  it("UZS preserves every whole so'm of debt", () => {
+    expect(contractScheduleOutstanding(10_000_000, 9_999_600, 'UZS')).toBe(400)
+    expect(contractScheduleOutstanding(10_000_000, 9_999_999, 'UZS')).toBe(1)
+    expect(contractScheduleOutstanding(10_000_000, 10_000_000, 'UZS')).toBe(0)
   })
 
   it('USD treats one whole cent as real debt, never 500 so\'m-equivalent slack', () => {
@@ -35,15 +36,15 @@ describe('currency-aware completion tolerance (nasiya-contract.ts)', () => {
     expect(contractScheduleOutstanding(1000, 999, 'USD')).toBe(1) // $1 short -> real debt, not silently forgiven
   })
 
-  it('tolerance constants are exactly 500 so\'m / $0.01', () => {
-    expect(getCompletionToleranceForCurrency('UZS')).toBe(500)
+  it("tolerance constants are exactly 1 so'm / $0.01", () => {
+    expect(getCompletionToleranceForCurrency('UZS')).toBe(1)
     expect(getCompletionToleranceForCurrency('USD')).toBe(0.01)
   })
 
   it('dust allocation is strict: below tolerance is ignored, tolerance itself is meaningful', () => {
     expect(isContractCurrencyDust(0.009, 'USD')).toBe(true)
     expect(isContractCurrencyDust(0.01, 'USD')).toBe(false)
-    expect(isContractCurrencyDust(499, 'UZS')).toBe(true)
-    expect(isContractCurrencyDust(500, 'UZS')).toBe(false)
+    expect(isContractCurrencyDust(0.4, 'UZS')).toBe(true)
+    expect(isContractCurrencyDust(1, 'UZS')).toBe(false)
   })
 })

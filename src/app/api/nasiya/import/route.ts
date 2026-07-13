@@ -44,7 +44,7 @@ export async function POST(req: NextRequest) {
     }
     const shopId = session.user.shopId
 
-    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    // Distributed when Upstash is configured; bounded in-process fallback otherwise.
     const rate = await checkRateLimitDistributed(rateLimitKey('nasiya-import', shopId, session.user.id), { windowMs: 60_000, max: 10 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
@@ -77,6 +77,9 @@ export async function POST(req: NextRequest) {
     }
     if (remainingDebtInput.amountUzs > originalTotalInput.amountUzs) {
       return badRequest("Qolgan qarz eski nasiya umumiy summasidan oshmasligi kerak")
+    }
+    if (alreadyPaidInput.amountUzs + remainingDebtInput.amountUzs !== originalTotalInput.amountUzs) {
+      return badRequest("Eski nasiya jami to'langan summa va qolgan qarz yig'indisiga teng bo'lishi kerak")
     }
 
     // Native contract-currency ledger — computed from the RAW inputs (not
@@ -250,6 +253,7 @@ export async function POST(req: NextRequest) {
           shopId,
           contractCurrency,
           contractExpectedAmount: contractSchedule[index].expectedAmount,
+          contractRemainingAmount: contractSchedule[index].expectedAmount,
           monthNumber: item.monthNumber,
           dueDate: item.dueDate,
           expectedAmount: item.expectedAmount,

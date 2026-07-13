@@ -8,10 +8,7 @@
 
 import { PrismaClient } from '@/generated/prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
-
-declare global {
-  var prisma: PrismaClient | undefined
-}
+import { currentBusinessLogContext, currentRequestAuditContext } from '@/lib/server/request-context'
 
 const connectionString =
   process.env.NODE_ENV === 'production'
@@ -39,8 +36,36 @@ const parsedPoolMax = Number(process.env.DATABASE_POOL_MAX)
 const requestedPoolMax = Number.isFinite(parsedPoolMax) && parsedPoolMax > 0 ? Math.floor(parsedPoolMax) : 5
 const poolMax = Math.min(Math.max(requestedPoolMax, 1), 20)
 
-export const prisma: PrismaClient =
-  global.prisma ?? new PrismaClient({ adapter: new PrismaPg({ connectionString, max: poolMax }) })
+function createPrismaClient() {
+  return new PrismaClient({ adapter: new PrismaPg({ connectionString, max: poolMax }) }).$extends({
+    name: 'request-audit-context',
+    query: {
+      log: {
+        create({ args, query }) {
+          const context = currentBusinessLogContext()
+          args.data.requestId ??= context.requestId
+          args.data.ipAddress ??= context.ipAddress
+          return query(args)
+        },
+      },
+      opsEvent: {
+        create({ args, query }) {
+          args.data.requestId ??= currentRequestAuditContext()?.requestId ?? null
+          return query(args)
+        },
+      },
+    },
+  })
+}
+
+declare global {
+  var prisma: PrismaClient | undefined
+}
+
+// Keep the public type compatible with Prisma.TransactionClient annotations
+// used throughout route handlers. The runtime instance still carries the
+// request-audit query extension above.
+export const prisma: PrismaClient = global.prisma ?? createPrismaClient() as unknown as PrismaClient
 
 if (process.env.NODE_ENV !== 'production') {
   global.prisma = prisma

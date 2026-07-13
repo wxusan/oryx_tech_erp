@@ -1,36 +1,11 @@
 /**
  * GET /api/cron/reminders
  *
- * Cron job (safe to run every ~10 min — all generation is idempotent) that:
- *   1. Generates a reminder for every NasiyaSchedule / Sale due today.
- *   2. Generates an overdue alert for every schedule/sale past its due date
- *      that is still unpaid, and marks them OVERDUE.
- *   3. Drains the notification queue, delivering any messages that are now due.
- *
- * PLANNED reminders (due-today + overdue) are NOT sent immediately: each is
- * scheduled at 11:00–11:30 Asia/Tashkent with a deterministic per-notification
- * jitter (see scheduledReminderSendAt), so they never all fire in the same
- * second. A later cron run inside that window delivers them. IMMEDIATE events
- * (sale/nasiya/payment/device) are queued with scheduledAt = now elsewhere and
- * are unaffected.
- *
- * Vercel cron configuration (vercel.json):
- * {
- *   "crons": [{ "path": "/api/cron/reminders", "schedule": "35 6 * * *" }]
- * }
- * Runs once daily at 06:35 UTC (11:35 Asia/Tashkent) — see docs/cron-jobs.md
- * for why (Vercel Hobby plan rejects sub-daily cron at deploy time).
- * Idempotent: dedupeKey guarantees one message per (day, admin, schedule/sale);
- * the drain only sends rows whose jittered scheduledAt has arrived. Sub-daily
- * cron needs Vercel Pro or an external scheduler hitting this endpoint with
- * the CRON_SECRET bearer token.
- *
- * Vercel Cron sends Authorization: Bearer <CRON_SECRET> automatically when the
- * env var is configured. The same header can be used by external schedulers:
- *   Authorization: Bearer <CRON_SECRET>
- *
- * Response:
- *   { reminders, overdue, saleReminders, saleOverdue }
+ * Generates planned Telegram reminders and drains the delivery queue. Reminder
+ * generation is keyset-paged and checkpointed in ReminderGenerationState so a
+ * timeout or missed daily cron resumes without skipping records. Notification
+ * dedupe keys include the original Tashkent trigger day, which makes retries
+ * and same-day rescans idempotent.
  */
 
 import { type NextRequest } from 'next/server'
@@ -38,15 +13,26 @@ import { prisma } from '@/lib/prisma'
 import { hasValidInternalSecret, internalSecret } from '@/lib/api-auth'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { scheduledReminderSendAt } from '@/lib/notification-schedule'
+import { processReminderPages } from '@/lib/reminder-pagination'
 import { invalidateShopOverdueCron } from '@/lib/server/cache-tags'
-import { tashkentDayRange, tashkentDaysUntil, matchesEarlyReminderDay } from '@/lib/timezone'
+import { tashkentDayRange } from '@/lib/timezone'
 import { recordOpsEvent } from '@/lib/server/ops-events'
 import { getUsdUzsRate } from '@/lib/server/currency'
 import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
 import { cleanupExpiredChangeEvents } from '@/lib/server/change-events'
+import { cleanupRetainedOperationalData } from '@/lib/server/data-retention'
 import { transitionNasiyaToOverdue } from '@/lib/server/overdue-transition'
 import { presentDeviceSpecs } from '@/lib/device-specs'
+import { initializeRequestAuditContext } from '@/lib/server/request-context'
+import {
+  acquireReminderGenerationLease,
+  checkpointReminderGeneration,
+  completeReminderGeneration,
+  releaseReminderGenerationLease,
+  REMINDER_GENERATION_PHASES,
+  type ReminderGenerationPhase,
+} from '@/lib/server/reminder-generation-state'
 import {
   nasiyaDueTodayMessage,
   nasiyaOverdueMessage,
@@ -61,6 +47,11 @@ import {
 
 export const maxDuration = 60
 
+// Reserve enough of the function's 60-second budget for bounded queue delivery,
+// telemetry, and cleanup after generation yields at a page boundary.
+const REMINDER_GENERATION_BUDGET_MS = 40_000
+const DAY_MS = 86_400_000
+
 let usdUzsRateForRun: Promise<number | null> | null = null
 
 function getUsdUzsRateForRun() {
@@ -69,15 +60,30 @@ function getUsdUzsRateForRun() {
 }
 
 async function reminderCurrency(shop: { preferredCurrency: CurrencyCode }): Promise<CurrencyContext> {
-  if (shop.preferredCurrency !== 'USD') return { currency: 'UZS', usdUzsRate: null }
-  return { currency: 'USD', usdUzsRate: await getUsdUzsRateForRun() }
+  return { currency: shop.preferredCurrency, usdUzsRate: await getUsdUzsRateForRun() }
 }
 
-// ---------------------------------------------------------------------------
-// GET handler
-// ---------------------------------------------------------------------------
+function addDays(value: Date, days: number): Date {
+  return new Date(value.getTime() + days * DAY_MS)
+}
+
+function earlyTriggerDay(dueDate: Date, earlyReminderDays: number | null): Date | null {
+  if (!earlyReminderDays || earlyReminderDays <= 0) return null
+  return addDays(tashkentDayRange(dueDate).start, -earlyReminderDays)
+}
+
+function isWithin(value: Date, start: Date, end: Date): boolean {
+  return value >= start && value < end
+}
+
+function pageAfter(cursor: string | null): { cursor?: { id: string }; skip?: number } {
+  return cursor ? { cursor: { id: cursor }, skip: 1 } : {}
+}
+
+type GenerationStatus = 'busy' | 'running' | 'partial' | 'complete'
 
 export async function GET(request: NextRequest): Promise<Response> {
+  await initializeRequestAuditContext(request.headers)
   if (!internalSecret()) {
     return new Response('Internal secret is not configured', { status: 503 })
   }
@@ -88,612 +94,703 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   const startedAt = Date.now()
   usdUzsRateForRun = null
+  let activeLeaseToken: string | null = null
   await recordOpsEvent({ level: 'INFO', event: 'cron.reminders.started', message: 'Reminders cron started' })
 
   try {
-  const { start: today, end: tomorrow, dayKey } = tashkentDayRange()
+    const { start: today, end: tomorrow, dayKey } = tashkentDayRange(new Date(Date.now()))
+    const acquired = await acquireReminderGenerationLease(today, tomorrow)
+    let generationStatus: GenerationStatus = acquired.acquired ? 'running' : 'busy'
+    let activePhase: ReminderGenerationPhase | null = acquired.acquired ? acquired.state.phase : null
+    let activeCursor = acquired.acquired ? acquired.state.cursor : null
+    let generationRowsProcessed = 0
+    const generationWindow = acquired.acquired
+      ? { start: acquired.state.windowStart, end: acquired.state.windowEnd }
+      : null
+    if (acquired.acquired) activeLeaseToken = acquired.state.leaseToken
 
-  // -------------------------------------------------------------------------
-  // 1. Today's reminders — dueDate = today, status PENDING or PARTIAL
-  // -------------------------------------------------------------------------
+    const summary = {
+      reminders: 0,
+      overdue: 0,
+      saleReminders: 0,
+      saleOverdue: 0,
+      earlyReminders: 0,
+      saleEarlyReminders: 0,
+      supplierPayableReminders: 0,
+      supplierPayableOverdue: 0,
+      supplierPayableEarlyReminders: 0,
+    }
+    const transitionedShopIds = new Set<string>()
 
-  const dueToday = await prisma.nasiyaSchedule.findMany({
-    where: {
-      OR: [
-        { delayedUntil: null, dueDate: { gte: today, lt: tomorrow } },
-        { delayedUntil: { gte: today, lt: tomorrow } },
-      ],
-      status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
-      nasiya: {
-        deletedAt: null,
-        reminderEnabled: true,
-        shop: { status: 'ACTIVE', deletedAt: null },
-      },
-    },
-    include: {
-      nasiya: {
-        include: {
-          customer: true,
-          device: { include: { imeis: { where: { deletedAt: null } } } },
-          shop: {
-            include: {
-              admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
+    async function runPhase<T extends { id: string }>(
+      phase: ReminderGenerationPhase,
+      fetchPage: (cursor: string | null, take: number) => Promise<T[]>,
+      processRow: (row: T) => Promise<void>,
+    ): Promise<void> {
+      if (!acquired.acquired || generationStatus !== 'running' || !activePhase) return
+
+      const targetIndex = REMINDER_GENERATION_PHASES.indexOf(phase)
+      const activeIndex = REMINDER_GENERATION_PHASES.indexOf(activePhase)
+      if (targetIndex < activeIndex) return
+      if (targetIndex > activeIndex) throw new Error(`REMINDER_GENERATION_PHASE_GAP:${activePhase}:${phase}`)
+
+      const result = await processReminderPages({
+        initialCursor: activeCursor,
+        fetchPage,
+        processRow,
+        checkpoint: (cursor) => checkpointReminderGeneration(acquired.state.leaseToken, phase, cursor),
+        hasTime: () => Date.now() - startedAt < REMINDER_GENERATION_BUDGET_MS,
+      })
+      generationRowsProcessed += result.processed
+      activeCursor = result.cursor
+
+      if (!result.complete) {
+        generationStatus = 'partial'
+        return
+      }
+
+      const nextPhase = REMINDER_GENERATION_PHASES[targetIndex + 1]
+      if (nextPhase) {
+        await checkpointReminderGeneration(acquired.state.leaseToken, nextPhase, null)
+        activePhase = nextPhase
+        activeCursor = null
+        return
+      }
+
+      await completeReminderGeneration(acquired.state)
+      activeLeaseToken = null
+      // A resumed stale window can finish successfully without having covered
+      // the current day yet. Keep the run non-green so an operator/external
+      // scheduler invokes us again; the next lease opens the following window.
+      generationStatus = acquired.state.windowEnd >= tomorrow ? 'complete' : 'partial'
+      activePhase = null
+      activeCursor = null
+    }
+
+    if (acquired.acquired) {
+      const { windowStart, windowEnd } = acquired.state
+      const earlyWindowEnd = addDays(windowEnd, 61)
+
+      await runPhase(
+        'NASIYA_DUE',
+        (cursor, take) => prisma.nasiyaSchedule.findMany({
+          where: {
+            OR: [
+              { delayedUntil: null, dueDate: { gte: windowStart, lt: windowEnd } },
+              { delayedUntil: { gte: windowStart, lt: windowEnd } },
+            ],
+            status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
+            nasiya: {
+              deletedAt: null,
+              returnedAt: null,
+              status: { in: ['ACTIVE', 'OVERDUE'] },
+              reminderEnabled: true,
+              shop: { status: 'ACTIVE', deletedAt: null },
             },
           },
-        },
-      },
-    },
-  })
-
-  for (const schedule of dueToday) {
-    const { nasiya } = schedule
-    const msg = nasiyaDueTodayMessage({
-      customerName: nasiya.customer.name,
-      customerPhone: nasiya.customer.phone,
-      device: presentDeviceSpecs(nasiya.device),
-      month: schedule.monthNumber,
-      amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency),
-      contractCurrency: nasiya.contractCurrency,
-      dueDate: schedule.delayedUntil ?? schedule.dueDate,
-      currency: await reminderCurrency(nasiya.shop),
-    })
-    for (const admin of nasiya.shop.admins) {
-      const dedupeKey = `REMINDER:${dayKey}:${admin.telegramId}:${schedule.id}`
-      await prisma.notification.upsert({
-        where: { dedupeKey },
-        update: {},
-        create: {
-          dedupeKey,
-          shopId: nasiya.shopId,
-          type: 'REMINDER',
-          message: msg,
-          telegramId: admin.telegramId!,
-          scheduledAt: scheduledReminderSendAt(dedupeKey),
-          relatedId: schedule.id,
-          relatedType: 'NasiyaSchedule',
-        },
-      })
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // 2. Overdue — dueDate < today and still unpaid.
-  //    OVERDUE is included in the selection so chronically-overdue schedules
-  //    keep alerting every day (deduped per day by dayKey), not just once.
-  //    PAID/COMPLETED schedules fall out because their status is no longer in
-  //    this set. Cancelled/returned nasiyas are excluded via the parent status
-  //    filter below. reminderEnabled is intentionally NOT a selection filter:
-  //    disabling Telegram alerts must not disable the business status change.
-  // -------------------------------------------------------------------------
-
-  const overdue = await prisma.nasiyaSchedule.findMany({
-    where: {
-      OR: [
-        { delayedUntil: null, dueDate: { lt: today } },
-        { delayedUntil: { lt: today } },
-      ],
-      status: { in: ['PENDING', 'PARTIAL', 'DEFERRED', 'OVERDUE'] },
-      nasiya: {
-        deletedAt: null,
-        status: { in: ['ACTIVE', 'OVERDUE'] },
-        shop: { status: 'ACTIVE', deletedAt: null },
-      },
-    },
-    include: {
-      nasiya: {
-        include: {
-          customer: true,
-          device: { include: { imeis: { where: { deletedAt: null } } } },
-          shop: {
-            include: {
-              admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
+          include: {
+            nasiya: {
+              include: {
+                customer: true,
+                device: { include: { imeis: { where: { deletedAt: null } } } },
+                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+              },
             },
           },
-        },
-      },
-    },
-  })
-
-  // Shops where a schedule/nasiya actually flipped to OVERDUE this run. Only
-  // these need a cache bust — repeated (idempotent) cron runs must not thrash.
-  const transitionedShopIds = new Set<string>()
-
-  for (const schedule of overdue) {
-    const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
-    const daysLate = Math.floor((today.getTime() - effectiveDue.getTime()) / 86400000)
-    const notifications: Array<{ dedupeKey: string; message: string; telegramId: string; scheduledAt: Date }> = []
-    if (schedule.nasiya.reminderEnabled) {
-      const msg = nasiyaOverdueMessage({
-        customerName: schedule.nasiya.customer.name,
-        customerPhone: schedule.nasiya.customer.phone,
-        device: presentDeviceSpecs(schedule.nasiya.device),
-        month: schedule.monthNumber,
-        amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), schedule.nasiya.contractCurrency),
-        contractCurrency: schedule.nasiya.contractCurrency,
-        dueDate: effectiveDue,
-        daysLate,
-        currency: await reminderCurrency(schedule.nasiya.shop),
-      })
-      notifications.push(...schedule.nasiya.shop.admins.map((admin) => {
-        const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
-        return {
-          dedupeKey,
-          message: msg,
-          telegramId: admin.telegramId!,
-          scheduledAt: scheduledReminderSendAt(dedupeKey),
-        }
-      }))
-    }
-    const transitioned = await transitionNasiyaToOverdue({
-      scheduleId: schedule.id,
-      nasiyaId: schedule.nasiya.id,
-      shopId: schedule.nasiya.shopId,
-      overdueBefore: today,
-      notifications,
-    })
-    if (transitioned) transitionedShopIds.add(schedule.nasiya.shopId)
-  }
-
-  // Bust caches only for shops whose nasiya schedules / parent status ACTUALLY
-  // flipped to OVERDUE this run, so the list, dashboard and reports refresh
-  // immediately — while the frequent cron cadence never thrashes caches on
-  // idempotent no-op runs.
-  for (const overdueShopId of transitionedShopIds) {
-    invalidateShopOverdueCron(overdueShopId)
-  }
-
-  // -------------------------------------------------------------------------
-  // 2b. Nasiya early reminders — "Ertaroq eslatilsinmi?": an extra reminder
-  //    N days before a schedule's due date, IN ADDITION TO (not instead of)
-  //    the due-day reminder above. `earlyReminderDays` varies per nasiya, so
-  //    it can't be expressed as a single DB date range — the window below is
-  //    just a bound (tomorrow..+60d, the UI's max), refined with exact
-  //    day-math in JS. A schedule whose early date has already passed never
-  //    matches "today", so it's silently skipped (no backfill) while the
-  //    due-day reminder is untouched.
-  // -------------------------------------------------------------------------
-
-  const earlyWindowEnd = new Date(tomorrow)
-  earlyWindowEnd.setUTCDate(earlyWindowEnd.getUTCDate() + 61)
-
-  const earlyCandidates = await prisma.nasiyaSchedule.findMany({
-    where: {
-      OR: [
-        { delayedUntil: null, dueDate: { gte: tomorrow, lt: earlyWindowEnd } },
-        { delayedUntil: { gte: tomorrow, lt: earlyWindowEnd } },
-      ],
-      status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
-      nasiya: {
-        deletedAt: null,
-        reminderEnabled: true,
-        earlyReminderEnabled: true,
-        shop: { status: 'ACTIVE', deletedAt: null },
-      },
-    },
-    include: {
-      nasiya: {
-        include: {
-          customer: true,
-          device: { include: { imeis: { where: { deletedAt: null } } } },
-          shop: {
-            include: {
-              admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
-            },
-          },
-        },
-      },
-    },
-  })
-
-  let earlyReminderCount = 0
-  for (const schedule of earlyCandidates) {
-    const { nasiya } = schedule
-    const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
-    const daysUntil = tashkentDaysUntil(effectiveDue, today)
-    if (!matchesEarlyReminderDay(daysUntil, nasiya.earlyReminderDays)) continue
-    earlyReminderCount++
-    const msg = nasiyaEarlyReminderMessage({
-      customerName: nasiya.customer.name,
-      customerPhone: nasiya.customer.phone,
-      device: presentDeviceSpecs(nasiya.device),
-      month: schedule.monthNumber,
-      amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency),
-      contractCurrency: nasiya.contractCurrency,
-      dueDate: effectiveDue,
-      daysLeft: daysUntil,
-      currency: await reminderCurrency(nasiya.shop),
-    })
-    for (const admin of nasiya.shop.admins) {
-      const dedupeKey = `EARLY_REMINDER:${dayKey}:${admin.telegramId}:${schedule.id}`
-      await prisma.notification.upsert({
-        where: { dedupeKey },
-        update: {},
-        create: {
-          dedupeKey,
-          shopId: nasiya.shopId,
-          type: 'EARLY_REMINDER',
-          message: msg,
-          telegramId: admin.telegramId!,
-          scheduledAt: scheduledReminderSendAt(dedupeKey),
-          relatedId: schedule.id,
-          relatedType: 'NasiyaSchedule',
-        },
-      })
-    }
-  }
-
-  const salePaymentsDueToday = await prisma.sale.findMany({
-    where: {
-      deletedAt: null,
-      paidFully: false,
-      remainingAmount: { gt: 0 },
-      reminderEnabled: true,
-      dueDate: { gte: today, lt: tomorrow },
-      shop: { status: 'ACTIVE', deletedAt: null },
-    },
-    include: {
-      customer: true,
-      device: { include: { imeis: { where: { deletedAt: null } } } },
-      shop: {
-        include: {
-          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
-        },
-      },
-    },
-  })
-
-  for (const sale of salePaymentsDueToday) {
-    const msg = saleDueTodayMessage({
-      customerName: sale.customer.name,
-      customerPhone: sale.customer.phone,
-      device: presentDeviceSpecs(sale.device),
-      remainingAmount: Number(sale.remainingAmount),
-      dueDate: sale.dueDate ?? new Date(),
-      currency: await reminderCurrency(sale.shop),
-    })
-    for (const admin of sale.shop.admins) {
-      const dedupeKey = `SALE_REMINDER:${dayKey}:${admin.telegramId}:${sale.id}`
-      await prisma.notification.upsert({
-        where: { dedupeKey },
-        update: {},
-        create: {
-          dedupeKey,
-          shopId: sale.shopId,
-          type: 'SALE_REMINDER',
-          message: msg,
-          telegramId: admin.telegramId!,
-          scheduledAt: scheduledReminderSendAt(dedupeKey),
-          relatedId: sale.id,
-          relatedType: 'Sale',
-        },
-      })
-    }
-  }
-
-  const overdueSales = await prisma.sale.findMany({
-    where: {
-      deletedAt: null,
-      paidFully: false,
-      remainingAmount: { gt: 0 },
-      reminderEnabled: true,
-      dueDate: { lt: today },
-      shop: { status: 'ACTIVE', deletedAt: null },
-    },
-    include: {
-      customer: true,
-      device: { include: { imeis: { where: { deletedAt: null } } } },
-      shop: {
-        include: {
-          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
-        },
-      },
-    },
-  })
-
-  for (const sale of overdueSales) {
-    const daysLate = sale.dueDate ? Math.floor((today.getTime() - sale.dueDate.getTime()) / 86400000) : 0
-    const msg = saleOverdueMessage({
-      customerName: sale.customer.name,
-      customerPhone: sale.customer.phone,
-      device: presentDeviceSpecs(sale.device),
-      remainingAmount: Number(sale.remainingAmount),
-      dueDate: sale.dueDate ?? new Date(),
-      daysLate,
-      currency: await reminderCurrency(sale.shop),
-    })
-    for (const admin of sale.shop.admins) {
-      const dedupeKey = `SALE_OVERDUE:${dayKey}:${admin.telegramId}:${sale.id}`
-      await prisma.notification.upsert({
-        where: { dedupeKey },
-        update: {},
-        create: {
-          dedupeKey,
-          shopId: sale.shopId,
-          type: 'SALE_OVERDUE',
-          message: msg,
-          telegramId: admin.telegramId!,
-          scheduledAt: scheduledReminderSendAt(dedupeKey),
-          relatedId: sale.id,
-          relatedType: 'Sale',
-        },
-      })
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // 3b. Sale early reminders — same mechanism as nasiya early reminders above,
-  //    for a later-payment cash sale's single dueDate.
-  // -------------------------------------------------------------------------
-
-  const saleEarlyCandidates = await prisma.sale.findMany({
-    where: {
-      deletedAt: null,
-      paidFully: false,
-      remainingAmount: { gt: 0 },
-      reminderEnabled: true,
-      earlyReminderEnabled: true,
-      dueDate: { gte: tomorrow, lt: earlyWindowEnd },
-      shop: { status: 'ACTIVE', deletedAt: null },
-    },
-    include: {
-      customer: true,
-      device: { include: { imeis: { where: { deletedAt: null } } } },
-      shop: {
-        include: {
-          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
-        },
-      },
-    },
-  })
-
-  let saleEarlyReminderCount = 0
-  for (const sale of saleEarlyCandidates) {
-    if (!sale.dueDate) continue
-    const daysUntil = tashkentDaysUntil(sale.dueDate, today)
-    if (!matchesEarlyReminderDay(daysUntil, sale.earlyReminderDays)) continue
-    saleEarlyReminderCount++
-    const msg = saleEarlyReminderMessage({
-      customerName: sale.customer.name,
-      customerPhone: sale.customer.phone,
-      device: presentDeviceSpecs(sale.device),
-      remainingAmount: Number(sale.remainingAmount),
-      dueDate: sale.dueDate,
-      daysLeft: daysUntil,
-      currency: await reminderCurrency(sale.shop),
-    })
-    for (const admin of sale.shop.admins) {
-      const dedupeKey = `SALE_EARLY_REMINDER:${dayKey}:${admin.telegramId}:${sale.id}`
-      await prisma.notification.upsert({
-        where: { dedupeKey },
-        update: {},
-        create: {
-          dedupeKey,
-          shopId: sale.shopId,
-          type: 'SALE_EARLY_REMINDER',
-          message: msg,
-          telegramId: admin.telegramId!,
-          scheduledAt: scheduledReminderSendAt(dedupeKey),
-          relatedId: sale.id,
-          relatedType: 'Sale',
-        },
-      })
-    }
-  }
-
-  // -------------------------------------------------------------------------
-  // 4. Supplier payable reminders ("Olib-sotdim" — money WE owe an external
-  //    supplier). Mirrors the nasiya/sale due-today + overdue + early-reminder
-  //    pattern above exactly, on the SupplierPayable table. PAID/CANCELLED
-  //    payables are never selected (status filters below), so marking one
-  //    paid stops its reminders immediately with no separate cleanup step.
-  // -------------------------------------------------------------------------
-
-  const supplierPayableDueToday = await prisma.supplierPayable.findMany({
-    where: {
-      deletedAt: null,
-      status: 'PENDING',
-      reminderEnabled: true,
-      dueDate: { gte: today, lt: tomorrow },
-      shop: { status: 'ACTIVE', deletedAt: null },
-    },
-    include: {
-      device: { include: { imeis: { where: { deletedAt: null } } } },
-      shop: {
-        include: {
-          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
-        },
-      },
-    },
-  })
-
-  for (const payable of supplierPayableDueToday) {
-    const msg = supplierPayableDueTodayMessage({
-      device: presentDeviceSpecs(payable.device),
-      supplierName: payable.supplierName,
-      supplierPhone: payable.supplierPhone,
-      amount: Number(payable.contractAmount),
-      contractCurrency: payable.contractCurrency,
-      dueDate: payable.dueDate,
-      currency: await reminderCurrency(payable.shop),
-    })
-    for (const admin of payable.shop.admins) {
-      const dedupeKey = `SUPPLIER_PAYABLE_REMINDER:${dayKey}:${admin.telegramId}:${payable.id}`
-      await prisma.notification.upsert({
-        where: { dedupeKey },
-        update: {},
-        create: {
-          dedupeKey,
-          shopId: payable.shopId,
-          type: 'SUPPLIER_PAYABLE_REMINDER',
-          message: msg,
-          telegramId: admin.telegramId!,
-          scheduledAt: scheduledReminderSendAt(dedupeKey),
-          relatedId: payable.id,
-          relatedType: 'SupplierPayable',
-        },
-      })
-    }
-  }
-
-  const supplierPayableOverdue = await prisma.supplierPayable.findMany({
-    where: {
-      deletedAt: null,
-      status: { in: ['PENDING', 'OVERDUE'] },
-      reminderEnabled: true,
-      dueDate: { lt: today },
-      shop: { status: 'ACTIVE', deletedAt: null },
-    },
-    include: {
-      device: { include: { imeis: { where: { deletedAt: null } } } },
-      shop: {
-        include: {
-          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
-        },
-      },
-    },
-  })
-
-  for (const payable of supplierPayableOverdue) {
-    const daysLate = Math.floor((today.getTime() - payable.dueDate.getTime()) / 86400000)
-    const msg = supplierPayableOverdueMessage({
-      device: presentDeviceSpecs(payable.device),
-      supplierName: payable.supplierName,
-      supplierPhone: payable.supplierPhone,
-      amount: Number(payable.contractAmount),
-      contractCurrency: payable.contractCurrency,
-      dueDate: payable.dueDate,
-      daysLate,
-      currency: await reminderCurrency(payable.shop),
-    })
-    for (const admin of payable.shop.admins) {
-      const dedupeKey = `SUPPLIER_PAYABLE_OVERDUE:${dayKey}:${admin.telegramId}:${payable.id}`
-      await prisma.notification.upsert({
-        where: { dedupeKey },
-        update: {},
-        create: {
-          dedupeKey,
-          shopId: payable.shopId,
-          type: 'SUPPLIER_PAYABLE_OVERDUE',
-          message: msg,
-          telegramId: admin.telegramId!,
-          scheduledAt: scheduledReminderSendAt(dedupeKey),
-          relatedId: payable.id,
-          relatedType: 'SupplierPayable',
-        },
-      })
-    }
-    if (payable.status !== 'OVERDUE') {
-      await prisma.$transaction(async (tx) => {
-        const changed = await tx.supplierPayable.updateMany({
-          where: { id: payable.id, status: 'PENDING' },
-          data: { status: 'OVERDUE' },
-        })
-        if (changed.count > 0) {
-          await tx.changeEvent.create({
-            data: {
-              scopeType: 'SHOP',
-              scopeId: payable.shopId,
-              domain: 'olibSotdim',
-              entityType: 'SupplierPayable',
-              entityId: payable.id,
-              operation: 'updated',
-              mutationKind: 'supplierPayable.overdue',
-            },
+          orderBy: { id: 'asc' },
+          take,
+          ...pageAfter(cursor),
+        }),
+        async (schedule) => {
+          summary.reminders++
+          const { nasiya } = schedule
+          const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
+          const triggerDay = tashkentDayRange(effectiveDue)
+          const msg = nasiyaDueTodayMessage({
+            customerName: nasiya.customer.name,
+            customerPhone: nasiya.customer.phone,
+            device: presentDeviceSpecs(nasiya.device),
+            month: schedule.monthNumber,
+            amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency),
+            contractCurrency: nasiya.contractCurrency,
+            dueDate: effectiveDue,
+            currency: await reminderCurrency(nasiya.shop),
           })
-        }
-      })
-    }
-  }
+          for (const admin of nasiya.shop.admins) {
+            const dedupeKey = `REMINDER:${triggerDay.dayKey}:${admin.telegramId}:${schedule.id}`
+            await prisma.notification.upsert({
+              where: { dedupeKey },
+              update: {},
+              create: {
+                dedupeKey,
+                shopId: nasiya.shopId,
+                type: 'REMINDER',
+                message: msg,
+                telegramId: admin.telegramId!,
+                scheduledAt: scheduledReminderSendAt(dedupeKey, effectiveDue),
+                relatedId: schedule.id,
+                relatedType: 'NasiyaSchedule',
+              },
+            })
+          }
+        },
+      )
 
-  const supplierPayableEarlyCandidates = await prisma.supplierPayable.findMany({
-    where: {
-      deletedAt: null,
-      status: 'PENDING',
-      reminderEnabled: true,
-      earlyReminderEnabled: true,
-      dueDate: { gte: tomorrow, lt: earlyWindowEnd },
-      shop: { status: 'ACTIVE', deletedAt: null },
-    },
-    include: {
-      device: { include: { imeis: { where: { deletedAt: null } } } },
-      shop: {
-        include: {
-          admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } },
+      await runPhase(
+        'NASIYA_OVERDUE',
+        (cursor, take) => prisma.nasiyaSchedule.findMany({
+          where: {
+            OR: [
+              { delayedUntil: null, dueDate: { lt: today } },
+              { delayedUntil: { lt: today } },
+            ],
+            status: { in: ['PENDING', 'PARTIAL', 'DEFERRED', 'OVERDUE'] },
+            nasiya: {
+              deletedAt: null,
+              returnedAt: null,
+              status: { in: ['ACTIVE', 'OVERDUE'] },
+              shop: { status: 'ACTIVE', deletedAt: null },
+            },
+          },
+          include: {
+            nasiya: {
+              include: {
+                customer: true,
+                device: { include: { imeis: { where: { deletedAt: null } } } },
+                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+              },
+            },
+          },
+          orderBy: { id: 'asc' },
+          take,
+          ...pageAfter(cursor),
+        }),
+        async (schedule) => {
+          summary.overdue++
+          const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
+          const daysLate = Math.floor((today.getTime() - effectiveDue.getTime()) / DAY_MS)
+          const notifications: Array<{ dedupeKey: string; message: string; telegramId: string; scheduledAt: Date }> = []
+          if (schedule.nasiya.reminderEnabled) {
+            const msg = nasiyaOverdueMessage({
+              customerName: schedule.nasiya.customer.name,
+              customerPhone: schedule.nasiya.customer.phone,
+              device: presentDeviceSpecs(schedule.nasiya.device),
+              month: schedule.monthNumber,
+              amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), schedule.nasiya.contractCurrency),
+              contractCurrency: schedule.nasiya.contractCurrency,
+              dueDate: effectiveDue,
+              daysLate,
+              currency: await reminderCurrency(schedule.nasiya.shop),
+            })
+            notifications.push(...schedule.nasiya.shop.admins.map((admin) => {
+              const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
+              return {
+                dedupeKey,
+                message: msg,
+                telegramId: admin.telegramId!,
+                scheduledAt: scheduledReminderSendAt(dedupeKey, today),
+              }
+            }))
+          }
+          const transitioned = await transitionNasiyaToOverdue({
+            scheduleId: schedule.id,
+            nasiyaId: schedule.nasiya.id,
+            shopId: schedule.nasiya.shopId,
+            overdueBefore: today,
+            notifications,
+          })
+          if (transitioned) transitionedShopIds.add(schedule.nasiya.shopId)
+        },
+      )
+
+      await runPhase(
+        'NASIYA_EARLY',
+        (cursor, take) => prisma.nasiyaSchedule.findMany({
+          where: {
+            OR: [
+              { delayedUntil: null, dueDate: { gte: tomorrow, lt: earlyWindowEnd } },
+              { delayedUntil: { gte: tomorrow, lt: earlyWindowEnd } },
+            ],
+            status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
+            nasiya: {
+              deletedAt: null,
+              returnedAt: null,
+              status: { in: ['ACTIVE', 'OVERDUE'] },
+              reminderEnabled: true,
+              earlyReminderEnabled: true,
+              shop: { status: 'ACTIVE', deletedAt: null },
+            },
+          },
+          include: {
+            nasiya: {
+              include: {
+                customer: true,
+                device: { include: { imeis: { where: { deletedAt: null } } } },
+                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+              },
+            },
+          },
+          orderBy: { id: 'asc' },
+          take,
+          ...pageAfter(cursor),
+        }),
+        async (schedule) => {
+          const { nasiya } = schedule
+          const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
+          const triggerDay = earlyTriggerDay(effectiveDue, nasiya.earlyReminderDays)
+          if (!triggerDay || !isWithin(triggerDay, windowStart, windowEnd)) return
+          summary.earlyReminders++
+          const triggerKey = tashkentDayRange(triggerDay).dayKey
+          const msg = nasiyaEarlyReminderMessage({
+            customerName: nasiya.customer.name,
+            customerPhone: nasiya.customer.phone,
+            device: presentDeviceSpecs(nasiya.device),
+            month: schedule.monthNumber,
+            amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency),
+            contractCurrency: nasiya.contractCurrency,
+            dueDate: effectiveDue,
+            daysLeft: nasiya.earlyReminderDays!,
+            currency: await reminderCurrency(nasiya.shop),
+          })
+          for (const admin of nasiya.shop.admins) {
+            const dedupeKey = `EARLY_REMINDER:${triggerKey}:${admin.telegramId}:${schedule.id}`
+            await prisma.notification.upsert({
+              where: { dedupeKey },
+              update: {},
+              create: {
+                dedupeKey,
+                shopId: nasiya.shopId,
+                type: 'EARLY_REMINDER',
+                message: msg,
+                telegramId: admin.telegramId!,
+                scheduledAt: scheduledReminderSendAt(dedupeKey, triggerDay),
+                relatedId: schedule.id,
+                relatedType: 'NasiyaSchedule',
+              },
+            })
+          }
+        },
+      )
+
+      await runPhase(
+        'SALE_DUE',
+        (cursor, take) => prisma.sale.findMany({
+          where: {
+            deletedAt: null,
+            returnedAt: null,
+            paidFully: false,
+            remainingAmount: { gt: 0 },
+            reminderEnabled: true,
+            dueDate: { gte: windowStart, lt: windowEnd },
+            shop: { status: 'ACTIVE', deletedAt: null },
+          },
+          include: {
+            customer: true,
+            device: { include: { imeis: { where: { deletedAt: null } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+          },
+          orderBy: { id: 'asc' },
+          take,
+          ...pageAfter(cursor),
+        }),
+        async (sale) => {
+          if (!sale.dueDate) return
+          summary.saleReminders++
+          const triggerDay = tashkentDayRange(sale.dueDate)
+          const msg = saleDueTodayMessage({
+            customerName: sale.customer.name,
+            customerPhone: sale.customer.phone,
+            device: presentDeviceSpecs(sale.device),
+            remainingAmount: Number(sale.contractRemainingAmount),
+            contractCurrency: sale.contractCurrency,
+            dueDate: sale.dueDate,
+            currency: await reminderCurrency(sale.shop),
+          })
+          for (const admin of sale.shop.admins) {
+            const dedupeKey = `SALE_REMINDER:${triggerDay.dayKey}:${admin.telegramId}:${sale.id}`
+            await prisma.notification.upsert({
+              where: { dedupeKey },
+              update: {},
+              create: {
+                dedupeKey,
+                shopId: sale.shopId,
+                type: 'SALE_REMINDER',
+                message: msg,
+                telegramId: admin.telegramId!,
+                scheduledAt: scheduledReminderSendAt(dedupeKey, sale.dueDate),
+                relatedId: sale.id,
+                relatedType: 'Sale',
+              },
+            })
+          }
+        },
+      )
+
+      await runPhase(
+        'SALE_OVERDUE',
+        (cursor, take) => prisma.sale.findMany({
+          where: {
+            deletedAt: null,
+            returnedAt: null,
+            paidFully: false,
+            remainingAmount: { gt: 0 },
+            reminderEnabled: true,
+            dueDate: { lt: today },
+            shop: { status: 'ACTIVE', deletedAt: null },
+          },
+          include: {
+            customer: true,
+            device: { include: { imeis: { where: { deletedAt: null } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+          },
+          orderBy: { id: 'asc' },
+          take,
+          ...pageAfter(cursor),
+        }),
+        async (sale) => {
+          if (!sale.dueDate) return
+          summary.saleOverdue++
+          const daysLate = Math.floor((today.getTime() - sale.dueDate.getTime()) / DAY_MS)
+          const msg = saleOverdueMessage({
+            customerName: sale.customer.name,
+            customerPhone: sale.customer.phone,
+            device: presentDeviceSpecs(sale.device),
+            remainingAmount: Number(sale.contractRemainingAmount),
+            contractCurrency: sale.contractCurrency,
+            dueDate: sale.dueDate,
+            daysLate,
+            currency: await reminderCurrency(sale.shop),
+          })
+          for (const admin of sale.shop.admins) {
+            const dedupeKey = `SALE_OVERDUE:${dayKey}:${admin.telegramId}:${sale.id}`
+            await prisma.notification.upsert({
+              where: { dedupeKey },
+              update: {},
+              create: {
+                dedupeKey,
+                shopId: sale.shopId,
+                type: 'SALE_OVERDUE',
+                message: msg,
+                telegramId: admin.telegramId!,
+                scheduledAt: scheduledReminderSendAt(dedupeKey, today),
+                relatedId: sale.id,
+                relatedType: 'Sale',
+              },
+            })
+          }
+        },
+      )
+
+      await runPhase(
+        'SALE_EARLY',
+        (cursor, take) => prisma.sale.findMany({
+          where: {
+            deletedAt: null,
+            returnedAt: null,
+            paidFully: false,
+            remainingAmount: { gt: 0 },
+            reminderEnabled: true,
+            earlyReminderEnabled: true,
+            dueDate: { gte: tomorrow, lt: earlyWindowEnd },
+            shop: { status: 'ACTIVE', deletedAt: null },
+          },
+          include: {
+            customer: true,
+            device: { include: { imeis: { where: { deletedAt: null } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+          },
+          orderBy: { id: 'asc' },
+          take,
+          ...pageAfter(cursor),
+        }),
+        async (sale) => {
+          if (!sale.dueDate) return
+          const triggerDay = earlyTriggerDay(sale.dueDate, sale.earlyReminderDays)
+          if (!triggerDay || !isWithin(triggerDay, windowStart, windowEnd)) return
+          summary.saleEarlyReminders++
+          const triggerKey = tashkentDayRange(triggerDay).dayKey
+          const msg = saleEarlyReminderMessage({
+            customerName: sale.customer.name,
+            customerPhone: sale.customer.phone,
+            device: presentDeviceSpecs(sale.device),
+            remainingAmount: Number(sale.contractRemainingAmount),
+            contractCurrency: sale.contractCurrency,
+            dueDate: sale.dueDate,
+            daysLeft: sale.earlyReminderDays!,
+            currency: await reminderCurrency(sale.shop),
+          })
+          for (const admin of sale.shop.admins) {
+            const dedupeKey = `SALE_EARLY_REMINDER:${triggerKey}:${admin.telegramId}:${sale.id}`
+            await prisma.notification.upsert({
+              where: { dedupeKey },
+              update: {},
+              create: {
+                dedupeKey,
+                shopId: sale.shopId,
+                type: 'SALE_EARLY_REMINDER',
+                message: msg,
+                telegramId: admin.telegramId!,
+                scheduledAt: scheduledReminderSendAt(dedupeKey, triggerDay),
+                relatedId: sale.id,
+                relatedType: 'Sale',
+              },
+            })
+          }
+        },
+      )
+
+      await runPhase(
+        'SUPPLIER_DUE',
+        (cursor, take) => prisma.supplierPayable.findMany({
+          where: {
+            deletedAt: null,
+            status: 'PENDING',
+            reminderEnabled: true,
+            dueDate: { gte: windowStart, lt: windowEnd },
+            shop: { status: 'ACTIVE', deletedAt: null },
+          },
+          include: {
+            device: { include: { imeis: { where: { deletedAt: null } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+          },
+          orderBy: { id: 'asc' },
+          take,
+          ...pageAfter(cursor),
+        }),
+        async (payable) => {
+          summary.supplierPayableReminders++
+          const triggerDay = tashkentDayRange(payable.dueDate)
+          const msg = supplierPayableDueTodayMessage({
+            device: presentDeviceSpecs(payable.device),
+            supplierName: payable.supplierName,
+            supplierPhone: payable.supplierPhone,
+            amount: Number(payable.contractAmount),
+            contractCurrency: payable.contractCurrency,
+            dueDate: payable.dueDate,
+            currency: await reminderCurrency(payable.shop),
+          })
+          for (const admin of payable.shop.admins) {
+            const dedupeKey = `SUPPLIER_PAYABLE_REMINDER:${triggerDay.dayKey}:${admin.telegramId}:${payable.id}`
+            await prisma.notification.upsert({
+              where: { dedupeKey },
+              update: {},
+              create: {
+                dedupeKey,
+                shopId: payable.shopId,
+                type: 'SUPPLIER_PAYABLE_REMINDER',
+                message: msg,
+                telegramId: admin.telegramId!,
+                scheduledAt: scheduledReminderSendAt(dedupeKey, payable.dueDate),
+                relatedId: payable.id,
+                relatedType: 'SupplierPayable',
+              },
+            })
+          }
+        },
+      )
+
+      await runPhase(
+        'SUPPLIER_OVERDUE',
+        (cursor, take) => prisma.supplierPayable.findMany({
+          where: {
+            deletedAt: null,
+            status: { in: ['PENDING', 'OVERDUE'] },
+            reminderEnabled: true,
+            dueDate: { lt: today },
+            shop: { status: 'ACTIVE', deletedAt: null },
+          },
+          include: {
+            device: { include: { imeis: { where: { deletedAt: null } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+          },
+          orderBy: { id: 'asc' },
+          take,
+          ...pageAfter(cursor),
+        }),
+        async (payable) => {
+          summary.supplierPayableOverdue++
+          const daysLate = Math.floor((today.getTime() - payable.dueDate.getTime()) / DAY_MS)
+          const msg = supplierPayableOverdueMessage({
+            device: presentDeviceSpecs(payable.device),
+            supplierName: payable.supplierName,
+            supplierPhone: payable.supplierPhone,
+            amount: Number(payable.contractAmount),
+            contractCurrency: payable.contractCurrency,
+            dueDate: payable.dueDate,
+            daysLate,
+            currency: await reminderCurrency(payable.shop),
+          })
+          for (const admin of payable.shop.admins) {
+            const dedupeKey = `SUPPLIER_PAYABLE_OVERDUE:${dayKey}:${admin.telegramId}:${payable.id}`
+            await prisma.notification.upsert({
+              where: { dedupeKey },
+              update: {},
+              create: {
+                dedupeKey,
+                shopId: payable.shopId,
+                type: 'SUPPLIER_PAYABLE_OVERDUE',
+                message: msg,
+                telegramId: admin.telegramId!,
+                scheduledAt: scheduledReminderSendAt(dedupeKey, today),
+                relatedId: payable.id,
+                relatedType: 'SupplierPayable',
+              },
+            })
+          }
+          if (payable.status !== 'OVERDUE') {
+            await prisma.$transaction(async (tx) => {
+              const changed = await tx.supplierPayable.updateMany({
+                where: { id: payable.id, status: 'PENDING' },
+                data: { status: 'OVERDUE' },
+              })
+              if (changed.count > 0) {
+                await tx.changeEvent.create({
+                  data: {
+                    scopeType: 'SHOP',
+                    scopeId: payable.shopId,
+                    domain: 'olibSotdim',
+                    entityType: 'SupplierPayable',
+                    entityId: payable.id,
+                    operation: 'updated',
+                    mutationKind: 'supplierPayable.overdue',
+                  },
+                })
+              }
+            })
+          }
+        },
+      )
+
+      await runPhase(
+        'SUPPLIER_EARLY',
+        (cursor, take) => prisma.supplierPayable.findMany({
+          where: {
+            deletedAt: null,
+            status: 'PENDING',
+            reminderEnabled: true,
+            earlyReminderEnabled: true,
+            dueDate: { gte: tomorrow, lt: earlyWindowEnd },
+            shop: { status: 'ACTIVE', deletedAt: null },
+          },
+          include: {
+            device: { include: { imeis: { where: { deletedAt: null } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+          },
+          orderBy: { id: 'asc' },
+          take,
+          ...pageAfter(cursor),
+        }),
+        async (payable) => {
+          const triggerDay = earlyTriggerDay(payable.dueDate, payable.earlyReminderDays)
+          if (!triggerDay || !isWithin(triggerDay, windowStart, windowEnd)) return
+          summary.supplierPayableEarlyReminders++
+          const triggerKey = tashkentDayRange(triggerDay).dayKey
+          const msg = supplierPayableEarlyReminderMessage({
+            device: presentDeviceSpecs(payable.device),
+            supplierName: payable.supplierName,
+            supplierPhone: payable.supplierPhone,
+            amount: Number(payable.contractAmount),
+            contractCurrency: payable.contractCurrency,
+            dueDate: payable.dueDate,
+            daysLeft: payable.earlyReminderDays!,
+            currency: await reminderCurrency(payable.shop),
+          })
+          for (const admin of payable.shop.admins) {
+            const dedupeKey = `SUPPLIER_PAYABLE_EARLY_REMINDER:${triggerKey}:${admin.telegramId}:${payable.id}`
+            await prisma.notification.upsert({
+              where: { dedupeKey },
+              update: {},
+              create: {
+                dedupeKey,
+                shopId: payable.shopId,
+                type: 'SUPPLIER_PAYABLE_EARLY_REMINDER',
+                message: msg,
+                telegramId: admin.telegramId!,
+                scheduledAt: scheduledReminderSendAt(dedupeKey, triggerDay),
+                relatedId: payable.id,
+                relatedType: 'SupplierPayable',
+              },
+            })
+          }
+        },
+      )
+    }
+
+    if (activeLeaseToken) {
+      await releaseReminderGenerationLease(activeLeaseToken)
+      activeLeaseToken = null
+    }
+
+    for (const overdueShopId of transitionedShopIds) {
+      invalidateShopOverdueCron(overdueShopId)
+    }
+
+    const delivery = await processPendingNotifications()
+    const [expiredChanges, retainedData] = await Promise.all([
+      cleanupExpiredChangeEvents(),
+      cleanupRetainedOperationalData(),
+    ])
+    // `runPhase` mutates this captured state; TypeScript's control-flow
+    // analysis intentionally does not infer closure side effects.
+    const generationOk = (generationStatus as GenerationStatus) === 'complete'
+    const runOk = generationOk && delivery.ok
+    const responseStatus = delivery.crashed ? 500 : runOk ? 200 : 503
+
+    await recordOpsEvent({
+      level: runOk ? 'INFO' : 'WARN',
+      event: 'cron.reminders.completed',
+      message: 'Reminders cron completed',
+      status: runOk ? 'ok' : delivery.crashed ? 'error' : 'partial',
+      metadata: {
+        ...summary,
+        generationStatus,
+        generationPhase: activePhase,
+        generationCursor: activeCursor,
+        generationWindowStart: generationWindow?.start.toISOString() ?? null,
+        generationWindowEnd: generationWindow?.end.toISOString() ?? null,
+        generationRowsProcessed,
+        notificationsAttempted: delivery.attempted,
+        notificationsSent: delivery.sent,
+        notificationsSentWithImage: delivery.sentWithImage,
+        notificationsFailed: delivery.failed,
+        notificationsCancelled: delivery.cancelled,
+        notificationsRemainingDue: delivery.remainingDue,
+        notificationsRetryScheduled: delivery.retryScheduled,
+        notificationsProcessing: delivery.processing,
+        notificationRunCrashed: delivery.crashed,
+        overdueTransitions: transitionedShopIds.size,
+        expiredChangeEventsDeleted: expiredChanges.count,
+        retainedNotificationsDeleted: retainedData.notifications,
+        retainedOpsEventsDeleted: retainedData.opsEvents,
+        retainedAuthSessionsDeleted: retainedData.authSessions,
+        retainedBusinessAuditLogsDeleted: retainedData.businessAuditLogs,
+        durationMs: Date.now() - startedAt,
+      },
+    })
+
+    return Response.json(
+      {
+        ...summary,
+        reminderGeneration: {
+          status: generationStatus,
+          phase: activePhase,
+          cursor: activeCursor,
+          windowStart: generationWindow?.start.toISOString() ?? null,
+          windowEnd: generationWindow?.end.toISOString() ?? null,
+          rowsProcessed: generationRowsProcessed,
+        },
+        notificationDelivery: delivery,
+        maintenance: {
+          expiredChangeEventsDeleted: expiredChanges.count,
+          retainedDataDeleted: retainedData,
         },
       },
-    },
-  })
-
-  let supplierPayableEarlyReminderCount = 0
-  for (const payable of supplierPayableEarlyCandidates) {
-    const daysUntil = tashkentDaysUntil(payable.dueDate, today)
-    if (!matchesEarlyReminderDay(daysUntil, payable.earlyReminderDays)) continue
-    supplierPayableEarlyReminderCount++
-    const msg = supplierPayableEarlyReminderMessage({
-      device: presentDeviceSpecs(payable.device),
-      supplierName: payable.supplierName,
-      supplierPhone: payable.supplierPhone,
-      amount: Number(payable.contractAmount),
-      contractCurrency: payable.contractCurrency,
-      dueDate: payable.dueDate,
-      daysLeft: daysUntil,
-      currency: await reminderCurrency(payable.shop),
-    })
-    for (const admin of payable.shop.admins) {
-      const dedupeKey = `SUPPLIER_PAYABLE_EARLY_REMINDER:${dayKey}:${admin.telegramId}:${payable.id}`
-      await prisma.notification.upsert({
-        where: { dedupeKey },
-        update: {},
-        create: {
-          dedupeKey,
-          shopId: payable.shopId,
-          type: 'SUPPLIER_PAYABLE_EARLY_REMINDER',
-          message: msg,
-          telegramId: admin.telegramId!,
-          scheduledAt: scheduledReminderSendAt(dedupeKey),
-          relatedId: payable.id,
-          relatedType: 'SupplierPayable',
-        },
-      })
-    }
-  }
-
-  // Flush pending Telegram notifications before the cron response completes.
-  const delivery = await processPendingNotifications()
-  const expiredChanges = await cleanupExpiredChangeEvents()
-
-  const summary = {
-    reminders: dueToday.length,
-    overdue: overdue.length,
-    saleReminders: salePaymentsDueToday.length,
-    saleOverdue: overdueSales.length,
-    earlyReminders: earlyReminderCount,
-    saleEarlyReminders: saleEarlyReminderCount,
-    supplierPayableReminders: supplierPayableDueToday.length,
-    supplierPayableOverdue: supplierPayableOverdue.length,
-    supplierPayableEarlyReminders: supplierPayableEarlyReminderCount,
-  }
-
-  await recordOpsEvent({
-    level: delivery.failed + delivery.cancelled > 0 ? 'WARN' : 'INFO',
-    event: 'cron.reminders.completed',
-    message: 'Reminders cron completed',
-    status: 'ok',
-    metadata: {
-      ...summary,
-      notificationsAttempted: delivery.attempted,
-      notificationsSent: delivery.sent,
-      notificationsSentWithImage: delivery.sentWithImage,
-      notificationsFailed: delivery.failed,
-      notificationsCancelled: delivery.cancelled,
-      overdueTransitions: transitionedShopIds.size,
-      expiredChangeEventsDeleted: expiredChanges.count,
-      durationMs: Date.now() - startedAt,
-    },
-  })
-
-  return Response.json(summary)
+      { status: responseStatus },
+    )
   } catch (error) {
+    if (activeLeaseToken) {
+      await releaseReminderGenerationLease(activeLeaseToken).catch(() => undefined)
+    }
     await recordOpsEvent({
       level: 'ERROR',
       event: 'cron.reminders.failed',

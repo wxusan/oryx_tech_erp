@@ -35,11 +35,12 @@ jobs:
       INTEGRATION_DB_RESET: 'yes'
       TEST_DATABASE_CONFIRM: reset-disposable-integration-database
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
-          node-version: 24.0.0
+          node-version: 24.x
           cache: npm
+      - run: npm install --global npm@10.9.4
       - run: npm ci
       - run: npm run prisma:generate
       - run: npm run prisma:validate

@@ -2,17 +2,21 @@ import { NextRequest } from 'next/server'
 import bcrypt from 'bcrypt'
 import { z, ZodError } from 'zod'
 import { Prisma } from '@/generated/prisma/client'
-import { badRequest, conflict, notFound, ok, serverError } from '@/lib/api-helpers'
+import { badRequest, conflict, notFound, ok, payloadTooLarge, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
 import { isTelegramIdTaken, nextTelegramVerifiedAt, normalizeTelegramId } from '@/lib/telegram-id'
 import { logger } from '@/lib/logger'
+import { currentPasswordSchema, passwordSchema } from '@/lib/validations'
+import {
+  isInvalidRequestBody,
+  isRequestBodyTooLarge,
+  readLimitedJsonBody,
+} from '@/lib/server/request-limits'
 
 const changePasswordSchema = z.object({
-  currentPassword: z.string({ error: 'Joriy parol kiritilishi shart' }).min(1, 'Joriy parol kiritilishi shart'),
-  newPassword: z
-    .string({ error: 'Yangi parol kiritilishi shart' })
-    .min(10, "Yangi parol kamida 10 ta belgidan iborat bo'lishi kerak"),
+  currentPassword: currentPasswordSchema,
+  newPassword: passwordSchema,
 })
 
 const updateTelegramSchema = z.object({
@@ -67,7 +71,7 @@ export async function PATCH(req: NextRequest) {
     const guarded = await requireSuperAdmin()
     if (!guarded.ok) return guarded.response
 
-    const body: unknown = await req.json()
+    const body = await readLimitedJsonBody(req)
     if (typeof body === 'object' && body !== null && 'telegramId' in body) {
       const parsed = updateTelegramSchema.safeParse(body)
 
@@ -219,6 +223,8 @@ export async function PATCH(req: NextRequest) {
 
     return ok({ passwordChanged: true }, 'Parol yangilandi. Qayta kiring.')
   } catch (err) {
+    if (isRequestBodyTooLarge(err)) return payloadTooLarge()
+    if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
     logger.error('[PATCH /api/admin/profile]', { event: 'api.route_error', error: err })
     return serverError()
   }

@@ -9,6 +9,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: production-release
@@ -16,7 +17,7 @@ concurrency:
 
 jobs:
   release:
-    if: inputs.confirm == 'RELEASE_PRODUCTION'
+    if: github.ref == 'refs/heads/main' && inputs.confirm == 'RELEASE_PRODUCTION'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     environment: production
@@ -24,13 +25,37 @@ jobs:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
         with:
-          node-version: 24.0.0
+          fetch-depth: 0
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24.x
           cache: npm
+      - run: npm install --global npm@10.9.4
       - run: npm ci
+      - name: Verify exact main commit and successful CI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git fetch origin main
+          test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+          ci_runs="$(gh run list --workflow ci.yml --branch main --commit "$GITHUB_SHA" --event push --status success --limit 10 --json conclusion,event,headBranch,headSha)"
+          jq -e --arg sha "$GITHUB_SHA" 'any(.[]; .conclusion == "success" and .event == "push" and .headBranch == "main" and .headSha == $sha)' <<< "$ci_runs"
       - name: Pull production configuration
         run: npx vercel@51.7.0 pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
-      - name: Build, migrate, and deploy in Vercel production
-        run: npx vercel@51.7.0 deploy --yes --prod --token="${{ secrets.VERCEL_TOKEN }}"
+      - name: Build, migrate, and create an unaliased production deployment
+        id: deploy
+        run: |
+          deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions --meta releaseCommit="$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
+          echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
+      - name: Inspect and smoke the exact production artifact
+        run: |
+          npx vercel@51.7.0 inspect "${{ steps.deploy.outputs.url }}" --token="${{ secrets.VERCEL_TOKEN }}"
+          health_json="$(npx vercel@51.7.0 curl /api/health --deployment "${{ steps.deploy.outputs.url }}" --yes --token="${{ secrets.VERCEL_TOKEN }}" -- --fail --silent --show-error --retry 3 --retry-all-errors)"
+          jq -e --arg commit "${GITHUB_SHA:0:7}" '.ok == true and .database == "ok" and .commit == $commit' <<< "$health_json"
+      - name: Recheck main and promote the verified artifact
+        run: |
+          remote_main="$(git ls-remote origin refs/heads/main | awk '{print $1}')"
+          test "$remote_main" = "$GITHUB_SHA"
+          npx vercel@51.7.0 promote "${{ steps.deploy.outputs.url }}" --yes --token="${{ secrets.VERCEL_TOKEN }}"

@@ -39,11 +39,21 @@ describe('P0-02 sale payment route guard: contract currency is authoritative', (
     expect(createBlock).toContain('appliedAmountInContractCurrency: contractPayment.appliedAmountInContractCurrency')
   })
 
-  it('keeps serializable retry, idempotency, and tenant-scoped sale lookup', () => {
+  it('replays an idempotent final payment before settlement rejection and scopes active sales to the tenant', () => {
     expect(route).toContain('where: { shopId_idempotencyKey: { shopId, idempotencyKey } }')
-    expect(route).toContain('where: { id: saleId, shopId, deletedAt: null }')
+    const replayLookup = route.indexOf('const existingPayment = await tx.salePayment.findUnique')
+    const saleLookup = route.indexOf('const sale = await tx.sale.findFirst')
+    const settlementCheck = route.indexOf('const contractPayment = applySalePaymentToContractLedger({')
+    expect(replayLookup).toBeGreaterThan(-1)
+    expect(saleLookup).toBeGreaterThan(replayLookup)
+    expect(settlementCheck).toBeGreaterThan(saleLookup)
+    const activeSaleBlock = route.slice(saleLookup, saleLookup + 300)
+    expect(activeSaleBlock).toContain('id: saleId')
+    expect(activeSaleBlock).toContain('shopId')
+    expect(activeSaleBlock).toContain('deletedAt: null')
+    expect(activeSaleBlock).toContain('returnedAt: null')
     expect(route).toContain('{ isolationLevel: Prisma.TransactionIsolationLevel.Serializable }')
-    expect(route).toContain("err.code === 'P2034' && attempt < 2")
+    expect(route).toContain('isRetryableTransactionError(err) && attempt < 2')
   })
 
   it('passes native applied and remaining values to the sale payment message', () => {

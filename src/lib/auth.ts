@@ -15,50 +15,94 @@ import NextAuth from 'next-auth'
 import Credentials from 'next-auth/providers/credentials'
 import type { NextAuthConfig } from 'next-auth'
 import bcrypt from 'bcrypt'
+import { createHash, randomUUID } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import type { UserRole } from '@/types'
+import { logger } from '@/lib/logger'
+import { initializeRequestAuditContext } from '@/lib/server/request-context'
+import {
+  checkLoginFailuresDistributed,
+  clearLoginFailuresDistributed,
+  recordLoginFailureDistributed,
+  type LoginFailureOptions,
+} from '@/lib/rate-limit-adapter'
 
 const AUTH_WINDOW_MS = 15 * 60 * 1000
 const AUTH_LOCK_MS = 10 * 60 * 1000
 const AUTH_MAX_FAILURES = 5
-const SESSION_MAX_AGE_SECONDS = 8 * 60 * 60
+const AUTH_IP_MAX_FAILURES = 20
+const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 const SESSION_UPDATE_AGE_SECONDS = 15 * 60
 const SUBSCRIPTION_GRACE_MS = 3 * 24 * 60 * 60 * 1000
 
-type AuthAttempt = { count: number; firstFailedAt: number; lockedUntil?: number }
-
-declare global {
-  var authAttempts: Map<string, AuthAttempt> | undefined
+const IDENTIFIER_THROTTLE: LoginFailureOptions = {
+  windowMs: AUTH_WINDOW_MS,
+  lockMs: AUTH_LOCK_MS,
+  max: AUTH_MAX_FAILURES,
+}
+const IP_THROTTLE: LoginFailureOptions = {
+  windowMs: AUTH_WINDOW_MS,
+  lockMs: AUTH_LOCK_MS,
+  max: AUTH_IP_MAX_FAILURES,
 }
 
-const authAttempts = global.authAttempts ?? new Map<string, AuthAttempt>()
-global.authAttempts = authAttempts
-
-function isLocked(key: string) {
-  const attempt = authAttempts.get(key)
-  return Boolean(attempt?.lockedUntil && attempt.lockedUntil > Date.now())
+function opaqueThrottleKey(value: string) {
+  return createHash('sha256').update(value).digest('hex')
 }
 
-function recordFailure(key: string) {
-  const now = Date.now()
-  const current = authAttempts.get(key)
-  const attempt =
-    current && now - current.firstFailedAt < AUTH_WINDOW_MS
-      ? { ...current, count: current.count + 1 }
-      : { count: 1, firstFailedAt: now }
+function requestIp(request: Request | undefined) {
+  const vercelForwarded = request?.headers.get('x-vercel-forwarded-for')?.split(',')[0]?.trim()
+  const forwarded = process.env.VERCEL
+    ? null
+    : request?.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+  const direct = request?.headers.get('x-real-ip')?.trim() || request?.headers.get('cf-connecting-ip')?.trim()
+  const value = vercelForwarded || forwarded || direct
+  return value && value.length <= 128 ? value : null
+}
 
-  if (attempt.count >= AUTH_MAX_FAILURES) {
-    attempt.lockedUntil = now + AUTH_LOCK_MS
+function loginThrottleKeys(provider: 'superadmin' | 'shopadmin', login: string, request?: Request) {
+  const identifierKey = `login:identity:${opaqueThrottleKey(`${provider}:${login.toLowerCase()}`)}`
+  const ip = requestIp(request)
+  return {
+    identifierKey,
+    ipKey: ip ? `login:ip:${opaqueThrottleKey(ip)}` : null,
   }
-  authAttempts.set(key, attempt)
 }
 
-function clearFailures(key: string) {
-  authAttempts.delete(key)
+async function isLoginLocked(keys: ReturnType<typeof loginThrottleKeys>) {
+  const checks = [checkLoginFailuresDistributed(keys.identifierKey, IDENTIFIER_THROTTLE)]
+  if (keys.ipKey) checks.push(checkLoginFailuresDistributed(keys.ipKey, IP_THROTTLE))
+  return (await Promise.all(checks)).some((result) => !result.allowed)
+}
+
+async function recordLoginFailure(keys: ReturnType<typeof loginThrottleKeys>) {
+  const writes = [recordLoginFailureDistributed(keys.identifierKey, IDENTIFIER_THROTTLE)]
+  if (keys.ipKey) writes.push(recordLoginFailureDistributed(keys.ipKey, IP_THROTTLE))
+  await Promise.all(writes)
 }
 
 function subscriptionCutoff() {
   return new Date(Date.now() - SUBSCRIPTION_GRACE_MS)
+}
+
+async function createServerSession(input: {
+  actorId: string
+  actorType: UserRole
+  shopId: string | null
+  sessionVersion: number
+}) {
+  const id = randomUUID()
+  await prisma.authSession.create({
+    data: {
+      id,
+      actorId: input.actorId,
+      actorType: input.actorType,
+      shopId: input.shopId,
+      sessionVersion: input.sessionVersion,
+      expiresAt: new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000),
+    },
+  })
+  return id
 }
 
 // ---------------------------------------------------------------------------
@@ -73,6 +117,7 @@ declare module 'next-auth' {
       role: UserRole
       shopId: string | null
       sessionVersion: number
+      sessionId: string
     }
   }
 
@@ -82,6 +127,7 @@ declare module 'next-auth' {
     role: UserRole
     shopId: string | null
     sessionVersion: number
+    sessionId: string
   }
 }
 
@@ -92,6 +138,7 @@ declare module '@auth/core/jwt' {
     shopId: string | null
     name: string
     sessionVersion: number
+    sessionId: string
   }
 }
 
@@ -152,7 +199,8 @@ export const authConfig: NextAuthConfig = {
         login: { label: 'Login', type: 'text' },
         password: { label: 'Parol', type: 'password' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
+        await initializeRequestAuditContext(request.headers)
         const identifier = credentials?.login
         const password = credentials?.password
 
@@ -163,15 +211,39 @@ export const authConfig: NextAuthConfig = {
         const login = identifier.trim().toLowerCase()
         if (!login) return null
 
-        const throttleKey = `super:${login}`
-        if (isLocked(throttleKey)) return null
+        const throttleKeys = loginThrottleKeys('superadmin', login, request)
+        if (await isLoginLocked(throttleKeys)) {
+          logger.warn('Authentication attempt blocked by rate limit', {
+            event: 'auth.login_blocked',
+            actorType: 'SUPER_ADMIN',
+            status: 'rate_limited',
+          })
+          return null
+        }
 
         const admin = await verifySuperAdminPassword(login, password)
         if (!admin) {
-          recordFailure(throttleKey)
+          await recordLoginFailure(throttleKeys)
+          logger.warn('Authentication failed', {
+            event: 'auth.login_failed',
+            actorType: 'SUPER_ADMIN',
+            status: 'invalid_credentials',
+          })
           return null
         }
-        clearFailures(throttleKey)
+        await clearLoginFailuresDistributed(throttleKeys.identifierKey)
+        const sessionId = await createServerSession({
+          actorId: admin.id,
+          actorType: 'SUPER_ADMIN',
+          shopId: null,
+          sessionVersion: admin.sessionVersion,
+        })
+        logger.info('Authentication succeeded', {
+          event: 'auth.login_succeeded',
+          actorId: admin.id,
+          actorType: 'SUPER_ADMIN',
+          status: 'ok',
+        })
 
         return {
           id: admin.id,
@@ -179,6 +251,7 @@ export const authConfig: NextAuthConfig = {
           role: 'SUPER_ADMIN' as UserRole,
           shopId: null,
           sessionVersion: admin.sessionVersion,
+          sessionId,
         }
       },
     }),
@@ -191,7 +264,8 @@ export const authConfig: NextAuthConfig = {
         login: { label: 'Login', type: 'text' },
         password: { label: 'Parol', type: 'password' },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
+        await initializeRequestAuditContext(request.headers)
         const login = credentials?.login
         const password = credentials?.password
 
@@ -202,15 +276,40 @@ export const authConfig: NextAuthConfig = {
         const normalizedLogin = login.trim()
         if (!normalizedLogin) return null
 
-        const throttleKey = `shop:${normalizedLogin.toLowerCase()}`
-        if (isLocked(throttleKey)) return null
+        const throttleKeys = loginThrottleKeys('shopadmin', normalizedLogin, request)
+        if (await isLoginLocked(throttleKeys)) {
+          logger.warn('Authentication attempt blocked by rate limit', {
+            event: 'auth.login_blocked',
+            actorType: 'SHOP_ADMIN',
+            status: 'rate_limited',
+          })
+          return null
+        }
 
         const admin = await verifyShopAdminPassword(normalizedLogin, password)
         if (!admin) {
-          recordFailure(throttleKey)
+          await recordLoginFailure(throttleKeys)
+          logger.warn('Authentication failed', {
+            event: 'auth.login_failed',
+            actorType: 'SHOP_ADMIN',
+            status: 'invalid_credentials',
+          })
           return null
         }
-        clearFailures(throttleKey)
+        await clearLoginFailuresDistributed(throttleKeys.identifierKey)
+        const sessionId = await createServerSession({
+          actorId: admin.id,
+          actorType: 'SHOP_ADMIN',
+          shopId: admin.shopId,
+          sessionVersion: admin.sessionVersion,
+        })
+        logger.info('Authentication succeeded', {
+          event: 'auth.login_succeeded',
+          shopId: admin.shopId,
+          actorId: admin.id,
+          actorType: 'SHOP_ADMIN',
+          status: 'ok',
+        })
 
         return {
           id: admin.id,
@@ -218,6 +317,7 @@ export const authConfig: NextAuthConfig = {
           role: 'SHOP_ADMIN' as UserRole,
           shopId: admin.shopId,
           sessionVersion: admin.sessionVersion,
+          sessionId,
         }
       },
     }),
@@ -242,6 +342,7 @@ export const authConfig: NextAuthConfig = {
         token.shopId = user.shopId
         token.name = user.name
         token.sessionVersion = user.sessionVersion
+        token.sessionId = user.sessionId
       }
       return token
     },
@@ -256,6 +357,7 @@ export const authConfig: NextAuthConfig = {
         role: token.role,
         shopId: token.shopId,
         sessionVersion: token.sessionVersion,
+        sessionId: token.sessionId,
       }
       return session
     },
@@ -264,6 +366,17 @@ export const authConfig: NextAuthConfig = {
   pages: {
     signIn: '/shop/login',
     error: '/shop/login',
+  },
+
+  events: {
+    async signOut(message) {
+      if ('token' in message && message.token?.sessionId) {
+        await prisma.authSession.updateMany({
+          where: { id: message.token.sessionId, revokedAt: null },
+          data: { revokedAt: new Date() },
+        })
+      }
+    },
   },
 }
 

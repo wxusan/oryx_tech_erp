@@ -5,9 +5,9 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, ArrowRight, CalendarClock, ClipboardList, Package, ReceiptText, TrendingUp, WalletCards } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Progress } from '@/components/ui/progress'
 import type { getShopStats } from '@/lib/server/shop-stats'
-import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
+import { formatMoneyByCurrency, formatPartitionedMoney, formatUserFacingMoney, type CurrencyContext } from '@/lib/currency'
+import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import { uzDate, uzMonthYear } from '@/lib/dates'
 import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 import { queryKeys } from '@/lib/query-keys'
@@ -19,12 +19,15 @@ type ShopStats = Awaited<ReturnType<typeof getShopStats>>
 interface UpcomingPayment {
   nasiya: {
     id: string
+    contractCurrency: 'UZS' | 'USD'
     customer: { name: string }
     device: { model: string }
   }
   dueDate: string | Date
   expectedAmount: number
   paidAmount: number
+  contractExpectedAmount: unknown
+  contractPaidAmount: unknown
   status: string
 }
 
@@ -60,7 +63,11 @@ function activityLabel(action: string) {
 }
 
 function outstanding(payment: UpcomingPayment) {
-  return Math.max(0, Number(payment.expectedAmount) - Number(payment.paidAmount ?? 0))
+  return contractScheduleOutstanding(
+    Number(payment.contractExpectedAmount),
+    Number(payment.contractPaidAmount),
+    payment.nasiya.contractCurrency,
+  )
 }
 
 function statusLabel(status: string) {
@@ -88,8 +95,18 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
 
   const grossCashIn = stats.grossCashInThisMonth ?? stats.cashCollectedThisMonth
   const netCashFlow = stats.netCashFlowThisMonth ?? stats.netCashAfterReturnsThisMonth
-  const collectionBase = grossCashIn + stats.expectedThisMonth
-  const collectionRate = collectionBase > 0 ? Math.round((grossCashIn / collectionBase) * 100) : 0
+  const expectedText = formatPartitionedMoney({
+    amountUzs: stats.expectedThisMonthUzs,
+    amountUsd: stats.expectedThisMonthUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+  const overdueText = formatPartitionedMoney({
+    amountUzs: stats.overdueMoneyUzs,
+    amountUsd: stats.overdueMoneyUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
 
   return (
     <div className="p-6 space-y-6 max-w-7xl">
@@ -125,16 +142,14 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
                 Sof tushum: {fmtBase(netCashFlow, currency)} · qaytarishlar ayirilgan, qabul qilingan pul
               </div>
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between text-xs text-zinc-500">
-                <span>Yig'ilgan ulush</span>
-                <span className="font-semibold text-zinc-800">{collectionRate}%</span>
+            <div className="rounded-md bg-zinc-50 px-3 py-2">
+              <div className="flex items-center justify-between gap-3 text-xs text-zinc-500">
+                <span>Shu oy hali kutilmoqda</span>
+                <span className="font-semibold text-zinc-800">{expectedText}</span>
               </div>
-              <Progress value={collectionRate} />
-              <div className="flex items-center justify-between text-xs text-zinc-500">
-                <span>Kutilmoqda: {fmt(stats.expectedThisMonth, currency)}</span>
-                <span>Umumiy aylanma + kutilayotgan: {fmt(collectionBase, currency)}</span>
-              </div>
+              <p className="mt-1 text-xs text-zinc-500">
+                Qabul qilingan pul va ochiq majburiyatlar alohida ko'rsatiladi; ular turli shartnoma davrlaridan bo'lishi mumkin.
+              </p>
             </div>
             <KoLink href="/shop/hisobot" />
           </CardContent>
@@ -181,7 +196,7 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
                 </CardAction>
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-red-700">{fmt(stats.overdueMoney, currency)}</div>
+                <div className="text-2xl font-bold text-red-700">{overdueText}</div>
                 <p className="mt-2 text-xs text-red-700/70">{stats.overdueCount} ta muddatdan o'tgan yozuv · joriy kurs bo'yicha</p>
               </CardContent>
             </Card>
@@ -206,7 +221,7 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
           <CardContent>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-xs text-zinc-500">Naqd sotuvlar</div>
+                <div className="text-xs text-zinc-500">Sotuvlar</div>
                 <div className="mt-1 text-xl font-bold text-zinc-900">{stats.soldThisMonth}</div>
               </div>
               <ReceiptText className="size-5 text-zinc-400" />
@@ -233,7 +248,7 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
                 <div className="text-xs text-zinc-500" title="Har bir shartnoma o'z valyutasidan joriy kurs bo'yicha bir marta hisoblanadi">
                   Bu oy kutilmoqda
                 </div>
-                <div className="mt-1 text-xl font-bold text-zinc-900">{fmt(stats.expectedThisMonth, currency)}</div>
+                <div className="mt-1 text-xl font-bold text-zinc-900">{expectedText}</div>
               </div>
               <CalendarClock className="size-5 text-zinc-400" />
             </div>
@@ -271,7 +286,14 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
                     </Badge>
                   </div>
                   <div className="text-right">
-                    <div className="text-sm font-semibold text-zinc-900">{fmt(outstanding(p), currency)}</div>
+                    <div className="text-sm font-semibold text-zinc-900">
+                      {formatUserFacingMoney({
+                        amount: outstanding(p),
+                        amountCurrency: p.nasiya.contractCurrency,
+                        displayCurrency: currency.currency,
+                        rate: currency.usdUzsRate,
+                      })}
+                    </div>
                     <div className="mt-0.5 text-xs text-zinc-400">qolgan</div>
                   </div>
                 </IntentPrefetchLink>

@@ -66,8 +66,8 @@ describe('nasiya: phone validated on the customer step, before step 3', () => {
   })
 
   it('shows the phone error inline under the Mijoz tel input', () => {
-    expect(src).toContain('{phoneError && <p')
-    expect(src).toContain('aria-invalid={!!phoneError}')
+    expect(src).toContain('<Field label="Mijoz tel raqami" required error={phoneError || undefined}>')
+    expect(read('src/components/ui/field.tsx')).toContain("'aria-invalid': error ? true")
   })
 
   it('keeps the shared phone rule (imports the helper, no ad-hoc regex)', () => {

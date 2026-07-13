@@ -7,6 +7,10 @@ import { z } from 'zod'
 import { MAX_NASIYA_INTEREST_PERCENT } from '@/lib/nasiya-utils'
 import { isValidPhone, normalizeUzPhone, PHONE_ERROR } from '@/lib/phone'
 import { isValidImei } from '@/lib/device-specs'
+import {
+  BCRYPT_PASSWORD_TOO_LONG_MESSAGE,
+  isBcryptPasswordWithinLimit,
+} from '@/lib/password-policy'
 
 // ---------------------------------------------------------------------------
 // Shared field schemas
@@ -18,9 +22,15 @@ export const phoneSchema = z
   .refine(isValidPhone, PHONE_ERROR)
   .transform((phone) => normalizeUzPhone(phone)!)
 
-const passwordSchema = z
+export const passwordSchema = z
   .string({ error: "Parol kiritilishi shart" })
   .min(10, "Parol kamida 10 ta belgidan iborat bo'lishi kerak")
+  .refine(isBcryptPasswordWithinLimit, BCRYPT_PASSWORD_TOO_LONG_MESSAGE)
+
+export const currentPasswordSchema = z
+  .string({ error: 'Joriy parol kiritilishi shart' })
+  .min(1, 'Joriy parol kiritilishi shart')
+  .refine(isBcryptPasswordWithinLimit, BCRYPT_PASSWORD_TOO_LONG_MESSAGE)
 
 const telegramIdInputSchema = z
   .string()
@@ -108,7 +118,8 @@ export const createShopSchema = z.object({
   note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
   admins: z
     .array(shopAdminInputSchema)
-    .min(1, "Kamida bitta admin qo'shilishi shart"),
+    .min(1, "Kamida bitta admin qo'shilishi shart")
+    .max(20, "Ko'pi bilan 20 ta admin qo'shish mumkin"),
 })
 
 export type CreateShopInput = z.infer<typeof createShopSchema>
@@ -345,6 +356,14 @@ export const importNasiyaSchema = z
   })
   .refine((data) => data.remainingDebt <= data.originalTotalAmount, {
     message: "Qolgan qarz eski nasiya umumiy summasidan oshmasligi kerak",
+    path: ['remainingDebt'],
+  })
+  .refine((data) => {
+    const units = data.inputCurrency === 'USD' ? 100 : 1
+    return Math.round(data.originalTotalAmount * units) ===
+      Math.round((data.alreadyPaidBeforeImport + data.remainingDebt) * units)
+  }, {
+    message: "Eski nasiya jami to'langan summa va qolgan qarz yig'indisiga teng bo'lishi kerak",
     path: ['remainingDebt'],
   })
   .refine((data) => !data.secondaryImei || Boolean(data.imei), { message: 'Ikkinchi IMEI uchun asosiy IMEI ham kiritilishi kerak', path: ['secondaryImei'] })

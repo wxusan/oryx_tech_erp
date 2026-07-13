@@ -1,3 +1,5 @@
+import { hasValidMinorUnits, type CurrencyCode } from '@/lib/currency'
+
 export type PaymentBreakdownMethod = 'CASH' | 'TRANSFER' | 'CARD' | 'OTHER'
 
 export interface PaymentBreakdownPart {
@@ -20,7 +22,7 @@ export interface PaymentBreakdownPart {
  *
  * Returns an error message string, or `null` when valid.
  */
-export function validatePaymentBreakdown(parts: PaymentBreakdownPart[], total: number): string | null {
+export function validatePaymentBreakdown(parts: PaymentBreakdownPart[], total: number, currency: CurrencyCode = 'UZS'): string | null {
   if (parts.length < 2) {
     return "Aralash to'lov kamida 2 ta usulni o'z ichiga olishi kerak"
   }
@@ -30,6 +32,11 @@ export function validatePaymentBreakdown(parts: PaymentBreakdownPart[], total: n
     }
     if (!Number.isFinite(part.amount) || part.amount <= 0) {
       return "Har bir qism musbat summa bo'lishi kerak"
+    }
+    if (!hasValidMinorUnits(part.amount, currency)) {
+      return currency === 'UZS'
+        ? "Har bir UZS qismi butun so'mda kiritilishi kerak"
+        : "Har bir USD qismi ko'pi bilan 2 kasr xonali bo'lishi kerak"
     }
   }
   const methods = parts.map((p) => p.method)

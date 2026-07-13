@@ -33,6 +33,12 @@ export function conflict(error: string): NextResponse<ApiResponse> {
   return NextResponse.json({ success: false, error }, { status: 409 })
 }
 
+export function payloadTooLarge(
+  error = "So'rov hajmi ruxsat etilgan chegaradan oshdi",
+): NextResponse<ApiResponse> {
+  return NextResponse.json({ success: false, error }, { status: 413 })
+}
+
 export function serverError(error = "Server xatosi yuz berdi"): NextResponse<ApiResponse> {
   return NextResponse.json({ success: false, error }, { status: 500 })
 }

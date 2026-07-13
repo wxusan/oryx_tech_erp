@@ -30,9 +30,11 @@ describe('schema: optional admin override, never read by accounting logic', () =
 describe('GET /api/customers (list) includes a trust badge per customer', () => {
   const source = read('src/app/api/customers/route.ts')
 
-  it('computes the rating from each customer\'s nested nasiya/schedules and applies any override', () => {
-    expect(source).toContain('computeCustomerTrustRating(nasiyaInputs, new Date(), override)')
+  it('computes the badge from a bounded one-row-per-customer aggregate and applies any override', () => {
+    expect(source).toContain('getCustomerTrustFactorsForList')
+    expect(source).toContain('computeCustomerTrustRatingFromFactors(')
     expect(source).toContain('isValidTrustTier(trustOverride)')
+    expect(source).not.toContain('schedules: {')
   })
 
   it('the list payload only carries tier/label/color (reasons fetched on demand for the full profile)', () => {

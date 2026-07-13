@@ -3,6 +3,9 @@ import 'server-only'
 import { getSupabaseAdminClient, PRIVATE_STORAGE_BUCKET } from '@/lib/supabase-admin'
 
 export const PRIVATE_UPLOAD_MAX_FILE_SIZE = 5 * 1024 * 1024
+export const PRIVATE_UPLOAD_MAX_REQUEST_SIZE = PRIVATE_UPLOAD_MAX_FILE_SIZE + 256 * 1024
+export const PRIVATE_UPLOAD_MAX_PIXELS = 20_000_000
+export const PRIVATE_UPLOAD_MAX_DIMENSION = 8_192
 export const PRIVATE_UPLOAD_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
 
 const BUCKET_CHECK_TTL_MS = 10 * 60_000

@@ -20,6 +20,7 @@ import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from
 import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaPaymentMessage, nasiyaCompletedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
+import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
@@ -28,8 +29,61 @@ import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
 import { validatePaymentBreakdown, representativePaymentMethod } from '@/lib/payment-breakdown'
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
+import { canonicalPaymentBreakdown, sameInstant, sameMoney, sameOptionalText } from '@/lib/idempotency-replay'
 
 type RouteContext = { params: Promise<{ id: string }> }
+
+type ExistingPaymentForReplay = {
+  nasiyaId: string
+  nasiyaScheduleId: string | null
+  amount: unknown
+  paymentMethod: string | null
+  paymentBreakdown: unknown
+  paidAt: Date
+  note: string | null
+  paymentInputAmount: unknown | null
+  paymentInputCurrency: 'UZS' | 'USD' | null
+}
+
+/**
+ * An idempotency key identifies the complete durable payment command, not just
+ * the target contract. Replaying the same command is safe; changing any field
+ * that was persisted with the payment is a conflict.
+ *
+ * Older multi-schedule rows stored a null nasiyaScheduleId, so that one field
+ * cannot be proven for those legacy rows. New rows always store the originally
+ * selected schedule below, making future comparisons complete.
+ */
+function matchesExistingPaymentPayload(
+  existing: ExistingPaymentForReplay,
+  submitted: {
+    nasiyaId: string
+    nasiyaScheduleId: string
+    amount: number
+    inputCurrency: 'UZS' | 'USD'
+    paymentMethod: string | undefined
+    paymentBreakdown: unknown
+    paidAt: Date
+    note: string | undefined
+  },
+): boolean {
+  if (existing.nasiyaId !== submitted.nasiyaId) return false
+  if (existing.nasiyaScheduleId !== null && existing.nasiyaScheduleId !== submitted.nasiyaScheduleId) return false
+
+  const storedCurrency = existing.paymentInputCurrency ?? 'UZS'
+  if (storedCurrency !== submitted.inputCurrency) return false
+  const storedInputAmount = Number(existing.paymentInputAmount ?? existing.amount)
+  if (!sameMoney(storedInputAmount, submitted.amount, storedCurrency)) return false
+  if (existing.paymentMethod !== (submitted.paymentMethod ?? null)) return false
+  if (
+    canonicalPaymentBreakdown(existing.paymentBreakdown, storedCurrency) !==
+    canonicalPaymentBreakdown(submitted.paymentBreakdown, submitted.inputCurrency)
+  ) {
+    return false
+  }
+  if (!sameInstant(existing.paidAt, submitted.paidAt)) return false
+  return sameOptionalText(existing.note, submitted.note)
+}
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
@@ -56,7 +110,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // to the payment amount; the existing paymentMethod field stays
     // populated with a representative value so no existing reader breaks.
     if (paymentBreakdown) {
-      const breakdownError = validatePaymentBreakdown(paymentBreakdown, amount)
+      const breakdownError = validatePaymentBreakdown(paymentBreakdown, amount, parsed.data.inputCurrency ?? 'UZS')
       if (breakdownError) return badRequest(breakdownError)
     }
     const effectivePaymentMethod = paymentBreakdown ? representativePaymentMethod(paymentBreakdown) : paymentMethod
@@ -65,7 +119,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
-    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    // Distributed when Upstash is configured; bounded in-process fallback otherwise.
     const rate = await checkRateLimitDistributed(rateLimitKey('nasiya-payment', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
@@ -131,35 +185,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             },
           })
           if (!nasiya) throw { status: 404, message: 'Nasiya topilmadi' }
-          const currentContractStatus = deriveContractNasiyaStatus({
-            status: nasiya.status,
-            contractCurrency: nasiya.contractCurrency,
-            contractFinalAmount: Number(nasiya.contractFinalAmount),
-            contractRemainingAmount: Number(nasiya.contractRemainingAmount),
-            schedules: nasiya.schedules.map((schedule) => ({
-              status: schedule.status,
-              dueDate: schedule.dueDate,
-              delayedUntil: schedule.delayedUntil,
-              expectedAmount: Number(schedule.expectedAmount),
-              paidAmount: Number(schedule.paidAmount),
-              contractExpectedAmount: Number(schedule.contractExpectedAmount),
-              contractPaidAmount: Number(schedule.contractPaidAmount),
-            })),
-          })
-          // A raw COMPLETED parent can be stale after legacy-UZS/contract FX
-          // drift. Reject only a contract-complete nasiya so its real final
-          // payment remains possible.
-          if (currentContractStatus.displayStatus === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }
 
           if (deferredToNext && idempotencyKey) {
             const existingDeferral = await tx.nasiyaDeferral.findUnique({
               where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
             })
             if (existingDeferral) {
-              if (existingDeferral.nasiyaId !== nasiyaId || existingDeferral.nasiyaScheduleId !== nasiyaScheduleId) {
+              if (
+                existingDeferral.nasiyaId !== nasiyaId
+                || existingDeferral.nasiyaScheduleId !== nasiyaScheduleId
+                || !sameInstant(existingDeferral.delayedUntil, delayedUntil)
+                || !sameOptionalText(existingDeferral.note, auditNote)
+              ) {
                 throw {
                   status: 409,
-                  message: 'Idempotency-Key boshqa nasiya kechiktirish amali uchun ishlatilgan',
+                  message: "Idempotency-Key boshqa yoki o'zgartirilgan nasiya kechiktirish amali uchun ishlatilgan",
                 }
               }
               return {
@@ -178,21 +218,53 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
             })
             if (existingPayment) {
-              if (existingPayment.nasiyaId !== nasiyaId) {
+              if (
+                !matchesExistingPaymentPayload(existingPayment, {
+                  nasiyaId,
+                  nasiyaScheduleId,
+                  amount,
+                  inputCurrency: amountInput.inputCurrency,
+                  paymentMethod: effectivePaymentMethod,
+                  paymentBreakdown,
+                  paidAt: date,
+                  note: auditNote,
+                })
+              ) {
                 throw {
                   status: 409,
-                  message: "Idempotency-Key boshqa nasiya to'lovi uchun ishlatilgan",
+                  message: "Idempotency-Key boshqa yoki o'zgartirilgan nasiya to'lovi uchun ishlatilgan",
                 }
               }
               return {
                 nasiyaId,
-                nasiyaScheduleId: existingPayment.nasiyaScheduleId,
+                nasiyaScheduleId: existingPayment.nasiyaScheduleId ?? nasiyaScheduleId,
                 amount: Number(existingPayment.amount),
                 remaining: Number(nasiya.remainingAmount),
                 duplicate: true,
               }
             }
           }
+
+          const currentContractStatus = deriveContractNasiyaStatus({
+            status: nasiya.status,
+            contractCurrency: nasiya.contractCurrency,
+            contractFinalAmount: Number(nasiya.contractFinalAmount),
+            contractRemainingAmount: Number(nasiya.contractRemainingAmount),
+            schedules: nasiya.schedules.map((schedule) => ({
+              status: schedule.status,
+              dueDate: schedule.dueDate,
+              delayedUntil: schedule.delayedUntil,
+              expectedAmount: Number(schedule.expectedAmount),
+              paidAmount: Number(schedule.paidAmount),
+              contractExpectedAmount: Number(schedule.contractExpectedAmount),
+              contractPaidAmount: Number(schedule.contractPaidAmount),
+            })),
+          })
+          // Idempotent replays above must be returned before this terminal-state
+          // guard; otherwise retrying the final successful payment reports 409.
+          // A raw COMPLETED parent can also be stale after legacy-UZS/contract
+          // FX drift, so reject only a contract-complete nasiya.
+          if (currentContractStatus.displayStatus === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }
 
           const selectedSchedule = await tx.nasiyaSchedule.findFirst({
             where: { id: nasiyaScheduleId, nasiyaId, shopId },
@@ -358,7 +430,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             await tx.nasiyaPayment.create({
               data: {
                 nasiyaId,
-                nasiyaScheduleId: allocations.length === 1 ? allocations[0].scheduleId : null,
+                // Preserve the user's selected schedule even when the amount
+                // overflows into later schedules. It is part of the durable
+                // idempotency command and is useful audit context.
+                nasiyaScheduleId,
                 shopId,
                 amount: amountUzs,
                 paymentMethod: effectivePaymentMethod,
@@ -565,7 +640,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         result = await runPaymentTransaction()
         break
       } catch (err) {
-        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034' && attempt < 2) {
+        if (isRetryableTransactionError(err) && attempt < 2) {
           continue
         }
         throw err

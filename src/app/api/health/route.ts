@@ -8,6 +8,7 @@
 
 import { prisma } from '@/lib/prisma'
 import { logger } from '@/lib/logger'
+import { initializeRequestAuditContext } from '@/lib/server/request-context'
 
 export const dynamic = 'force-dynamic'
 
@@ -19,7 +20,8 @@ function commit(): string {
   )
 }
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
+  await initializeRequestAuditContext(request.headers)
   let database = false
   try {
     await prisma.$queryRaw`SELECT 1`

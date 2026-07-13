@@ -35,7 +35,9 @@ describe('nasiya detail page shows only the selected display currency', () => {
   })
 
   it("paymentAmountDisplay is called with the nasiya's contractCurrency", () => {
-    expect(page).toContain('paymentAmountDisplay(payment, nasiya.contractCurrency, currency)')
+    const history = read('src/components/shop/nasiya-history-sections.tsx')
+    expect(page).toContain('contractCurrency={nasiya.contractCurrency}')
+    expect(history).toContain('paymentAmountDisplay(payment, contractCurrency, currency)')
   })
 })
 

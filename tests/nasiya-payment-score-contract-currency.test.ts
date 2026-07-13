@@ -18,11 +18,11 @@ const uzsDisplay = { currency: 'UZS' as const, usdUzsRate: null }
 const usdDisplay = { currency: 'USD' as const, usdUzsRate: 12_500 }
 
 describe('computeNasiyaPaymentScore — currency-aware overdue tolerance', () => {
-  it('defaults to UZS (unchanged behavior for any caller not yet updated)', () => {
-    // 400 so'm short of a 200,000 so'm schedule, overdue -> within UZS tolerance (500), NOT overdue.
+  it("defaults to UZS and preserves every whole so'm of overdue debt", () => {
     const s = schedule({ expectedAmount: 200_000, paidAmount: 199_600, status: 'PARTIAL', dueDate: '2020-01-01T00:00:00.000Z' })
     const score = computeNasiyaPaymentScore({ schedules: [s] }, now, uzsDisplay)
-    expect(score.factors.overdueScheduleCount).toBe(0)
+    expect(score.factors.overdueScheduleCount).toBe(1)
+    expect(score.factors.currentOverdueAmount).toBe(400)
   })
 
   it('USD contract: a genuine $1 shortfall on an overdue schedule is NOT forgiven by UZS-sized tolerance', () => {

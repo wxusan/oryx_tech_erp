@@ -36,7 +36,9 @@ describe('Uzbek phone input consistency', () => {
       'src/app/api/shop-admin/profile/route.ts',
       'src/app/api/import/customers/route.ts',
     ]) {
-      expect(read(file), file).toContain("import { phoneSchema } from '@/lib/validations'")
+      expect(read(file), file).toMatch(
+        /import\s*\{[^}]*\bphoneSchema\b[^}]*\}\s*from ['"]@\/lib\/validations['"]/,
+      )
     }
   })
 })

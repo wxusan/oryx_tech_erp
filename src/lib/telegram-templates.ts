@@ -572,6 +572,7 @@ export function saleDueTodayMessage(data: {
   customerPhone?: string | null
   device: DeviceSpecs
   remainingAmount: number
+  contractCurrency?: CurrencyCode
   dueDate: Date | string
   currency?: CurrencyContext | null
 }): string {
@@ -579,7 +580,7 @@ export function saleDueTodayMessage(data: {
     '<b>⏰ Bugun to‘lov kuni</b>',
     block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
-    block(`💵 To‘lov summasi: ${telegramMoney(data.remainingAmount, data.currency)}`, '📅 Muddat: Bugun'),
+    block(`💵 To‘lov summasi: ${contractMoney(data.remainingAmount, data.contractCurrency ?? 'UZS', data.currency)}`, '📅 Muddat: Bugun'),
   )
 }
 
@@ -588,6 +589,7 @@ export function saleOverdueMessage(data: {
   customerPhone?: string | null
   device: DeviceSpecs
   remainingAmount: number
+  contractCurrency?: CurrencyCode
   dueDate: Date | string
   daysLate: number
   currency?: CurrencyContext | null
@@ -597,7 +599,7 @@ export function saleOverdueMessage(data: {
     block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      `💵 Qolgan to‘lov: ${telegramMoney(data.remainingAmount, data.currency)}`,
+      `💵 Qolgan to‘lov: ${contractMoney(data.remainingAmount, data.contractCurrency ?? 'UZS', data.currency)}`,
       `📅 Muddat: ${formatUzDate(data.dueDate)}`,
       `⏳ Kechikkan: ${escapeTelegramHtml(data.daysLate)} kun`,
     ),
@@ -639,6 +641,7 @@ export function saleEarlyReminderMessage(data: {
   customerPhone?: string | null
   device: DeviceSpecs
   remainingAmount: number
+  contractCurrency?: CurrencyCode
   dueDate: Date | string
   daysLeft: number
   currency?: CurrencyContext | null
@@ -648,7 +651,7 @@ export function saleEarlyReminderMessage(data: {
     block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      `💵 To‘lov summasi: ${telegramMoney(data.remainingAmount, data.currency)}`,
+      `💵 To‘lov summasi: ${contractMoney(data.remainingAmount, data.contractCurrency ?? 'UZS', data.currency)}`,
       `📅 Muddat: ${formatUzDate(data.dueDate)}`,
       `⏳ Qoldi: ${escapeTelegramHtml(data.daysLeft)} kun`,
     ),

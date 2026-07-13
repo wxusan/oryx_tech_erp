@@ -4,7 +4,25 @@ import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, serverError } from '@/lib/api-helpers'
 import { normalizePhone } from '@/lib/phone'
 import { logger } from '@/lib/logger'
-import { computeCustomerTrustRating, isValidTrustTier, type CustomerNasiyaInput } from '@/lib/nasiya-customer-trust'
+import {
+  computeCustomerTrustRatingFromFactors,
+  isValidTrustTier,
+  type CustomerTrustFactors,
+} from '@/lib/nasiya-customer-trust'
+import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
+
+const EMPTY_TRUST_FACTORS: CustomerTrustFactors = {
+  totalNasiyaCount: 0,
+  completedNasiyaCount: 0,
+  activeNasiyaCount: 0,
+  cancelledNasiyaCount: 0,
+  paidInstallmentCount: 0,
+  onTimeRatio: null,
+  lateInstallmentCount: 0,
+  maxDaysLate: 0,
+  currentOverdueScheduleCount: 0,
+  hasCurrentOverdue: false,
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -67,46 +85,21 @@ export async function GET(req: NextRequest) {
             nasiya: { where: { deletedAt: null, status: { not: 'CANCELLED' } } },
           },
         },
-        // Item 12 — list badge. Bounded (take is capped at 500, and each
-        // customer's own nasiya/schedule count is small), so this stays a
-        // single batched query rather than genuine per-row N+1.
-        nasiya: {
-          where: { deletedAt: null },
-          select: {
-            status: true,
-            contractCurrency: true,
-            schedules: {
-              select: {
-                status: true,
-                dueDate: true,
-                delayedUntil: true,
-                contractExpectedAmount: true,
-                contractPaidAmount: true,
-                paidAt: true,
-              },
-            },
-          },
-        },
       },
       }),
       prisma.customer.count({ where }),
     ])
 
-    const withTrust = customers.map(({ nasiya, trustOverride, ...rest }) => {
-      const nasiyaInputs: CustomerNasiyaInput[] = nasiya.map((n) => ({
-        status: n.status,
-        contractCurrency: n.contractCurrency,
-        schedules: n.schedules.map((s) => ({
-          status: s.status,
-          dueDate: s.dueDate,
-          delayedUntil: s.delayedUntil,
-          expectedAmount: Number(s.contractExpectedAmount),
-          paidAmount: Number(s.contractPaidAmount),
-          paidAt: s.paidAt,
-        })),
-      }))
+    const trustFactors = await getCustomerTrustFactorsForList({
+      shopId: resolved.shopId,
+      customerIds: customers.map((customer) => customer.id),
+    })
+    const withTrust = customers.map(({ trustOverride, ...rest }) => {
       const override = isValidTrustTier(trustOverride) ? trustOverride : null
-      const trust = computeCustomerTrustRating(nasiyaInputs, new Date(), override)
+      const trust = computeCustomerTrustRatingFromFactors(
+        trustFactors.get(rest.id) ?? EMPTY_TRUST_FACTORS,
+        override,
+      )
       return { ...rest, trust: { tier: trust.tier, label: trust.label, color: trust.color } }
     })
 

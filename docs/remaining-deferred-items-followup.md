@@ -1,5 +1,11 @@
 # Remaining deferred items — follow-up pass
 
+> **Historical snapshot:** this 2026-07-09 table is preserved as change
+> history. Later work added executable PostgreSQL integration tests, an
+> enforcing nonce CSP, a stronger distributed-rate-limit adapter, and further
+> performance remediation. Current status is authoritative only in
+> `docs/remediation/remediation-matrix.md`.
+
 Date: 2026-07-09. Scope: a same-day follow-up ticket picking up the items
 still marked PARTIAL/DEFERRED at the end of the two prior passes (17-item
 product-feature batch, `docs/product-feature-fixes.md`; production-readiness

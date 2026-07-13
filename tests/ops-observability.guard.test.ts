@@ -2,9 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// Source-level guards for the ops/observability wiring. Behavioural coverage of
-// the DB writes needs a live DB (see integration.todo.test.ts); these fail loudly
-// if the wiring or migration-safety scripts are reverted.
+// Source-level guards for the ops/observability wiring. Behavioural DB coverage
+// also runs in tests/integration; these fail quickly if wiring is reverted.
 
 function read(rel: string): string {
   return readFileSync(resolve(process.cwd(), rel), 'utf8')
@@ -83,6 +82,7 @@ describe('health endpoint safety', () => {
   const src = readFlat('src/app/api/health/route.ts')
   it('exposes only ok/timestamp/commit/database and probes the DB', () => {
     expect(src).toContain('SELECT 1')
+    expect(src).toContain('initializeRequestAuditContext(request.headers)')
     expect(src).toContain('timestamp')
     expect(src).toContain('database')
     // Must NOT leak queue internals or shop data from the public endpoint.
@@ -101,6 +101,9 @@ describe('admin ops endpoint access control', () => {
     expect(raw).toContain('notificationCounts.PENDING > 100')
     expect(raw).toContain('notificationCounts.FAILED > 0')
     expect(raw).toContain('notificationCounts.CANCELLED > 0')
+    expect(raw).toContain('oldestActionableNotification')
+    expect(raw).toContain('oldestActionableAgeSeconds > 15 * 60')
+    expect(raw).toContain('queueHealth')
   })
   it('omits notification message bodies (customer PII) from the payload', () => {
     // Scope to the failed-notification query's select block — OpsEvent.message

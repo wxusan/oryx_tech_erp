@@ -43,6 +43,7 @@ export enum NasiyaScheduleStatus {
   PARTIAL = 'PARTIAL',
   OVERDUE = 'OVERDUE',
   DEFERRED = 'DEFERRED',
+  CANCELLED = 'CANCELLED',
 }
 
 export enum ActorType {

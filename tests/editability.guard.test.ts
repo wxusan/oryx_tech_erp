@@ -2,10 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// Source-level GUARDS for the "safe editability" pass. Behavioural coverage needs
-// a live DB/session (see integration.todo.test.ts); these fail loudly if a safety
-// property is reverted: tenant scoping, audit logging, cache invalidation, and the
-// money/history locks that keep this ERP auditable.
+// Source-level guards for the "safe editability" pass. Behavioral DB coverage
+// also runs under tests/integration; these fail quickly if tenant scoping, audit
+// logging, cache invalidation, or money/history locks are reverted.
 
 function read(rel: string): string {
   return readFileSync(resolve(process.cwd(), rel), 'utf8').replace(/\s+/g, ' ')
@@ -36,6 +35,26 @@ describe('device edit safety guard', () => {
 
   it('locks the purchase price once a device is financially linked', () => {
     expect(src).toContain('isFinanciallyLinked && updateData.purchasePrice !== undefined')
+  })
+
+  it('rechecks financial state atomically before writing purchase data', () => {
+    const guardedUpdateStart = src.indexOf('const guardedUpdate = await tx.device.updateMany')
+    const guardedUpdateBlock = src.slice(guardedUpdateStart, guardedUpdateStart + 1200)
+    expect(guardedUpdateStart).toBeGreaterThan(-1)
+    expect(guardedUpdateBlock).toContain("status: 'IN_STOCK' as const")
+    expect(guardedUpdateBlock).toContain('sales: { none: { deletedAt: null } }')
+    expect(guardedUpdateBlock).toContain('nasiya: { none: { deletedAt: null } }')
+    expect(guardedUpdateBlock).toContain('if (guardedUpdate.count !== 1)')
+  })
+
+  it('soft-deletes only an atomically rechecked, unlinked IN_STOCK device', () => {
+    const guardedDeleteStart = src.indexOf('const guardedDelete = await tx.device.updateMany')
+    const guardedDeleteBlock = src.slice(guardedDeleteStart, guardedDeleteStart + 900)
+    expect(guardedDeleteStart).toBeGreaterThan(-1)
+    expect(guardedDeleteBlock).toContain("status: 'IN_STOCK'")
+    expect(guardedDeleteBlock).toContain('sales: { none: { deletedAt: null } }')
+    expect(guardedDeleteBlock).toContain('nasiya: { none: { deletedAt: null } }')
+    expect(guardedDeleteBlock).toContain('if (guardedDelete.count !== 1)')
   })
 
   it('validates active-IMEI uniqueness and backstops on the DB partial unique index', () => {
@@ -100,7 +119,11 @@ describe('sale edit safety guard', () => {
 
   it('is shop-scoped, normalizes phone, audit-logged and cache-invalidated', () => {
     expect(src).toContain('resolveActiveShopId(session, requestedShopId)')
-    expect(src).toContain('where: { id: saleId, shopId, deletedAt: null }')
+    const activeSaleLookup = src.slice(src.indexOf('const existing = await prisma.sale.findFirst'), src.indexOf('const saleUpdate ='))
+    expect(activeSaleLookup).toContain('id: saleId')
+    expect(activeSaleLookup).toContain('shopId')
+    expect(activeSaleLookup).toContain('deletedAt: null')
+    expect(activeSaleLookup).toContain('returnedAt: null')
     expect(src).toContain('normalizedPhone: normalizePhone(parsed.data.customerPhone)')
     expect(src).toContain('tx.log.create')
     expect(src).toContain('invalidateShopSaleMutation(shopId)')

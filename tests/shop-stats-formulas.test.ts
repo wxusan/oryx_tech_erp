@@ -64,7 +64,7 @@ describe('worked example: a fully-paid cash sale moves profit AND turnover toget
     )
     expect(stats.accrualGrossProfitThisMonth).toBe(1_250_000) // profit: Sotuv foydasi
     expect(stats.grossCashInThisMonth).toBe(6_250_000) // turnover: Umumiy aylanma
-    expect(stats.soldThisMonth).toBe(1) // Naqd sotuvlar count
+    expect(stats.soldThisMonth).toBe(1) // Every Sale row created this month.
   })
 })
 
@@ -93,7 +93,7 @@ describe('worked example: a sale created with NO down payment recognizes profit 
   })
 })
 
-describe('Naqd sotuvlar (cash sale count) and Ombordagi tannarx (inventory cost)', () => {
+describe('Sotuvlar (all Sale rows) and Ombordagi tannarx (inventory cost)', () => {
   it('sold-this-month count reflects every Sale row created this month, regardless of payment status', () => {
     const stats = computeShopStatsFromRows(
       baseRows({
@@ -171,6 +171,35 @@ describe('USD-native sale turnover does not drift after a rate change', () => {
   })
 })
 
+describe('return-period reversal preserves the original sale period', () => {
+  it('posts revenue/cost reversal and retained value in the return month', () => {
+    const stats = computeShopStatsFromRows(baseRows({
+      returnRefundSum: 500,
+      returnRevenueReversalSum: 1_000,
+      returnInventoryCostRecoverySum: 600,
+      returnRetainedValueSum: 200,
+      returnsThisMonth: 1,
+    }))
+
+    expect(stats.accrualRevenueBeforeReturnsThisMonth).toBe(0)
+    expect(stats.accrualRevenueThisMonth).toBe(-800)
+    expect(stats.accrualGrossProfitThisMonth).toBe(-200)
+    expect(stats.returnRevenueReversalsThisMonth).toBe(1_000)
+    expect(stats.returnInventoryCostRecoveriesThisMonth).toBe(600)
+    expect(stats.returnRetainedValueThisMonth).toBe(200)
+    expect(stats.netCashFlowThisMonth).toBe(-500)
+  })
+
+  it('keeps an original-period sale intact when no return event belongs to that month', () => {
+    const originalPeriod = computeShopStatsFromRows(baseRows({
+      cashSalesThisMonth: [{ salePrice: 1_000, device: { purchasePrice: 600 } }],
+      saleReceivedSum: 1_000,
+    }))
+    expect(originalPeriod.accrualRevenueThisMonth).toBe(1_000)
+    expect(originalPeriod.accrualGrossProfitThisMonth).toBe(400)
+  })
+})
+
 describe('mixed USD/UZS aggregation never raw-sums currencies', () => {
   it('expectedThisMonth converts each USD schedule/sale balance via convertContractAmountToUzs before summing with UZS ones', () => {
     const stats = computeShopStatsFromRows(
@@ -200,6 +229,33 @@ describe('mixed USD/UZS aggregation never raw-sums currencies', () => {
     // $100 -> 1,250,000 so'm at rate 12,500, plus the 500,000 so'm sale ->
     // 1,750,000 total. Never $100 + 500,000 = 500,100 (a meaningless raw sum).
     expect(stats.expectedThisMonth).toBe(1_250_000 + 500_000)
+  })
+
+  it('keeps native partitions when the USD rate is unavailable', () => {
+    const stats = computeShopStatsFromRows(
+      baseRows({
+        usdUzsRate: null,
+        nasiyaSchedulesForStats: [{
+          dueDate: new Date('2026-07-20'),
+          delayedUntil: null,
+          expectedAmount: 0,
+          paidAmount: 0,
+          contractExpectedAmount: 100,
+          contractPaidAmount: 0,
+          nasiya: { contractCurrency: 'USD' },
+        }],
+        unpaidSales: [{
+          dueDate: new Date('2026-07-25'),
+          remainingAmount: 0,
+          contractCurrency: 'UZS',
+          contractRemainingAmount: 500_000,
+        }],
+      }),
+    )
+    expect(stats.expectedThisMonth).toBe(500_000)
+    expect(stats.expectedThisMonthUzs).toBe(500_000)
+    expect(stats.expectedThisMonthUsd).toBe(100)
+    expect(stats.expectedThisMonthComplete).toBe(false)
   })
 })
 

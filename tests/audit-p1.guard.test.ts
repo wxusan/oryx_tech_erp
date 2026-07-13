@@ -37,6 +37,20 @@ describe('P1 money/report clarity guard', () => {
     expect(report).toContain('Qaytarilgan summa')
     expect(report).toContain('Sotuv foydasi')
   })
+
+  it('does not present a percentage made from unrelated receipt and obligation cohorts', () => {
+    const dashboard = read('src/app/(shop)/shop/dashboard/dashboard-client.tsx')
+    const report = read('src/app/(shop)/shop/hisobot/hisobot-client.tsx')
+
+    for (const source of [dashboard, report]) {
+      expect(source).not.toContain('collectionRate')
+      expect(source).not.toContain("Yig'ish darajasi")
+      expect(source).not.toContain('Kutilgan pulga nisbatan')
+      expect(source).toContain("ochiq majburiyatlar")
+    }
+    expect(dashboard).toContain('>Sotuvlar</div>')
+    expect(dashboard).not.toContain('>Naqd sotuvlar</div>')
+  })
 })
 
 describe('P1 nasiya preview consistency guard', () => {

@@ -14,7 +14,7 @@ const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: data
 async function resetBusinessData() {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
-      "ChangeEvent", "OpsEvent", "Log", "Notification", "DeviceReturn",
+      "ReminderGenerationState", "AuthSession", "ChangeEvent", "OpsEvent", "Log", "Notification", "DeviceReturn",
       "NasiyaDeferral", "NasiyaPayment", "NasiyaSchedule", "Nasiya",
       "SupplierPayable", "SalePayment", "Sale", "Customer", "Device",
       "Supplier", "ShopAdmin", "ShopPayment", "CurrencyRate", "Shop", "SuperAdmin"
@@ -52,6 +52,7 @@ function session(input: { id: string; role: 'SHOP_ADMIN' | 'SUPER_ADMIN'; shopId
       role: input.role,
       shopId: input.shopId,
       sessionVersion: 1,
+      sessionId: 'integration-session',
     },
     expires: '2099-01-01T00:00:00.000Z',
   }
@@ -263,19 +264,57 @@ describe('migration-managed active-only uniqueness', () => {
         createdBy: owner.id,
       },
     })
-    const returned = await prisma.deviceReturn.create({
+    const payment = await prisma.salePayment.create({
       data: {
         shopId: shop.id,
-        deviceId: device.id,
         saleId: sale.id,
-        refundAmount: 6_250_000,
-        refundInputAmount: 500,
-        refundInputCurrency: 'USD',
-        refundExchangeRateAtCreation: 12_500,
-        refundMethod: 'CASH',
-        note: 'Integration refund',
+        amount: 6_250_000,
+        paymentMethod: 'CASH',
+        paymentInputAmount: 500,
+        paymentInputCurrency: 'USD',
+        paymentExchangeRate: 12_500,
+        appliedAmountInContractCurrency: 500,
         createdBy: owner.id,
       },
+    })
+    const returned = await prisma.$transaction(async (tx) => {
+      const returnRow = await tx.deviceReturn.create({
+        data: {
+          shopId: shop.id,
+          deviceId: device.id,
+          saleId: sale.id,
+          idempotencyKey: 'integration-refund-snapshot',
+          ledgerVersion: 2,
+          refundAmount: 6_250_000,
+          refundInputAmount: 500,
+          refundInputCurrency: 'USD',
+          refundExchangeRateAtCreation: 12_500,
+          refundMethod: 'CASH',
+          contractCurrency: 'USD',
+          contractAmount: 500,
+          contractReceiptsAtReturn: 500,
+          contractRefundAmount: 500,
+          contractRetainedAmount: 0,
+          contractCancelledDebt: 0,
+          revenueReversalAmountUzs: 6_250_000,
+          inventoryCostRecoveryUzs: 100,
+          note: 'Integration refund',
+          createdBy: owner.id,
+        },
+      })
+      await tx.returnRefundAllocation.create({
+        data: {
+          shopId: shop.id,
+          deviceReturnId: returnRow.id,
+          salePaymentId: payment.id,
+          sourcePaymentMethod: 'CASH',
+          refundMethod: 'CASH',
+          contractCurrency: 'USD',
+          contractAmount: 500,
+          amountUzs: 6_250_000,
+        },
+      })
+      return returnRow
     })
     expect(returned).toMatchObject({
       refundInputCurrency: 'USD',
@@ -556,10 +595,20 @@ describe('transactional incremental change events', () => {
         customerId: customer.id,
         totalAmount: 1_000_000,
         downPayment: 100_000,
+        baseRemainingAmount: 900_000,
+        interestAmount: 0,
+        finalNasiyaAmount: 900_000,
         remainingAmount: 900_000,
         months: 3,
         monthlyPayment: 300_000,
         startDate: new Date('2026-01-01T00:00:00.000Z'),
+        contractTotalAmount: 1_000_000,
+        contractDownPayment: 100_000,
+        contractBaseRemainingAmount: 900_000,
+        contractInterestAmount: 0,
+        contractFinalAmount: 900_000,
+        contractMonthlyPayment: 300_000,
+        contractRemainingAmount: 900_000,
         createdBy: owner.id,
       },
     })
@@ -606,7 +655,12 @@ describe('bounded derived nasiya status projection', () => {
       data: { shopId: shop.id, name: 'Status customer', phone: '+998908181818', normalizedPhone: '998908181818' },
     })
 
-    async function createContract(index: number, dueDate: Date, paid: number) {
+    async function createContract(
+      index: number,
+      dueDate: Date,
+      paid: number,
+      scheduleStatus: 'PENDING' | 'PAID' | 'CANCELLED' = paid === 100 ? 'PAID' : 'PENDING',
+    ) {
       const device = await prisma.device.create({
         data: { shopId: shop.id, model: `Status phone ${index}`, purchasePrice: 50, imei: `76666666666666${index}`, addedBy: owner.id, status: 'SOLD_NASIYA' },
       })
@@ -631,6 +685,7 @@ describe('bounded derived nasiya status projection', () => {
           contractMonthlyPayment: 100,
           contractPaidAmount: paid,
           contractRemainingAmount: remaining,
+          status: paid === 100 ? 'COMPLETED' : 'ACTIVE',
           createdBy: owner.id,
         },
       })
@@ -646,7 +701,7 @@ describe('bounded derived nasiya status projection', () => {
           contractExpectedAmount: 100,
           contractPaidAmount: paid,
           contractRemainingAmount: remaining,
-          status: paid === 100 ? 'PAID' : 'PENDING',
+          status: scheduleStatus,
         },
       })
       return nasiya.id
@@ -655,13 +710,21 @@ describe('bounded derived nasiya status projection', () => {
     const today = await createContract(1, new Date('2026-07-12T00:00:00.000Z'), 0)
     const overdue = await createContract(2, new Date('2026-07-11T00:00:00.000Z'), 0)
     const completed = await createContract(3, new Date('2026-07-11T00:00:00.000Z'), 100)
+    const cancelledSchedule = await createContract(4, new Date('2026-07-01T00:00:00.000Z'), 0, 'CANCELLED')
     const now = new Date('2026-07-12T12:00:00.000Z')
 
     await expect(findShopNasiyaIdsByDerivedStatus({ shopId: shop.id, status: 'ACTIVE', skip: 0, take: 25, now }))
       .resolves.toMatchObject({ ids: [today], total: 1 })
     await expect(findShopNasiyaIdsByDerivedStatus({ shopId: shop.id, status: 'OVERDUE', skip: 0, take: 25, now }))
       .resolves.toMatchObject({ ids: [overdue], total: 1 })
-    await expect(findShopNasiyaIdsByDerivedStatus({ shopId: shop.id, status: 'COMPLETED', skip: 0, take: 25, now }))
-      .resolves.toMatchObject({ ids: [completed], total: 1 })
+    const completedPage = await findShopNasiyaIdsByDerivedStatus({
+      shopId: shop.id,
+      status: 'COMPLETED',
+      skip: 0,
+      take: 25,
+      now,
+    })
+    expect(completedPage.total).toBe(2)
+    expect(new Set(completedPage.ids)).toEqual(new Set([completed, cancelledSchedule]))
   })
 })

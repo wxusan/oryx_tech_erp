@@ -52,8 +52,11 @@ describe('nasiyalar list surfaces the Yakunlangan tab and excludes completed nas
 
   it('dashboard/report active-debt stats correct a raw COMPLETED parent when an unpaid native schedule remains', () => {
     const stats = read('src/lib/server/shop-stats.ts')
+    const queries = read('src/lib/server/shop-stats-queries.ts')
     expect(stats).toContain("status: { in: ['ACTIVE', 'OVERDUE'] }")
-    expect(stats).toContain('const falseCompletedNasiyaIds = new Set(')
-    expect(stats).toContain('activeNasiyalar: activeNasiyalar + falseCompletedNasiyaIds.size')
+    expect(stats).toContain('activeNasiyalar: activeNasiyalar + obligationAggregate.falseCompletedCount')
+    expect(queries).toContain("WHERE nasiya_status = 'COMPLETED' AND outstanding > 0")
+    expect(queries).toContain('count(DISTINCT nasiya_id) FILTER')
+    expect(queries).toContain('false_completed_count')
   })
 })

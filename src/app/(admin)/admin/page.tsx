@@ -26,8 +26,8 @@ import {
 } from '@/components/ui/table'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
-
-type ShopStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED'
+import { ShopStatusBadge } from '@/components/admin/shop-status-badge'
+import type { ShopStatus } from '@/lib/domain-types'
 
 interface ShopRow {
   id: string
@@ -49,28 +49,6 @@ interface AdminStats {
 
 function formatMoney(n: number) {
   return n.toLocaleString('ru-RU') + " so'm"
-}
-
-function StatusBadge({ status }: { status: ShopStatus }) {
-  if (status === 'ACTIVE') {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-900 text-white">
-        Faol
-      </span>
-    )
-  }
-  if (status === 'SUSPENDED') {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-500">
-        To&apos;xtatilgan
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-400">
-      O&apos;chirilgan
-    </span>
-  )
 }
 
 export default function DashboardPage() {
@@ -248,7 +226,7 @@ export default function DashboardPage() {
                   <TableCell className="text-sm text-zinc-500 font-mono">{formatUzPhoneDisplay(shop.ownerPhone)}</TableCell>
                   <TableCell className="text-sm text-zinc-500">{shop.shopNumber}</TableCell>
                   <TableCell>
-                    <StatusBadge status={shop.status} />
+                    <ShopStatusBadge status={shop.status} />
                   </TableCell>
                   <TableCell className="text-sm text-zinc-500">
                     {shop.subscriptionDue ? new Date(shop.subscriptionDue).toLocaleDateString('ru-RU') : '—'}

@@ -2,9 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// Source-level regression GUARDS for Telegram fixes that need a live bot / DB
-// to test behaviourally (see integration.todo.test.ts). These fail loudly if a
-// fix is reverted.
+// Source-level regression guards for Telegram wiring. HTTP and persistence
+// behavior also run in tests/integration/telegram-http.integration.test.ts.
 
 function read(rel: string): string {
   return readFileSync(resolve(process.cwd(), rel), 'utf8').replace(/\s+/g, ' ')

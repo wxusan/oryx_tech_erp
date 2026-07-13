@@ -31,7 +31,8 @@ describe('centralized image-aware Telegram delivery', () => {
   })
 
   it('a failed photo send falls back to a plain text message (never drops the notification)', () => {
-    expect(service).toContain('if ((firstError || unresolvedCount > 0)')
+    expect(service).toContain('const fallbackAllowed = unresolvedCount > 0 || (')
+    expect(service).toContain("failedMethod !== 'message'")
     expect(service).toContain('sendTelegramMessage(notification.telegramId, notification.message)')
   })
 })

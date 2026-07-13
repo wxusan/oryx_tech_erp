@@ -1,58 +1,74 @@
-# Return/refund accounting decision
+# Return/refund accounting policy
 
-Status: **approval required before F-001 implementation**.
+Status: **implemented in the remediation branch; production deployment and
+historic-data review are still pending**.
 
-The current return route restocks the device and deletes/cancels the active
-contract. That is not an immutable accounting reversal. This document isolates
-the product decisions that must be approved before schema or behavior changes.
+This file records the policy implemented by migration
+`202607130001_immutable_return_ledger` and
+`src/app/api/devices/[id]/return/route.ts`. It replaces the earlier design-only
+version of this document. It does not authorize rewriting historic records.
 
-## Recommended default policy
+## Implemented policy
 
-1. Original Sale, Nasiya, schedules and payment rows remain immutable and visible.
-2. A return creates one immutable return event plus explicit financial
-   adjustment/refund allocations.
-3. `refundAmount` is the cash/value actually returned to the customer.
-4. `retainedAmount = total customer receipts - refundAmount`.
-5. Unpaid contract principal/interest is cancelled explicitly; it is not treated
-   as refunded cash.
-6. Refund allocations reference original payments and methods. The operator may
-   not refund more through a method than was received through it without an
-   explicit approved override and reason.
-7. Inventory returns to stock only if the financial adjustment and audit records
-   commit in the same serializable, idempotent transaction.
-8. Reports record reversal effects in the return period while preserving the
-   original transaction period. Historic revenue is never rewritten silently.
-9. A completed return is corrected through a compensating adjustment, never by
-   editing/deleting the return.
+1. The original Sale or Nasiya, schedules, and payment rows remain present.
+   A returned Sale receives `returnedAt`; a returned Nasiya and its unpaid
+   schedules become `CANCELLED`. Payment rows are not deleted or rewritten.
+2. Every completed return creates one immutable `DeviceReturn` for the
+   shop-scoped idempotency key.
+3. `refundAmount` is the value actually returned to the customer. Both its
+   submitted currency/value and its UZS accounting snapshot are frozen.
+4. The return freezes contract-native receipts, refund, retained value, and
+   cancelled debt. It also freezes UZS revenue reversal, interest reversal,
+   inventory-cost recovery, and retained-value snapshots for reporting.
+5. A non-zero refund cannot exceed receipts and must be allocated to immutable
+   original Sale/Nasiya payment rows using the same payment method. Split
+   payments are allocated by their stored breakdown. There is no unrestricted
+   cross-method override.
+6. Partial and zero refunds are allowed. A reason of 5–1,000 characters is
+   always required, and retained value is explicit rather than being mistaken
+   for a refund.
+7. Unpaid contract debt is cancelled on a completed physical return. It is
+   recorded separately from refunded and retained money.
+8. Inventory returns to `IN_STOCK`, the return event, allocations, contract
+   disposition, audit log, and notification enqueue all commit in one
+   serializable transaction. Retryable serialization failures and PostgreSQL
+   deadlocks are retried up to three attempts.
+9. Duplicate requests replay the same completed event. Reusing an idempotency
+   key with different inputs is rejected.
+10. Reports and exports exclude returned contracts from current operational
+    sales/debt while preserving their original rows and exposing the immutable
+    return-period ledger.
 
-## Approval questions
-
-The accounting/product owner must approve one answer for each item:
-
-| Decision | Recommended answer | Alternatives/impact |
-|---|---|---|
-| Partial refunds | Allowed only with retained amount shown and reason required | Disallowing is simpler but may not match operations |
-| Zero refund | Allowed with explicit retained amount and reason | Disallow if legally/business inappropriate |
-| Remaining debt | Cancel on completed physical return | Keeping debt requires a non-return repossession workflow |
-| Interest already received | Allocate separately from principal and show retained/refunded portions | Treating all receipts alike loses margin explanation |
-| Refund method | Allocate against original payment methods | Unrestricted method creates cash/card reconciliation gaps |
-| Inventory cost | Device returns to inventory at frozen original purchase-cost snapshot, subject to approved impairment | Revaluing requires a separate inventory adjustment |
-| Profit reporting | Original period remains; return-period reversal/retained value is explicit | Rewriting history breaks closed-period auditability |
-| Return correction | Compensating adjustment only | Editing/deleting destroys the audit chain |
-| Repeat return | Idempotency blocks duplicates; a resold device can have a later distinct return | One lifetime return would block valid resale cycles |
-
-## Required invariant and examples
+## Reconciliation invariant
 
 For every returned contract:
 
-`original receipts - refunds = retained cash`
+`contract receipts - contract refund = contract retained value`
 
-Separately:
+Separately, cancelled unpaid debt remains a disposition field; it is never
+invented as a receipt or refund. For a non-zero refund, the sum of immutable
+refund allocations must equal the recorded contract refund and UZS refund.
 
-`cancelled unpaid debt + retained cash + refunded cash` must reconcile to the
-contract disposition without inventing receipts.
+## Proven behavior
 
-Implementation cannot begin until the approval table is signed off. Integration
-tests must cover full, partial and zero refund; open Qarz; nasiya principal and
-interest; concurrent payment/return; duplicate request; and report/export
-reconciliation.
+- Pure allocation tests cover frozen USD values, newest-first allocation,
+  split-payment allocation, and rejection of an unsupported refund method.
+- PostgreSQL route tests cover a Sale return, a Nasiya return, a zero-refund
+  return, method rejection, legacy `RETURNED` restock control, and a Nasiya
+  payment racing a return.
+- The disposable-database suite applied all 36 migrations and passed 73/73
+  integration tests on 2026-07-13.
+
+## Deliberate limits and separate approvals
+
+- This migration does not invent return events for old deleted/cancelled rows.
+  Historic candidate detection and any repair require the production repair
+  procedure in `docs/operations/recovery-and-release-runbook.md`.
+- A completed return has no edit/delete endpoint. If an operator later needs to
+  correct one, an approved compensating-adjustment workflow must be designed;
+  the immutable row must not be changed in place.
+- The current ledger stores an aggregate Nasiya interest-reversal snapshot. It
+  does not allocate each refund between principal and interest components.
+- Production behavior is not claimed until the exact commit passes CI, preview
+  browser verification, the guarded Vercel migration sequence, and post-release
+  smoke checks.

@@ -6,6 +6,9 @@ import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
 
 const CBU_USD_URL = 'https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/'
 const RATE_TTL_MS = 12 * 60 * 60 * 1000
+const MAX_FALLBACK_RATE_AGE_MS = 7 * 24 * 60 * 60 * 1000
+export const MIN_USD_UZS_RATE = 1_000
+export const MAX_USD_UZS_RATE = 100_000
 
 interface CbuRate {
   Ccy?: string
@@ -25,8 +28,9 @@ export const getShopCurrencyContext = cache(async function getShopCurrencyContex
     select: { preferredCurrency: true },
   })
   const currency = (shop?.preferredCurrency ?? 'UZS') as CurrencyCode
-  if (currency === 'UZS') return { currency, usdUzsRate: null }
-
+  // The preferred currency controls presentation, not which contract
+  // currencies may appear. A UZS-preferred shop can still have USD-native
+  // debt, so every context carries the best governed USD/UZS rate available.
   try {
     return { currency, usdUzsRate: await getUsdUzsRate() }
   } catch {
@@ -36,7 +40,7 @@ export const getShopCurrencyContext = cache(async function getShopCurrencyContex
 
 export async function getUsdUzsRate(): Promise<number> {
   const latestCbu = await latestStoredUsdRate('CBU')
-  if (latestCbu && Date.now() - latestCbu.fetchedAt.getTime() <= RATE_TTL_MS) {
+  if (latestCbu && isOperationalUsdUzsRate(latestCbu.rate) && Date.now() - latestCbu.fetchedAt.getTime() <= RATE_TTL_MS) {
     return Number(latestCbu.rate)
   }
 
@@ -45,7 +49,11 @@ export async function getUsdUzsRate(): Promise<number> {
   } catch (err) {
     await logRateFailure(err)
     const latest = await latestStoredUsdRate()
-    if (latest) return Number(latest.rate)
+    if (
+      latest &&
+      isOperationalUsdUzsRate(latest.rate) &&
+      Date.now() - latest.fetchedAt.getTime() <= MAX_FALLBACK_RATE_AGE_MS
+    ) return Number(latest.rate)
     throw new CurrencyRateUnavailableError()
   }
 }
@@ -60,7 +68,7 @@ export async function refreshUsdUzsRate(): Promise<number> {
   const json = (await response.json()) as CbuRate[]
   const item = json.find((row) => row.Ccy === 'USD') ?? json[0]
   const rate = Number(String(item?.Rate ?? '').replace(',', '.'))
-  if (!Number.isFinite(rate) || rate <= 0) throw new Error('CBU USD rate response is invalid')
+  if (!isOperationalUsdUzsRate(rate)) throw new Error('CBU USD rate response is outside the approved range')
 
   await prisma.currencyRate.create({
     data: {
@@ -74,6 +82,11 @@ export async function refreshUsdUzsRate(): Promise<number> {
   })
 
   return rate
+}
+
+export function isOperationalUsdUzsRate(value: unknown): boolean {
+  const rate = Number(value)
+  return Number.isFinite(rate) && rate >= MIN_USD_UZS_RATE && rate <= MAX_USD_UZS_RATE
 }
 
 async function latestStoredUsdRate(source?: 'CBU' | 'MANUAL') {

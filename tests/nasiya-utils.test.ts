@@ -504,15 +504,27 @@ describe('deriveNasiyaOverdue (contract display status)', () => {
     expect(d.isOverdue).toBe(false)
   })
 
-  it('a nasiya within the rounding tolerance (but not exactly 0) is effectively COMPLETED', () => {
+  it('a sub-so\'m legacy fractional remainder is arithmetic dust and effectively COMPLETED', () => {
     const d = deriveNasiyaOverdue(
       {
         status: 'ACTIVE',
-        schedules: [sch({ status: 'PARTIAL', expectedAmount: 1_000_000, paidAmount: 999_600, dueDate: new Date('2026-01-15') })],
+        schedules: [sch({ status: 'PARTIAL', expectedAmount: 1_000_000, paidAmount: 999_999.5, dueDate: new Date('2026-01-15') })],
       },
       NOW,
     )
     expect(d.displayStatus).toBe('COMPLETED')
+  })
+
+  it('an exact one-so\'m balance remains visible and overdue', () => {
+    const d = deriveNasiyaOverdue(
+      {
+        status: 'ACTIVE',
+        schedules: [sch({ status: 'PARTIAL', expectedAmount: 1_000_000, paidAmount: 999_999, dueDate: new Date('2026-01-15') })],
+      },
+      NOW,
+    )
+    expect(d.displayStatus).toBe('OVERDUE')
+    expect(d.overdueAmount).toBe(1)
   })
 
   it('a nasiya with a real outstanding balance beyond tolerance stays ACTIVE/OVERDUE, never falsely COMPLETED', () => {

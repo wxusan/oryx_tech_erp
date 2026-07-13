@@ -1,7 +1,7 @@
 'use client'
 
-import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { AlertTriangle, Building2, CalendarClock, CreditCard, Percent, ReceiptText } from 'lucide-react'
 import {
@@ -37,23 +37,25 @@ interface AdminStats {
   suspendedShops: number
   dueSoon: number
   overdue: number
-  shops: Array<{
-    id: string
-    name: string
-    ownerName: string
-    shopNumber: string
-    status: 'ACTIVE' | 'SUSPENDED' | 'DELETED'
-    subscriptionDue: string
-    payments: Array<{
-      amount: string | number
-      months: number
-      paidAt: string
-    }>
-    _count: {
-      devices: number
-      nasiya: number
-    }
-  }>
+}
+
+interface DueShop {
+  id: string
+  name: string
+  ownerName: string
+  shopNumber: string
+  subscriptionDue: string
+  _count: {
+    devices: number
+    nasiya: number
+  }
+}
+
+interface DueShopsPage {
+  items: DueShop[]
+  total: number
+  skip: number
+  take: number
 }
 
 function formatMoney(value: number) {
@@ -72,6 +74,8 @@ function daysUntil(value: string) {
 
 export default function AdminReportsPage() {
   const scope = useAuthenticatedQueryScope()
+  const [duePage, setDuePage] = useState(1)
+  const duePerPage = 12
   const statsQuery = useQuery({
     queryKey: queryKeys.list(scope, 'adminReports', { view: 'report' }),
     queryFn: async ({ signal }) => {
@@ -81,18 +85,36 @@ export default function AdminReportsPage() {
       return json.data
     },
   })
+  const dueShopsQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'adminReports', { view: 'dueShops', page: duePage, take: duePerPage }),
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({
+        skip: String((duePage - 1) * duePerPage),
+        take: String(duePerPage),
+      })
+      const response = await fetch(`/api/admin/reports/due-shops?${params.toString()}`, { signal, cache: 'no-store' })
+      const json: ApiResponse<DueShopsPage> = await response.json()
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error || "Do'konlar yuklanmadi")
+      return json.data
+    },
+    placeholderData: keepPreviousData,
+  })
   const stats = statsQuery.data ?? null
-  const loading = statsQuery.isPending && !statsQuery.data
-  const error = statsQuery.error instanceof Error ? statsQuery.error.message : ''
+  const statsLoading = statsQuery.isPending && !statsQuery.data
+  const dueLoading = dueShopsQuery.isPending && !dueShopsQuery.data
+  const error = statsQuery.error instanceof Error
+    ? statsQuery.error.message
+    : dueShopsQuery.error instanceof Error
+      ? dueShopsQuery.error.message
+      : ''
 
   const collectionRate = stats?.expectedRevenue
     ? Math.min(100, Math.round((stats.thisMonthRevenue / stats.expectedRevenue) * 100))
     : 0
   const averagePayment = stats?.totalPayments ? Math.round(stats.totalRevenue / stats.totalPayments) : 0
-  const dueRows = useMemo(
-    () => (stats?.shops ?? []).filter((shop) => shop.status === 'ACTIVE').slice(0, 12),
-    [stats],
-  )
+  const dueRows = dueShopsQuery.data?.items ?? []
+  const dueTotal = dueShopsQuery.data?.total ?? 0
+  const dueTotalPages = Math.max(1, Math.ceil(dueTotal / duePerPage))
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -125,7 +147,7 @@ export default function AdminReportsPage() {
             <div>
               <div className="text-xs font-medium uppercase text-zinc-500">Tushgan summa</div>
               <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-900">
-                {loading ? 'Yuklanmoqda...' : formatMoney(stats?.thisMonthRevenue ?? 0)}
+                {statsLoading ? 'Yuklanmoqda...' : formatMoney(stats?.thisMonthRevenue ?? 0)}
               </div>
             </div>
             <div className="space-y-2">
@@ -171,7 +193,7 @@ export default function AdminReportsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading ? (
+              {dueLoading ? (
                 <TableRow>
                   <TableCell colSpan={6} className="py-10 text-center text-sm text-zinc-400">
                     Yuklanmoqda...
@@ -206,6 +228,32 @@ export default function AdminReportsPage() {
               )}
             </TableBody>
           </Table>
+          <div className="flex flex-col gap-2 border-t border-zinc-100 px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+            <span className="text-xs text-zinc-400">
+              {dueTotal} ta faol do&apos;kondan {dueTotal === 0 ? 0 : Math.min((duePage - 1) * duePerPage + 1, dueTotal)}-{Math.min(duePage * duePerPage, dueTotal)} ko&apos;rsatilmoqda
+            </span>
+            <div className="flex items-center border border-zinc-200">
+              <button
+                type="button"
+                onClick={() => setDuePage((page) => Math.max(1, page - 1))}
+                disabled={duePage === 1 || dueShopsQuery.isFetching}
+                className="h-8 border-r border-zinc-200 px-4 text-xs text-zinc-600 transition-colors hover:bg-zinc-50 disabled:pointer-events-none disabled:opacity-40"
+              >
+                Oldingi
+              </button>
+              <span className="flex h-8 items-center px-4 text-xs text-zinc-500">
+                {duePage} / {dueTotalPages}
+              </span>
+              <button
+                type="button"
+                onClick={() => setDuePage((page) => Math.min(dueTotalPages, page + 1))}
+                disabled={duePage === dueTotalPages || dueShopsQuery.isFetching}
+                className="h-8 border-l border-zinc-200 px-4 text-xs text-zinc-600 transition-colors hover:bg-zinc-50 disabled:pointer-events-none disabled:opacity-40"
+              >
+                Keyingi
+              </button>
+            </div>
+          </div>
         </CardContent>
       </Card>
     </div>

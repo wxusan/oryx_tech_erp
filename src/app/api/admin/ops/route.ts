@@ -25,9 +25,11 @@ export async function GET(req: NextRequest) {
     const level = url.searchParams.get('level')
     const takeParam = Number(url.searchParams.get('take'))
     const take = Number.isFinite(takeParam) && takeParam > 0 ? Math.min(takeParam, 200) : 50
+    const now = new Date()
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+    const staleProcessingBefore = new Date(now.getTime() - 5 * 60 * 1000)
 
-    const [events, levelGroups, notifGroups, recentFailedNotifications, lastCron, lastCronFailure] =
+    const [events, levelGroups, notifGroups, recentFailedNotifications, lastCron, lastCronFailure, oldestActionableNotification] =
       await Promise.all([
         prisma.opsEvent.findMany({
           where: {
@@ -82,6 +84,29 @@ export async function GET(req: NextRequest) {
           orderBy: { createdAt: 'desc' },
           select: { id: true, event: true, message: true, metadata: true, createdAt: true },
         }),
+        prisma.notification.findFirst({
+          where: {
+            OR: [
+              { status: 'PENDING', scheduledAt: { lte: now } },
+              {
+                status: 'FAILED',
+                OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: now } }],
+              },
+              {
+                status: 'PROCESSING',
+                OR: [{ lastAttemptAt: null }, { lastAttemptAt: { lte: staleProcessingBefore } }],
+              },
+            ],
+          },
+          orderBy: { createdAt: 'asc' },
+          select: {
+            status: true,
+            createdAt: true,
+            scheduledAt: true,
+            nextAttemptAt: true,
+            lastAttemptAt: true,
+          },
+        }),
       ])
 
     const levelCounts = { INFO: 0, WARN: 0, ERROR: 0 } as Record<string, number>
@@ -95,6 +120,9 @@ export async function GET(req: NextRequest) {
       CANCELLED: 0,
     }
     for (const group of notifGroups) notificationCounts[group.status] = group._count._all
+    const oldestActionableAgeSeconds = oldestActionableNotification
+      ? Math.max(0, Math.floor((now.getTime() - oldestActionableNotification.createdAt.getTime()) / 1000))
+      : 0
     const notificationWarnings = [
       notificationCounts.PENDING > 100
         ? `Bildirishnoma navbati katta: ${notificationCounts.PENDING} ta PENDING`
@@ -105,6 +133,9 @@ export async function GET(req: NextRequest) {
       notificationCounts.CANCELLED > 0
         ? `CANCELLED bildirishnomalar bor: ${notificationCounts.CANCELLED} ta`
         : null,
+      oldestActionableAgeSeconds > 15 * 60
+        ? `Eng eski yuborilishi kerak bo'lgan bildirishnoma ${Math.floor(oldestActionableAgeSeconds / 60)} daqiqadan beri navbatda`
+        : null,
     ].filter((item): item is string => item !== null)
 
     return ok({
@@ -112,6 +143,11 @@ export async function GET(req: NextRequest) {
       levelCounts,
       notificationCounts,
       notificationWarnings,
+      queueHealth: {
+        oldestActionableCreatedAt: oldestActionableNotification?.createdAt ?? null,
+        oldestActionableAgeSeconds,
+        oldestActionableStatus: oldestActionableNotification?.status ?? null,
+      },
       events,
       recentFailedNotifications,
       lastCron,

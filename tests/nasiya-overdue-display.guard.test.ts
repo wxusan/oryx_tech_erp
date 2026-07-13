@@ -44,10 +44,10 @@ describe('nasiyalar list client renders the derived display status', () => {
 })
 
 describe('nasiya detail page derives each schedule from contract currency', () => {
-  const src = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
+  const src = read('src/components/shop/nasiya-history-sections.tsx')
 
   it('uses deriveContractScheduleStatus for the row badge instead of the raw status', () => {
-    expect(src).toContain('rowDisplayStatus(row, nasiya.contractCurrency)')
+    expect(src).toContain('deriveContractScheduleStatus(row, contractCurrency).displayStatus')
     expect(src).toContain('deriveContractScheduleStatus')
     expect(src).not.toContain('status={row.status as RowStatus}')
   })

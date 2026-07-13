@@ -1,6 +1,6 @@
 import type { CurrencyCode } from '@/lib/currency'
-
-export type DeviceStatus = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA' | 'RETURNED' | 'DELETED'
+import type { DeviceStatus } from '@/lib/domain-types'
+export type { DeviceStatus } from '@/lib/domain-types'
 
 export interface DeviceListSaleInfo {
   saleType: 'CASH' | 'NASIYA'

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { DateInput } from '@/components/ui/date-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
+import { Field } from '@/components/ui/field'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
@@ -21,6 +22,7 @@ import { uzDate, uzMonthYear } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import { commitNavigationMutation } from '@/lib/client-events'
+import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 
 /**
  * The single receive-payment modal used by BOTH the nasiya detail page and the
@@ -37,12 +39,12 @@ interface Schedule {
   delayedUntil: string | null
   expectedAmount: number
   paidAmount: number
-  status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED'
+  status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
   contractExpectedAmount: number
   contractPaidAmount: number
 }
 
-type RowStatus = 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED'
+type RowStatus = 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
 
 const scheduleStatusLabels: Record<RowStatus, string> = {
   PAID: "To'landi",
@@ -50,6 +52,7 @@ const scheduleStatusLabels: Record<RowStatus, string> = {
   PARTIAL: "Qisman to'landi",
   OVERDUE: "Muddati o'tgan",
   DEFERRED: "Keyinga o'tkazilgan",
+  CANCELLED: 'Bekor qilingan',
 }
 
 function scheduleBalance(row: Schedule) {
@@ -81,6 +84,7 @@ export interface NasiyaPaymentModalProps {
 }
 
 export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, customerName, deviceName }: NasiyaPaymentModalProps) {
+  const paymentCommand = useLogicalCommandIdempotency()
   const { currency } = useShopCurrency()
 
   const [schedules, setSchedules] = useState<Schedule[]>([])
@@ -277,42 +281,44 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
     setSubmitting(true)
     setPayError('')
     try {
-      const idempotencyKey = crypto.randomUUID()
+      const payload = {
+        nasiyaScheduleId: selectedScheduleId,
+        // Split mode: the submitted total is always the SUM of the two
+        // parts (never a total-minus-second-part subtraction).
+        amount: carryOver ? 0 : splitPayment ? splitTotal : Number(payAmount),
+        inputCurrency: currency.currency,
+        paymentMethod: carryOver ? undefined : payMethod,
+        paymentBreakdown:
+          !carryOver && splitPayment
+            ? [
+                { method: payMethod, amount: Number(splitAmount1Input) },
+                { method: splitMethod2, amount: Number(splitAmount2Input) },
+              ]
+            : undefined,
+        date: payDate,
+        delayedUntil: carryOver ? payDate : undefined,
+        deferredToNext: carryOver,
+        note: payNote || undefined,
+      }
       const res = await fetch(`/api/nasiya/${nasiyaId}/payment`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Idempotency-Key': idempotencyKey,
+          'Idempotency-Key': paymentCommand.keyFor(payload),
         },
-        body: JSON.stringify({
-          nasiyaScheduleId: selectedScheduleId,
-          // Split mode: the submitted total is always the SUM of the two
-          // parts (never a total-minus-second-part subtraction).
-          amount: carryOver ? 0 : splitPayment ? splitTotal : Number(payAmount),
-          inputCurrency: currency.currency,
-          paymentMethod: carryOver ? undefined : payMethod,
-          paymentBreakdown:
-            !carryOver && splitPayment
-              ? [
-                  { method: payMethod, amount: Number(splitAmount1Input) },
-                  { method: splitMethod2, amount: Number(splitAmount2Input) },
-                ]
-              : undefined,
-          date: payDate,
-          delayedUntil: carryOver ? payDate : undefined,
-          deferredToNext: carryOver,
-          note: payNote || undefined,
-        }),
+        body: JSON.stringify(payload),
       })
       const json = await res.json()
       if (res.ok && json.success) {
+        paymentCommand.committed()
         await commitNavigationMutation({
           kind: 'nasiya.paymentRecorded',
           nasiyaId,
-        })
+        }).catch(() => undefined)
         onOpenChange(false)
         onSuccess()
       } else {
+        paymentCommand.rejected(res.status)
         setPayError(json.error || "To'lovda xatolik")
       }
     } catch {
@@ -344,11 +350,11 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
             <>
               {pendingSchedules.length > 0 && (
                 <div className="space-y-2">
-                  <label className="block text-xs font-medium text-zinc-700">
-                    Qaysi oy to&apos;lovi? <span className="text-red-500">*</span>
+                  <label htmlFor="nasiya-schedule" className="block text-xs font-medium text-zinc-700">
+                    Qaysi oy to&apos;lovi? <span aria-hidden="true" className="text-red-500">*</span>
                   </label>
                   <Select value={selectedScheduleId} onValueChange={(v) => v && setSelectedScheduleId(v)}>
-                    <SelectTrigger className="h-11 w-full rounded-lg border-zinc-200 text-sm [&>span]:truncate">
+                    <SelectTrigger id="nasiya-schedule" aria-required="true" className="h-11 w-full rounded-lg border-zinc-200 text-sm [&>span]:truncate">
                       <SelectValue placeholder="To'lov oyini tanlang">
                         {selectedSchedule ? scheduleTriggerLabel(selectedSchedule) : "To'lov oyini tanlang"}
                       </SelectValue>
@@ -382,8 +388,9 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                 </div>
               )}
 
-              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-zinc-200 px-3 py-2.5 hover:bg-zinc-50">
+              <label htmlFor="nasiya-carry-over" className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-zinc-200 px-3 py-2.5 hover:bg-zinc-50">
                 <input
+                  id="nasiya-carry-over"
                   type="checkbox"
                   checked={carryOver}
                   onChange={(e) => setCarryOver(e.target.checked)}
@@ -398,8 +405,9 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
               </label>
 
               {!carryOver && (
-                <label className="flex items-center gap-2 text-xs font-medium text-zinc-700">
+                <label htmlFor="nasiya-split-payment" className="flex items-center gap-2 text-xs font-medium text-zinc-700">
                   <input
+                    id="nasiya-split-payment"
                     type="checkbox"
                     checked={splitPayment}
                     onChange={(e) => {
@@ -420,11 +428,13 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
 
               {!carryOver && !splitPayment && (
                 <div className="space-y-2">
-                  <label className="block text-xs font-medium text-zinc-700">
-                    Miqdor ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
+                  <label htmlFor="nasiya-payment-amount" className="block text-xs font-medium text-zinc-700">
+                    Miqdor ({currencyLabel(currency.currency)}) <span aria-hidden="true" className="text-red-500">*</span>
                   </label>
                   <div className="relative">
                     <MoneyInput
+                      id="nasiya-payment-amount"
+                      required
                       currency={currency.currency}
                       value={payAmount}
                       onChange={setPayAmount}
@@ -478,13 +488,14 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                   ALWAYS the sum of the two parts and is never itself editable. */}
               {!carryOver && splitPayment && (
                 <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                  <div className="space-y-1.5">
-                    <label className="block text-xs font-medium text-zinc-700">
-                      To&apos;lov usuli 1 <span className="text-red-500">*</span>
-                    </label>
+                  <fieldset className="space-y-1.5">
+                    <legend className="block text-xs font-medium text-zinc-700">
+                      To&apos;lov usuli 1 <span aria-hidden="true" className="text-red-500">*</span>
+                    </legend>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <label htmlFor="nasiya-split-method-1" className="sr-only">Birinchi to&apos;lov usuli</label>
                       <Select value={payMethod} onValueChange={(v) => v && setPayMethod(v)}>
-                        <SelectTrigger className="h-10 w-full rounded-lg border-zinc-200 text-sm">
+                        <SelectTrigger id="nasiya-split-method-1" aria-required="true" className="h-10 w-full rounded-lg border-zinc-200 text-sm">
                           <SelectValue placeholder="Usulni tanlang" />
                         </SelectTrigger>
                         <SelectContent>
@@ -494,7 +505,10 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                           <SelectItem value="OTHER">Boshqa</SelectItem>
                         </SelectContent>
                       </Select>
+                      <label htmlFor="nasiya-split-amount-1" className="sr-only">Birinchi to&apos;lov miqdori</label>
                       <MoneyInput
+                        id="nasiya-split-amount-1"
+                        required
                         currency={currency.currency}
                         value={splitAmount1Input}
                         onChange={(v) => {
@@ -540,34 +554,33 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                         Tavsiya etilgan summa: {dfmt(selectedScheduleContractOutstanding)}
                       </button>
                     )}
-                  </div>
+                  </fieldset>
 
-                  <div className="space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <label className="block text-xs font-medium text-zinc-700">
-                        To&apos;lov usuli 2 <span className="text-red-500">*</span>
-                      </label>
-                      {suggestedAmountNumber != null && (
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const remaining = Math.max(0, roundDisplayAmount(suggestedAmountNumber) - Number(splitAmount1Input || 0))
-                            setSplitAmount2Input(remaining > 0 ? formatAmountForInput(remaining) : '')
-                            // Resuming auto-follow — the button IS the
-                            // auto-fill action, so further edits to part 1
-                            // should keep updating part 2 again until the
-                            // user types into it directly.
-                            setSplitAmount2Touched(false)
-                          }}
-                          className="text-xs font-medium text-zinc-600 underline hover:text-zinc-900"
-                        >
-                          Qolganini qo&apos;yish
-                        </button>
-                      )}
-                    </div>
+                  <fieldset className="space-y-1.5">
+                    <legend className="block text-xs font-medium text-zinc-700">
+                      To&apos;lov usuli 2 <span aria-hidden="true" className="text-red-500">*</span>
+                    </legend>
+                    {suggestedAmountNumber != null && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const remaining = Math.max(0, roundDisplayAmount(suggestedAmountNumber) - Number(splitAmount1Input || 0))
+                          setSplitAmount2Input(remaining > 0 ? formatAmountForInput(remaining) : '')
+                          // Resuming auto-follow — the button IS the
+                          // auto-fill action, so further edits to part 1
+                          // should keep updating part 2 again until the
+                          // user types into it directly.
+                          setSplitAmount2Touched(false)
+                        }}
+                        className="block text-xs font-medium text-zinc-600 underline hover:text-zinc-900"
+                      >
+                        Qolganini qo&apos;yish
+                      </button>
+                    )}
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <label htmlFor="nasiya-split-method-2" className="sr-only">Ikkinchi to&apos;lov usuli</label>
                       <Select value={splitMethod2} onValueChange={(v) => v && setSplitMethod2(v)}>
-                        <SelectTrigger className="h-10 w-full rounded-lg border-zinc-200 text-sm">
+                        <SelectTrigger id="nasiya-split-method-2" aria-required="true" className="h-10 w-full rounded-lg border-zinc-200 text-sm">
                           <SelectValue placeholder="Usulni tanlang" />
                         </SelectTrigger>
                         <SelectContent>
@@ -577,7 +590,10 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                           <SelectItem value="OTHER">Boshqa</SelectItem>
                         </SelectContent>
                       </Select>
+                      <label htmlFor="nasiya-split-amount-2" className="sr-only">Ikkinchi to&apos;lov miqdori</label>
                       <MoneyInput
+                        id="nasiya-split-amount-2"
+                        required
                         currency={currency.currency}
                         value={splitAmount2Input}
                         onChange={(v) => {
@@ -588,7 +604,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                         className="h-10 rounded-lg border-zinc-200 text-sm"
                       />
                     </div>
-                  </div>
+                  </fieldset>
 
                   {splitMethod2 && payMethod && splitMethod2 === payMethod && (
                     <p className="text-xs text-red-600">Ikkala usul bir xil bo&apos;lmasligi kerak.</p>
@@ -645,11 +661,11 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                 {!carryOver && !splitPayment && (
                   <div className="space-y-2">
-                    <label className="block text-xs font-medium text-zinc-700">
-                      To&apos;lov usuli <span className="text-red-500">*</span>
+                    <label htmlFor="nasiya-payment-method" className="block text-xs font-medium text-zinc-700">
+                      To&apos;lov usuli <span aria-hidden="true" className="text-red-500">*</span>
                     </label>
                     <Select value={payMethod} onValueChange={(v) => v && setPayMethod(v)}>
-                      <SelectTrigger className="h-11 w-full rounded-lg border-zinc-200 text-sm">
+                      <SelectTrigger id="nasiya-payment-method" aria-required="true" className="h-11 w-full rounded-lg border-zinc-200 text-sm">
                         <SelectValue placeholder="Usulni tanlang" />
                       </SelectTrigger>
                       <SelectContent>
@@ -661,30 +677,27 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                     </Select>
                   </div>
                 )}
-                <div className={carryOver || splitPayment ? 'space-y-2 sm:col-span-2' : 'space-y-2'}>
-                  <label className="block text-xs font-medium text-zinc-700">
-                    {carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"} <span className="text-red-500">*</span>
-                  </label>
+                <Field
+                  label={carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"}
+                  required
+                  className={carryOver || splitPayment ? 'sm:col-span-2' : undefined}
+                >
                   <DateInput
-                    aria-label={carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"}
                     value={payDate}
                     onValueChange={setPayDate}
                     className="h-11 rounded-lg border-zinc-200 text-sm"
                   />
-                </div>
+                </Field>
               </div>
 
-              <div className="space-y-2">
-                <label className="block text-xs font-medium text-zinc-700">
-                  Izoh {carryOver && <span className="text-red-500">*</span>}
-                </label>
+              <Field label="Izoh" required={carryOver}>
                 <Textarea
                   value={payNote}
                   onChange={(e) => setPayNote(e.target.value)}
                   placeholder={carryOver ? "Masalan: mijoz 10 kunga kechiktirishni so'radi" : "Masalan: mijoz oylik to'lovni naqd berdi"}
                   className="min-h-[80px] rounded-lg border-zinc-200 text-sm"
                 />
-              </div>
+              </Field>
             </>
           )}
         </div>

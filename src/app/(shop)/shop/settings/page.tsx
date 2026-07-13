@@ -22,6 +22,8 @@ import { uzDateTime } from '@/lib/dates'
 import { isValidPhone } from '@/lib/phone'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import type { ApiResponse } from '@/types'
+import { SettingsInfo as Info } from '@/components/shop/settings-info'
+import { SettingsPasswordField as PasswordField } from '@/components/shop/settings-password-field'
 
 interface ShopAdminProfile {
   id: string
@@ -472,15 +474,16 @@ export default function ShopSettingsPage() {
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                       />
                     </div>
-                    <div>
-                      <Label className="mb-1.5 block text-xs font-medium text-zinc-700">
-                        Pul ko'rinishi
-                      </Label>
+                    <fieldset>
+                      <legend className="mb-1.5 block text-xs font-medium text-zinc-700">
+                        Pul ko&apos;rinishi
+                      </legend>
                       <div className="inline-flex overflow-hidden rounded-md border border-zinc-200 bg-white">
                         {(['UZS', 'USD'] as const).map((currency) => (
                           <button
                             key={currency}
                             type="button"
+                            aria-pressed={shopForm.preferredCurrency === currency}
                             onClick={() => setShopForm((f) => ({ ...f, preferredCurrency: currency }))}
                             className={[
                               'h-9 px-4 text-sm font-medium transition-colors',
@@ -496,7 +499,7 @@ export default function ShopSettingsPage() {
                       <p className="mt-1.5 text-xs text-zinc-500">
                         UZS bazaviy hisob bo'lib qoladi; USD faqat ko'rish va kiritish uchun.
                       </p>
-                    </div>
+                    </fieldset>
                   </div>
                   <div>
                     <Label htmlFor="shop-note" className="mb-1.5 block text-xs font-medium text-zinc-700">
@@ -645,46 +648,6 @@ export default function ShopSettingsPage() {
           </Card>
         </div>
       ) : null}
-    </div>
-  )
-}
-
-function Info({ label, value, mono = false }: { label: string; value: string; mono?: boolean }) {
-  return (
-    <div className="rounded-md border border-zinc-200 bg-white p-3">
-      <div className="text-xs font-medium text-zinc-500">{label}</div>
-      <div className={['mt-1 truncate text-sm font-semibold text-zinc-900', mono ? 'font-mono' : ''].join(' ')}>
-        {value}
-      </div>
-    </div>
-  )
-}
-
-function PasswordField({
-  id,
-  label,
-  value,
-  onChange,
-}: {
-  id: string
-  label: string
-  value: string
-  onChange: (value: string) => void
-}) {
-  return (
-    <div>
-      <Label htmlFor={id} className="mb-1.5 block text-xs font-medium text-zinc-700">
-        {label}
-      </Label>
-      <Input
-        id={id}
-        type="password"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        minLength={10}
-        required
-        className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
-      />
     </div>
   )
 }

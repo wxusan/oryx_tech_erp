@@ -1,5 +1,10 @@
-import { describe, it, expect } from 'vitest'
-import { redact, serializeError } from '../src/lib/logger'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { logger, redact, serializeError } from '../src/lib/logger'
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllEnvs()
+})
 
 describe('logger redaction', () => {
   it('redacts sensitive keys regardless of value', () => {
@@ -47,6 +52,26 @@ describe('logger redaction', () => {
     expect(out.photo).toContain('[redacted]')
   })
 
+  it('redacts a signed URL embedded in free text without dropping the message', () => {
+    const out = redact({
+      detail: 'download failed at https://example.test/private/a.jpg?x=1&X-Amz-Signature=secret-value retrying',
+    }) as Record<string, string>
+    expect(out.detail).toBe('download failed at https://example.test/private/a.jpg?[redacted] retrying')
+  })
+
+  it('redacts bearer credentials in free text', () => {
+    const out = redact({ detail: 'upstream said Authorization: Bearer abc.def-123' }) as Record<string, string>
+    expect(out.detail).toBe('upstream said Authorization: Bearer [redacted]')
+  })
+
+  it('redacts the top-level logger message, not only its context', () => {
+    vi.stubEnv('NODE_ENV', 'production')
+    const output = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+    logger.info('failed https://example.test/x?token=do-not-log')
+    const line = JSON.parse(String(output.mock.calls[0]?.[0])) as { message: string }
+    expect(line.message).toBe('failed https://example.test/x?[redacted]')
+  })
+
   it('recurses into nested objects and arrays', () => {
     const out = redact({ a: { b: { password: 'x', ok: 1 } }, list: [{ token: 't' }] }) as {
       a: { b: { password: string; ok: number } }
@@ -82,5 +107,9 @@ describe('logger error serialization', () => {
   it('handles non-Error input without throwing', () => {
     expect(serializeError('plain string').message).toBe('plain string')
     expect(serializeError(null).message).toBe('null')
+  })
+
+  it('redacts secrets in non-Error input', () => {
+    expect(serializeError('Bearer secret-value').message).toBe('Bearer [redacted]')
   })
 })

@@ -46,10 +46,10 @@ describe('next.config.ts: security headers applied to every response', () => {
     expect(config).toContain("key: 'Strict-Transport-Security'")
   })
 
-  it('enforces a Content-Security-Policy and documents the remaining inline nonce limitation', () => {
+  it('enforces a baseline Content-Security-Policy and delegates protected-page script nonces to proxy', () => {
     expect(config).toContain("key: 'Content-Security-Policy'")
     expect(config).not.toContain("Content-Security-Policy-Report-Only")
-    expect(config).toContain("doesn't yet wire a nonce through middleware")
+    expect(config).toContain('per-request script nonce from src/proxy.ts')
   })
 
   it('the policy covers script/style/img/font/connect/object/frame-ancestors, and allows the Supabase storage origin for signed-URL images', () => {

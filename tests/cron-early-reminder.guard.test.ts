@@ -12,8 +12,10 @@ describe('cron generates early reminders in addition to due-day reminders', () =
   it('queries nasiya schedules and sales gated on earlyReminderEnabled', () => {
     expect(cron).toContain('earlyReminderEnabled: true')
     // Both the nasiya and sale early-reminder blocks must also respect reminderEnabled.
-    const earlyBlockIndex = cron.indexOf('earlyCandidates')
-    expect(cron.slice(earlyBlockIndex, earlyBlockIndex + 400)).toContain('reminderEnabled: true')
+    const nasiyaEarly = cron.slice(cron.indexOf("'NASIYA_EARLY'"), cron.indexOf("'SALE_DUE'"))
+    const saleEarly = cron.slice(cron.indexOf("'SALE_EARLY'"), cron.indexOf("'SUPPLIER_DUE'"))
+    expect(nasiyaEarly).toContain('reminderEnabled: true')
+    expect(saleEarly).toContain('reminderEnabled: true')
   })
 
   it('uses the same 11:00 jitter helper (no separate jitter logic)', () => {
@@ -21,25 +23,19 @@ describe('cron generates early reminders in addition to due-day reminders', () =
     expect(cron).toContain("dedupeKey = `SALE_EARLY_REMINDER:")
     // Both new dedupe keys feed into scheduledReminderSendAt like every other planned type
     // (total also includes the later supplier-payable reminder blocks — see cron-jitter.guard.test.ts).
-    const count = cron.split('scheduledAt: scheduledReminderSendAt(dedupeKey)').length - 1
+    const count = cron.split('scheduledAt: scheduledReminderSendAt(dedupeKey,').length - 1
     expect(count).toBe(9)
   })
 
-  it('computes days-until-due from the due date, not the schedule creation date', () => {
-    // The inline day-math was extracted to tashkentDaysUntil (item 9 — see
-    // docs/product-feature-fixes.md) so it can be unit-tested directly (see
-    // tests/telegram-3day-reminder.test.ts); the cron route now just calls it.
-    expect(cron).toContain('daysUntil')
-    expect(cron).toContain('tashkentDaysUntil(effectiveDue, today)')
-    expect(cron).toContain('tashkentDaysUntil(sale.dueDate, today)')
-    expect(cron).toContain("import { tashkentDayRange, tashkentDaysUntil, matchesEarlyReminderDay } from '@/lib/timezone'")
+  it('computes the trigger day from the due date and configured lead time', () => {
+    expect(cron).toContain('earlyTriggerDay(effectiveDue, nasiya.earlyReminderDays)')
+    expect(cron).toContain('earlyTriggerDay(sale.dueDate, sale.earlyReminderDays)')
+    expect(cron).not.toContain('createdAt, earlyReminderDays')
   })
 
   it('never generates a due-day reminder and early reminder from the same code path (additive, not replacing)', () => {
-    // The due-today block (section 1) and the early block (section 2b) are
-    // separate for-loops over separate queries, so one cannot suppress the other.
-    expect(cron).toContain('1. Today\'s reminders')
-    expect(cron).toContain('Nasiya early reminders')
+    expect(cron).toContain("await runPhase(\n        'NASIYA_DUE'")
+    expect(cron).toContain("await runPhase(\n        'NASIYA_EARLY'")
   })
 
   it('imports the new early-reminder message templates', () => {

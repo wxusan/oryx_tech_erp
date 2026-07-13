@@ -5,7 +5,13 @@ const mocks = vi.hoisted(() => ({
   updateMany: vi.fn(),
   update: vi.fn(),
   create: vi.fn(),
+  count: vi.fn(),
   shopAdminFindMany: vi.fn(),
+  shopAdminFindFirst: vi.fn(),
+  nasiyaScheduleFindFirst: vi.fn(),
+  nasiyaDeferralFindFirst: vi.fn(),
+  saleFindFirst: vi.fn(),
+  supplierPayableFindFirst: vi.fn(),
   sendMessage: vi.fn(),
   sendPhoto: vi.fn(),
   sendMediaGroup: vi.fn(),
@@ -21,8 +27,13 @@ vi.mock('@/lib/prisma', () => ({
       updateMany: mocks.updateMany,
       update: mocks.update,
       create: mocks.create,
+      count: mocks.count,
     },
-    shopAdmin: { findMany: mocks.shopAdminFindMany },
+    shopAdmin: { findMany: mocks.shopAdminFindMany, findFirst: mocks.shopAdminFindFirst },
+    nasiyaSchedule: { findFirst: mocks.nasiyaScheduleFindFirst },
+    nasiyaDeferral: { findFirst: mocks.nasiyaDeferralFindFirst },
+    sale: { findFirst: mocks.saleFindFirst },
+    supplierPayable: { findFirst: mocks.supplierPayableFindFirst },
   },
 }))
 
@@ -111,6 +122,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   notification = makeNotification(0)
   mocks.findMany.mockImplementation(async () => [notification])
+  mocks.count.mockResolvedValue(0)
   mocks.updateMany.mockResolvedValue({ count: 1 })
   mocks.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => applyUpdate(data))
   mocks.resolveImageKeys.mockImplementation(async () => notification.mediaKeys)
@@ -120,6 +132,8 @@ beforeEach(() => {
   mocks.sendMessage.mockResolvedValue({ ok: true })
   mocks.sendPhoto.mockResolvedValue({ ok: true })
   mocks.sendMediaGroup.mockResolvedValue({ ok: true })
+  mocks.shopAdminFindFirst.mockResolvedValue({ id: 'admin-1' })
+  mocks.nasiyaDeferralFindFirst.mockResolvedValue(null)
   mocks.recordOpsEvent.mockResolvedValue(undefined)
 })
 
@@ -134,6 +148,22 @@ describe('Telegram notification delivery', () => {
     expect(result.attempted).toBe(101)
     expect(result.sent).toBe(101)
     expect(mocks.findMany).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps scheduledAt and retry eligibility in the atomic claim predicate', async () => {
+    await processPendingNotifications()
+
+    const claimWhere = mocks.updateMany.mock.calls[0]?.[0]?.where
+    expect(claimWhere).toMatchObject({ id: notification.id })
+    expect(claimWhere.OR[0]).toMatchObject({
+      status: { in: ['PENDING', 'FAILED'] },
+      scheduledAt: { lte: expect.any(Date) },
+      OR: [{ nextAttemptAt: null }, { nextAttemptAt: { lte: expect.any(Date) } }],
+    })
+    expect(claimWhere.OR[1]).toMatchObject({
+      status: 'PROCESSING',
+      OR: [{ lastAttemptAt: null }, { lastAttemptAt: { lte: expect.any(Date) } }],
+    })
   })
 
   it.each([0, 1, 2, 10, 11])('delivers all %i images through the real processor plan', async (imageCount) => {
@@ -233,5 +263,112 @@ describe('Telegram notification delivery', () => {
     expect(mocks.sendMediaGroup).toHaveBeenCalledTimes(2)
     expect(mocks.sendMediaGroup.mock.calls[1]?.[2]).toBeUndefined()
     expect(notification.status).toBe('SENT')
+  })
+
+  it('does not immediately send a text-only notification twice after Telegram 429', async () => {
+    mocks.sendMessage.mockResolvedValueOnce({
+      ok: false,
+      errorCode: 429,
+      description: 'Too Many Requests',
+      retryAfterSeconds: 7,
+    })
+
+    const result = await processPendingNotifications()
+
+    expect(result).toMatchObject({ ok: false, attempted: 1, sent: 0, failed: 1, cancelled: 0 })
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(notification.status).toBe('FAILED')
+    expect(notification.nextAttemptAt).toBeInstanceOf(Date)
+  })
+
+  it.each([400, 401, 403])('cancels permanent Telegram %i failures without retrying', async (errorCode) => {
+    mocks.sendMessage.mockResolvedValueOnce({ ok: false, errorCode, description: `Telegram ${errorCode}` })
+
+    const result = await processPendingNotifications()
+
+    expect(result).toMatchObject({ ok: false, failed: 0, cancelled: 1 })
+    expect(mocks.sendMessage).toHaveBeenCalledTimes(1)
+    expect(notification.status).toBe('CANCELLED')
+    expect(notification.nextAttemptAt).toBeNull()
+  })
+
+  it('cancels before external delivery when the queued recipient is no longer authorized', async () => {
+    mocks.shopAdminFindFirst.mockResolvedValueOnce(null)
+
+    const result = await processPendingNotifications()
+
+    expect(result).toMatchObject({ ok: false, attempted: 1, sent: 0, cancelled: 1 })
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(notification.status).toBe('CANCELLED')
+    expect(notification.lastError).toContain('recipient_revoked_or_unverified')
+  })
+
+  it('cancels a queued sale reminder after its debt has been resolved', async () => {
+    notification = {
+      ...makeNotification(0),
+      type: 'SALE_REMINDER',
+      relatedType: 'Sale',
+      relatedId: 'sale-1',
+    }
+    mocks.saleFindFirst.mockResolvedValueOnce({
+      paidFully: true,
+      remainingAmount: 0,
+      contractRemainingAmount: 0,
+      reminderEnabled: true,
+      returnedAt: null,
+      deletedAt: null,
+      payments: [],
+    })
+
+    const result = await processPendingNotifications()
+
+    expect(result).toMatchObject({ ok: false, sent: 0, cancelled: 1 })
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(notification.lastError).toContain('debt_resolved_or_changed')
+  })
+
+  it('cancels an otherwise-active reminder when a newer partial payment made its message stale', async () => {
+    notification = {
+      ...makeNotification(0),
+      type: 'SALE_REMINDER',
+      relatedType: 'Sale',
+      relatedId: 'sale-1',
+    }
+    mocks.saleFindFirst.mockResolvedValueOnce({
+      paidFully: false,
+      remainingAmount: 500_000,
+      contractRemainingAmount: 500_000,
+      reminderEnabled: true,
+      returnedAt: null,
+      deletedAt: null,
+      payments: [{ id: 'newer-payment' }],
+    })
+
+    const result = await processPendingNotifications()
+
+    expect(result).toMatchObject({ ok: false, sent: 0, cancelled: 1 })
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(notification.lastError).toContain('debt_resolved_or_changed')
+  })
+
+  it('reports a queue-level crash as non-green even if failure telemetry also fails', async () => {
+    mocks.findMany.mockRejectedValueOnce(new Error('database unavailable'))
+    mocks.recordOpsEvent.mockRejectedValueOnce(new Error('ops database unavailable'))
+
+    const result = await processPendingNotifications()
+
+    expect(result).toMatchObject({ ok: false, crashed: true, sent: 0, failed: 0 })
+  })
+
+  it('does not report green while a previously claimed row is still PROCESSING', async () => {
+    mocks.findMany.mockResolvedValueOnce([])
+    mocks.count
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(0)
+      .mockResolvedValueOnce(1)
+
+    const result = await processPendingNotifications()
+
+    expect(result).toMatchObject({ ok: false, crashed: false, processing: 1 })
   })
 })

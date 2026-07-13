@@ -20,8 +20,46 @@ describe('disposable PostgreSQL migration foundation', () => {
       ORDER BY migration_name
     `
 
-    expect(rows).toHaveLength(30)
-    expect(rows.at(-1)?.migration_name).toBe('202607120006_tenant_refund_integrity')
+    expect(rows).toHaveLength(36)
+    expect(rows.at(-1)?.migration_name).toBe('202607130006_request_audit_context')
+  })
+
+  it('installs nullable request correlation fields without storing historic network data', async () => {
+    const columns = await prisma.$queryRaw<Array<{ table_name: string; column_name: string }>>`
+      SELECT table_name, column_name
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND (table_name, column_name) IN (('Log', 'requestId'), ('OpsEvent', 'requestId'))
+      ORDER BY table_name
+    `
+    expect(columns).toEqual([
+      { table_name: 'Log', column_name: 'requestId' },
+      { table_name: 'OpsEvent', column_name: 'requestId' },
+    ])
+  })
+
+  it('installs live Telegram identity indexes and cross-role write guards', async () => {
+    const indexes = await prisma.$queryRaw<Array<{ indexname: string }>>`
+      SELECT indexname FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND indexname IN ('SuperAdmin_telegramId_live_key', 'ShopAdmin_telegramId_live_key')
+      ORDER BY indexname
+    `
+    expect(indexes.map(({ indexname }) => indexname)).toEqual([
+      'ShopAdmin_telegramId_live_key',
+      'SuperAdmin_telegramId_live_key',
+    ])
+
+    const triggers = await prisma.$queryRaw<Array<{ tgname: string }>>`
+      SELECT tgname FROM pg_trigger
+      WHERE NOT tgisinternal
+        AND tgname IN ('SuperAdmin_telegram_identity_guard', 'ShopAdmin_telegram_identity_guard')
+      ORDER BY tgname
+    `
+    expect(triggers.map(({ tgname }) => tgname)).toEqual([
+      'ShopAdmin_telegram_identity_guard',
+      'SuperAdmin_telegram_identity_guard',
+    ])
   })
 
   it('preserves the migration-managed active-only unique indexes', async () => {

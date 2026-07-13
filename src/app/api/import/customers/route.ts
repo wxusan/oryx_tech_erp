@@ -36,7 +36,7 @@ export async function POST(req: NextRequest) {
     const resolved = await resolveActiveShopId(session, parsed.data.shopId)
     if (!resolved.ok) return resolved.response
 
-    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    // Distributed when Upstash is configured; bounded in-process fallback otherwise.
     const rate = await checkRateLimitDistributed(rateLimitKey('customer-import', resolved.shopId, session.user.id), { windowMs: 60_000, max: 10 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 

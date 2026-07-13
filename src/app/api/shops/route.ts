@@ -8,12 +8,17 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import bcrypt from 'bcrypt'
 import { createShopSchema } from '@/lib/validations'
-import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
+import { ok, created, badRequest, conflict, payloadTooLarge, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 import type { ZodError } from 'zod'
 import { logger } from '@/lib/logger'
+import {
+  isInvalidRequestBody,
+  isRequestBodyTooLarge,
+  readLimitedJsonBody,
+} from '@/lib/server/request-limits'
 
 // ---------------------------------------------------------------------------
 // GET /api/shops
@@ -35,14 +40,6 @@ export async function GET(req: NextRequest) {
         admins: {
           where: { deletedAt: null, isActive: true },
           select: shopAdminPublicSelect,
-        },
-        payments: {
-          where: { deletedAt: null },
-          orderBy: { paidAt: 'desc' },
-          take: 12,
-          include: {
-            recordedBy: { select: { name: true, login: true } },
-          },
         },
         _count: {
           select: {
@@ -73,7 +70,7 @@ export async function POST(req: NextRequest) {
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
-    const body: unknown = await req.json()
+    const body = await readLimitedJsonBody(req)
     const parsed = createShopSchema.safeParse(body)
 
     if (!parsed.success) {
@@ -159,6 +156,8 @@ export async function POST(req: NextRequest) {
 
     return created(shop, "Do'kon muvaffaqiyatli yaratildi")
   } catch (err) {
+    if (isRequestBodyTooLarge(err)) return payloadTooLarge()
+    if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
     logger.error('[POST /api/shops]', { event: 'api.route_error', error: err })
     return serverError()
   }
