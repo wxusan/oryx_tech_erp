@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { NextRequest } from 'next/server'
+import { readFileSync } from 'node:fs'
 
 const getToken = vi.hoisted(() => vi.fn())
 vi.mock('next-auth/jwt', () => ({ getToken }))
@@ -85,5 +86,16 @@ describe('proxy mutation-origin boundary', () => {
     const csp = buildProtectedPageCsp('fixed-nonce')
     expect(csp).toContain("style-src 'self' 'unsafe-inline'")
     expect(csp).toContain("script-src 'self' 'nonce-fixed-nonce' 'strict-dynamic'")
+  })
+
+  it('renders both login pages dynamically so Next can attach the request nonce', () => {
+    for (const page of [
+      'src/app/(auth)/shop/login/page.tsx',
+      'src/app/(auth)/admin/login/page.tsx',
+    ]) {
+      const source = readFileSync(page, 'utf8')
+      expect(source).toContain("import { connection } from 'next/server'")
+      expect(source).toContain('await connection()')
+    }
   })
 })
