@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireCurrentShopPermission } from '@/lib/api-auth'
 import { getShopNasiyalarList } from '@/lib/server/shop-lists'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import NasiyalarClient from './nasiyalar-client'
@@ -17,8 +17,8 @@ interface NasiyalarPageProps {
 const PER_PAGE = 25
 
 export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps) {
-  const guarded = await requireApiSession()
-  if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
+  const guarded = await requireCurrentShopPermission('NASIYA_VIEW')
+  if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
 
   const params = await searchParams
   const status = Array.isArray(params?.status) ? params?.status[0] : params?.status

@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import { z, ZodError } from 'zod'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { badRequest, notFound, ok, serverError } from '@/lib/api-helpers'
 import { prisma } from '@/lib/prisma'
 import { normalizePhone } from '@/lib/phone'
@@ -25,7 +25,7 @@ const updateSaleSchema = z.object({
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('CASH_SALE_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const { id: saleId } = await ctx.params

@@ -5,6 +5,7 @@ import { planTelegramDelivery } from '@/lib/telegram-delivery'
 import { resolveNotificationImageKeys, resolveNotificationImageUrls } from '@/lib/server/notification-image'
 import { logger } from '@/lib/logger'
 import { recordOpsEvent } from '@/lib/server/ops-events'
+import { tashkentTodayInputValue } from '@/lib/timezone'
 
 const MAX_NOTIFICATION_ATTEMPTS = 5
 const NOTIFICATION_BATCH_SIZE = 100
@@ -109,6 +110,33 @@ function hasPositiveDebt(...amounts: Array<unknown>): boolean {
   return amounts.some((amount) => Number(amount) > 0)
 }
 
+function telegramEligibilitySelect() {
+  return {
+    id: true,
+    telegramId: true,
+    shop: {
+      select: {
+        ownerAdminId: true,
+        telegramNotificationsEnabled: true,
+        packageVersions: {
+          where: { effectiveOn: { lte: new Date(`${tashkentTodayInputValue()}T00:00:00.000Z`) } },
+          orderBy: [{ effectiveOn: 'desc' as const }, { createdAt: 'desc' as const }],
+          take: 1,
+          select: { features: { select: { featureCode: true, enabled: true } } },
+        },
+      },
+    },
+  } satisfies Prisma.ShopAdminSelect
+}
+
+type TelegramEligibleAdmin = Prisma.ShopAdminGetPayload<{ select: ReturnType<typeof telegramEligibilitySelect> }>
+
+function telegramAdminIsEligible(admin: TelegramEligibleAdmin) {
+  const enabled = new Set(admin.shop.packageVersions[0]?.features.filter((feature) => feature.enabled).map((feature) => feature.featureCode) ?? [])
+  if (!admin.shop.telegramNotificationsEnabled || !enabled.has('TELEGRAM')) return false
+  return admin.id === admin.shop.ownerAdminId || enabled.has('STAFF_ACCESS')
+}
+
 /**
  * Re-authorize the stored target and re-check debt reminder state immediately
  * before an external send. Event notifications (sale created, payment
@@ -122,13 +150,15 @@ async function preDeliveryCancellationReason(notification: PendingNotification):
       shopId: notification.shopId,
       telegramId: notification.telegramId,
       telegramVerifiedAt: { not: null },
+      telegramNotificationsEnabled: true,
       isActive: true,
       deletedAt: null,
       shop: { status: 'ACTIVE', deletedAt: null },
     },
-    select: { id: true },
+    select: telegramEligibilitySelect(),
   })
   if (!recipient) return 'recipient_revoked_or_unverified'
+  if (!telegramAdminIsEligible(recipient)) return 'recipient_not_entitled_or_notifications_disabled'
 
   if (NASIYA_REMINDER_TYPES.has(notification.type)) {
     if (notification.relatedType !== 'NasiyaSchedule' || !notification.relatedId) {
@@ -488,8 +518,18 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
 
 export async function notifyShopAdmins(shopId: string, message: string, type: string, relatedId?: string, relatedType?: string): Promise<void> {
   try {
-    const admins = await prisma.shopAdmin.findMany({ where: { shopId, isActive: true, telegramId: { not: null }, telegramVerifiedAt: { not: null }, deletedAt: null }, select: { telegramId: true } })
-    const targets = admins.filter((admin): admin is { telegramId: string } => admin.telegramId !== null)
+    const admins = await prisma.shopAdmin.findMany({
+      where: {
+        shopId,
+        isActive: true,
+        telegramId: { not: null },
+        telegramVerifiedAt: { not: null },
+        telegramNotificationsEnabled: true,
+        deletedAt: null,
+      },
+      select: telegramEligibilitySelect(),
+    })
+    const targets = admins.filter(telegramAdminIsEligible).filter((admin): admin is typeof admin & { telegramId: string } => admin.telegramId !== null)
     if (!targets.length) {
       logger.info('no verified telegram admins for shop', { event: 'notification.no_recipients', shopId, status: type })
       return

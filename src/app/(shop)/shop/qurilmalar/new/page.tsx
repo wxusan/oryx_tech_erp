@@ -20,6 +20,7 @@ import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { patchDeviceUpsert } from '@/lib/device-query-cache'
 import type { DeviceListItem } from '@/lib/device-list-contract'
 import { DeviceImagePicker } from '@/components/shop/device-image-picker'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -40,6 +41,12 @@ interface FormData {
 }
 
 export default function NewDevicePage() {
+  const { can } = useShopAccess()
+  if (!can('INVENTORY_MANAGE')) return <ShopAccessDenied />
+  return <AuthorizedNewDevicePage />
+}
+
+function AuthorizedNewDevicePage() {
   const router = useRouter()
   const queryClient = useQueryClient()
   const queryScope = useAuthenticatedQueryScope()

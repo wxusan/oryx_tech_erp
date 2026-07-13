@@ -4,9 +4,17 @@ import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { badRequest, forbidden, unauthorized } from '@/lib/api-helpers'
 import { initializeRequestAuditContext } from '@/lib/server/request-context'
+import {
+  buildShopPrincipal,
+  getActiveShopPackage,
+  principalHasFeature,
+  principalHasPermission,
+  type ShopPrincipal,
+} from '@/lib/server/shop-access'
+import type { ShopFeatureCode, ShopPermissionCode } from '@/lib/access-control'
 
 type GuardResult =
-  | { ok: true; session: Session; shopId?: string }
+  | { ok: true; session: Session; shopId?: string; principal?: ShopPrincipal }
   | { ok: false; response: ReturnType<typeof unauthorized> }
 
 const SUBSCRIPTION_GRACE_MS = 3 * 24 * 60 * 60 * 1000
@@ -59,6 +67,8 @@ async function requireApiSessionUncached(): Promise<GuardResult> {
     }
   }
 
+  let shopPrincipal: ShopPrincipal | undefined
+
   if (session.user.role === 'SHOP_ADMIN') {
     if (!session.user.shopId) {
       return { ok: false, response: forbidden("Do'kon ma'lumotlari topilmadi") }
@@ -76,11 +86,42 @@ async function requireApiSessionUncached(): Promise<GuardResult> {
           subscriptionDue: { gte: subscriptionCutoff() },
         },
       },
-      select: { shopId: true, sessionVersion: true },
+      select: {
+        shopId: true,
+        sessionVersion: true,
+        permissionVersion: true,
+        legacyFullAccess: true,
+        permissions: { select: { permissionCode: true } },
+        shop: { select: { ownerAdminId: true, authorizationVersion: true } },
+      },
     })
 
     if (!activeAdmin || activeAdmin.sessionVersion !== session.user.sessionVersion) {
       return { ok: false, response: forbidden("Do'kon faol emas yoki ruxsat bekor qilingan") }
+    }
+
+    const activePackage = await getActiveShopPackage(session.user.shopId, now)
+    if (!activePackage) {
+      return { ok: false, response: forbidden("Do'kon paketi sozlanmagan") }
+    }
+
+    shopPrincipal = buildShopPrincipal({
+      actorId: session.user.id,
+      shopId: activeAdmin.shopId,
+      ownerAdminId: activeAdmin.shop.ownerAdminId,
+      legacyFullAccess: activeAdmin.legacyFullAccess,
+      authorizationVersion: activeAdmin.shop.authorizationVersion,
+      permissionVersion: activeAdmin.permissionVersion,
+      permissionCodes: activeAdmin.permissions.map((item) => item.permissionCode),
+      packageVersion: activePackage,
+    })
+
+    if (shopPrincipal.memberKind === 'SHOP_STAFF' && !principalHasFeature(shopPrincipal, 'STAFF_ACCESS')) {
+      await prisma.authSession.updateMany({
+        where: { id: session.user.sessionId, revokedAt: null },
+        data: { revokedAt: now },
+      })
+      return { ok: false, response: forbidden("Bu do'konda xodim profillari o'chirilgan") }
     }
   }
 
@@ -112,7 +153,7 @@ async function requireApiSessionUncached(): Promise<GuardResult> {
     })
   }
 
-  return { ok: true, session, shopId: session.user.shopId ?? undefined }
+  return { ok: true, session, shopId: session.user.shopId ?? undefined, principal: shopPrincipal }
 }
 
 /** React memoization prevents a layout and its page from repeating auth DB checks in one render. */
@@ -122,6 +163,45 @@ export async function requireSuperAdmin(): Promise<GuardResult> {
   const guarded = await requireApiSession()
   if (!guarded.ok) return guarded
   if (guarded.session.user.role !== 'SUPER_ADMIN') return { ok: false, response: forbidden() }
+  return guarded
+}
+
+export async function requireCurrentShopPermission(permission: ShopPermissionCode): Promise<GuardResult> {
+  const guarded = await requireApiSession()
+  if (!guarded.ok) return guarded
+  if (guarded.session.user.role !== 'SHOP_ADMIN' || !guarded.principal) {
+    return { ok: false, response: forbidden("Do'kon foydalanuvchisi ruxsati talab qilinadi") }
+  }
+  if (!principalHasPermission(guarded.principal, permission)) {
+    return { ok: false, response: forbidden("Bu amal uchun ruxsat berilmagan") }
+  }
+  return guarded
+}
+
+/**
+ * Guard shared operational routes. Super admins retain their existing audited
+ * cross-shop access; shop members are checked against the live package and
+ * live member permissions on every request.
+ */
+export async function requireShopPermission(permission: ShopPermissionCode): Promise<GuardResult> {
+  const guarded = await requireApiSession()
+  if (!guarded.ok) return guarded
+  if (guarded.session.user.role === 'SUPER_ADMIN') return guarded
+  if (!guarded.principal || !principalHasPermission(guarded.principal, permission)) {
+    return { ok: false, response: forbidden("Bu amal uchun ruxsat berilmagan") }
+  }
+  return guarded
+}
+
+export async function requireCurrentShopFeature(feature: ShopFeatureCode): Promise<GuardResult> {
+  const guarded = await requireApiSession()
+  if (!guarded.ok) return guarded
+  if (guarded.session.user.role !== 'SHOP_ADMIN' || !guarded.principal) {
+    return { ok: false, response: forbidden("Do'kon foydalanuvchisi ruxsati talab qilinadi") }
+  }
+  if (!principalHasFeature(guarded.principal, feature)) {
+    return { ok: false, response: forbidden("Bu modul do'kon paketida yoqilmagan") }
+  }
   return guarded
 }
 

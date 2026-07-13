@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireCurrentShopPermission } from '@/lib/api-auth'
 import { getShopStats } from '@/lib/server/shop-stats'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { recentTashkentMonthKeys, tashkentMonthRangeFromKey } from '@/lib/timezone'
@@ -20,8 +20,8 @@ interface ShopReportPageProps {
 }
 
 export default async function ShopReportPage({ searchParams }: ShopReportPageProps) {
-  const guarded = await requireApiSession()
-  if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
+  const guarded = await requireCurrentShopPermission('REPORT_VIEW')
+  if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
   const params = await searchParams
   const monthParam = Array.isArray(params?.month) ? params.month[0] : params?.month
   const adminParam = Array.isArray(params?.admin) ? params.admin[0] : params?.admin

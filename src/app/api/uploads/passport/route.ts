@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { badRequest, forbidden, ok, payloadTooLarge, serverError, tooManyRequests } from '@/lib/api-helpers'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireShopPermission } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
 import { validatePrivateUploadImage } from '@/lib/server/image-validation'
 import { getSupabaseAdminClient, PRIVATE_STORAGE_BUCKET } from '@/lib/supabase-admin'
@@ -35,7 +35,7 @@ function isAuthorizedForKey(role: string, sessionShopId: string | null | undefin
 }
 
 export async function POST(request: Request) {
-  const guarded = await requireApiSession()
+  const guarded = await requireShopPermission('NASIYA_CREATE')
   if (!guarded.ok) return guarded.response
 
   try {
@@ -92,7 +92,7 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const guarded = await requireApiSession()
+  const guarded = await requireShopPermission('NASIYA_VIEW')
   if (!guarded.ok) return guarded.response
 
   try {

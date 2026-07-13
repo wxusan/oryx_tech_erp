@@ -23,6 +23,29 @@ import { ShopAdminsTable } from '@/components/admin/shop-admins-table'
 import { ShopPaymentsTable } from '@/components/admin/shop-payments-table'
 import type { AdminShopDetail as ShopDetail, AdminShopUser as ShopAdmin } from '@/lib/admin-shop-detail-contract'
 import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
+import { ShopPackageEditor } from '@/components/admin/shop-package-editor'
+import type { ShopPackageDraft, ShopPackageDto } from '@/lib/shop-package-contract'
+import { tashkentTodayInputValue } from '@/lib/timezone'
+
+interface PackageResponse {
+  active: ShopPackageDto | null
+  versions: ShopPackageDto[]
+}
+
+function draftFromPackage(value: ShopPackageDto): ShopPackageDraft {
+  return {
+    effectiveOn: tashkentTodayInputValue(),
+    basePrice: Number(value.basePrice),
+    currency: value.currency,
+    discountAmount: Number(value.discountAmount),
+    note: "Paket sozlamalari yangilandi",
+    features: value.features.map((feature) => ({
+      featureCode: feature.featureCode,
+      enabled: feature.enabled,
+      recurringPrice: Number(feature.recurringPrice),
+    })),
+  }
+}
 
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
@@ -51,6 +74,15 @@ export default function ShopDetailPage() {
   const [addAdminModalOpen, setAddAdminModalOpen] = useState(false)
   const [resetPasswordModalOpen, setResetPasswordModalOpen] = useState(false)
   const [editModalOpen, setEditModalOpen] = useState(false)
+  const [packageModalOpen, setPackageModalOpen] = useState(false)
+  const [ownerModalOpen, setOwnerModalOpen] = useState(false)
+  const [packageInfo, setPackageInfo] = useState<PackageResponse | null>(null)
+  const [packageError, setPackageError] = useState<string | null>(null)
+  const [packageSaving, setPackageSaving] = useState(false)
+  const [selectedOwnerId, setSelectedOwnerId] = useState('')
+  const [ownerReason, setOwnerReason] = useState('')
+  const [ownerSaving, setOwnerSaving] = useState(false)
+  const [ownerError, setOwnerError] = useState<string | null>(null)
 
   // Delete form
   const [deleteNote, setDeleteNote] = useState('')
@@ -103,7 +135,6 @@ export default function ShopDetailPage() {
   const [deleteAdminLoading, setDeleteAdminLoading] = useState(false)
   const [deleteAdminError, setDeleteAdminError] = useState<string | null>(null)
 
-  const paymentValid = payAmount.trim() !== '' && payMonths !== '' && payMethod !== ''
   const adminValid =
     adminName.trim() !== '' &&
     isValidPhone(adminPhone) &&
@@ -119,6 +150,10 @@ export default function ShopDetailPage() {
     isValidPhone(editOwnerPhone) &&
     editShopNumber.trim().length >= 1
   const isDeleted = shop?.status === 'DELETED' || !!shop?.deletedAt
+  const activePackage = packageInfo?.active ?? null
+  const staffAccessEnabled = activePackage?.features.some((feature) => feature.featureCode === 'STAFF_ACCESS' && feature.enabled) ?? false
+  const paymentValid = payAmount.trim() !== '' && payMonths !== '' && payMethod !== '' &&
+    Boolean(activePackage && !activePackage.pricingNeedsReview && activePackage.price.recurringPrice > 0)
   const paymentPreview = shop && payMonths
     ? (() => {
         const base = new Date(Math.max(previewNow, new Date(shop.subscriptionDue).getTime()))
@@ -139,9 +174,74 @@ export default function ShopDetailPage() {
       .finally(() => setLoading(false))
   }, [id])
 
+  const fetchPackage = useCallback(() => {
+    fetch(`/api/shops/${id}/package`)
+      .then((response) => response.json())
+      .then((json) => {
+        if (json.success) setPackageInfo(json.data)
+        else setPackageError(json.error ?? "Paket topilmadi")
+      })
+      .catch(() => setPackageError('Paket ma\'lumotini yuklab bo\'lmadi'))
+  }, [id])
+
   useEffect(() => {
     fetchShop()
-  }, [fetchShop])
+    fetchPackage()
+  }, [fetchPackage, fetchShop])
+
+  const savePackage = async (draft: ShopPackageDraft) => {
+    setPackageSaving(true)
+    setPackageError(null)
+    try {
+      const response = await fetch(`/api/shops/${id}/package`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(draft),
+      })
+      const json = await response.json()
+      if (!response.ok || !json.success) throw new Error(json.error ?? "Paketni saqlab bo'lmadi")
+      await commitNavigationMutation({ kind: 'admin.shopPackageUpdated', shopId: id })
+      setPackageModalOpen(false)
+      fetchPackage()
+      fetchShop()
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : "Paketni saqlab bo'lmadi"
+      setPackageError(message)
+      throw caught
+    } finally {
+      setPackageSaving(false)
+    }
+  }
+
+  const openOwnerDialog = () => {
+    if (!shop) return
+    setSelectedOwnerId(shop.ownerAdminId ?? shop.admins.find((admin) => admin.isActive)?.id ?? '')
+    setOwnerReason('')
+    setOwnerError(null)
+    setOwnerModalOpen(true)
+  }
+
+  const saveOwner = async () => {
+    if (!selectedOwnerId || ownerReason.trim().length < 5) return
+    setOwnerSaving(true)
+    setOwnerError(null)
+    try {
+      const response = await fetch(`/api/shops/${id}/owner`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ownerAdminId: selectedOwnerId, reason: ownerReason.trim() }),
+      })
+      const json = await response.json()
+      if (!response.ok || !json.success) throw new Error(json.error ?? "Do'kon egasini saqlab bo'lmadi")
+      await commitNavigationMutation({ kind: 'admin.shopOwnerUpdated', shopId: id })
+      setOwnerModalOpen(false)
+      fetchShop()
+    } catch (caught) {
+      setOwnerError(caught instanceof Error ? caught.message : 'Xatolik yuz berdi')
+    } finally {
+      setOwnerSaving(false)
+    }
+  }
 
   const resetPayment = () => {
     setPayAmount('')
@@ -472,6 +572,15 @@ export default function ShopDetailPage() {
                 size="sm"
                 variant="outline"
                 className="h-8 px-3 text-xs rounded-none border-zinc-200 text-zinc-700 hover:bg-zinc-50"
+                onClick={() => setPackageModalOpen(true)}
+                disabled={!activePackage}
+              >
+                Paket va kirish
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-3 text-xs rounded-none border-zinc-200 text-zinc-700 hover:bg-zinc-50"
                 onClick={() => setPaymentModalOpen(true)}
               >
                 To&apos;lov qo&apos;shish
@@ -510,7 +619,19 @@ export default function ShopDetailPage() {
 
       {/* Info card */}
       <div className="bg-white border border-zinc-200 p-5 mb-5">
-        <h2 className="text-sm font-semibold text-zinc-900 mb-4">Do&apos;kon ma&apos;lumotlari</h2>
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <h2 className="text-sm font-semibold text-zinc-900">Do&apos;kon ma&apos;lumotlari</h2>
+          {!isDeleted && (
+            <button onClick={openOwnerDialog} className="border border-zinc-200 px-2.5 py-1 text-xs text-zinc-600 hover:bg-zinc-50">
+              {shop.ownershipStatus === 'RESOLVED' ? "Egasini o'zgartirish" : 'Egasini biriktirish'}
+            </button>
+          )}
+        </div>
+        {shop.ownershipStatus !== 'RESOLVED' && (
+          <div className="mb-4 border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            Eski ma&apos;lumotdan do&apos;kon egasini xavfsiz aniqlab bo&apos;lmadi ({shop.ownershipStatus}). Xodimlarni o&apos;chirishdan oldin egani tanlang.
+          </div>
+        )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
           <InfoRow label="Egasi" value={shop.ownerName} />
           <InfoRow label="Shop ID" value={shop.id} mono />
@@ -525,13 +646,89 @@ export default function ShopDetailPage() {
         </div>
       </div>
 
+      <div className="mb-5 border border-zinc-200 bg-white p-5">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-zinc-900">Paket va kirish turi</h2>
+            {activePackage ? (
+              <p className="mt-1 text-sm text-zinc-500">
+                {staffAccessEnabled ? 'Egasi va xodimlar' : 'Faqat do\'kon egasi'} · {activePackage.price.recurringPrice} {activePackage.currency}/oy
+              </p>
+            ) : (
+              <p className="mt-1 text-sm text-amber-700">{packageError ?? 'Paket yuklanmoqda...'}</p>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
+              Xodim profili: 0 {activePackage?.currency ?? 'UZS'}
+            </span>
+            {activePackage?.pricingNeedsReview && (
+              <span className="bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900">Narx tekshirilishi kerak</span>
+            )}
+          </div>
+        </div>
+        {packageInfo && packageInfo.versions.length > 0 && (
+          <div className="mt-3 text-xs text-zinc-500">
+            {packageInfo.versions.length} ta o&apos;zgarmas paket versiyasi · faol sana {activePackage?.effectiveOn ?? '—'}
+          </div>
+        )}
+      </div>
+
       <ShopAdminsTable
         admins={shop.admins}
         onAdd={() => setAddAdminModalOpen(true)}
         onResetPassword={openPasswordReset}
         onDelete={openDeleteAdmin}
+        staffAccessEnabled={staffAccessEnabled}
       />
       <ShopPaymentsTable payments={shop.payments} />
+
+      <Dialog open={packageModalOpen} onOpenChange={setPackageModalOpen}>
+        <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto rounded-xl p-0">
+          <DialogHeader className="border-b border-zinc-200 px-5 py-4">
+            <DialogTitle className="text-base font-semibold text-zinc-900">Paket, narx va kirish turini boshqarish</DialogTitle>
+          </DialogHeader>
+          <div className="p-4 sm:p-5">
+            {activePackage ? (
+              <ShopPackageEditor
+                key={activePackage.id}
+                initialValue={draftFromPackage(activePackage)}
+                onSubmit={savePackage}
+                isSaving={packageSaving}
+                minimumEffectiveOn={tashkentTodayInputValue()}
+                error={packageError}
+              />
+            ) : (
+              <div className="p-8 text-center text-sm text-zinc-500">Paket ma&apos;lumoti topilmadi.</div>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={ownerModalOpen} onOpenChange={setOwnerModalOpen}>
+        <DialogContent className="max-w-md rounded-lg">
+          <DialogHeader><DialogTitle>Do&apos;kon egasini biriktirish</DialogTitle></DialogHeader>
+          <p className="text-sm text-zinc-500">Tanlangan profil to&apos;liq egasi vakolatini oladi. Oldingi faol sessiyalar xavfsizlik uchun yakunlanadi.</p>
+          {ownerError && <div className="border border-red-200 bg-red-50 p-3 text-sm text-red-700">{ownerError}</div>}
+          <Field label="Egasi profili" required>
+            <select value={selectedOwnerId} onChange={(event) => setSelectedOwnerId(event.target.value)} className="h-9 w-full border border-zinc-200 bg-white px-2 text-sm">
+              <option value="">Tanlang...</option>
+              {shop.admins.filter((admin) => admin.isActive).map((admin) => (
+                <option key={admin.id} value={admin.id}>{admin.name} · {admin.login}</option>
+              ))}
+            </select>
+          </Field>
+          <Field label="Sabab" required help="Kamida 5 ta belgi">
+            <Textarea value={ownerReason} onChange={(event) => setOwnerReason(event.target.value)} placeholder="Masalan: egasi bilan tasdiqlandi" />
+          </Field>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setOwnerModalOpen(false)}>Bekor qilish</Button>
+            <Button disabled={!selectedOwnerId || ownerReason.trim().length < 5 || ownerSaving} onClick={() => void saveOwner()} className="bg-zinc-900 text-white hover:bg-zinc-800">
+              {ownerSaving ? 'Saqlanmoqda...' : 'Egani saqlash'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* ── DELETE DIALOG ── */}
       <Dialog open={deleteModalOpen} onOpenChange={(v) => { setDeleteModalOpen(v); if (!v) { setDeleteNote(''); setDeleteError(null) } }}>
@@ -705,18 +902,29 @@ export default function ShopDetailPage() {
             <p className="text-xs text-red-500 mt-1">{payError}</p>
           )}
           <div className="mt-3 space-y-3">
-            <Field label={<>Miqdor (so&apos;m)</>} required>
+            <Field label={`Miqdor (${activePackage?.currency ?? 'UZS'})`} required help="Faol paket narxi va tanlangan oylar sonidan avtomatik hisoblanadi">
               <MoneyInput
                 placeholder="500000"
                 value={payAmount}
                 onChange={setPayAmount}
+                currency={activePackage?.currency}
+                readOnly
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
             </Field>
             <Field label="Oylar" required>
               <select
                 value={payMonths}
-                onChange={(e) => setPayMonths(e.target.value)}
+                onChange={(e) => {
+                  const months = e.target.value
+                  setPayMonths(months)
+                  if (!months || !activePackage) {
+                    setPayAmount('')
+                    return
+                  }
+                  const amount = activePackage.price.recurringPrice * Number(months)
+                  setPayAmount(activePackage.currency === 'USD' ? amount.toFixed(2) : amount.toFixed(0))
+                }}
                 className="w-full h-8 text-sm border border-zinc-200 bg-white px-2 focus:outline-none focus:ring-1 focus:ring-zinc-400"
               >
                 <option value="">Tanlang...</option>
@@ -725,6 +933,11 @@ export default function ShopDetailPage() {
                 ))}
               </select>
             </Field>
+            {activePackage?.pricingNeedsReview && (
+              <div className="border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                To&apos;lov qabul qilishdan oldin paket narxini tasdiqlang.
+              </div>
+            )}
             <Field label={<>To&apos;lov usuli</>} required>
               <select
                 value={payMethod}
@@ -779,7 +992,7 @@ export default function ShopDetailPage() {
         <DialogContent className="max-w-md rounded-none">
           <DialogHeader>
             <DialogTitle className="text-base font-semibold text-zinc-900">
-              Admin qo&apos;shish
+              Xodim qo&apos;shish
             </DialogTitle>
           </DialogHeader>
           {adminError && (
@@ -803,9 +1016,10 @@ export default function ShopDetailPage() {
             </Field>
             <Field label="Telegram ID">
               <Input
-                placeholder="@username"
+                placeholder="123456789"
+                inputMode="numeric"
                 value={adminTelegram}
-                onChange={(e) => setAdminTelegram(e.target.value)}
+                onChange={(e) => setAdminTelegram(e.target.value.replace(/\D/g, ''))}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
             </Field>

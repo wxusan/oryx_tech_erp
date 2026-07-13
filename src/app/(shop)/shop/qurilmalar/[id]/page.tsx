@@ -41,6 +41,7 @@ import type { DeviceListItem } from '@/lib/device-list-contract'
 import { DeviceConditionBadge } from '@/components/shop/device-condition-badge'
 import { DeviceActionHistory, type DeviceActionLog as DeviceLog } from '@/components/shop/device-action-history'
 import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 
 interface Supplier {
   name: string
@@ -167,6 +168,19 @@ function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']
 }
 
 export default function QurilmaDetailPage() {
+  const { can } = useShopAccess()
+  if (!can('INVENTORY_VIEW')) return <ShopAccessDenied />
+  return <AuthorizedQurilmaDetailPage />
+}
+
+function AuthorizedQurilmaDetailPage() {
+  const { can } = useShopAccess()
+  const canManageInventory = can('INVENTORY_MANAGE')
+  const canCreateCashSale = can('CASH_SALE_CREATE')
+  const canManageCashSale = can('CASH_SALE_MANAGE')
+  const canCreateNasiya = can('NASIYA_CREATE')
+  const canReceivePayment = can('PAYMENT_RECEIVE')
+  const canManageReturns = can('RETURN_MANAGE')
   const salePaymentCommand = useLogicalCommandIdempotency()
   const returnCommand = useLogicalCommandIdempotency()
   const params = useParams()
@@ -704,7 +718,7 @@ export default function QurilmaDetailPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {device.status === 'IN_STOCK' && (
+          {canManageInventory && device.status === 'IN_STOCK' && (
             <Button
               variant="outline"
               onClick={openEdit}
@@ -714,24 +728,28 @@ export default function QurilmaDetailPage() {
               Tahrirlash
             </Button>
           )}
-          {showSaleActions && (
+          {showSaleActions && (canCreateCashSale || canCreateNasiya) && (
             <>
-              <Link href={`/shop/sotuv/new?deviceId=${device.id}`}>
-                <Button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">Naqd sotish</Button>
-              </Link>
-              <Link href={`/shop/nasiyalar/new?deviceId=${device.id}`}>
-                <Button variant="outline" className="h-9 px-4 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded">
-                  Nasiyaga berish
-                </Button>
-              </Link>
+              {canCreateCashSale && (
+                <Link href={`/shop/sotuv/new?deviceId=${device.id}`}>
+                  <Button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">Naqd sotish</Button>
+                </Link>
+              )}
+              {canCreateNasiya && (
+                <Link href={`/shop/nasiyalar/new?deviceId=${device.id}`}>
+                  <Button variant="outline" className="h-9 px-4 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded">
+                    Nasiyaga berish
+                  </Button>
+                </Link>
+              )}
             </>
           )}
-          {device.status === 'RETURNED' && (
+          {canManageReturns && device.status === 'RETURNED' && (
             <Button onClick={() => setRestockModalOpen(true)} className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">
               Sotuvga qo&apos;yish
             </Button>
           )}
-          {!['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(device.status) && (
+          {canManageInventory && !['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(device.status) && (
             <Button
               variant="outline"
               aria-label="Qurilmani o'chirish"
@@ -741,7 +759,7 @@ export default function QurilmaDetailPage() {
               <Trash2 size={15} />
             </Button>
           )}
-          {['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(device.status) && (
+          {canManageReturns && ['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(device.status) && (
             <Button
               variant="outline"
               onClick={() => setReturnModalOpen(true)}
@@ -818,15 +836,17 @@ export default function QurilmaDetailPage() {
         <div className="border border-zinc-200 rounded overflow-hidden">
           <div className="flex items-center justify-between gap-3 px-4 py-3 bg-zinc-50 border-b border-zinc-200">
             <span className="text-sm font-semibold text-zinc-900">Sotuv ma'lumotlari</span>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={openSaleEdit}
-              className="h-8 rounded border-zinc-200 px-3 text-xs text-zinc-700"
-            >
-              <Pencil size={13} />
-              Tahrirlash
-            </Button>
+            {canManageCashSale && (
+              <Button
+                type="button"
+                variant="outline"
+                onClick={openSaleEdit}
+                className="h-8 rounded border-zinc-200 px-3 text-xs text-zinc-700"
+              >
+                <Pencil size={13} />
+                Tahrirlash
+              </Button>
+            )}
           </div>
           <div className="p-4 space-y-2">
             <div className="flex gap-4 text-sm">
@@ -880,7 +900,7 @@ export default function QurilmaDetailPage() {
               <span className="text-zinc-500 w-32">Sotilgan sana</span>
               <span className="text-zinc-900 font-medium">{uzDate(latestSale.createdAt)}</span>
             </div>
-            {saleHasDebt && (
+            {canReceivePayment && saleHasDebt && (
               <Button
                 onClick={() => {
                   // Every open starts from a clean slate — never carries a
@@ -1037,7 +1057,7 @@ export default function QurilmaDetailPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 mt-2">
-              {(latestNasiya.status === 'ACTIVE' || latestNasiya.status === 'OVERDUE') && (
+              {canReceivePayment && (latestNasiya.status === 'ACTIVE' || latestNasiya.status === 'OVERDUE') && (
                 <Button
                   onClick={() => setNasiyaPaymentOpen(true)}
                   className="text-sm font-semibold bg-zinc-900 text-white hover:bg-zinc-800 rounded shadow-sm"
@@ -1056,7 +1076,7 @@ export default function QurilmaDetailPage() {
         </div>
       )}
 
-      {latestNasiya && (
+      {canReceivePayment && latestNasiya && (
         <NasiyaPaymentModal
           nasiyaId={latestNasiya.id}
           open={nasiyaPaymentOpen}

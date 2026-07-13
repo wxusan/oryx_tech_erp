@@ -11,6 +11,7 @@ import {
   BCRYPT_PASSWORD_TOO_LONG_MESSAGE,
   isBcryptPasswordWithinLimit,
 } from '@/lib/password-policy'
+import { shopAccessModeSchema, shopPackageDraftSchema } from '@/lib/shop-package-contract'
 
 // ---------------------------------------------------------------------------
 // Shared field schemas
@@ -116,10 +117,31 @@ export const createShopSchema = z.object({
     .max(64, "Do'kon raqami 64 ta belgidan oshmasligi kerak"),
   address: z.string().max(255, "Manzil 255 ta belgidan oshmasligi kerak").optional(),
   note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
+  accessMode: shopAccessModeSchema.optional(),
+  package: shopPackageDraftSchema.optional(),
   admins: z
     .array(shopAdminInputSchema)
     .min(1, "Kamida bitta admin qo'shilishi shart")
     .max(20, "Ko'pi bilan 20 ta admin qo'shish mumkin"),
+}).superRefine((value, context) => {
+  if (value.accessMode === 'OWNER_ONLY' && value.admins.length !== 1) {
+    context.addIssue({
+      code: 'custom',
+      path: ['admins'],
+      message: "Faqat do'kon egasi rejimida aynan bitta kirish profili bo'lishi kerak",
+    })
+  }
+  if (value.accessMode && value.package) {
+    const staffEnabled = value.package.features.find((item) => item.featureCode === 'STAFF_ACCESS')?.enabled
+    const expected = value.accessMode === 'OWNER_AND_STAFF'
+    if (staffEnabled !== expected) {
+      context.addIssue({
+        code: 'custom',
+        path: ['package', 'features'],
+        message: "Xodimlar profili tanlangan kirish rejimiga mos bo'lishi kerak",
+      })
+    }
+  }
 })
 
 export type CreateShopInput = z.infer<typeof createShopSchema>
@@ -427,7 +449,8 @@ export const addShopPaymentSchema = z.object({
   months: z
     .number({ error: "Oy soni kiritilishi shart" })
     .int("Oy soni butun son bo'lishi kerak")
-    .min(1, "Kamida 1 oy bo'lishi kerak"),
+    .min(1, "Kamida 1 oy bo'lishi kerak")
+    .max(120, "Ko'pi bilan 120 oy bo'lishi mumkin"),
   paymentMethod: paymentMethodSchema,
   note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
 })

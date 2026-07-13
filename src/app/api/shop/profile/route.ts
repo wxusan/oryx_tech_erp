@@ -1,8 +1,8 @@
 /**
  * GET   /api/shop/profile — the signed-in shop admin's own shop profile.
- * PATCH /api/shop/profile — edit safe shop profile fields (shop admin only).
+ * PATCH /api/shop/profile — edit safe shop profile fields (shop owner only).
  *
- * A shop admin may edit descriptive/contact fields of their OWN shop only:
+ * The shop owner may edit descriptive/contact fields of their OWN shop only:
  * name, ownerName, ownerPhone, address, note. Sensitive fields controlled by the
  * super admin (shopNumber, status, subscriptionDue, telegramGroupId) are NOT
  * editable here. Every edit is shop-scoped, validated, audit-logged and
@@ -14,7 +14,7 @@ import { z, ZodError } from 'zod'
 import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-helpers'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireCurrentShopPermission } from '@/lib/api-auth'
 import { invalidateShopProfileMutation } from '@/lib/server/cache-tags'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { logger } from '@/lib/logger'
@@ -32,6 +32,7 @@ function shopProfileSelect() {
     status: true,
     subscriptionDue: true,
     preferredCurrency: true,
+    telegramNotificationsEnabled: true,
   } satisfies Prisma.ShopSelect
 }
 
@@ -42,11 +43,12 @@ const updateShopProfileSchema = z.object({
   address: z.string().trim().optional(),
   note: z.string().trim().optional(),
   preferredCurrency: z.enum(['UZS', 'USD']).optional(),
+  telegramNotificationsEnabled: z.boolean().optional(),
 })
 
 export async function GET() {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireCurrentShopPermission('SETTINGS_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -71,7 +73,7 @@ export async function GET() {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireCurrentShopPermission('SETTINGS_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -86,7 +88,6 @@ export async function PATCH(req: NextRequest) {
       const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
       return badRequest(firstError)
     }
-
     const updateData = {
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...(parsed.data.ownerName !== undefined ? { ownerName: parsed.data.ownerName } : {}),
@@ -94,6 +95,7 @@ export async function PATCH(req: NextRequest) {
       ...(parsed.data.address !== undefined ? { address: parsed.data.address } : {}),
       ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
       ...(parsed.data.preferredCurrency !== undefined ? { preferredCurrency: parsed.data.preferredCurrency } : {}),
+      ...(parsed.data.telegramNotificationsEnabled !== undefined ? { telegramNotificationsEnabled: parsed.data.telegramNotificationsEnabled } : {}),
     }
     if (Object.keys(updateData).length === 0) {
       return badRequest("O'zgartirish uchun ma'lumot kiritilmadi")
@@ -101,9 +103,16 @@ export async function PATCH(req: NextRequest) {
 
     const existing = await prisma.shop.findFirst({
       where: { id: shopId, deletedAt: null },
-      select: { id: true, name: true, ownerName: true, ownerPhone: true, address: true, note: true, preferredCurrency: true },
+      select: { id: true, name: true, ownerName: true, ownerPhone: true, address: true, note: true, preferredCurrency: true, telegramNotificationsEnabled: true },
     })
     if (!existing) return notFound("Do'kon topilmadi")
+    if (
+      parsed.data.telegramNotificationsEnabled !== undefined &&
+      parsed.data.telegramNotificationsEnabled !== existing.telegramNotificationsEnabled &&
+      !guarded.principal?.enabledFeatures.has('TELEGRAM')
+    ) {
+      return forbidden("Telegram moduli do'kon paketida yoqilmagan")
+    }
 
     const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.shop.update({ where: { id: shopId }, data: updateData })
@@ -122,6 +131,7 @@ export async function PATCH(req: NextRequest) {
             address: existing.address,
             note: existing.note,
             preferredCurrency: existing.preferredCurrency,
+            telegramNotificationsEnabled: existing.telegramNotificationsEnabled,
           },
           newValue: updateData,
         },

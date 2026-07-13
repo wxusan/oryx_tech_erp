@@ -10,7 +10,7 @@
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
 import { calculateRemaining } from '@/lib/nasiya-utils'
 import { convertPaymentToContractCurrency, contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'
@@ -87,7 +87,7 @@ function matchesExistingPaymentPayload(
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('PAYMENT_RECEIVE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

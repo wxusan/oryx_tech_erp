@@ -18,6 +18,7 @@ import type { DeviceListItem, DeviceListPage, DeviceStatus } from '@/lib/device-
 import { queryKeys, type DeviceListQuery } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { adoptIncrementalSnapshotCursor, requestIncrementalSync } from '@/lib/client-sync-runtime'
+import { useShopAccess } from '@/components/shop/shop-access-context'
 
 type DisplayStatus = 'Omborda' | 'Sotilgan' | 'Qarz' | 'Nasiyada' | 'Qaytarilgan (eski holat)' | "O'chirilgan"
 type Device = DeviceListItem
@@ -216,6 +217,9 @@ export default function QurilmalarClient({
   initialSyncCursor: string
 }) {
   const scope = useAuthenticatedQueryScope()
+  const { can } = useShopAccess()
+  const canManageInventory = can('INVENTORY_MANAGE')
+  const canExport = can('EXPORT_DATA')
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState(initialSearch)
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch)
@@ -285,20 +289,23 @@ export default function QurilmalarClient({
           <p className="text-sm text-zinc-500 mt-0.5">Omboringizdagi barcha qurilmalar</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {/* Shop-scoped devices export (session cookie auth) — entity confirmed supported by /api/export/[entity] */}
-          <button
-            onClick={() => {
-              window.location.href = exportUrl('devices', 'xlsx')
-            }}
-            className="h-9 px-4 text-sm border border-zinc-200 rounded text-zinc-700 hover:bg-zinc-100 transition-colors"
-          >
-            Excel yuklab olish
-          </button>
-          <Link href="/shop/qurilmalar/new">
-            <Button className="bg-zinc-900 hover:bg-zinc-800 text-white h-9 px-4 text-sm rounded">
-              + Yangi qurilma
-            </Button>
-          </Link>
+          {canExport && (
+            <button
+              onClick={() => {
+                window.location.href = exportUrl('devices', 'xlsx')
+              }}
+              className="h-9 px-4 text-sm border border-zinc-200 rounded text-zinc-700 hover:bg-zinc-100 transition-colors"
+            >
+              Excel yuklab olish
+            </button>
+          )}
+          {canManageInventory && (
+            <Link href="/shop/qurilmalar/new">
+              <Button className="bg-zinc-900 hover:bg-zinc-800 text-white h-9 px-4 text-sm rounded">
+                + Yangi qurilma
+              </Button>
+            </Link>
+          )}
         </div>
       </div>
 

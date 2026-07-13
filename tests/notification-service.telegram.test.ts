@@ -132,7 +132,18 @@ beforeEach(() => {
   mocks.sendMessage.mockResolvedValue({ ok: true })
   mocks.sendPhoto.mockResolvedValue({ ok: true })
   mocks.sendMediaGroup.mockResolvedValue({ ok: true })
-  mocks.shopAdminFindFirst.mockResolvedValue({ id: 'admin-1' })
+  mocks.shopAdminFindFirst.mockResolvedValue({
+    id: 'admin-1',
+    telegramId: '123456789',
+    shop: {
+      ownerAdminId: 'admin-1',
+      telegramNotificationsEnabled: true,
+      packageVersions: [{ features: [
+        { featureCode: 'TELEGRAM', enabled: true },
+        { featureCode: 'STAFF_ACCESS', enabled: true },
+      ] }],
+    },
+  })
   mocks.nasiyaDeferralFindFirst.mockResolvedValue(null)
   mocks.recordOpsEvent.mockResolvedValue(undefined)
 })
@@ -301,6 +312,31 @@ describe('Telegram notification delivery', () => {
     expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(notification.status).toBe('CANCELLED')
     expect(notification.lastError).toContain('recipient_revoked_or_unverified')
+  })
+
+  it('cancels queued staff delivery when STAFF_ACCESS is no longer entitled', async () => {
+    mocks.shopAdminFindFirst.mockResolvedValueOnce({
+      id: 'staff-1',
+      telegramId: '123456789',
+      shop: {
+        ownerAdminId: 'owner-1',
+        telegramNotificationsEnabled: true,
+        packageVersions: [{ features: [
+          { featureCode: 'TELEGRAM', enabled: true },
+          { featureCode: 'STAFF_ACCESS', enabled: false },
+        ] }],
+      },
+    })
+
+    const result = await processPendingNotifications()
+
+    expect(result).toMatchObject({ sent: 0, cancelled: 1 })
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(notification.lastError).toContain('recipient_not_entitled_or_notifications_disabled')
+    expect(mocks.shopAdminFindFirst.mock.calls[0]?.[0]).toMatchObject({
+      where: { telegramNotificationsEnabled: true },
+      select: { shop: { select: { telegramNotificationsEnabled: true } } },
+    })
   })
 
   it('cancels a queued sale reminder after its debt has been resolved', async () => {

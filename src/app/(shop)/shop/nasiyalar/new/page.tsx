@@ -28,6 +28,7 @@ import { navigateAfterMutation } from '@/lib/client-events'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import type { PaymentMethod } from '@/lib/domain-types'
 import { NasiyaSchedulePreview } from '@/components/shop/nasiya-schedule-preview'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 
 type Device = InStockPickerDevice
 
@@ -54,6 +55,12 @@ function deviceMeta(device: Device) {
 }
 
 export default function NewNasiyaPage() {
+  const { can } = useShopAccess()
+  if (!can('NASIYA_CREATE')) return <ShopAccessDenied />
+  return <AuthorizedNewNasiyaPage />
+}
+
+function AuthorizedNewNasiyaPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
   const [step, setStep] = useState<1 | 2 | 3>(1)

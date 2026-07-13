@@ -16,7 +16,7 @@ import { NextRequest, after } from 'next/server'
 import { randomBytes } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireShopPermission } from '@/lib/api-auth'
 import { importNasiyaSchema } from '@/lib/validations'
 import { generateImportSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, conflict, forbidden, serverError, tooManyRequests } from '@/lib/api-helpers'
@@ -35,7 +35,7 @@ import { formatDeviceStorage, normalizeImei } from '@/lib/device-specs'
 
 export async function POST(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('IMPORT_DATA')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

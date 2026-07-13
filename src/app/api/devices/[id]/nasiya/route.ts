@@ -9,7 +9,7 @@
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { createNasiyaSchema } from '@/lib/validations'
 import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
@@ -29,7 +29,7 @@ type RouteContext = { params: Promise<{ id: string }> }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('NASIYA_CREATE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

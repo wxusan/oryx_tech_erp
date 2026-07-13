@@ -26,6 +26,10 @@ import {
   recordLoginFailureDistributed,
   type LoginFailureOptions,
 } from '@/lib/rate-limit-adapter'
+import { enabledFeatureSet, getActiveShopPackage } from '@/lib/server/shop-access'
+import { shopMemberKind } from '@/lib/access-control'
+import { Prisma } from '@/generated/prisma/client'
+import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 
 const AUTH_WINDOW_MS = 15 * 60 * 1000
 const AUTH_LOCK_MS = 10 * 60 * 1000
@@ -105,6 +109,56 @@ async function createServerSession(input: {
   return id
 }
 
+async function createGuardedShopSession(input: {
+  actorId: string
+  shopId: string
+  sessionVersion: number
+}) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await prisma.$transaction(async (tx) => {
+        await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Shop" WHERE "id" = ${input.shopId} FOR UPDATE`)
+        const live = await tx.shopAdmin.findFirst({
+          where: {
+            id: input.actorId,
+            shopId: input.shopId,
+            isActive: true,
+            deletedAt: null,
+            sessionVersion: input.sessionVersion,
+            shop: {
+              status: 'ACTIVE',
+              deletedAt: null,
+              subscriptionDue: { gte: subscriptionCutoff() },
+            },
+          },
+          select: { id: true, sessionVersion: true, shop: { select: { ownerAdminId: true } } },
+        })
+        if (!live) return null
+        const packageVersion = await getActiveShopPackage(input.shopId, new Date(), tx)
+        if (!packageVersion) return null
+        const memberKind = shopMemberKind({ memberId: live.id, ownerAdminId: live.shop.ownerAdminId })
+        if (memberKind === 'SHOP_STAFF' && !enabledFeatureSet(packageVersion).has('STAFF_ACCESS')) return null
+
+        const id = randomUUID()
+        await tx.authSession.create({
+          data: {
+            id,
+            actorId: live.id,
+            actorType: 'SHOP_ADMIN',
+            shopId: input.shopId,
+            sessionVersion: live.sessionVersion,
+            expiresAt: new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000),
+          },
+        })
+        return id
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (error) {
+      if (!isRetryableTransactionError(error) || attempt === 2) throw error
+    }
+  }
+  return null
+}
+
 // ---------------------------------------------------------------------------
 // Module augmentation — extend NextAuth default types
 // ---------------------------------------------------------------------------
@@ -177,10 +231,22 @@ async function verifyShopAdminPassword(
         subscriptionDue: { gte: subscriptionCutoff() },
       },
     },
+    select: {
+      id: true,
+      name: true,
+      shopId: true,
+      passwordHash: true,
+      sessionVersion: true,
+      shop: { select: { ownerAdminId: true } },
+    },
   })
   if (!admin) return null
   const valid = await bcrypt.compare(password, admin.passwordHash)
   if (!valid) return null
+  const packageVersion = await getActiveShopPackage(admin.shopId)
+  if (!packageVersion) return null
+  const memberKind = shopMemberKind({ memberId: admin.id, ownerAdminId: admin.shop.ownerAdminId })
+  if (memberKind === 'SHOP_STAFF' && !enabledFeatureSet(packageVersion).has('STAFF_ACCESS')) return null
   return { id: admin.id, name: admin.name, shopId: admin.shopId, sessionVersion: admin.sessionVersion }
 }
 
@@ -297,12 +363,20 @@ export const authConfig: NextAuthConfig = {
           return null
         }
         await clearLoginFailuresDistributed(throttleKeys.identifierKey)
-        const sessionId = await createServerSession({
+        const sessionId = await createGuardedShopSession({
           actorId: admin.id,
-          actorType: 'SHOP_ADMIN',
           shopId: admin.shopId,
           sessionVersion: admin.sessionVersion,
         })
+        if (!sessionId) {
+          logger.warn('Authentication invalidated during session creation', {
+            event: 'auth.login_invalidated',
+            shopId: admin.shopId,
+            actorId: admin.id,
+            actorType: 'SHOP_ADMIN',
+          })
+          return null
+        }
         logger.info('Authentication succeeded', {
           event: 'auth.login_succeeded',
           shopId: admin.shopId,

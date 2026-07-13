@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { invalidateShopCustomerMutation } from '@/lib/server/cache-tags'
 import { normalizePhone, normalizeAdditionalPhones } from '@/lib/phone'
@@ -24,7 +24,7 @@ const updateCustomerSchema = z.object({
 
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('CUSTOMER_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -91,7 +91,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('CUSTOMER_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

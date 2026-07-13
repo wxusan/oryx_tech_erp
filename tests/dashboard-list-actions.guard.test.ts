@@ -56,9 +56,9 @@ describe('dashboard links', () => {
 describe('nasiyalar list payment action', () => {
   const src = read(NASIYALAR_CLIENT)
 
-  it('shows "To\'lov qabul qilish" only for active/overdue with remaining > 0', () => {
+  it('shows "To\'lov qabul qilish" only with permission and an active/overdue remaining balance', () => {
     expect(src).toContain(
-      "const canPay = (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0",
+      "const canPay = canReceivePayment && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0",
     )
     expect(src).toContain('{canPay && (')
     expect(src).toContain("To&apos;lov qabul qilish")

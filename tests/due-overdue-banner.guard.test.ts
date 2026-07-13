@@ -18,7 +18,7 @@ describe('GET /api/stats/due-overdue: shop-scoped, contract-currency-aware overd
   const queries = read('src/lib/server/shop-stats-queries.ts')
 
   it('resolves the shop via the standard session guard, never trusts a client-supplied shopId', () => {
-    expect(route).toContain('const guarded = await requireApiSession()')
+    expect(route).toContain("const guarded = await requireShopPermission('PAYMENT_RECEIVE')")
     expect(route).toContain('resolveActiveShopId(guarded.session, null)')
   })
 

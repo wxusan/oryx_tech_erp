@@ -14,7 +14,7 @@ import { NextRequest, after } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -33,7 +33,7 @@ const restockDeviceSchema = z.object({
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('RETURN_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

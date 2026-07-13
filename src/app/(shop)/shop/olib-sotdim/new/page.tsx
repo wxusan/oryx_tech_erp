@@ -20,10 +20,17 @@ import { tashkentTodayInputValue } from '@/lib/timezone'
 import { ArrowLeft, Loader2, Check } from 'lucide-react'
 import type { PaymentMethod } from '@/lib/domain-types'
 import { DeviceImagePicker } from '@/components/shop/device-image-picker'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 export default function NewOlibSotdimPage() {
+  const { can } = useShopAccess()
+  if (!can('OLIB_MANAGE')) return <ShopAccessDenied />
+  return <AuthorizedNewOlibSotdimPage />
+}
+
+function AuthorizedNewOlibSotdimPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
   const today = tashkentTodayInputValue()

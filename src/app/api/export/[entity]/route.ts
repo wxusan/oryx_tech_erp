@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/node'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { csvRows } from '@/lib/csv'
 import { formatMoneyByCurrency, formatUserFacingMoney } from '@/lib/currency'
 import { displayImei } from '@/lib/device-display'
@@ -605,7 +605,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
 
 export async function GET(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('EXPORT_DATA')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const { entity } = await ctx.params

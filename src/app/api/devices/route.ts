@@ -8,7 +8,7 @@
 
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { addDeviceSchema } from '@/lib/validations'
 import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -30,7 +30,7 @@ const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RE
 
 export async function GET(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('INVENTORY_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -143,7 +143,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('INVENTORY_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

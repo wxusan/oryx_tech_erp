@@ -11,7 +11,15 @@ export interface DeviceListQuery {
 }
 
 function scopeRoot(scope: AuthenticatedQueryScope) {
-  return ['oryx', scope.role, scope.tenantId, scope.sessionVersion] as const
+  return [
+    'oryx',
+    scope.role,
+    scope.tenantId,
+    scope.sessionVersion,
+    scope.memberKind,
+    scope.authorizationVersion,
+    scope.permissionVersion,
+  ] as const
 }
 
 export const queryKeys = {

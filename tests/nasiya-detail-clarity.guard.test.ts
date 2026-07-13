@@ -40,7 +40,7 @@ describe('nasiya detail: completed profile', () => {
   })
 
   it('hides the "To\'lov qabul qilish" button once completed/cancelled', () => {
-    expect(source).toContain('{!isCompleted && displayStatus !== \'CANCELLED\' && (')
+    expect(source).toContain("{canReceivePayment && !isCompleted && displayStatus !== 'CANCELLED' && (")
   })
 
   it('shows a clear completed banner text', () => {

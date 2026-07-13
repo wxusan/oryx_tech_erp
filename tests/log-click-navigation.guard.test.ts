@@ -17,8 +17,8 @@ function read(rel: string): string {
 describe('GET /api/logs/[id]/link resolves each target type to a shop-scoped href', () => {
   const source = read('src/app/api/logs/[id]/link/route.ts')
 
-  it('is guarded by requireApiSession + resolveActiveShopId (tenant isolation)', () => {
-    expect(source).toContain('requireApiSession()')
+  it('is guarded by the live log permission + resolveActiveShopId (tenant isolation)', () => {
+    expect(source).toContain("requireShopPermission('LOG_VIEW')")
     expect(source).toContain('resolveActiveShopId(session')
   })
 

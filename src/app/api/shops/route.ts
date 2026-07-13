@@ -19,6 +19,20 @@ import {
   isRequestBodyTooLarge,
   readLimitedJsonBody,
 } from '@/lib/server/request-limits'
+import { SHOP_FEATURE_CODES } from '@/lib/access-control'
+import { tashkentTodayInputValue } from '@/lib/timezone'
+import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
+
+async function runSerializable<T>(operation: () => Promise<T>) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      return await operation()
+    } catch (error) {
+      if (!isRetryableTransactionError(error) || attempt === 2) throw error
+    }
+  }
+  throw new Error('SERIALIZABLE_TRANSACTION_FAILED')
+}
 
 // ---------------------------------------------------------------------------
 // GET /api/shops
@@ -79,6 +93,23 @@ export async function POST(req: NextRequest) {
     }
 
     const { name, ownerName, ownerPhone, shopNumber, address, note, admins } = parsed.data
+    const accessMode = parsed.data.accessMode ?? (admins.length > 1 ? 'OWNER_AND_STAFF' : 'OWNER_ONLY')
+    const today = tashkentTodayInputValue()
+    if (parsed.data.package && parsed.data.package.effectiveOn !== today) {
+      return badRequest("Yangi do'konning birinchi paketi bugungi sana bilan boshlanishi kerak")
+    }
+    const packageDraft = parsed.data.package ?? {
+      effectiveOn: today,
+      basePrice: 0,
+      currency: 'UZS' as const,
+      discountAmount: 0,
+      note: "Boshlang'ich paket narxi bosh admin tomonidan ko'rib chiqilishi kerak",
+      features: SHOP_FEATURE_CODES.map((featureCode) => ({
+        featureCode,
+        enabled: featureCode === 'STAFF_ACCESS' ? accessMode === 'OWNER_AND_STAFF' : true,
+        recurringPrice: 0,
+      })),
+    }
     const duplicateLogin = admins.find((admin, index) =>
       admins.some((other, otherIndex) => otherIndex !== index && other.login === admin.login),
     )
@@ -111,7 +142,27 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const shop = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    // bcrypt is intentionally completed before the database transaction so a
+    // CPU-heavy password hash never holds PostgreSQL locks open.
+    const adminsWithPasswordHash = await Promise.all(normalizedAdmins.map(async (admin) => ({
+      ...admin,
+      passwordHash: await bcrypt.hash(admin.password, 12),
+    })))
+
+    const shop = await runSerializable(() => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      for (const telegramId of [...telegramIds].sort()) {
+        await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`telegram:${telegramId}`}))`)
+      }
+      if (telegramIds.length) {
+        const [superAdminOwner, shopAdminOwner] = await Promise.all([
+          tx.superAdmin.findFirst({ where: { telegramId: { in: telegramIds }, deletedAt: null }, select: { id: true } }),
+          tx.shopAdmin.findFirst({ where: { telegramId: { in: telegramIds }, deletedAt: null }, select: { id: true } }),
+        ])
+        if (superAdminOwner || shopAdminOwner) {
+          throw Object.assign(new Error('TELEGRAM_TAKEN'), { code: 'TELEGRAM_TAKEN' })
+        }
+      }
+      const subscriptionDue = new Date()
       const newShop = await tx.shop.create({
         data: {
           name,
@@ -121,13 +172,14 @@ export async function POST(req: NextRequest) {
           address: address ?? '',
           note,
           createdById: session.user.id,
-          subscriptionDue: new Date(),
+          subscriptionDue,
+          billingAnchorDay: Number(today.slice(-2)),
         },
       })
 
-      for (const admin of normalizedAdmins) {
-        const passwordHash = await bcrypt.hash(admin.password, 12)
-        await tx.shopAdmin.create({
+      let ownerAdminId: string | null = null
+      for (const [index, admin] of adminsWithPasswordHash.entries()) {
+        const member = await tx.shopAdmin.create({
           data: {
             shopId: newShop.id,
             name: admin.name,
@@ -135,10 +187,45 @@ export async function POST(req: NextRequest) {
             login: admin.login,
             telegramId: admin.telegramId,
             telegramVerifiedAt: null,
-            passwordHash,
+            passwordHash: admin.passwordHash,
+            legacyFullAccess: false,
           },
+          select: { id: true },
         })
+        if (index === 0) ownerAdminId = member.id
       }
+
+      if (!ownerAdminId) throw new Error('OWNER_ADMIN_REQUIRED')
+
+      await tx.shop.update({
+        where: { id: newShop.id },
+        data: {
+          ownerAdminId,
+          ownershipStatus: 'RESOLVED',
+          ownershipResolvedAt: new Date(),
+          ownershipResolvedById: session.user.id,
+        },
+      })
+
+      await tx.shopPackageVersion.create({
+        data: {
+          shopId: newShop.id,
+          effectiveOn: new Date(`${packageDraft.effectiveOn}T00:00:00.000Z`),
+          basePrice: packageDraft.basePrice,
+          currency: packageDraft.currency,
+          discountAmount: packageDraft.discountAmount,
+          pricingNeedsReview: !parsed.data.package,
+          note: packageDraft.note,
+          createdById: session.user.id,
+          features: {
+            create: packageDraft.features.map((feature) => ({
+              featureCode: feature.featureCode,
+              enabled: feature.enabled,
+              recurringPrice: feature.recurringPrice,
+            })),
+          },
+        },
+      })
 
       await tx.log.create({
         data: {
@@ -147,17 +234,21 @@ export async function POST(req: NextRequest) {
           action: 'CREATE',
           targetType: 'Shop',
           targetId: newShop.id,
-          newValue: { name, ownerName, ownerPhone, shopNumber },
+          newValue: { name, ownerName, ownerPhone, shopNumber, ownerAdminId, accessMode },
         },
       })
 
-      return newShop
-    })
+      return tx.shop.findUniqueOrThrow({ where: { id: newShop.id } })
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }))
 
     return created(shop, "Do'kon muvaffaqiyatli yaratildi")
   } catch (err) {
     if (isRequestBodyTooLarge(err)) return payloadTooLarge()
     if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
+    if (err && typeof err === 'object' && 'code' in err) {
+      if (err.code === 'TELEGRAM_TAKEN') return conflict('Bu Telegram ID allaqachon mavjud')
+      if (err.code === 'P2002') return conflict('Login yoki boshqa noyob ma\'lumot allaqachon mavjud')
+    }
     logger.error('[POST /api/shops]', { event: 'api.route_error', error: err })
     return serverError()
   }

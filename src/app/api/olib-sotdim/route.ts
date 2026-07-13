@@ -16,7 +16,7 @@
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { createOlibSotdimSchema } from '@/lib/validations'
 import { ok, created, badRequest, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -38,7 +38,7 @@ import { deviceConditionLabel, formatDeviceStorage, normalizeImei } from '@/lib/
 
 export async function GET(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('OLIB_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -147,7 +147,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('OLIB_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

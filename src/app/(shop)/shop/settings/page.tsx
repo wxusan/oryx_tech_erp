@@ -24,6 +24,7 @@ import { useShopCurrency } from '@/lib/use-shop-currency'
 import type { ApiResponse } from '@/types'
 import { SettingsInfo as Info } from '@/components/shop/settings-info'
 import { SettingsPasswordField as PasswordField } from '@/components/shop/settings-password-field'
+import { useShopAccess } from '@/components/shop/shop-access-context'
 
 interface ShopAdminProfile {
   id: string
@@ -52,6 +53,7 @@ interface ShopProfile {
   subscriptionDue: string
   preferredCurrency: 'UZS' | 'USD'
   usdUzsRate: number | null
+  telegramNotificationsEnabled: boolean
 }
 
 interface PasswordForm {
@@ -81,6 +83,8 @@ function formatDate(value: string | null | undefined) {
 
 export default function ShopSettingsPage() {
   const { setCurrency } = useShopCurrency()
+  const { can } = useShopAccess()
+  const canManageShop = can('SETTINGS_MANAGE')
   const [profile, setProfile] = useState<ShopAdminProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -102,7 +106,7 @@ export default function ShopSettingsPage() {
 
   // Shop profile editing
   const [shop, setShop] = useState<ShopProfile | null>(null)
-  const [shopForm, setShopForm] = useState({ name: '', ownerName: '', ownerPhone: '', address: '', note: '', preferredCurrency: 'UZS' as 'UZS' | 'USD' })
+  const [shopForm, setShopForm] = useState({ name: '', ownerName: '', ownerPhone: '', address: '', note: '', preferredCurrency: 'UZS' as 'UZS' | 'USD', telegramNotificationsEnabled: true })
   const [shopError, setShopError] = useState('')
   const [shopSuccess, setShopSuccess] = useState('')
   const [shopSaving, setShopSaving] = useState(false)
@@ -115,10 +119,12 @@ export default function ShopSettingsPage() {
         if (!response.ok) throw new Error(await readApiError(response))
         return (await response.json()) as ApiResponse<ShopAdminProfile>
       }),
-      fetch('/api/shop/profile').then(async (response) => {
-        if (!response.ok) return null
-        return (await response.json()) as ApiResponse<ShopProfile>
-      }),
+      canManageShop
+        ? fetch('/api/shop/profile').then(async (response) => {
+            if (!response.ok) return null
+            return (await response.json()) as ApiResponse<ShopProfile>
+          })
+        : Promise.resolve(null),
     ])
       .then(([profileJson, shopJson]) => {
         if (!mounted) return
@@ -135,6 +141,7 @@ export default function ShopSettingsPage() {
             address: shopJson.data.address ?? '',
             note: shopJson.data.note ?? '',
             preferredCurrency: shopJson.data.preferredCurrency ?? 'UZS',
+            telegramNotificationsEnabled: shopJson.data.telegramNotificationsEnabled,
           })
         }
       })
@@ -148,7 +155,7 @@ export default function ShopSettingsPage() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [canManageShop])
 
   const telegramStatus = useMemo(() => {
     if (!profile) return { label: '-', tone: 'secondary' as const }
@@ -226,6 +233,7 @@ export default function ShopSettingsPage() {
           address: shopForm.address.trim(),
           note: shopForm.note.trim(),
           preferredCurrency: shopForm.preferredCurrency,
+          telegramNotificationsEnabled: shopForm.telegramNotificationsEnabled,
         }),
       })
       if (!response.ok) throw new Error(await readApiError(response))
@@ -500,6 +508,18 @@ export default function ShopSettingsPage() {
                         UZS bazaviy hisob bo'lib qoladi; USD faqat ko'rish va kiritish uchun.
                       </p>
                     </fieldset>
+                    <label htmlFor="shop-telegram-notifications" className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 p-3 text-sm">
+                      <span>
+                        <span className="block font-medium text-zinc-800">Do&apos;kon Telegram xabarlari</span>
+                        <span className="mt-0.5 block text-xs text-zinc-500">Barcha ruxsat berilgan oluvchilar uchun umumiy kalit</span>
+                      </span>
+                      <input
+                        id="shop-telegram-notifications"
+                        type="checkbox"
+                        checked={shopForm.telegramNotificationsEnabled}
+                        onChange={(event) => setShopForm((form) => ({ ...form, telegramNotificationsEnabled: event.target.checked }))}
+                      />
+                    </label>
                   </div>
                   <div>
                     <Label htmlFor="shop-note" className="mb-1.5 block text-xs font-medium text-zinc-700">

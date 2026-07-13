@@ -28,6 +28,7 @@ import {
 } from '@/components/ui/select'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { useShopAccess } from '@/components/shop/shop-access-context'
 
 const TRUST_TIER_LABELS: Record<TrustTier, string> = {
   NEW: 'Yangi mijoz',
@@ -59,6 +60,9 @@ const PER_PAGE = 25
 
 export default function CustomersClient({ initialSearch, initialPage }: { initialSearch: string; initialPage: number }) {
   const scope = useAuthenticatedQueryScope()
+  const { can } = useShopAccess()
+  const canManageCustomers = can('CUSTOMER_MANAGE')
+  const canExport = can('EXPORT_DATA')
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState(initialSearch)
   const [committedSearch, setCommittedSearch] = useState(initialSearch)
@@ -171,13 +175,15 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
           <h1 className="text-xl font-bold text-zinc-900">Mijozlar</h1>
           <p className="text-sm text-zinc-500 mt-0.5">Savdo va nasiya mijozlari tarixi</p>
         </div>
-        <button
-          type="button"
-          onClick={() => window.location.assign('/api/export/customers')}
-          className="inline-flex h-9 items-center justify-center rounded bg-zinc-900 px-4 text-sm text-white hover:bg-zinc-800"
-        >
-          CSV eksport
-        </button>
+        {canExport && (
+          <button
+            type="button"
+            onClick={() => window.location.assign('/api/export/customers')}
+            className="inline-flex h-9 items-center justify-center rounded bg-zinc-900 px-4 text-sm text-white hover:bg-zinc-800"
+          >
+            CSV eksport
+          </button>
+        )}
       </div>
 
       <div className="flex max-w-md gap-2">
@@ -229,9 +235,11 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
                   <td className="px-4 py-3 text-zinc-600">{customer._count?.nasiya ?? 0}</td>
                   <td className="px-4 py-3 text-zinc-500">{uzDate(customer.createdAt)}</td>
                   <td className="px-4 py-3 text-right">
-                    <Button variant="outline" onClick={() => openEdit(customer)} className="h-8 rounded border-zinc-200 px-3 text-xs">
-                      Tahrirlash
-                    </Button>
+                    {canManageCustomers && (
+                      <Button variant="outline" onClick={() => openEdit(customer)} className="h-8 rounded border-zinc-200 px-3 text-xs">
+                        Tahrirlash
+                      </Button>
+                    )}
                   </td>
                 </tr>
               ))
@@ -266,13 +274,15 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
                 <span>{customer._count?.nasiya ?? 0} ta nasiya</span>
                 <span>{uzDate(customer.createdAt)}</span>
               </div>
-              <Button
-                variant="outline"
-                onClick={() => openEdit(customer)}
-                className="h-8 w-full rounded border-zinc-200 text-xs"
-              >
-                Tahrirlash
-              </Button>
+              {canManageCustomers && (
+                <Button
+                  variant="outline"
+                  onClick={() => openEdit(customer)}
+                  className="h-8 w-full rounded border-zinc-200 text-xs"
+                >
+                  Tahrirlash
+                </Button>
+              )}
             </div>
           ))
         )}

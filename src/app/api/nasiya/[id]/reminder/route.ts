@@ -8,7 +8,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireShopPermission } from '@/lib/api-auth'
 import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopReminderMutation } from '@/lib/server/cache-tags'
 import type { ZodError } from 'zod'
@@ -22,7 +22,7 @@ const reminderSchema = z.object({
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('NASIYA_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

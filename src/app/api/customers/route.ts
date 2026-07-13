@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, serverError } from '@/lib/api-helpers'
 import { normalizePhone } from '@/lib/phone'
 import { logger } from '@/lib/logger'
@@ -26,7 +26,7 @@ const EMPTY_TRUST_FACTORS: CustomerTrustFactors = {
 
 export async function GET(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('CUSTOMER_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

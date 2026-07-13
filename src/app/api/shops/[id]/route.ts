@@ -48,7 +48,13 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     if (!shop) return notFound("Do'kon topilmadi")
 
-    return ok(shop)
+    return ok({
+      ...shop,
+      admins: shop.admins.map((admin) => ({
+        ...admin,
+        memberKind: admin.id === shop.ownerAdminId ? 'SHOP_OWNER' as const : 'SHOP_STAFF' as const,
+      })),
+    })
   } catch (err) {
     logger.error('[GET /api/shops/[id]]', { event: 'api.route_error', error: err })
     return serverError()

@@ -51,6 +51,10 @@ export function NavigationCacheCoordinator({
       // affected active query revalidates. Device lists are patched precisely
       // above and therefore do not need a broad refetch.
       void invalidateNavigationQueryDomains(queryClient, scope, delta.invalidatedDomains)
+      // Package/member changes alter the authorization context rendered by
+      // the shop layout. Refresh only the RSC tree; React Query keeps all
+      // unaffected cached lists in place.
+      if (delta.invalidatedDomains.includes('access')) router.refresh()
     }
 
     async function executeSync(): Promise<string | null> {

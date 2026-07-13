@@ -8,6 +8,9 @@ export interface AdminShopUser {
   telegramVerifiedAt: string | null
   login: string
   isActive: boolean
+  memberKind: 'SHOP_OWNER' | 'SHOP_STAFF'
+  legacyFullAccess: boolean
+  telegramNotificationsEnabled: boolean
 }
 
 export interface AdminShopPayment {
@@ -17,6 +20,11 @@ export interface AdminShopPayment {
   months: number
   paymentMethod: string
   note: string | null
+  allocationStatus: 'PACKAGE_ALLOCATED' | 'LEGACY_UNALLOCATED'
+  currency: 'UZS' | 'USD' | null
+  packageMonthlyPriceSnapshot: string | number | null
+  servicePeriodStart: string | null
+  servicePeriodEnd: string | null
 }
 
 export interface AdminShopDetail {
@@ -32,6 +40,10 @@ export interface AdminShopDetail {
   deletedAt: string | null
   deletedBy: string | null
   deleteNote: string | null
+  ownerAdminId: string | null
+  ownershipStatus: 'RESOLVED' | 'UNMATCHED' | 'AMBIGUOUS'
+  authorizationVersion: number
+  telegramNotificationsEnabled: boolean
   admins: AdminShopUser[]
   payments: AdminShopPayment[]
 }

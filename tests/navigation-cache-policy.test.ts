@@ -100,4 +100,27 @@ describe('mutation-aware navigation cache policy', () => {
     const revokedSession = navigationScopeForSession({ id: 'a', role: 'SHOP_ADMIN', shopId: 'shop-a', sessionVersion: 2 })
     expect(new Set([first, secondShop, revokedSession]).size).toBe(3)
   })
+
+  it('partitions client notifications by live owner/staff authorization generation', () => {
+    const owner = navigationScopeForSession({
+      id: 'a', role: 'SHOP_ADMIN', shopId: 'shop-a', sessionVersion: 1,
+      memberKind: 'SHOP_OWNER', authorizationVersion: 1, permissionVersion: 1,
+    })
+    const staff = navigationScopeForSession({
+      id: 'a', role: 'SHOP_ADMIN', shopId: 'shop-a', sessionVersion: 1,
+      memberKind: 'SHOP_STAFF', authorizationVersion: 1, permissionVersion: 1,
+    })
+    const packageChanged = navigationScopeForSession({
+      id: 'a', role: 'SHOP_ADMIN', shopId: 'shop-a', sessionVersion: 1,
+      memberKind: 'SHOP_OWNER', authorizationVersion: 2, permissionVersion: 1,
+    })
+    expect(new Set([owner, staff, packageChanged]).size).toBe(3)
+  })
+
+  it('targets the real worker-management path and authorization domain after staff changes', () => {
+    const impact = navigationImpactForMutation({ kind: 'shop.staffUpdated' })
+    expect(impact.domains).toContain('access')
+    expect(impact.paths).toContain('/shop/xodimlar')
+    expect(impact.paths).not.toContain('/shop/staff')
+  })
 })

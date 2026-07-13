@@ -10,7 +10,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireShopPermission } from '@/lib/api-auth'
 import { ok, badRequest, conflict, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
@@ -59,7 +59,7 @@ const deleteDeviceSchema = z.object({
 
 export async function GET(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('INVENTORY_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -234,7 +234,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('INVENTORY_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -430,7 +430,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('INVENTORY_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

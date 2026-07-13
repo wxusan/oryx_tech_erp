@@ -24,6 +24,17 @@ enum ShopStatus {
   DELETED
 }
 
+enum ShopOwnershipStatus {
+  RESOLVED
+  UNMATCHED
+  AMBIGUOUS
+}
+
+enum ShopPaymentAllocationStatus {
+  PACKAGE_ALLOCATED
+  LEGACY_UNALLOCATED
+}
+
 enum DeviceStatus {
   IN_STOCK
   SOLD_CASH
@@ -113,8 +124,10 @@ model SuperAdmin {
   deletedAt          DateTime?
 
   // Relations
-  shopsCreated Shop[]        @relation("ShopCreatedBy")
-  shopPayments ShopPayment[]
+  shopsCreated           Shop[]               @relation("ShopCreatedBy")
+  shopPayments           ShopPayment[]
+  packageVersionsCreated ShopPackageVersion[] @relation("PackageVersionCreatedBy")
+  ownershipsResolved     Shop[]               @relation("ShopOwnershipResolvedBy")
 
   @@index([telegramId])
 }
@@ -124,40 +137,52 @@ model SuperAdmin {
 // ---------------------------------------------------------------------------
 
 model Shop {
-  id                String       @id @default(cuid())
-  name              String
-  ownerName         String
-  ownerPhone        String
-  shopNumber        String
-  address           String
-  note              String?
-  status            ShopStatus   @default(ACTIVE)
-  subscriptionDue   DateTime
-  telegramGroupId   String?
-  preferredCurrency CurrencyCode @default(UZS)
-  createdAt         DateTime     @default(now())
-  updatedAt         DateTime     @updatedAt
-  deletedAt         DateTime?
-  deletedBy         String?
-  deleteNote        String?
+  id                           String              @id @default(cuid())
+  name                         String
+  ownerName                    String
+  ownerPhone                   String
+  shopNumber                   String
+  address                      String
+  note                         String?
+  status                       ShopStatus          @default(ACTIVE)
+  subscriptionDue              DateTime
+  telegramGroupId              String?
+  telegramNotificationsEnabled Boolean             @default(true)
+  preferredCurrency            CurrencyCode        @default(UZS)
+  authorizationVersion         Int                 @default(1)
+  billingAnchorDay             Int                 @default(1)
+  ownerAdminId                 String?             @unique
+  ownershipStatus              ShopOwnershipStatus @default(UNMATCHED)
+  ownershipResolvedAt          DateTime?
+  ownershipResolvedById        String?
+  createdAt                    DateTime            @default(now())
+  updatedAt                    DateTime            @updatedAt
+  deletedAt                    DateTime?
+  deletedBy                    String?
+  deleteNote                   String?
 
   // FK
-  createdById String
-  createdBy   SuperAdmin @relation("ShopCreatedBy", fields: [createdById], references: [id])
+  createdById         String
+  createdBy           SuperAdmin  @relation("ShopCreatedBy", fields: [createdById], references: [id])
+  ownershipResolvedBy SuperAdmin? @relation("ShopOwnershipResolvedBy", fields: [ownershipResolvedById], references: [id])
+  ownerAdmin          ShopAdmin?  @relation("ShopOwnerAdmin", fields: [ownerAdminId, id], references: [id, shopId])
 
   // Relations
-  payments         ShopPayment[]
-  admins           ShopAdmin[]
-  devices          Device[]
-  deviceReturns    DeviceReturn[]
-  suppliers        Supplier[]
-  sales            Sale[]
-  customers        Customer[]
-  nasiya           Nasiya[]
-  notifications    Notification[]
-  logs             Log[]
-  supplierPayables SupplierPayable[]
+  payments          ShopPayment[]
+  admins            ShopAdmin[]            @relation("ShopMembers")
+  devices           Device[]
+  deviceReturns     DeviceReturn[]
+  suppliers         Supplier[]
+  sales             Sale[]
+  customers         Customer[]
+  nasiya            Nasiya[]
+  notifications     Notification[]
+  logs              Log[]
+  supplierPayables  SupplierPayable[]
+  packageVersions   ShopPackageVersion[]
+  memberPermissions ShopMemberPermission[]
 
+  @@unique([ownerAdminId, id])
   @@index([status])
 }
 
@@ -166,25 +191,36 @@ model Shop {
 // ---------------------------------------------------------------------------
 
 model ShopPayment {
-  id             String        @id @default(cuid())
-  shopId         String
-  amount         Decimal       @db.Decimal(12, 2)
-  months         Int
-  paymentMethod  PaymentMethod
-  note           String?
-  idempotencyKey String?
-  paidAt         DateTime      @default(now())
-  deletedAt      DateTime?
-  deletedBy      String?
-  deleteNote     String?
+  id                          String                      @id @default(cuid())
+  shopId                      String
+  amount                      Decimal                     @db.Decimal(12, 2)
+  months                      Int
+  paymentMethod               PaymentMethod
+  note                        String?
+  idempotencyKey              String?
+  commandHash                 String?
+  paidAt                      DateTime                    @default(now())
+  deletedAt                   DateTime?
+  deletedBy                   String?
+  deleteNote                  String?
+  allocationStatus            ShopPaymentAllocationStatus @default(LEGACY_UNALLOCATED)
+  currency                    CurrencyCode?
+  packageVersionId            String?
+  packageMonthlyPriceSnapshot Decimal?                    @db.Decimal(12, 2)
+  servicePeriodStart          DateTime?                   @db.Date
+  servicePeriodEnd            DateTime?                   @db.Date
+  dueBefore                   DateTime?
+  dueAfter                    DateTime?
 
   // FK
-  recordedById String
-  recordedBy   SuperAdmin @relation(fields: [recordedById], references: [id])
-  shop         Shop       @relation(fields: [shopId], references: [id])
+  recordedById   String
+  recordedBy     SuperAdmin          @relation(fields: [recordedById], references: [id])
+  shop           Shop                @relation(fields: [shopId], references: [id])
+  packageVersion ShopPackageVersion? @relation(fields: [packageVersionId, shopId], references: [id, shopId])
 
   @@unique([shopId, idempotencyKey])
   @@index([shopId])
+  @@index([packageVersionId, shopId])
   @@index([paidAt])
 }
 
@@ -211,29 +247,125 @@ model CurrencyRate {
 // ---------------------------------------------------------------------------
 
 model ShopAdmin {
-  id                 String    @id @default(cuid())
-  shopId             String
-  name               String
-  phone              String
-  login              String
-  telegramId         String?
-  telegramVerifiedAt DateTime?
-  passwordHash       String
-  passwordChangedAt  DateTime  @default(now())
-  sessionVersion     Int       @default(1)
-  isActive           Boolean   @default(true)
-  createdAt          DateTime  @default(now())
-  deletedAt          DateTime?
-  deletedBy          String?
-  deleteNote         String?
+  id                           String    @id @default(cuid())
+  shopId                       String
+  name                         String
+  phone                        String
+  login                        String
+  telegramId                   String?
+  telegramVerifiedAt           DateTime?
+  passwordHash                 String
+  passwordChangedAt            DateTime  @default(now())
+  sessionVersion               Int       @default(1)
+  permissionVersion            Int       @default(1)
+  isActive                     Boolean   @default(true)
+  legacyFullAccess             Boolean   @default(false)
+  telegramNotificationsEnabled Boolean   @default(true)
+  createdAt                    DateTime  @default(now())
+  deletedAt                    DateTime?
+  deletedBy                    String?
+  deleteNote                   String?
 
   // Relations
-  shop Shop @relation(fields: [shopId], references: [id])
+  shop        Shop                   @relation("ShopMembers", fields: [shopId], references: [id])
+  ownedShop   Shop?                  @relation("ShopOwnerAdmin")
+  permissions ShopMemberPermission[]
 
   @@unique([login])
+  @@unique([id, shopId])
   @@index([shopId])
   @@index([shopId, phone])
   @@index([telegramId])
+}
+
+// ---------------------------------------------------------------------------
+// Expandable feature and permission catalogs. Stable string codes allow new
+// commercial modules and staff capabilities without a PostgreSQL enum
+// migration; application code still exposes a closed typed catalog.
+// ---------------------------------------------------------------------------
+
+model FeatureDefinition {
+  code          String   @id
+  nameUz        String
+  descriptionUz String?
+  billable      Boolean  @default(true)
+  platformCore  Boolean  @default(false)
+  sortOrder     Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  packageFeatures ShopPackageFeature[]
+  permissions     PermissionDefinition[]
+}
+
+model PermissionDefinition {
+  code          String   @id
+  nameUz        String
+  descriptionUz String?
+  featureCode   String?
+  sortOrder     Int      @default(0)
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  memberPermissions ShopMemberPermission[]
+  feature           FeatureDefinition?     @relation(fields: [featureCode], references: [code])
+
+  @@index([featureCode])
+}
+
+// One immutable version is a complete package snapshot. The active package is
+// the latest version whose effectiveOn is not in the future.
+model ShopPackageVersion {
+  id                 String       @id @default(cuid())
+  shopId             String
+  effectiveOn        DateTime     @db.Date
+  basePrice          Decimal      @db.Decimal(12, 2)
+  currency           CurrencyCode @default(UZS)
+  discountAmount     Decimal      @default(0) @db.Decimal(12, 2)
+  pricingNeedsReview Boolean      @default(false)
+  note               String
+  createdById        String
+  createdAt          DateTime     @default(now())
+
+  shop      Shop                 @relation(fields: [shopId], references: [id])
+  createdBy SuperAdmin           @relation("PackageVersionCreatedBy", fields: [createdById], references: [id])
+  features  ShopPackageFeature[]
+  payments  ShopPayment[]
+
+  @@unique([id, shopId])
+  @@index([shopId, effectiveOn(sort: Desc), createdAt(sort: Desc)])
+}
+
+model ShopPackageFeature {
+  id               String  @id @default(cuid())
+  packageVersionId String
+  featureCode      String
+  enabled          Boolean
+  recurringPrice   Decimal @default(0) @db.Decimal(12, 2)
+
+  packageVersion ShopPackageVersion @relation(fields: [packageVersionId], references: [id])
+  feature        FeatureDefinition  @relation(fields: [featureCode], references: [code])
+
+  @@unique([packageVersionId, featureCode])
+  @@index([featureCode])
+}
+
+model ShopMemberPermission {
+  id             String   @id @default(cuid())
+  shopId         String
+  shopAdminId    String
+  permissionCode String
+  grantedAt      DateTime @default(now())
+  grantedById    String
+
+  shop       Shop                 @relation(fields: [shopId], references: [id])
+  member     ShopAdmin            @relation(fields: [shopAdminId, shopId], references: [id, shopId])
+  permission PermissionDefinition @relation(fields: [permissionCode], references: [code])
+
+  @@unique([shopAdminId, permissionCode])
+  @@index([shopId, permissionCode])
 }
 
 // ---------------------------------------------------------------------------

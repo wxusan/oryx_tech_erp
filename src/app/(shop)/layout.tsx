@@ -10,7 +10,7 @@ import { AuthenticatedQueryProvider } from '@/components/authenticated-query-pro
 
 export default async function ShopLayout({ children }: { children: React.ReactNode }) {
   const guarded = await requireApiSession()
-  if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
+  if (!guarded.ok || !guarded.shopId || !guarded.principal) redirect('/shop/login')
 
   const syncCursor = await latestChangeCursorForSession(guarded.session)
   const [currency, shop] = await Promise.all([
@@ -20,13 +20,22 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
 
   return (
     <AuthenticatedQueryProvider
-      scope={authenticatedQueryScope(guarded.session.user)}
+      scope={authenticatedQueryScope({
+        ...guarded.session.user,
+        memberKind: guarded.principal.memberKind,
+        authorizationVersion: guarded.principal.authorizationVersion,
+        permissionVersion: guarded.principal.permissionVersion,
+      })}
       initialCursor={syncCursor}
     >
       <ShopCurrencyProvider initialCurrency={currency}>
         <ShopLayoutClient
           shopName={shop?.name ?? "Do'kon"}
           adminName={guarded.session.user.name}
+          memberKind={guarded.principal.memberKind}
+          enabledFeatures={[...guarded.principal.enabledFeatures]}
+          grantedPermissions={[...guarded.principal.grantedPermissions]}
+          legacyFullAccess={guarded.principal.legacyFullAccess}
         >
           {children}
         </ShopLayoutClient>

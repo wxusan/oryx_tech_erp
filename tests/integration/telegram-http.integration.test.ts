@@ -55,7 +55,7 @@ async function seedShop(suffix: string) {
       createdById: owner.id,
     },
   })
-  await prisma.shopAdmin.create({
+  const admin = await prisma.shopAdmin.create({
     data: {
       shopId: shop.id,
       name: `Telegram admin ${suffix}`,
@@ -66,7 +66,35 @@ async function seedShop(suffix: string) {
       passwordHash: 'audit-only',
     },
   })
-  return { owner, shop }
+  await prisma.shop.update({
+    where: { id: shop.id },
+    data: {
+      ownerAdminId: admin.id,
+      ownershipStatus: 'RESOLVED',
+      ownershipResolvedAt: new Date('2026-07-01T00:00:00.000Z'),
+      ownershipResolvedById: owner.id,
+      telegramNotificationsEnabled: true,
+    },
+  })
+  await prisma.shopPackageVersion.create({
+    data: {
+      shopId: shop.id,
+      effectiveOn: new Date('2026-01-01T00:00:00.000Z'),
+      basePrice: 1_000,
+      currency: 'UZS',
+      discountAmount: 0,
+      pricingNeedsReview: false,
+      note: 'Telegram integration package',
+      createdById: owner.id,
+      features: {
+        create: [
+          'INVENTORY', 'CASH_SALES', 'NASIYA', 'OLIB_SOTDIM', 'CUSTOMER_CRM',
+          'TELEGRAM', 'REMINDERS', 'REPORTS', 'IMPORTS', 'EXPORTS', 'STAFF_ACCESS',
+        ].map((featureCode) => ({ featureCode, enabled: true, recurringPrice: 0 })),
+      },
+    },
+  })
+  return { owner, shop, admin }
 }
 
 beforeAll(async () => {

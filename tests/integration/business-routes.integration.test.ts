@@ -63,6 +63,33 @@ async function seedActor(suffix: string) {
       passwordHash: 'audit-only',
     },
   })
+  await prisma.shop.update({
+    where: { id: shop.id },
+    data: {
+      ownerAdminId: admin.id,
+      ownershipStatus: 'RESOLVED',
+      ownershipResolvedAt: new Date('2026-07-01T00:00:00.000Z'),
+      ownershipResolvedById: owner.id,
+    },
+  })
+  await prisma.shopPackageVersion.create({
+    data: {
+      shopId: shop.id,
+      effectiveOn: new Date('2026-01-01T00:00:00.000Z'),
+      basePrice: 1_000,
+      currency: 'UZS',
+      discountAmount: 0,
+      pricingNeedsReview: false,
+      note: 'Disposable integration package',
+      createdById: owner.id,
+      features: {
+        create: [
+          'INVENTORY', 'CASH_SALES', 'NASIYA', 'OLIB_SOTDIM', 'CUSTOMER_CRM',
+          'TELEGRAM', 'REMINDERS', 'REPORTS', 'IMPORTS', 'EXPORTS', 'STAFF_ACCESS',
+        ].map((featureCode) => ({ featureCode, enabled: true, recurringPrice: 0 })),
+      },
+    },
+  })
   const authSession = await prisma.authSession.create({
     data: {
       id: `route-session-${suffix}`,
@@ -88,6 +115,55 @@ function useShopAdmin(actor: Awaited<ReturnType<typeof seedActor>>) {
     },
     expires: '2099-01-01T00:00:00.000Z',
   }
+}
+
+async function seedStaff(
+  actor: Awaited<ReturnType<typeof seedActor>>,
+  suffix: string,
+  permissionCodes: string[],
+) {
+  const admin = await prisma.shopAdmin.create({
+    data: {
+      shopId: actor.shop.id,
+      name: `Staff ${suffix}`,
+      phone: `+99893${suffix.padStart(7, '0').slice(-7)}`,
+      login: `staff_route_${suffix}`,
+      passwordHash: 'audit-only',
+    },
+  })
+  if (permissionCodes.length) {
+    await prisma.shopMemberPermission.createMany({
+      data: permissionCodes.map((permissionCode) => ({
+        shopId: actor.shop.id,
+        shopAdminId: admin.id,
+        permissionCode,
+        grantedById: actor.admin.id,
+      })),
+    })
+  }
+  const authSession = await prisma.authSession.create({
+    data: {
+      id: `staff-route-session-${suffix}`,
+      actorId: admin.id,
+      actorType: 'SHOP_ADMIN',
+      shopId: actor.shop.id,
+      sessionVersion: admin.sessionVersion,
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+    },
+  })
+  return { ...actor, admin, authSession }
+}
+
+async function deviceListRequest() {
+  const { NextRequest } = await import('next/server')
+  const { GET } = await import('@/app/api/devices/route')
+  return GET(new NextRequest('http://localhost/api/devices?paginated=1'))
+}
+
+async function shopStatsRequest() {
+  const { NextRequest } = await import('next/server')
+  const { GET } = await import('@/app/api/stats/shop/route')
+  return GET(new NextRequest('http://localhost/api/stats/shop'))
 }
 
 async function useSuperAdmin(actor: Awaited<ReturnType<typeof seedActor>>) {
@@ -339,6 +415,19 @@ afterAll(async () => {
 })
 
 describe('real-PostgreSQL route evidence', () => {
+  it('enforces live staff permissions on real routes while preserving allowed inventory access', async () => {
+    const actor = await seedActor('staff_matrix')
+    const staff = await seedStaff(actor, 'staff_matrix', ['INVENTORY_VIEW'])
+    useShopAdmin(staff)
+
+    expect((await deviceListRequest()).status).toBe(200)
+    expect((await shopStatsRequest()).status).toBe(403)
+
+    await prisma.shopMemberPermission.deleteMany({ where: { shopAdminId: staff.admin.id } })
+    await prisma.shopAdmin.update({ where: { id: staff.admin.id }, data: { permissionVersion: { increment: 1 } } })
+    expect((await deviceListRequest()).status).toBe(403)
+  })
+
   it('preserves the original Sale and receipts while posting an allocated return event', async () => {
     const actor = await seedActor('immutable_return')
     useShopAdmin(actor)
@@ -935,6 +1024,14 @@ describe('real-PostgreSQL route evidence', () => {
     expect((await shopPaymentRequest({ ...command, months: 2 })).status).toBe(409)
     expect((await shopPaymentRequest({ ...command, note: 'Changed note' })).status).toBe(409)
     expect(await prisma.shopPayment.count({ where: { shopId: actor.shop.id } })).toBe(1)
+    const receipt = await prisma.shopPayment.findFirstOrThrow({ where: { shopId: actor.shop.id } })
+    expect(receipt.allocationStatus).toBe('PACKAGE_ALLOCATED')
+    expect(receipt.currency).toBe('UZS')
+    expect(Number(receipt.packageMonthlyPriceSnapshot)).toBe(1_000)
+    expect(receipt.packageVersionId).not.toBeNull()
+    expect(receipt.commandHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(receipt.servicePeriodStart).not.toBeNull()
+    expect(receipt.servicePeriodEnd).not.toBeNull()
   })
 
   it('does not let a shop admin pay another shop Nasiya', async () => {

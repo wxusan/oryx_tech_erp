@@ -23,6 +23,7 @@ import { ArrowLeft, Check } from 'lucide-react'
 import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
 import { navigateAfterMutation } from '@/lib/client-events'
 import type { PaymentMethod } from '@/lib/domain-types'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 
 type Device = InStockPickerDevice
 
@@ -44,6 +45,12 @@ function deviceMeta(device: Device) {
 }
 
 export default function NewSotuvPage() {
+  const { can } = useShopAccess()
+  if (!can('CASH_SALE_CREATE')) return <ShopAccessDenied />
+  return <AuthorizedNewSotuvPage />
+}
+
+function AuthorizedNewSotuvPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
   const [step, setStep] = useState<1 | 2>(1)

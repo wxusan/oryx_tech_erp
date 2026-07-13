@@ -25,6 +25,7 @@ import {
   type NasiyaActionLog as NasiyaLog,
   type NasiyaScheduleRow as NasiyaSchedule,
 } from '@/components/shop/nasiya-history-sections'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 
 type NasiyaPayment = NasiyaPaymentDisplayRecord
 
@@ -111,6 +112,15 @@ function ImportField({ label, value }: { label: string; value: string }) {
 }
 
 export default function NasiyaDetailPage() {
+  const { can } = useShopAccess()
+  if (!can('NASIYA_VIEW')) return <ShopAccessDenied />
+  return <AuthorizedNasiyaDetailPage />
+}
+
+function AuthorizedNasiyaDetailPage() {
+  const { can } = useShopAccess()
+  const canManageNasiya = can('NASIYA_MANAGE')
+  const canReceivePayment = can('PAYMENT_RECEIVE')
   const params = useParams()
   const id = params.id as string
   const { currency } = useShopCurrency()
@@ -336,11 +346,13 @@ export default function NasiyaDetailPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Button variant="outline" onClick={openEdit} className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded">
-            <Pencil size={14} />
-            Tahrirlash
-          </Button>
-          {!isCompleted && displayStatus !== 'CANCELLED' && (
+          {canManageNasiya && (
+            <Button variant="outline" onClick={openEdit} className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded">
+              <Pencil size={14} />
+              Tahrirlash
+            </Button>
+          )}
+          {canReceivePayment && !isCompleted && displayStatus !== 'CANCELLED' && (
             <Button onClick={() => setPaymentModalOpen(true)} className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">
               To'lov qabul qilish
             </Button>
@@ -485,18 +497,20 @@ export default function NasiyaDetailPage() {
           <div className="text-sm font-semibold text-zinc-900">To'lov eslatmasi</div>
           <div className="text-xs text-zinc-500 mt-0.5">{nasiya.reminderEnabled ? 'Eslatma yoqilgan' : "Eslatma o'chirilgan"}</div>
         </div>
-        <Button
-          onClick={handleToggleReminder}
-          disabled={reminderSubmitting}
-          variant={nasiya.reminderEnabled ? 'outline' : 'default'}
-          className={
-            nasiya.reminderEnabled
-              ? 'h-9 px-4 text-sm border-zinc-200 text-zinc-700 rounded disabled:opacity-40'
-              : 'h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40'
-          }
-        >
-          {reminderSubmitting ? 'Saqlanmoqda...' : nasiya.reminderEnabled ? "Eslatmani o'chirish" : 'Eslatmani yoqish'}
-        </Button>
+        {canManageNasiya && (
+          <Button
+            onClick={handleToggleReminder}
+            disabled={reminderSubmitting}
+            variant={nasiya.reminderEnabled ? 'outline' : 'default'}
+            className={
+              nasiya.reminderEnabled
+                ? 'h-9 px-4 text-sm border-zinc-200 text-zinc-700 rounded disabled:opacity-40'
+                : 'h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40'
+            }
+          >
+            {reminderSubmitting ? 'Saqlanmoqda...' : nasiya.reminderEnabled ? "Eslatmani o'chirish" : 'Eslatmani yoqish'}
+          </Button>
+        )}
       </div>
 
       {/* Passport photo */}
@@ -524,17 +538,19 @@ export default function NasiyaDetailPage() {
       />
 
       {/* Payment modal — shared component, also used on the nasiyalar list */}
-      <NasiyaPaymentModal
-        nasiyaId={nasiya.id}
-        open={paymentModalOpen}
-        onOpenChange={setPaymentModalOpen}
-        customerName={nasiya.customer.name}
-        deviceName={nasiya.device.model}
-        onSuccess={() => {
-          setLoading(true)
-          fetchNasiya()
-        }}
-      />
+      {canReceivePayment && (
+        <NasiyaPaymentModal
+          nasiyaId={nasiya.id}
+          open={paymentModalOpen}
+          onOpenChange={setPaymentModalOpen}
+          customerName={nasiya.customer.name}
+          deviceName={nasiya.device.model}
+          onSuccess={() => {
+            setLoading(true)
+            fetchNasiya()
+          }}
+        />
+      )}
 
       {/* Edit (safe fields) Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

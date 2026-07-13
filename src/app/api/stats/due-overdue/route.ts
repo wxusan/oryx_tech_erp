@@ -8,7 +8,7 @@
  * a direct link when there is exactly one overdue deal, which the dashboard
  * aggregate doesn't track.
  */
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, serverError } from '@/lib/api-helpers'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { convertContractAmountToUzs } from '@/lib/nasiya-contract'
@@ -18,7 +18,7 @@ import { getCurrentOverdueSummary } from '@/lib/server/shop-stats-queries'
 
 export async function GET() {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('PAYMENT_RECEIVE')
     if (!guarded.ok) return guarded.response
     const resolved = await resolveActiveShopId(guarded.session, null)
     if (!resolved.ok) return resolved.response

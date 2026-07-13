@@ -12,7 +12,7 @@
  */
 
 import { NextRequest } from 'next/server'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, serverError } from '@/lib/api-helpers'
 import { logger } from '@/lib/logger'
 import { getShopNasiyalarList, type NasiyaStatusFilter } from '@/lib/server/shop-lists'
@@ -21,7 +21,7 @@ const nasiyaStatuses = ['ACTIVE', 'COMPLETED', 'OVERDUE', 'CANCELLED'] as const
 
 export async function GET(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('NASIYA_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

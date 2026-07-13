@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireCurrentShopPermission } from '@/lib/api-auth'
 import { getShopDevicesList } from '@/lib/server/shop-lists'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import QurilmalarClient from './qurilmalar-client'
@@ -16,8 +16,8 @@ interface QurilmalarPageProps {
 const PER_PAGE = 25
 
 export default async function QurilmalarPage({ searchParams }: QurilmalarPageProps) {
-  const guarded = await requireApiSession()
-  if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
+  const guarded = await requireCurrentShopPermission('INVENTORY_VIEW')
+  if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
 
   const params = await searchParams
   const status = Array.isArray(params?.status) ? params?.status[0] : params?.status

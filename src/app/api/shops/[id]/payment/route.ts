@@ -3,6 +3,7 @@
  */
 
 import { NextRequest } from 'next/server'
+import { createHash } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { addShopPaymentSchema } from '@/lib/validations'
@@ -14,6 +15,8 @@ import type { ZodError } from 'zod'
 import { logger } from '@/lib/logger'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { sameMoney, sameOptionalText } from '@/lib/idempotency-replay'
+import { getActiveShopPackage, packageRecurringPrice } from '@/lib/server/shop-access'
+import { tashkentTodayInputValue } from '@/lib/timezone'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -51,7 +54,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           if (
             existingPayment.shopId !== id
             || existingPayment.recordedById !== session.user.id
-            || !sameMoney(existingPayment.amount, parsed.data.amount, 'UZS')
+            || !sameMoney(existingPayment.amount, parsed.data.amount, existingPayment.currency ?? 'UZS')
             || existingPayment.months !== parsed.data.months
             || existingPayment.paymentMethod !== parsed.data.paymentMethod
             || !sameOptionalText(existingPayment.note, parsed.data.note)
@@ -78,6 +81,36 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
         const base = max([new Date(), shop.subscriptionDue])
         const newDue = addMonths(base, parsed.data.months)
+        const packageVersion = await getActiveShopPackage(id, base, tx)
+        if (!packageVersion) {
+          throw { status: 409, message: "Do'konning faol paketi topilmadi" }
+        }
+        if (packageVersion.pricingNeedsReview) {
+          throw { status: 409, message: "To'lovdan oldin do'kon paketining narxini tasdiqlang" }
+        }
+        const monthlyPrice = packageRecurringPrice(packageVersion).recurringPrice
+        const expectedAmount = new Prisma.Decimal(monthlyPrice).mul(parsed.data.months).toDecimalPlaces(2)
+        if (!sameMoney(expectedAmount, parsed.data.amount, packageVersion.currency)) {
+          throw {
+            status: 409,
+            message: `Bu davr uchun to'lov ${expectedAmount.toString()} ${packageVersion.currency} bo'lishi kerak`,
+          }
+        }
+        const servicePeriodStart = new Date(`${tashkentTodayInputValue(base)}T00:00:00.000Z`)
+        const servicePeriodEnd = new Date(`${tashkentTodayInputValue(newDue)}T00:00:00.000Z`)
+        const commandHash = createHash('sha256').update(JSON.stringify({
+          shopId: id,
+          recordedById: session.user.id,
+          amount: expectedAmount.toString(),
+          months: parsed.data.months,
+          paymentMethod: parsed.data.paymentMethod,
+          note: parsed.data.note?.trim() || null,
+          packageVersionId: packageVersion.id,
+          servicePeriodStart: servicePeriodStart.toISOString(),
+          servicePeriodEnd: servicePeriodEnd.toISOString(),
+          dueBefore: shop.subscriptionDue.toISOString(),
+          dueAfter: newDue.toISOString(),
+        })).digest('hex')
 
         await tx.shopPayment.create({
           data: {
@@ -88,6 +121,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             note: parsed.data.note,
             idempotencyKey,
             recordedById: session.user.id,
+            allocationStatus: 'PACKAGE_ALLOCATED',
+            currency: packageVersion.currency,
+            packageVersionId: packageVersion.id,
+            packageMonthlyPriceSnapshot: monthlyPrice,
+            servicePeriodStart,
+            servicePeriodEnd,
+            dueBefore: shop.subscriptionDue,
+            dueAfter: newDue,
+            commandHash,
           },
         })
 
@@ -118,6 +160,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               amount: parsed.data.amount,
               months: parsed.data.months,
               paymentMethod: parsed.data.paymentMethod,
+              currency: packageVersion.currency,
+              packageVersionId: packageVersion.id,
+              packageMonthlyPriceSnapshot: monthlyPrice,
+              servicePeriodStart,
+              servicePeriodEnd,
               newSubscriptionDue: newDue,
             },
             note: parsed.data.note,

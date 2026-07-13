@@ -18,6 +18,7 @@ import { uzDate } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { navigateAfterMutation } from '@/lib/client-events'
 import { isValidPhone } from '@/lib/phone'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
   if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
@@ -46,6 +47,12 @@ function previewSchedule(remainingDebt: number, monthlyPayment: number, nextPaym
 }
 
 export default function ImportNasiyaPage() {
+  const { can } = useShopAccess()
+  if (!can('IMPORT_DATA')) return <ShopAccessDenied />
+  return <AuthorizedImportNasiyaPage />
+}
+
+function AuthorizedImportNasiyaPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
   const [form, setForm] = useState({

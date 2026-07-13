@@ -16,6 +16,7 @@ import type { PaymentScoreColor, PaymentScoreLabel } from '@/lib/nasiya-payment-
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import type { NasiyaStatus } from '@/lib/domain-types'
+import { useShopAccess } from '@/components/shop/shop-access-context'
 
 type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan' | 'Bekor qilingan'
 
@@ -153,6 +154,11 @@ export default function NasiyalarClient({
   currency: CurrencyContext
 }) {
   const scope = useAuthenticatedQueryScope()
+  const { can } = useShopAccess()
+  const canCreate = can('NASIYA_CREATE')
+  const canImport = can('IMPORT_DATA')
+  const canExport = can('EXPORT_DATA')
+  const canReceivePayment = can('PAYMENT_RECEIVE')
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState(initialSearch)
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch)
@@ -216,22 +222,28 @@ export default function NasiyalarClient({
           <p className="text-sm text-zinc-500 mt-0.5">Barcha nasiya shartnomalar</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => { window.location.href = '/api/export/nasiya?format=xlsx' }}
-            className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors"
-          >
-            Excel yuklab olish
-          </button>
-          <Link href="/shop/nasiyalar/import">
-            <button className="h-9 px-4 text-sm border border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded transition-colors">
-              + Eski nasiya kiritish
+          {canExport && (
+            <button
+              onClick={() => { window.location.href = '/api/export/nasiya?format=xlsx' }}
+              className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors"
+            >
+              Excel yuklab olish
             </button>
-          </Link>
-          <Link href="/shop/nasiyalar/new">
-            <button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors">
-              + Yangi nasiya
-            </button>
-          </Link>
+          )}
+          {canImport && (
+            <Link href="/shop/nasiyalar/import">
+              <button className="h-9 px-4 text-sm border border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded transition-colors">
+                + Eski nasiya kiritish
+              </button>
+            </Link>
+          )}
+          {canCreate && (
+            <Link href="/shop/nasiyalar/new">
+              <button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors">
+                + Yangi nasiya
+              </button>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -282,7 +294,7 @@ export default function NasiyalarClient({
               const dfmt = (amount: number) => formatDisplayMoneyFromContract(amount, n.contractCurrency, currency.currency, currency.usdUzsRate)
               const contractPaidAmount = n.contractFinalAmount - n.contractRemainingAmount
               const isOverdue = n.isOverdue
-              const canPay = (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              const canPay = canReceivePayment && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
               return (
                 <div
                   key={n.id}
@@ -363,7 +375,7 @@ export default function NasiyalarClient({
           <div className="sm:hidden space-y-3">
             {nasiyalar.map((n) => {
               const dfmt = (amount: number) => formatDisplayMoneyFromContract(amount, n.contractCurrency, currency.currency, currency.usdUzsRate)
-              const canPay = (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              const canPay = canReceivePayment && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
               return (
                 <div
                   key={n.id}
@@ -448,14 +460,16 @@ export default function NasiyalarClient({
         </div>
       )}
 
-      <NasiyaPaymentModal
-        nasiyaId={payFor?.id ?? ''}
-        open={payFor !== null}
-        onOpenChange={(o) => { if (!o) setPayFor(null) }}
-        customerName={payFor?.customer.name}
-        deviceName={payFor?.device.model}
-        onSuccess={handlePaymentSuccess}
-      />
+      {canReceivePayment && (
+        <NasiyaPaymentModal
+          nasiyaId={payFor?.id ?? ''}
+          open={payFor !== null}
+          onOpenChange={(o) => { if (!o) setPayFor(null) }}
+          customerName={payFor?.customer.name}
+          deviceName={payFor?.device.model}
+          onSuccess={handlePaymentSuccess}
+        />
+      )}
     </div>
   )
 }
