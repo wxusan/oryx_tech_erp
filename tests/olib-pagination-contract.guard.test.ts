@@ -8,7 +8,7 @@ const page = readFileSync(resolve(process.cwd(), 'src/app/(shop)/shop/olib-sotdi
 describe('Olib-sotdim bounded native-currency list', () => {
   it('returns a real pagination envelope', () => {
     expect(api).toContain('prisma.supplierPayable.count({ where })')
-    expect(api).toContain('total, skip, take')
+    expect(api).toMatch(/items:\s*payables\.map[\s\S]*?total,\s*skip,\s*take,/)
     expect(api).toContain('skip,')
   })
 

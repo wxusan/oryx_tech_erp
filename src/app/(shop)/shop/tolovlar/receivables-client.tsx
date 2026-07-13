@@ -2,10 +2,11 @@
 
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, CalendarCheck2, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react'
+import { AlertTriangle, CalendarCheck2, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { StretchedLink } from '@/components/ui/stretched-link'
 import { formatUserFacingMoney, type CurrencyContext } from '@/lib/currency'
 import { uzDate } from '@/lib/dates'
 import { queryKeys } from '@/lib/query-keys'
@@ -124,27 +125,24 @@ export default function ReceivablesClient({ initialData }: { initialData: Receiv
                   <th scope="col" className="px-4 py-3 font-medium">Qurilma / tur</th>
                   <th scope="col" className="px-4 py-3 font-medium">Muddat</th>
                   <th scope="col" className="px-4 py-3 text-right font-medium">Qoldiq</th>
-                  <th scope="col" className="px-4 py-3 text-right font-medium"><span className="sr-only">Amal</span></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {data.items.map((item) => (
-                  <tr key={`${item.dealType}:${item.dealId}`}>
+                  <tr key={`${item.cohort}:${item.dealType}:${item.dealId}`} className="relative transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-zinc-900">{item.customerName}</div>
+                      <StretchedLink href={dealHref(item)} className="font-medium text-zinc-900">
+                        {item.customerName}
+                        <span className="sr-only"> — {item.dealType === 'nasiya' ? 'Nasiya' : 'Qarz'} tafsilotlarini ochish</span>
+                      </StretchedLink>
                       <div className="text-xs text-zinc-500">{item.customerPhone}</div>
                     </td>
                     <td className="px-4 py-3 text-zinc-700">
                       <div>{item.deviceModel}</div>
-                      <Badge variant="outline" className="mt-1 rounded text-[10px]">{item.dealType === 'nasiya' ? 'Nasiya' : 'Qarz savdo'}</Badge>
+                      <Badge variant="outline" className="mt-1 rounded text-[10px]">{item.dealType === 'nasiya' ? 'Nasiya' : 'Qarz'}</Badge>
                     </td>
                     <td className={isOverdue ? 'px-4 py-3 font-medium text-red-700' : 'px-4 py-3 font-medium text-emerald-700'}>{uzDate(item.effectiveDue)}</td>
                     <td className="px-4 py-3 text-right font-semibold text-zinc-900">{amountText(item, data.currency)}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Link href={dealHref(item)} className="inline-flex items-center gap-1 text-xs font-medium text-blue-700 hover:underline">
-                        Ko'rish <ExternalLink className="size-3" />
-                      </Link>
-                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -153,7 +151,10 @@ export default function ReceivablesClient({ initialData }: { initialData: Receiv
 
           <div className="grid gap-3 md:hidden">
             {data.items.map((item) => (
-              <Card key={`${item.dealType}:${item.dealId}`} className="rounded-lg">
+              <Card key={`${item.cohort}:${item.dealType}:${item.dealId}`} className="relative rounded-lg transition-colors hover:bg-zinc-50 focus-within:ring-2 focus-within:ring-zinc-900">
+                <StretchedLink href={dealHref(item)} className="absolute inset-0 z-0">
+                  <span className="sr-only">{item.customerName} — {item.dealType === 'nasiya' ? 'Nasiya' : 'Qarz'} tafsilotlarini ochish</span>
+                </StretchedLink>
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between gap-3">
                     <CardTitle className="text-base">{item.customerName}</CardTitle>
@@ -166,7 +167,6 @@ export default function ReceivablesClient({ initialData }: { initialData: Receiv
                     <span className={isOverdue ? 'font-medium text-red-700' : 'font-medium text-emerald-700'}>{uzDate(item.effectiveDue)}</span>
                     <span className="font-semibold text-zinc-900">{amountText(item, data.currency)}</span>
                   </div>
-                  <Button render={<Link href={dealHref(item)} />} variant="outline" className="w-full">Ko'rish</Button>
                 </CardContent>
               </Card>
             ))}

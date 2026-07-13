@@ -18,8 +18,10 @@ const updateCustomerSchema = z.object({
   name: z.string().min(2).optional(),
   phone: phoneSchema.optional(),
   additionalPhones: z.array(z.string()).optional(),
-  note: z.string().optional(),
-  reason: z.string().optional(),
+  // An ordinary profile note must never block a contact update. A submitted
+  // blank deliberately clears the nullable field instead of storing `''`.
+  note: z.string().trim().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value === undefined ? undefined : value || null),
+  reason: z.string().trim().max(1000, "Sabab 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
   shopId: z.string().optional(),
   trustOverride: z.enum(['NEW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH']).nullable().optional(),
   passportIdentifier: z.string().trim().max(64).refine(isValidPassportIdentifier, "Pasport seriya/raqami noto'g'ri").nullable().optional(),
@@ -139,20 +141,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       return badRequest("Pasport rasmi boshqa do'konga tegishli yoki havola muddati tugagan")
     }
 
-    const identityChanged =
-      (parsed.data.name !== undefined && parsed.data.name !== existing.name) ||
-      (parsed.data.phone !== undefined && parsed.data.phone !== existing.phone)
-    const auditNote = parsed.data.reason?.trim() || parsed.data.note?.trim()
-    let identityChangeReason: string | undefined
-    if (identityChanged) {
-      if (!auditNote) {
-        return badRequest("Mijoz ismi yoki telefonini o'zgartirish uchun izoh yoki sabab kiritilishi shart")
-      }
-      if (auditNote.length < 5) {
-        return badRequest("Mijoz ma'lumotlarini o'zgartirish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
-      }
-      identityChangeReason = auditNote
-    }
+    const auditNote = parsed.data.reason ?? (typeof parsed.data.note === 'string' ? parsed.data.note : undefined)
 
     const nextPrimaryPhone = parsed.data.phone !== undefined ? parsed.data.phone : existing.phone
     const passportUpdate = parsed.data.passportIdentifier === undefined
@@ -218,9 +207,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
               ? { passportIdentifierChanged: true, passportMasked: updated.passportIdentifierLast4 ? `••••${updated.passportIdentifierLast4}` : null }
               : {}),
             ...(parsed.data.passportPhotoUrl !== undefined ? { hasPassportPhoto: Boolean(updated.passportPhotoUrl) } : {}),
-            ...(identityChangeReason ? { identityChangeReason } : {}),
+            ...(auditNote ? { editNote: auditNote } : {}),
           },
-          note: identityChangeReason,
+          note: auditNote,
         },
       })
       return {

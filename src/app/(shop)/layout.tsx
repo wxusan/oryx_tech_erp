@@ -15,9 +15,10 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
   const guarded = await requireApiSession()
   if (!guarded.ok || !guarded.shopId || !guarded.principal) redirect('/shop/login')
 
-  const includeCashSales = principalHasFeature(guarded.principal, 'CASH_SALES') &&
+  const canSeeFinancialOverview = guarded.principal.memberKind === 'SHOP_OWNER'
+  const includeCashSales = canSeeFinancialOverview && principalHasFeature(guarded.principal, 'CASH_SALES') &&
     principalHasPermission(guarded.principal, 'INVENTORY_VIEW')
-  const includeNasiya = principalHasFeature(guarded.principal, 'NASIYA') &&
+  const includeNasiya = canSeeFinancialOverview && principalHasFeature(guarded.principal, 'NASIYA') &&
     principalHasPermission(guarded.principal, 'NASIYA_VIEW')
   const { start: todayStart, end: tomorrowStart, dayKey } = tashkentDayRange(new Date())
   const [syncCursor, currency, shop, dueCohorts] = await Promise.all([

@@ -5,14 +5,18 @@ import { requireCurrentShopPermission } from '@/lib/api-auth'
 import { badRequest, conflict, notFound, ok, payloadTooLarge, serverError } from '@/lib/api-helpers'
 import {
   SHOP_PERMISSION_CATALOG,
+  type ShopFeatureCode,
   type ShopPermissionCode,
 } from '@/lib/access-control'
 import { prisma } from '@/lib/prisma'
 import { enabledFeatureSet, getActiveShopPackage } from '@/lib/server/shop-access'
 import {
   deleteShopStaffSchema,
+  legacyStaffPermissionCodes,
+  STAFF_LOGS_PERMISSION,
   updateShopStaffSchema,
   type ShopStaffDto,
+  withStaffLogsPermission,
 } from '@/lib/shop-staff-contract'
 import {
   isInvalidRequestBody,
@@ -33,6 +37,7 @@ const staffSelect = {
   telegramId: true,
   telegramVerifiedAt: true,
   telegramNotificationsEnabled: true,
+  legacyFullAccess: true,
   permissionVersion: true,
   createdAt: true,
   permissions: { select: { permissionCode: true } },
@@ -40,7 +45,10 @@ const staffSelect = {
 
 type StaffRow = Prisma.ShopAdminGetPayload<{ select: typeof staffSelect }>
 
-function staffDto(row: StaffRow): ShopStaffDto {
+function staffDto(row: StaffRow, enabledFeatures: ReadonlySet<ShopFeatureCode>): ShopStaffDto {
+  const effectivePermissions = row.legacyFullAccess
+    ? legacyStaffPermissionCodes(enabledFeatures)
+    : row.permissions.map((item) => item.permissionCode as ShopPermissionCode)
   return {
     id: row.id,
     name: row.name,
@@ -50,8 +58,9 @@ function staffDto(row: StaffRow): ShopStaffDto {
     telegramId: row.telegramId,
     telegramVerifiedAt: row.telegramVerifiedAt?.toISOString() ?? null,
     telegramNotificationsEnabled: row.telegramNotificationsEnabled,
+    logsViewEnabled: effectivePermissions.includes(STAFF_LOGS_PERMISSION),
     permissionVersion: row.permissionVersion,
-    permissionCodes: row.permissions.map((item) => item.permissionCode as ShopPermissionCode),
+    permissionCodes: effectivePermissions.filter((code) => code !== STAFF_LOGS_PERMISSION),
     createdAt: row.createdAt.toISOString(),
   }
 }
@@ -120,11 +129,21 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       if (shop?.ownerAdminId === id) throw Object.assign(new Error('OWNER_TARGET'), { code: 'OWNER_TARGET' })
 
       const activePackage = await getActiveShopPackage(shopId, new Date(), tx)
-      if (!activePackage || !enabledFeatureSet(activePackage).has('STAFF_ACCESS')) {
+      const activeFeatures = activePackage ? enabledFeatureSet(activePackage) : null
+      if (!activeFeatures || !activeFeatures.has('STAFF_ACCESS')) {
         throw Object.assign(new Error('STAFF_ACCESS_DISABLED'), { code: 'STAFF_ACCESS_DISABLED' })
       }
+      const permissionSnapshotChanged = parsed.data.permissionCodes !== undefined || parsed.data.logsViewEnabled !== undefined
+      const existingPermissionCodes = target.legacyFullAccess
+        ? legacyStaffPermissionCodes(activeFeatures)
+        : target.permissions.map((item) => item.permissionCode as ShopPermissionCode)
+      const nextPermissionCodes = withStaffLogsPermission(
+        parsed.data.permissionCodes ?? existingPermissionCodes.filter((code) => code !== STAFF_LOGS_PERMISSION),
+        parsed.data.logsViewEnabled ?? existingPermissionCodes.includes(STAFF_LOGS_PERMISSION),
+      )
       const sessionAffectingChange = parsed.data.isActive !== undefined ||
-        passwordHash !== undefined || parsed.data.permissionCodes !== undefined
+        passwordHash !== undefined || permissionSnapshotChanged ||
+        parsed.data.telegramNotificationsEnabled !== undefined
 
       await tx.shopAdmin.update({
         where: { id },
@@ -135,17 +154,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           telegramNotificationsEnabled: parsed.data.telegramNotificationsEnabled,
           passwordHash,
           passwordChangedAt: passwordHash ? new Date() : undefined,
-          permissionVersion: parsed.data.permissionCodes ? { increment: 1 } : undefined,
-          legacyFullAccess: parsed.data.permissionCodes ? false : undefined,
+          permissionVersion: permissionSnapshotChanged ? { increment: 1 } : undefined,
+          legacyFullAccess: permissionSnapshotChanged ? false : undefined,
           sessionVersion: sessionAffectingChange ? { increment: 1 } : undefined,
         },
       })
 
-      if (parsed.data.permissionCodes) {
+      if (permissionSnapshotChanged) {
         await tx.shopMemberPermission.deleteMany({ where: { shopAdminId: id, shopId } })
-        if (parsed.data.permissionCodes.length) {
+        if (nextPermissionCodes.length) {
           await tx.shopMemberPermission.createMany({
-            data: parsed.data.permissionCodes.map((permissionCode) => ({
+            data: nextPermissionCodes.map((permissionCode) => ({
               shopId,
               shopAdminId: id,
               permissionCode,
@@ -175,12 +194,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
             isActive: target.isActive,
             legacyFullAccess: target.legacyFullAccess,
             permissionCodes: target.permissions.map((item) => item.permissionCode),
+            logsViewEnabled: existingPermissionCodes.includes(STAFF_LOGS_PERMISSION),
           },
           newValue: {
             name: parsed.data.name,
             isActive: parsed.data.isActive,
-            permissionCodes: parsed.data.permissionCodes,
-            legacyFullAccess: parsed.data.permissionCodes ? false : target.legacyFullAccess,
+            permissionCodes: nextPermissionCodes,
+            logsViewEnabled: nextPermissionCodes.includes(STAFF_LOGS_PERMISSION),
+            legacyFullAccess: permissionSnapshotChanged ? false : target.legacyFullAccess,
             telegramNotificationsEnabled: parsed.data.telegramNotificationsEnabled,
             passwordReset: Boolean(passwordHash),
           },
@@ -191,7 +212,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       return tx.shopAdmin.findUniqueOrThrow({ where: { id }, select: staffSelect })
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }))
 
-    return ok(staffDto(row), "Xodim profili yangilandi")
+    return ok(staffDto(row, principal.enabledFeatures), "Xodim profili yangilandi")
   } catch (error) {
     if (isRequestBodyTooLarge(error)) return payloadTooLarge()
     if (isInvalidRequestBody(error)) return badRequest("So'rov ma'lumoti noto'g'ri")

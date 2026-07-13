@@ -15,7 +15,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { uzMonthYear } from '@/lib/dates'
 import { formatUzPhoneDisplay } from '@/lib/phone'
-import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
+import { StretchedLink } from '@/components/ui/stretched-link'
 import {
   Table,
   TableBody,
@@ -202,26 +202,33 @@ export default function DashboardPage() {
               <TableHead className="text-xs text-zinc-500 font-medium">Do&apos;kon raqami</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">Status</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">To&apos;lov sanasi</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium pr-5 text-right">Amallar</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-10 text-sm text-zinc-400">
+                <TableCell colSpan={6} className="text-center py-10 text-sm text-zinc-400">
                   Yuklanmoqda...
                 </TableCell>
               </TableRow>
             ) : shops.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-10 text-sm text-zinc-400">
+                <TableCell colSpan={6} className="text-center py-10 text-sm text-zinc-400">
                   Hech qanday do&apos;kon topilmadi
                 </TableCell>
               </TableRow>
             ) : (
               shops.map((shop) => (
-                <TableRow key={shop.id} className="border-zinc-100 hover:bg-zinc-50">
-                  <TableCell className="pl-5 text-sm font-medium text-zinc-900">{shop.name}</TableCell>
+                <TableRow key={shop.id} className="relative border-zinc-100 hover:bg-zinc-50">
+                  <TableCell className="pl-5 text-sm font-medium text-zinc-900">
+                    <StretchedLink
+                      href={`/admin/shops/${shop.id}`}
+                      aria-label={`${shop.name} do'koni ma'lumotlarini ochish`}
+                      className="font-medium text-zinc-900 hover:underline"
+                    >
+                      {shop.name}
+                    </StretchedLink>
+                  </TableCell>
                   <TableCell className="text-sm text-zinc-600">{shop.ownerName}</TableCell>
                   <TableCell className="text-sm text-zinc-500 font-mono">{formatUzPhoneDisplay(shop.ownerPhone)}</TableCell>
                   <TableCell className="text-sm text-zinc-500">{shop.shopNumber}</TableCell>
@@ -230,14 +237,6 @@ export default function DashboardPage() {
                   </TableCell>
                   <TableCell className="text-sm text-zinc-500">
                     {shop.subscriptionDue ? new Date(shop.subscriptionDue).toLocaleDateString('ru-RU') : '—'}
-                  </TableCell>
-                  <TableCell className="pr-5 text-right">
-                    <IntentPrefetchLink
-                      href={`/admin/shops/${shop.id}`}
-                      className="text-xs text-zinc-500 hover:text-zinc-900 border border-zinc-200 px-2.5 py-1 hover:bg-zinc-50 transition-colors"
-                    >
-                      Ko&apos;rish
-                    </IntentPrefetchLink>
                   </TableCell>
                 </TableRow>
               ))

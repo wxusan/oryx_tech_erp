@@ -41,10 +41,15 @@ const forbiddenMoneyFields = [
 const updateNasiyaSchema = z.object({
   customerName: z.string().trim().min(2, "Mijoz ismi kamida 2 ta harfdan iborat bo'lishi kerak").max(100).optional(),
   customerPhone: phoneSchema.optional(),
-  note: z.string().trim().max(1000, "Izoh 1000 belgidan oshmasligi kerak").optional(),
-  importNote: z.string().trim().max(1000, "Import izohi 1000 belgidan oshmasligi kerak").optional(),
+  // A submitted blank is an intentional clear. Persist null rather than a
+  // misleading empty-string comment, while an omitted field still means
+  // "leave this value unchanged".
+  note: z.string().trim().max(1000, "Izoh 1000 belgidan oshmasligi kerak").optional().transform((value) => value === undefined ? undefined : value || null),
+  importNote: z.string().trim().max(1000, "Import izohi 1000 belgidan oshmasligi kerak").optional().transform((value) => value === undefined ? undefined : value || null),
   reminderEnabled: z.boolean().optional(),
-  reason: z.string().trim().min(5, "Tahrirlash sababi kamida 5 ta belgidan iborat bo'lishi kerak").max(1000).optional(),
+  // Retained for API compatibility with older clients. It is ordinary edit
+  // context, never a mandatory reason for a financial correction.
+  reason: z.string().trim().max(1000, "Sabab 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
 })
 
 export async function GET(_req: NextRequest, ctx: RouteContext) {
@@ -52,6 +57,8 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     const guarded = await requireShopPermission('NASIYA_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
+    const includeOwnerResolutionData =
+      session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
 
     const { id: nasiyaId } = await ctx.params
 
@@ -150,25 +157,30 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     if (!nasiya) return notFound('Nasiya topilmadi')
 
-    const resolutionEvents = await prisma.nasiyaResolutionEvent.findMany({
-      where: { shopId: nasiya.shopId, nasiyaId: nasiya.id },
-      orderBy: { createdAt: 'desc' },
-      select: {
-        id: true,
-        eventType: true,
-        previousState: true,
-        newState: true,
-        contractCurrency: true,
-        nativeRemainingAmount: true,
-        frozenUzsAmount: true,
-        frozenUsdUzsRate: true,
-        reason: true,
-        actorId: true,
-        actorType: true,
-        reversesEventId: true,
-        createdAt: true,
-      },
-    })
+    // Resolution events contain write-off/archive amounts and immutable
+    // financial/audit context. Staff may operate active Nasiyas but must not
+    // receive this owner-only ledger payload even through a direct URL.
+    const resolutionEvents = includeOwnerResolutionData
+      ? await prisma.nasiyaResolutionEvent.findMany({
+          where: { shopId: nasiya.shopId, nasiyaId: nasiya.id },
+          orderBy: { createdAt: 'desc' },
+          select: {
+            id: true,
+            eventType: true,
+            previousState: true,
+            newState: true,
+            contractCurrency: true,
+            nativeRemainingAmount: true,
+            frozenUzsAmount: true,
+            frozenUsdUzsRate: true,
+            reason: true,
+            actorId: true,
+            actorType: true,
+            reversesEventId: true,
+            createdAt: true,
+          },
+        })
+      : []
 
     const scheduleInputs = nasiya.schedules.map((s) => ({
       status: s.status,
@@ -257,12 +269,16 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         overdueAmount: derived.overdueAmount,
         paymentScore,
         customerTrust,
-        resolutionEvents: resolutionEvents.map((event) => ({
-          ...event,
-          nativeRemainingAmount: Number(event.nativeRemainingAmount),
-          frozenUzsAmount: Number(event.frozenUzsAmount),
-          frozenUsdUzsRate: Number(event.frozenUsdUzsRate),
-        })),
+        ...(includeOwnerResolutionData
+          ? {
+              resolutionEvents: resolutionEvents.map((event) => ({
+                ...event,
+                nativeRemainingAmount: Number(event.nativeRemainingAmount),
+                frozenUzsAmount: Number(event.frozenUzsAmount),
+                frozenUsdUzsRate: Number(event.frozenUsdUzsRate),
+              })),
+            }
+          : {}),
       },
       "Nasiya ma'lumotlari",
     )
@@ -283,7 +299,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (body && typeof body === 'object') {
       const forbidden = forbiddenMoneyFields.find((field) => field in body)
       if (forbidden) {
-        return badRequest("Pul summalari to'lovlar va hisobotlarga bog'langan. Ularni tuzatish uchun alohida adjustment kerak.")
+        return badRequest("Pul summalari to'lovlar va hisobotlarga bog'langan. Ularni tuzatish uchun alohida tasdiqlangan moliyaviy tuzatish amali kerak.")
       }
     }
     const parsed = updateNasiyaSchema.safeParse(body)

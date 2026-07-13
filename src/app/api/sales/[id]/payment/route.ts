@@ -137,7 +137,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       contractRate,
     )
 
-    const auditNote = parsed.data.reason?.trim() || parsed.data.note?.trim()
+    // Optional ordinary comments are normalized to `undefined` so a blank
+    // textarea is stored as NULL rather than an ambiguous empty audit note.
+    const auditNote = parsed.data.reason?.trim() || parsed.data.note?.trim() || undefined
     const runPaymentTransaction = () =>
       prisma.$transaction(
         async (tx: Prisma.TransactionClient) => {
@@ -161,19 +163,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               }
             }
             return { payment: existingPayment, duplicate: true }
-          }
-
-          if (!auditNote) {
-            throw {
-              status: 400,
-              message: "To'lov yozish yoki keyingi to'lov sanasini o'zgartirish uchun izoh yoki sabab kiritilishi shart",
-            }
-          }
-          if (auditNote.length < 5) {
-            throw {
-              status: 400,
-              message: "To'lov yoki keyingi to'lov sanasi sababi kamida 5 ta belgidan iborat bo'lishi kerak",
-            }
           }
 
           const sale = await tx.sale.findFirst({
@@ -290,7 +279,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 appliedAmountInContractCurrency: contractPayment.appliedAmountInContractCurrency,
                 dueDate: updatedSale.dueDate,
                 deviceStatus: nextDeviceStatus,
-                auditReason: auditNote,
+                ...(auditNote ? { auditReason: auditNote } : {}),
                 inputAmount: parsed.data.amount,
                 ...moneyInputMeta(amountInput),
               },

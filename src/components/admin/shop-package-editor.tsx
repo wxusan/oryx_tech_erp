@@ -487,7 +487,10 @@ export function ShopPackageEditor({
         <h2 id="package-reason-heading" className="text-base font-semibold text-zinc-950">O‘zgarish sababi</h2>
         <div className="mt-4">
           <Field
-            label="Izoh"
+            // Package pricing and entitlement changes are an auditable,
+            // high-risk operation.  This is intentionally not an ordinary
+            // optional Izoh field: Field renders the visible required marker.
+            label="Sabab"
             required
             error={submitAttempted ? noteError : null}
             help="Audit tarixida tushunarli bo‘lishi uchun kamida 5 ta belgi yozing."

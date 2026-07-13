@@ -41,15 +41,52 @@ function profileSelect() {
     login: true,
     telegramId: true,
     telegramVerifiedAt: true,
+    telegramNotificationsEnabled: true,
     passwordChangedAt: true,
     shop: {
       select: {
         id: true,
         name: true,
         shopNumber: true,
+        telegramNotificationsEnabled: true,
       },
     },
   } satisfies Prisma.ShopAdminSelect
+}
+
+type ProfileRow = Prisma.ShopAdminGetPayload<{ select: ReturnType<typeof profileSelect> }>
+
+/**
+ * Worker settings deliberately receive a personal-account DTO only. In
+ * particular, do not return a nested Shop object and accidentally expose
+ * currency, package, ownership, or other shop-level metadata to a worker.
+ */
+function profileDto(
+  admin: ProfileRow,
+  input: { isStaff: boolean; telegramFeatureEnabled: boolean },
+) {
+  const { shop, telegramNotificationsEnabled, ...personal } = admin
+  const telegramAllowed = !input.isStaff || (
+    input.telegramFeatureEnabled &&
+    telegramNotificationsEnabled &&
+    shop.telegramNotificationsEnabled
+  )
+
+  return {
+    ...personal,
+    telegramNotificationsEnabled,
+    memberKind: input.isStaff ? 'SHOP_STAFF' as const : 'SHOP_OWNER' as const,
+    telegramAllowed,
+    ...(input.isStaff
+      ? {}
+      : {
+          shop: {
+            id: shop.id,
+            name: shop.name,
+            shopNumber: shop.shopNumber,
+          },
+        }),
+  }
 }
 
 export async function GET() {
@@ -58,7 +95,7 @@ export async function GET() {
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
-    if (session.user.role !== 'SHOP_ADMIN' || !session.user.shopId) {
+    if (session.user.role !== 'SHOP_ADMIN' || !session.user.shopId || !guarded.principal) {
       return forbidden("Faqat do'kon adminlari uchun")
     }
 
@@ -74,7 +111,10 @@ export async function GET() {
 
     if (!admin) return notFound("Admin topilmadi")
 
-    return ok(admin)
+    return ok(profileDto(admin, {
+      isStaff: guarded.principal.memberKind === 'SHOP_STAFF',
+      telegramFeatureEnabled: guarded.principal.enabledFeatures.has('TELEGRAM'),
+    }))
   } catch (err) {
     logger.error('[GET /api/shop-admin/profile]', { event: 'api.route_error', error: err })
     return serverError()
@@ -87,9 +127,11 @@ export async function PATCH(req: NextRequest) {
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
-    if (session.user.role !== 'SHOP_ADMIN' || !session.user.shopId) {
+    if (session.user.role !== 'SHOP_ADMIN' || !session.user.shopId || !guarded.principal) {
       return forbidden("Faqat do'kon adminlari uchun")
     }
+    const isStaff = guarded.principal.memberKind === 'SHOP_STAFF'
+    const telegramFeatureEnabled = guarded.principal.enabledFeatures.has('TELEGRAM')
 
     const body = await readLimitedJsonBody(req)
     if (typeof body === 'object' && body !== null && 'telegramId' in body) {
@@ -115,10 +157,15 @@ export async function PATCH(req: NextRequest) {
           name: true,
           telegramId: true,
           telegramVerifiedAt: true,
+          telegramNotificationsEnabled: true,
+          shop: { select: { telegramNotificationsEnabled: true } },
         },
       })
 
       if (!admin) return notFound("Admin topilmadi")
+      if (isStaff && (!telegramFeatureEnabled || !admin.telegramNotificationsEnabled || !admin.shop.telegramNotificationsEnabled)) {
+        return forbidden("Telegram bildirishnomalari do'kon egasi tomonidan siz uchun yoqilmagan")
+      }
       if (telegramId && (await isTelegramIdTaken(telegramId, { type: 'SHOP_ADMIN', id: admin.id }))) {
         return conflict(`Bu Telegram ID allaqachon tizimda bor: ${telegramId}`)
       }
@@ -151,10 +198,13 @@ export async function PATCH(req: NextRequest) {
         })
       })
 
-      return ok(updated, telegramId ? 'Telegram ID yangilandi.' : "Telegram ID o'chirildi.")
+      return ok(profileDto(updated, { isStaff, telegramFeatureEnabled }), telegramId ? 'Telegram ID yangilandi.' : "Telegram ID o'chirildi.")
     }
 
     if (typeof body === 'object' && body !== null && ('name' in body || 'phone' in body)) {
+      if (isStaff) {
+        return forbidden("Xodim ism yoki telefonini o'zgartira olmaydi. Bu ma'lumotni do'kon egasi yangilaydi.")
+      }
       const parsed = updateProfileSchema.safeParse(body)
       if (!parsed.success) {
         const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
@@ -197,7 +247,7 @@ export async function PATCH(req: NextRequest) {
         return tx.shopAdmin.findUniqueOrThrow({ where: { id: admin.id }, select: profileSelect() })
       })
 
-      return ok(updated, 'Profil yangilandi.')
+      return ok(profileDto(updated, { isStaff, telegramFeatureEnabled }), 'Profil yangilandi.')
     }
 
     const parsed = changePasswordSchema.safeParse(body)

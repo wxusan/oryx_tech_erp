@@ -81,9 +81,11 @@ export interface NasiyaPaymentModalProps {
   /** Optional context shown instantly while schedules load. */
   customerName?: string
   deviceName?: string
+  /** Queue actions preselect this still-open schedule when it remains valid. */
+  preferredScheduleId?: string
 }
 
-export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, customerName, deviceName }: NasiyaPaymentModalProps) {
+export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, customerName, deviceName, preferredScheduleId }: NasiyaPaymentModalProps) {
   const paymentCommand = useLogicalCommandIdempotency()
   const { currency } = useShopCurrency()
 
@@ -164,10 +166,13 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
           customerName: json.data.customer?.name ?? '',
           deviceName: json.data.device?.model ?? '',
         })
-        const firstPending = rows
+        const pending = rows
           .filter((s) => ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(s.status))
           .sort((a, b) => a.monthNumber - b.monthNumber)[0]
-        setSelectedScheduleId(firstPending ? firstPending.id : '')
+        const preferred = preferredScheduleId
+          ? rows.find((schedule) => schedule.id === preferredScheduleId && ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(schedule.status))
+          : undefined
+        setSelectedScheduleId(preferred?.id ?? pending?.id ?? '')
       } catch {
         if (!cancelled) setPayError('Xatolik yuz berdi')
       } finally {
@@ -178,7 +183,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
     return () => {
       cancelled = true
     }
-  }, [open, nasiyaId])
+  }, [open, nasiyaId, preferredScheduleId])
 
   const pendingSchedules = schedules
     .filter((s) => ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(s.status))

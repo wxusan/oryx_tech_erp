@@ -8,7 +8,7 @@ import {
   SHOP_PERMISSION_CATALOG,
   type ShopPermissionCode,
 } from '@/lib/access-control'
-import type { ShopStaffDto } from '@/lib/shop-staff-contract'
+import { STAFF_LOGS_PERMISSION, type ShopStaffDto } from '@/lib/shop-staff-contract'
 import { formatUzPhoneDisplay, isValidPhone } from '@/lib/phone'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -24,7 +24,9 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
-const assignablePermissions = SHOP_PERMISSION_CATALOG.filter((item) => !item.ownerOnly)
+const assignablePermissions = SHOP_PERMISSION_CATALOG.filter(
+  (item) => !item.ownerOnly && item.code !== STAFF_LOGS_PERMISSION,
+)
 
 interface StaffForm {
   name: string
@@ -33,6 +35,7 @@ interface StaffForm {
   password: string
   telegramId: string
   telegramNotificationsEnabled: boolean
+  logsViewEnabled: boolean
   permissionCodes: ShopPermissionCode[]
   isActive: boolean
   note: string
@@ -45,6 +48,7 @@ const emptyForm: StaffForm = {
   password: '',
   telegramId: '',
   telegramNotificationsEnabled: false,
+  logsViewEnabled: true,
   permissionCodes: [],
   isActive: true,
   note: '',
@@ -106,6 +110,7 @@ export function StaffManagement() {
       password: '',
       telegramId: member.telegramId ?? '',
       telegramNotificationsEnabled: member.telegramNotificationsEnabled,
+      logsViewEnabled: member.logsViewEnabled,
       permissionCodes: member.permissionCodes,
       isActive: member.isActive,
       note: '',
@@ -143,6 +148,7 @@ export function StaffManagement() {
           phone: form.phone,
           password: form.password || undefined,
           telegramNotificationsEnabled: form.telegramNotificationsEnabled,
+          logsViewEnabled: form.logsViewEnabled,
           permissionCodes: form.permissionCodes,
           isActive: form.isActive,
           note: form.note.trim(),
@@ -153,6 +159,7 @@ export function StaffManagement() {
           password: form.password,
           telegramId: form.telegramId.trim() || undefined,
           telegramNotificationsEnabled: form.telegramNotificationsEnabled,
+          logsViewEnabled: form.logsViewEnabled,
           permissionCodes: form.permissionCodes,
         }),
       })
@@ -183,7 +190,7 @@ export function StaffManagement() {
 
       <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
         <ShieldCheck className="mr-2 inline size-4" />
-        Faqat siz belgilagan amallar ishlaydi. Hisobot, log, sozlama va xodim boshqaruvi xodimlarga berilmaydi.
+        Faqat siz belgilagan amallar ishlaydi. Hisobot, do&apos;kon sozlamalari va xodim boshqaruvi xodimlarga berilmaydi; loglarni esa alohida yoqishingiz mumkin.
       </div>
 
       {error && <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
@@ -214,7 +221,7 @@ export function StaffManagement() {
                 </span>
               </div>
               <div className="mt-3 text-xs text-zinc-500">
-                {member.permissionCodes.length} ta ruxsat · Telegram {member.telegramNotificationsEnabled ? 'yoqilgan' : "o'chirilgan"}
+                {member.permissionCodes.length} ta ruxsat · Loglar {member.logsViewEnabled ? 'yoqilgan' : "o'chirilgan"} · Telegram {member.telegramNotificationsEnabled ? 'yoqilgan' : "o'chirilgan"}
               </div>
             </button>
           ))}
@@ -246,6 +253,11 @@ export function StaffManagement() {
             </div>
           </fieldset>
 
+          <label htmlFor="staff-logs-enabled" className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 p-3 text-sm">
+            <span><span className="block font-medium">Loglarni ko&apos;rish</span><span className="text-xs text-zinc-500">Egasi xodim uchun alohida boshqaradi. Moliyaviy hisobotlar berilmaydi.</span></span>
+            <input id="staff-logs-enabled" type="checkbox" checked={form.logsViewEnabled} onChange={(event) => setForm((current) => ({ ...current, logsViewEnabled: event.target.checked }))} />
+          </label>
+
           <label htmlFor="staff-telegram-enabled" className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 p-3 text-sm">
             <span><span className="block font-medium">Telegram xabarlari</span><span className="text-xs text-zinc-500">Egasi xodim uchun alohida boshqaradi</span></span>
             <input id="staff-telegram-enabled" type="checkbox" checked={form.telegramNotificationsEnabled} onChange={(event) => setForm((current) => ({ ...current, telegramNotificationsEnabled: event.target.checked }))} />
@@ -256,7 +268,7 @@ export function StaffManagement() {
                 <span className="font-medium">Xodim faol</span>
                 <input id="staff-account-active" type="checkbox" checked={form.isActive} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} />
               </label>
-              <Field controlId="staff-change-note" label="O'zgarish sababi" required error={submitted && form.note.trim().length < 5 ? "Sabab kamida 5 ta belgidan iborat bo'lishi kerak" : undefined}><Input value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} placeholder="Kamida 5 ta belgi" /></Field>
+              <Field controlId="staff-change-note" label="Sabab" required help="Xodim ruxsati yoki profili o'zgarishi uchun audit sababi." error={submitted && form.note.trim().length < 5 ? "Sabab kamida 5 ta belgidan iborat bo'lishi kerak" : undefined}><Input value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} placeholder="Kamida 5 ta belgi" /></Field>
             </>
           )}
           <DialogFooter>

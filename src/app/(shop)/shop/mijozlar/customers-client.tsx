@@ -1,9 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import Link from 'next/link'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
+import { StretchedLink } from '@/components/ui/stretched-link'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { formatUzPhoneDisplay, isValidPhone } from '@/lib/phone'
@@ -78,7 +78,6 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
   const [phone, setPhone] = useState('')
   const [additionalPhones, setAdditionalPhones] = useState<string[]>([])
   const [note, setNote] = useState('')
-  const [reason, setReason] = useState('')
   const [trustOverride, setTrustOverride] = useState<TrustTier | ''>('')
   const [passportIdentifier, setPassportIdentifier] = useState('')
   const [saving, setSaving] = useState(false)
@@ -141,7 +140,6 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
     setPhone(customer.phone)
     setAdditionalPhones(customer.additionalPhones ?? [])
     setNote(customer.note ?? '')
-    setReason('')
     setTrustOverride(customer.trustOverride ?? '')
     setPassportIdentifier('')
     passportSelection.clear()
@@ -165,7 +163,6 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
     setPhone('')
     setAdditionalPhones([])
     setNote('')
-    setReason('')
     setTrustOverride('')
     setPassportIdentifier('')
     passportSelection.clear()
@@ -178,7 +175,6 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
     setSaveError('')
     try {
       const [passportPhotoUrl] = await passportSelection.uploadAll()
-      const identityChanged = Boolean(editing && (name !== editing.name || phone !== editing.phone))
       const res = await fetch(editing ? `/api/customers/${editing.id}` : '/api/customers', {
         method: editing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -187,7 +183,6 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
           phone,
           additionalPhones,
           note,
-          reason: identityChanged ? reason : undefined,
           trustOverride: trustOverride || null,
           passportIdentifier: passportIdentifier.trim() || undefined,
           passportPhotoUrl,
@@ -198,7 +193,6 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
       await commitNavigationMutation({ kind: 'customer.updated' })
       setEditing(null)
       setCreating(false)
-      setReason('')
       passportSelection.clear()
       void customersQuery.refetch()
     } catch (err) {
@@ -216,15 +210,16 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
           <p className="text-sm text-zinc-500 mt-0.5">Savdo va nasiya mijozlari tarixi</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {canManageCustomers && <Button type="button" onClick={openCreate}>Yangi mijoz</Button>}
+          {canManageCustomers && <Button type="button" size="lg" onClick={openCreate}>Yangi mijoz</Button>}
           {canExport && (
-            <button
+            <Button
               type="button"
+              size="lg"
+              variant="outline"
               onClick={() => window.location.assign('/api/export/customers')}
-              className="inline-flex h-9 items-center justify-center rounded bg-zinc-900 px-4 text-sm text-white hover:bg-zinc-800"
             >
               CSV eksport
-            </button>
+            </Button>
           )}
         </div>
       </div>
@@ -268,9 +263,15 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
               <tr><td colSpan={7} className="px-4 py-8 text-center text-zinc-500">Mijoz topilmadi</td></tr>
             ) : (
               customers.map((customer) => (
-                <tr key={customer.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
+                <tr key={customer.id} className="relative border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                   <td className="px-4 py-3 font-medium text-zinc-900">
-                    <Link href={`/shop/mijozlar/${customer.id}`} className="hover:underline">{customer.name}</Link>
+                    <StretchedLink
+                      href={`/shop/mijozlar/${customer.id}`}
+                      aria-label={`${customer.name} mijoz profilini ochish`}
+                      className="font-medium text-zinc-900 hover:underline"
+                    >
+                      {customer.name}
+                    </StretchedLink>
                   </td>
                   <td className="px-4 py-3 font-mono text-zinc-600">
                     <div>{formatUzPhoneDisplay(customer.phone)}</div>
@@ -284,7 +285,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
                   <td className="px-4 py-3 text-zinc-600">{customer._count?.sales ?? 0}</td>
                   <td className="px-4 py-3 text-zinc-600">{customer._count?.nasiya ?? 0}</td>
                   <td className="px-4 py-3 text-zinc-500">{uzDate(customer.createdAt)}</td>
-                  <td className="px-4 py-3 text-right">
+                  <td className="relative z-10 px-4 py-3 text-right">
                     {canManageCustomers && (
                       <Button variant="outline" onClick={() => openEdit(customer)} className="h-8 rounded border-zinc-200 px-3 text-xs">
                         Tahrirlash
@@ -306,10 +307,16 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
           <div className="border border-zinc-200 rounded px-4 py-8 text-center text-sm text-zinc-500">Mijoz topilmadi</div>
         ) : (
           customers.map((customer) => (
-            <div key={customer.id} className="border border-zinc-200 rounded p-3 space-y-2">
-              <div className="flex items-start justify-between gap-2">
+            <div key={customer.id} className="relative space-y-2 rounded border border-zinc-200 p-3">
+              <StretchedLink
+                href={`/shop/mijozlar/${customer.id}`}
+                aria-label={`${customer.name} mijoz profilini ochish`}
+              >
+                <span className="sr-only">{customer.name} mijoz profilini ochish</span>
+              </StretchedLink>
+              <div className="pointer-events-none relative z-10 flex items-start justify-between gap-2">
                 <div>
-                  <Link href={`/shop/mijozlar/${customer.id}`} className="font-medium text-zinc-900 hover:underline">{customer.name}</Link>
+                  <div className="font-medium text-zinc-900">{customer.name}</div>
                   <div className="text-xs font-mono text-zinc-500 mt-0.5">{formatUzPhoneDisplay(customer.phone)}</div>
                   {customer.phoneNormalizationNeedsReview && (
                     <span className="mt-1 inline-flex rounded bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
@@ -319,19 +326,21 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
                 </div>
                 {customer.trust && <TrustBadge trust={customer.trust} />}
               </div>
-              <div className="flex items-center gap-3 text-xs text-zinc-500">
+              <div className="pointer-events-none relative z-10 flex items-center gap-3 text-xs text-zinc-500">
                 <span>{customer._count?.sales ?? 0} ta sotuv</span>
                 <span>{customer._count?.nasiya ?? 0} ta nasiya</span>
                 <span>{uzDate(customer.createdAt)}</span>
               </div>
               {canManageCustomers && (
-                <Button
-                  variant="outline"
-                  onClick={() => openEdit(customer)}
-                  className="h-8 w-full rounded border-zinc-200 text-xs"
-                >
-                  Tahrirlash
-                </Button>
+                <div className="relative z-10">
+                  <Button
+                    variant="outline"
+                    onClick={() => openEdit(customer)}
+                    className="h-8 w-full rounded border-zinc-200 text-xs"
+                  >
+                    Tahrirlash
+                  </Button>
+                </div>
               )}
             </div>
           ))
@@ -418,20 +427,6 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
                 </Button>
               </div>
             </fieldset>
-            {editing && (name !== editing.name || phone !== editing.phone) && (
-              <div>
-                <label htmlFor="customer-reason" className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  O'zgartirish sababi <span className="text-red-500">*</span>
-                </label>
-                <Textarea
-                  id="customer-reason"
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  placeholder="Masalan: mijoz telefon raqamini yangiladi"
-                  className="text-sm border-zinc-200 rounded min-h-[70px]"
-                />
-              </div>
-            )}
             <div>
               <label htmlFor="customer-note" className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
               <Textarea id="customer-note" value={note} onChange={(e) => setNote(e.target.value)} className="text-sm border-zinc-200 rounded min-h-[80px]" />
@@ -493,8 +488,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
                 saving ||
                 passportSelection.hasBlockingErrors ||
                 name.trim().length < 2 ||
-                !isValidPhone(phone) ||
-                (!!editing && (name !== editing.name || phone !== editing.phone) && reason.trim().length < 5)
+                !isValidPhone(phone)
               }
               onClick={saveCustomer}
               className="bg-zinc-900 text-white rounded"

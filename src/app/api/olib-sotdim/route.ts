@@ -43,6 +43,8 @@ export async function GET(req: NextRequest) {
     const guarded = await requireShopPermission('OLIB_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
+    const includeOwnerFinancials =
+      session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
 
     const { searchParams } = req.nextUrl
     const resolved = await resolveActiveShopId(session, searchParams.get('shopId'))
@@ -102,39 +104,76 @@ export async function GET(req: NextRequest) {
         device: { select: {
           id: true, model: true, imei: true, color: true, storage: true,
           storageAmount: true, storageUnit: true, conditionCode: true,
-          purchasePrice: true, purchaseInputAmount: true, purchaseCurrency: true,
+          purchaseInputAmount: true, purchaseCurrency: true,
           imeis: { where: { deletedAt: null }, select: { slot: true, value: true } },
         } },
-        sale: { select: { id: true, salePrice: true, contractSalePrice: true, contractCurrency: true, customer: { select: { name: true, phone: true } } } },
+        sale: { select: { id: true, contractSalePrice: true, contractCurrency: true, customer: { select: { name: true, phone: true } } } },
       },
       }),
       prisma.supplierPayable.count({ where }),
     ])
 
     return ok(
-      { items: payables.map((p) => ({
-        id: p.id,
-        amount: Number(p.contractAmount),
-        contractCurrency: p.contractCurrency,
-        status: p.status,
-        dueDate: p.dueDate.toISOString(),
-        paidAt: p.paidAt?.toISOString() ?? null,
-        paymentMethod: p.paymentMethod,
-        supplierName: p.supplierName,
-        supplierPhone: p.supplierPhone,
-        supplierLocation: p.supplierLocation,
-        createdAt: p.createdAt.toISOString(),
-        device: {
-          ...p.device,
-          purchasePrice: Number(p.device.purchaseInputAmount),
-          purchaseCurrency: p.device.purchaseCurrency,
-          storageDisplay: formatDeviceStorage(p.device) || null,
-          secondaryImei: p.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
-          conditionLabel: deviceConditionLabel(p.device.conditionCode),
-        },
-        sale: { ...p.sale, salePrice: Number(p.sale.contractSalePrice), contractCurrency: p.sale.contractCurrency },
-        profit: Number(p.sale.contractSalePrice) - Number(p.contractAmount),
-      })), total, skip, take },
+      {
+        items: payables.map((p) => {
+          const device = {
+            id: p.device.id,
+            model: p.device.model,
+            imei: p.device.imei,
+            color: p.device.color,
+            storage: p.device.storage,
+            storageAmount: p.device.storageAmount,
+            storageUnit: p.device.storageUnit,
+            conditionCode: p.device.conditionCode,
+            imeis: p.device.imeis,
+            storageDisplay: formatDeviceStorage(p.device) || null,
+            secondaryImei: p.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
+            conditionLabel: deviceConditionLabel(p.device.conditionCode),
+            ...(includeOwnerFinancials
+              ? {
+                  purchasePrice: Number(p.device.purchaseInputAmount),
+                  purchaseCurrency: p.device.purchaseCurrency,
+                }
+              : {}),
+          }
+
+          return {
+            id: p.id,
+            // A supplier payable is an individual operational amount needed
+            // by a staff member authorized to record the supplier payment.
+            amount: Number(p.contractAmount),
+            contractCurrency: p.contractCurrency,
+            status: p.status,
+            dueDate: p.dueDate.toISOString(),
+            paidAt: p.paidAt?.toISOString() ?? null,
+            paymentMethod: p.paymentMethod,
+            supplierName: p.supplierName,
+            supplierPhone: p.supplierPhone,
+            supplierLocation: p.supplierLocation,
+            createdAt: p.createdAt.toISOString(),
+            device,
+            // A staff member may need the individual supplier payable to
+            // record that payment, but pairing it with the customer sale
+            // price would disclose the operation's margin.
+            sale: {
+              id: p.sale.id,
+              customer: p.sale.customer,
+              ...(includeOwnerFinancials
+                ? {
+                    salePrice: Number(p.sale.contractSalePrice),
+                    contractCurrency: p.sale.contractCurrency,
+                  }
+                : {}),
+            },
+            ...(includeOwnerFinancials
+              ? { profit: Number(p.sale.contractSalePrice) - Number(p.contractAmount) }
+              : {}),
+          }
+        }),
+        total,
+        skip,
+        take,
+      },
       "Olib-sotdim ro'yxati",
     )
   } catch (err) {
@@ -333,9 +372,19 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      const shop = await tx.shop.findUnique({ where: { id: shopId }, select: { name: true } })
+      const shop = await tx.shop.findUnique({ where: { id: shopId }, select: { name: true, ownerAdminId: true } })
       const shopAdmins = await tx.shopAdmin.findMany({
-        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
+        // Olib-sotdim messages include purchase cost and margin, so a staff
+        // Telegram identity must not receive them even when general Telegram
+        // notifications are enabled for that worker.
+        where: {
+          shopId,
+          id: shop?.ownerAdminId ?? '__no-shop-owner__',
+          deletedAt: null,
+          isActive: true,
+          telegramId: { not: '' },
+          telegramVerifiedAt: { not: null },
+        },
       })
       const message = olibSotdimCreatedMessage({
         shopName: shop?.name ?? '',
@@ -403,7 +452,15 @@ export async function POST(req: NextRequest) {
       ),
     )
 
-    return created(result, "Olib-sotdim muvaffaqiyatli saqlandi")
+    // This mutation navigates immediately; return only stable identifiers.
+    // Returning Prisma's raw create results here exposed purchase cost and
+    // other owner-financial fields to an authorized staff browser/cache.
+    return created({
+      deviceId: result.device.id,
+      saleId: result.sale.id,
+      payableId: result.payable.id,
+      payableStatus: result.payable.status,
+    }, "Olib-sotdim muvaffaqiyatli saqlandi")
   } catch (err) {
     if (err instanceof CustomerSelectionError) {
       if (err.status === 404) return notFound(err.message)

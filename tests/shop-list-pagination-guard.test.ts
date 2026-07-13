@@ -29,7 +29,9 @@ describe('shop-lists.ts: getShopDevicesList/getShopNasiyalarList are real page/s
   it('both getShopDevicesList and getShopNasiyalarList accept a query object and return {items, total, skip, take}', () => {
     expect(source).toMatch(/export interface ShopListPage<T>/)
     expect(source).toMatch(/total:\s*number/)
-    expect(source).toMatch(/getShopDevicesList\(shopId: string, query: ShopDevicesQuery = \{\}\): Promise<ShopListPage<ShopDeviceListItem>>/)
+    // Device lists also require an explicit viewer visibility contract so a
+    // caller cannot accidentally put owner cost/margin data in a worker cache.
+    expect(source).toMatch(/getShopDevicesList\(\s*shopId: string,\s*query: ShopDevicesQuery,\s*visibility: ShopDeviceListVisibility,\s*\): Promise<ShopListPage<ShopDeviceListItem>>/)
     expect(source).toMatch(/getShopNasiyalarList\(shopId: string, query: ShopNasiyalarQuery = \{\}\): Promise<ShopListPage<ShopNasiyaListItem>>/)
   })
 

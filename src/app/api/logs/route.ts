@@ -12,7 +12,9 @@ import { prisma } from '@/lib/prisma'
 import { badRequest, ok, serverError } from '@/lib/api-helpers'
 import { requireShopPermission } from '@/lib/api-auth'
 import { enrichLogsWithActors } from '@/lib/server/log-actors'
+import { resolveShopLogTargetHrefs, shopLogTargetKey } from '@/lib/server/log-links'
 import { isLogCategory, logCategoryWhere } from '@/lib/log-categories'
+import { redactShopStaffLogValue } from '@/lib/log-financial-redaction'
 import { logger } from '@/lib/logger'
 
 function parseDateParam(value: string | null | undefined, endOfDay = false) {
@@ -26,6 +28,8 @@ export async function GET(req: NextRequest) {
     const guarded = await requireShopPermission('LOG_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
+    const isShopStaff =
+      session.user.role === 'SHOP_ADMIN' && guarded.principal?.memberKind === 'SHOP_STAFF'
 
     const { searchParams } = req.nextUrl
 
@@ -82,6 +86,11 @@ export async function GET(req: NextRequest) {
 
     const where: Prisma.LogWhereInput = {
       ...(shopId && shopId !== 'all' ? { shopId } : {}),
+      // Keep legacy restock audit events for platform administrators, while
+      // never returning them in a shop-facing list, filter, count, or cache.
+      ...(session.user.role === 'SHOP_ADMIN'
+        ? { NOT: { action: 'RESTOCK', targetType: 'Device' } }
+        : {}),
       ...(actorType && actorType !== 'barchasi' ? { actorType: actorType as 'SUPER_ADMIN' | 'SHOP_ADMIN' } : {}),
       ...(actorId ? { actorId } : {}),
       ...(targetType ? { targetType } : {}),
@@ -121,9 +130,23 @@ export async function GET(req: NextRequest) {
       prisma.log.count({ where }),
     ])
 
-    const logsWithActors = await enrichLogsWithActors(logs)
+    const [logsWithActors, hrefs] = await Promise.all([
+      enrichLogsWithActors(logs),
+      shopId && shopId !== 'all'
+        ? resolveShopLogTargetHrefs(shopId, logs)
+        : Promise.resolve(new Map<string, string>()),
+    ])
 
-    return ok({ logs: logsWithActors, total, skip, take }, "Loglar ro'yxati")
+    return ok({
+      logs: logsWithActors.map((log) => ({
+        ...log,
+        ...(isShopStaff ? { newValue: redactShopStaffLogValue(log.newValue) } : {}),
+        href: hrefs.get(shopLogTargetKey(log)) ?? null,
+      })),
+      total,
+      skip,
+      take,
+    }, "Loglar ro'yxati")
   } catch (err) {
     logger.error('[GET /api/logs]', { event: 'api.route_error', error: err })
     return serverError()

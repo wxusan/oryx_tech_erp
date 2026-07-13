@@ -20,7 +20,10 @@ const updateSaleSchema = z.object({
   dueDate: z.coerce.date().nullable().optional(),
   reminderEnabled: z.boolean().optional(),
   paymentMethod: z.enum(['CASH', 'TRANSFER', 'CARD', 'OTHER']).optional(),
-  reason: z.string().trim().min(5, "Tahrirlash sababi kamida 5 ta belgidan iborat bo'lishi kerak").max(1000).optional(),
+  // This is compatibility context for ordinary edits, not a high-risk audit
+  // reason. Keep it optional and normalize whitespace-only input exactly like
+  // the visible Izoh field.
+  reason: z.string().trim().max(1000, "Sabab 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
 })
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {

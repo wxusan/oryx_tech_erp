@@ -37,11 +37,13 @@ describe('device selection is crash-safe', () => {
     expect(rowBlock).not.toContain('router')
   })
 
-  // Nasiya still shows a read-only "Kelish narxi" (purchase price) reference
-  // via the same string-safe convert helper — item 5 removed the
-  // auto-*prefill* of the selling-price field, not the read-only display.
-  it(`${NASIYA}: the read-only purchase-price reference goes through the (string-safe) convert helper`, () => {
-    expect(read(NASIYA)).toContain('convertUzsToUsd(d.purchasePrice, currency.usdUzsRate)')
+  // Purchase cost is an owner-only reference. It must never be present in a
+  // worker's data contract/cache, while an owner can still read it safely in
+  // the active display currency.
+  it(`${NASIYA}: the read-only purchase-price reference is owner-only and uses the shared money formatter`, () => {
+    const src = read(NASIYA)
+    expect(src).toContain('canSeeOwnerFinancials && selectedDevice?.purchasePrice != null')
+    expect(src).toContain('formatMoneyByCurrency(selectedDevice.purchasePrice, currency.currency, currency.usdUzsRate)')
   })
 
   // Sotuv's read-only purchase-price reference (in the selected-device
@@ -49,8 +51,9 @@ describe('device selection is crash-safe', () => {
   // — also string-safe (formatMoneyByCurrency Number()-coerces internally),
   // just via the already-audited shared formatter rather than a bespoke
   // local prefill helper (which no longer exists in this file — item 5).
-  it(`${SOTUV}: the read-only purchase-price reference uses the shared money formatter`, () => {
+  it(`${SOTUV}: the owner-only read-only purchase-price reference uses the shared money formatter`, () => {
     const src = read(SOTUV)
+    expect(src).toContain('canSeeOwnerFinancials && selectedDevice.purchasePrice != null')
     expect(src).toContain('fmt(selectedDevice.purchasePrice, currency)')
     expect(src).not.toContain('salePriceInput ?? (selectedDevice')
   })

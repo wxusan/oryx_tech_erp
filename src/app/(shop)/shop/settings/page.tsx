@@ -32,10 +32,12 @@ interface ShopAdminProfile {
   name: string
   phone: string
   login: string
+  memberKind: 'SHOP_OWNER' | 'SHOP_STAFF'
+  telegramAllowed: boolean
   telegramId: string | null
   telegramVerifiedAt: string | null
   passwordChangedAt: string
-  shop: {
+  shop?: {
     id: string
     name: string
     shopNumber: string
@@ -84,8 +86,9 @@ function formatDate(value: string | null | undefined) {
 
 export default function ShopSettingsPage() {
   const { setCurrency } = useShopCurrency()
-  const { can } = useShopAccess()
-  const canManageShop = can('SETTINGS_MANAGE')
+  const { can, memberKind } = useShopAccess()
+  const isStaff = memberKind === 'SHOP_STAFF'
+  const canManageShop = !isStaff && can('SETTINGS_MANAGE')
   const [profile, setProfile] = useState<ShopAdminProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -334,9 +337,9 @@ export default function ShopSettingsPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Sozlamalar</h1>
-          <p className="mt-0.5 text-sm text-zinc-500">Profil, Telegram ulanishi va parol xavfsizligi</p>
+          <p className="mt-0.5 text-sm text-zinc-500">{isStaff ? 'Shaxsiy ma’lumotlar va parol xavfsizligi' : 'Profil, Telegram ulanishi va parol xavfsizligi'}</p>
         </div>
-        {profile && (
+        {profile?.shop && (
           <Badge variant="outline" className="h-6 w-fit rounded-md border-zinc-200 text-zinc-600">
             {profile.shop.name}
           </Badge>
@@ -359,62 +362,74 @@ export default function ShopSettingsPage() {
           <Card className="rounded-lg">
             <CardHeader className="border-b border-zinc-100">
               <CardTitle>Profil</CardTitle>
-              <CardDescription>Hisob va do'kon ma'lumotlari</CardDescription>
+              <CardDescription>{isStaff ? 'Sizning shaxsiy hisob ma’lumotlaringiz' : "Hisob va do'kon ma'lumotlari"}</CardDescription>
               <CardAction>
                 <UserRound className="size-5 text-zinc-400" />
               </CardAction>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form onSubmit={handleAccountSubmit} className="space-y-3">
-                {accountError && (
-                  <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
-                    {accountError}
+              {isStaff ? (
+                <div className="space-y-3">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Info label="Ism" value={profile.name} />
+                    <Info label="Telefon" value={profile.phone} />
+                    <Info label="Login" value={profile.login} mono />
                   </div>
-                )}
-                {accountSuccess && (
-                  <div className="flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                    <CheckCircle2 className="size-4" />
-                    {accountSuccess}
-                  </div>
-                )}
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <Field label="Ism" required controlId="account-name">
-                    <Input
-                      id="account-name"
-                      value={accountName}
-                      onChange={(event) => setAccountName(event.target.value)}
-                      className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
-                    />
-                  </Field>
-                  <Field label="Telefon" required controlId="account-phone">
-                    <PhoneInput
-                      id="account-phone"
-                      value={accountPhone}
-                      onChange={setAccountPhone}
-                      className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
-                    />
-                  </Field>
-                  <Info label="Login" value={profile.login} mono />
-                  <Info label="Do'kon raqami" value={profile.shop.shopNumber} />
+                  <p className="text-xs text-zinc-500">Ism va telefonni do&apos;kon egasi yangilaydi. Parolingizni quyidagi bo&apos;limdan o&apos;zgartirishingiz mumkin.</p>
+                  <div className="text-xs text-zinc-500">Parol oxirgi yangilangan: {formatDate(profile.passwordChangedAt)}</div>
                 </div>
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-xs text-zinc-500">
-                    Parol oxirgi yangilangan: {formatDate(profile.passwordChangedAt)}
+              ) : (
+                <form onSubmit={handleAccountSubmit} className="space-y-3">
+                  {accountError && (
+                    <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                      {accountError}
+                    </div>
+                  )}
+                  {accountSuccess && (
+                    <div className="flex items-center gap-2 rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                      <CheckCircle2 className="size-4" />
+                      {accountSuccess}
+                    </div>
+                  )}
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <Field label="Ism" required controlId="account-name">
+                      <Input
+                        id="account-name"
+                        value={accountName}
+                        onChange={(event) => setAccountName(event.target.value)}
+                        className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                      />
+                    </Field>
+                    <Field label="Telefon" required controlId="account-phone">
+                      <PhoneInput
+                        id="account-phone"
+                        value={accountPhone}
+                        onChange={setAccountPhone}
+                        className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
+                      />
+                    </Field>
+                    <Info label="Login" value={profile.login} mono />
+                    <Info label="Do'kon raqami" value={profile.shop?.shopNumber ?? '-'} />
                   </div>
-                  <Button
-                    type="submit"
-                    disabled={accountLoading}
-                    className="h-9 rounded-md bg-zinc-900 text-white hover:bg-zinc-800"
-                  >
-                    {accountLoading ? <Loader2 className="size-4 animate-spin" /> : <UserRound className="size-4" />}
-                    Saqlash
-                  </Button>
-                </div>
-              </form>
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="text-xs text-zinc-500">
+                      Parol oxirgi yangilangan: {formatDate(profile.passwordChangedAt)}
+                    </div>
+                    <Button
+                      type="submit"
+                      disabled={accountLoading}
+                      className="h-9 rounded-md bg-zinc-900 text-white hover:bg-zinc-800"
+                    >
+                      {accountLoading ? <Loader2 className="size-4 animate-spin" /> : <UserRound className="size-4" />}
+                      Saqlash
+                    </Button>
+                  </div>
+                </form>
+              )}
             </CardContent>
           </Card>
 
-          {shop && (
+          {!isStaff && shop && (
             <Card className="rounded-lg lg:col-span-2">
               <CardHeader className="border-b border-zinc-100">
                 <CardTitle>Do'kon ma'lumotlari</CardTitle>
@@ -537,7 +552,7 @@ export default function ShopSettingsPage() {
             </Card>
           )}
 
-          <Card className="rounded-lg">
+          {profile.telegramAllowed && <Card className="rounded-lg">
             <CardHeader className="border-b border-zinc-100">
               <CardTitle>Telegram</CardTitle>
               <CardDescription>Bot orqali xabar olish uchun Telegram ID</CardDescription>
@@ -605,7 +620,7 @@ export default function ShopSettingsPage() {
                 </div>
               )}
             </CardContent>
-          </Card>
+          </Card>}
 
           <Card className="rounded-lg lg:col-span-2">
             <CardHeader className="border-b border-zinc-100">

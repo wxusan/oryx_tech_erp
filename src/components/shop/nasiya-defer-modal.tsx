@@ -27,6 +27,8 @@ interface NasiyaDeferModalProps {
   onSuccess: () => void
   customerName?: string
   deviceName?: string
+  /** Queue actions preselect this still-open schedule when it remains valid. */
+  preferredScheduleId?: string
 }
 
 function effectiveDue(schedule: Schedule) {
@@ -40,6 +42,7 @@ export function NasiyaDeferModal({
   onSuccess,
   customerName,
   deviceName,
+  preferredScheduleId,
 }: NasiyaDeferModalProps) {
   const command = useLogicalCommandIdempotency()
   const [schedules, setSchedules] = useState<Schedule[]>([])
@@ -71,7 +74,8 @@ export function NasiyaDeferModal({
           ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(schedule.status),
         )
         setSchedules(pending)
-        setSelectedScheduleId(pending[0]?.id ?? '')
+        const preferred = preferredScheduleId ? pending.find((schedule: Schedule) => schedule.id === preferredScheduleId) : undefined
+        setSelectedScheduleId(preferred?.id ?? pending[0]?.id ?? '')
         setIdentity({
           customerName: json.data.customer?.name ?? '',
           deviceName: json.data.device?.model ?? '',
@@ -86,20 +90,22 @@ export function NasiyaDeferModal({
     return () => {
       cancelled = true
     }
-  }, [nasiyaId, open])
+  }, [nasiyaId, open, preferredScheduleId])
 
   const selected = useMemo(
     () => schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null,
     [schedules, selectedScheduleId],
   )
-  const canSubmit = Boolean(selected && newDueDate && reason.trim().length >= 5)
+  // A deferral must identify the schedule and a later date. Its ordinary
+  // comment is optional; the server records an immutable event either way.
+  const canSubmit = Boolean(selected && newDueDate)
 
   async function submit() {
     if (!canSubmit || submitting) return
     const payload = {
       nasiyaScheduleId: selectedScheduleId,
       newDueDate,
-      reason: reason.trim(),
+      reason: reason.trim() || undefined,
     }
     setSubmitting(true)
     setError('')
@@ -174,7 +180,7 @@ export function NasiyaDeferModal({
               <Field label="Yangi to'lov sanasi" required>
                 <DateInput value={newDueDate} onValueChange={setNewDueDate} className="h-10 rounded-lg border-zinc-200" />
               </Field>
-              <Field label="Kechiktirish sababi" required>
+              <Field label="Izoh">
                 <Textarea
                   value={reason}
                   onChange={(event) => setReason(event.target.value)}

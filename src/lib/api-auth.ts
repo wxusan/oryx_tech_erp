@@ -224,10 +224,12 @@ export async function requireShopPermissionAndAnyFeature(
 }
 
 /**
- * Read-only mixed receivable surfaces span Sale and Nasiya, so no single
- * permission/feature pair represents them. A member sees only the cohorts
- * whose underlying module and view permission are both live; receiving money
- * is intentionally not required merely to view a due warning.
+ * Read-only mixed receivable surfaces contain tenant-wide count and money
+ * aggregates across Sale and Nasiya.  They are therefore an owner/super-admin
+ * financial overview, not a generic operational read permission.  Staff can
+ * still receive an authorized payment from the individual device/Nasiya flow,
+ * but must never fetch a due-summary, banner, or mixed queue by calling this
+ * route directly.
  */
 export async function requireReceivableView(): Promise<
   | (Extract<GuardResult, { ok: true }> & { includeCashSales: boolean; includeNasiya: boolean })
@@ -235,6 +237,10 @@ export async function requireReceivableView(): Promise<
 > {
   const guarded = await requireApiSession()
   if (!guarded.ok) return guarded
+  const isFinancialOwner = guarded.session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
+  if (!isFinancialOwner) {
+    return { ok: false, response: forbidden("To'lovlar xulosasi faqat do'kon egasi uchun") }
+  }
   const includeCashSales = guarded.session.user.role === 'SUPER_ADMIN' || Boolean(
     guarded.principal &&
     principalHasFeature(guarded.principal, 'CASH_SALES') &&

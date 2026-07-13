@@ -32,6 +32,8 @@ export default function NewOlibSotdimPage() {
 function AuthorizedNewOlibSotdimPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
+  const { memberKind } = useShopAccess()
+  const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const today = tashkentTodayInputValue()
   const [step, setStep] = useState<1 | 2>(1)
   const [submitting, setSubmitting] = useState(false)
@@ -540,7 +542,7 @@ function AuthorizedNewOlibSotdimPage() {
                 </Select>
               </div>
 
-              {priceWarning && (
+              {canSeeOwnerFinancials && priceWarning && (
                 <div className="sm:col-span-2 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                   Sotuv narxi olingan narxdan past
                 </div>
@@ -659,11 +661,13 @@ function AuthorizedNewOlibSotdimPage() {
                 </div>
                 <div className="text-xs text-zinc-500 mt-0.5">Sotilgan narx: {fmt(Number(salePrice))}</div>
               </div>
-              <div className="pt-3 border-t border-zinc-100 flex items-center justify-between">
-                <span className="text-xs font-semibold text-zinc-500">{supplierPaidNow ? 'Foyda' : 'Kutilayotgan foyda'}</span>
-                <span className={`text-base font-bold ${profit < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{fmt(profit)}</span>
-              </div>
-              {!supplierPaidNow && (
+              {canSeeOwnerFinancials && (
+                <div className="pt-3 border-t border-zinc-100 flex items-center justify-between">
+                  <span className="text-xs font-semibold text-zinc-500">{supplierPaidNow ? 'Foyda' : 'Kutilayotgan foyda'}</span>
+                  <span className={`text-base font-bold ${profit < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{fmt(profit)}</span>
+                </div>
+              )}
+              {canSeeOwnerFinancials && !supplierPaidNow && (
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                   Yetkazib beruvchiga hali to&apos;lanmagan — foyda qarz to&apos;langandan keyin real hisoblanadi.
                 </p>

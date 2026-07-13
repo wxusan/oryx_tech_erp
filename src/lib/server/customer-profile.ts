@@ -5,6 +5,11 @@ import { prisma } from '@/lib/prisma'
 import { computeCustomerTrustRatingFromFactors, isValidTrustTier, type CustomerTrustFactors } from '@/lib/nasiya-customer-trust'
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
 import { tashkentDayRange } from '@/lib/timezone'
+import {
+  redactShopStaffCustomerProfileMetrics,
+  type CustomerProfileMetrics,
+  type CustomerProfileVisibleMetrics,
+} from '@/lib/customer-profile-visibility'
 
 export const CUSTOMER_PROFILE_SECTIONS = ['devices', 'sales', 'nasiya', 'payments', 'returns', 'resolutions'] as const
 export type CustomerProfileSection = (typeof CUSTOMER_PROFILE_SECTIONS)[number]
@@ -38,8 +43,22 @@ function money(uzs: unknown, usd: unknown) {
   return { UZS: Number(uzs ?? 0), USD: Number(usd ?? 0) }
 }
 
+export interface CustomerProfileVisibility {
+  /**
+   * Shop-wide/customer-lifetime cash flow, write-off, interest and margin
+   * aggregates are owner data. Staff still receive the operational contract
+   * and due queues needed to serve this individual customer.
+   */
+  includeOwnerFinancials: boolean
+}
+
 /** Set-based, one-row customer lifetime/current-state aggregate. */
-export async function getCustomerProfileOverview(input: { shopId: string; customerId: string; now?: Date }) {
+export async function getCustomerProfileOverview(input: {
+  shopId: string
+  customerId: string
+  now?: Date
+  visibility: CustomerProfileVisibility
+}) {
   const customer = await prisma.customer.findFirst({
     where: { id: input.customerId, shopId: input.shopId, deletedAt: null },
     select: {
@@ -202,6 +221,22 @@ export async function getCustomerProfileOverview(input: { shopId: string; custom
     isValidTrustTier(customer.trustOverride) ? customer.trustOverride : null,
   )
 
+  const metrics: CustomerProfileMetrics = {
+    contractValue: money(row?.contract_uzs, row?.contract_usd),
+    cashCollected: money(row?.collected_uzs, row?.collected_usd),
+    dueToday: money(row?.due_today_uzs, row?.due_today_usd),
+    overdue: money(row?.overdue_uzs, row?.overdue_usd),
+    refunds: money(row?.refunds_uzs, row?.refunds_usd),
+    writeOffs: money(row?.writeoffs_uzs, row?.writeoffs_usd),
+    accountingAccrualGrossProfitUzs: Number(row?.accrual_profit_uzs ?? 0),
+    nasiyaInterestUzs: Number(row?.nasiya_interest_uzs ?? 0),
+    legacyUsdPaymentCount: Number(row?.legacy_usd_payment_count ?? 0),
+  }
+
+  const visibleMetrics: CustomerProfileVisibleMetrics = input.visibility.includeOwnerFinancials
+    ? metrics
+    : redactShopStaffCustomerProfileMetrics(metrics)
+
   return {
     customer: {
       id: customer.id,
@@ -214,17 +249,7 @@ export async function getCustomerProfileOverview(input: { shopId: string; custom
       hasPassportPhoto: Boolean(customer.passportPhotoUrl),
     },
     trust,
-    metrics: {
-      contractValue: money(row?.contract_uzs, row?.contract_usd),
-      cashCollected: money(row?.collected_uzs, row?.collected_usd),
-      dueToday: money(row?.due_today_uzs, row?.due_today_usd),
-      overdue: money(row?.overdue_uzs, row?.overdue_usd),
-      refunds: money(row?.refunds_uzs, row?.refunds_usd),
-      writeOffs: money(row?.writeoffs_uzs, row?.writeoffs_usd),
-      accountingAccrualGrossProfitUzs: Number(row?.accrual_profit_uzs ?? 0),
-      nasiyaInterestUzs: Number(row?.nasiya_interest_uzs ?? 0),
-      legacyUsdPaymentCount: Number(row?.legacy_usd_payment_count ?? 0),
-    },
+    metrics: visibleMetrics,
     counts: {
       devices: Number(row?.device_count ?? 0),
       sales: Number(row?.sale_count ?? 0),

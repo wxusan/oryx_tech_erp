@@ -54,6 +54,8 @@ export default function NewSotuvPage() {
 function AuthorizedNewSotuvPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
+  const { memberKind } = useShopAccess()
+  const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const [step, setStep] = useState<1 | 2>(1)
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
 
@@ -248,10 +250,12 @@ function AuthorizedNewSotuvPage() {
                 <div className="text-xs text-zinc-500 mt-0.5">{deviceMeta(selectedDevice)}</div>
               </div>
               <div className="flex items-center gap-3">
-                <div className="text-right">
-                  <div className="text-[10px] uppercase tracking-wide text-zinc-400">Kelish narxi</div>
-                  <span className="text-sm font-bold text-zinc-900">{fmt(selectedDevice.purchasePrice, currency)}</span>
-                </div>
+                {canSeeOwnerFinancials && selectedDevice.purchasePrice != null && (
+                  <div className="text-right">
+                    <div className="text-[10px] uppercase tracking-wide text-zinc-400">Kelish narxi</div>
+                    <span className="text-sm font-bold text-zinc-900">{fmt(selectedDevice.purchasePrice, currency)}</span>
+                  </div>
+                )}
                 <button
                   type="button"
                   onClick={() => setStep(1)}

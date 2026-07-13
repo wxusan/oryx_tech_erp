@@ -8,11 +8,13 @@ import { queryKeys } from '@/lib/query-keys'
 import { buttonVariants } from '@/components/ui/button'
 import { TrustBadge, type TrustBadgeData } from '@/components/shop/trust-badge'
 import { CustomerPassportPanel } from '@/components/shop/customer-passport-panel'
+import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 import { formatUzPhoneDisplay } from '@/lib/phone'
 import { uzDate } from '@/lib/dates'
 import { cn } from '@/lib/utils'
 import { historyStatusLabel, paymentMethodLabel } from '@/lib/labels'
 import type { CustomerProfileSection } from '@/lib/server/customer-profile'
+import { useShopAccess } from '@/components/shop/shop-access-context'
 
 const SECTION_LABELS: Record<CustomerProfileSection, string> = {
   devices: 'Qurilmalar',
@@ -40,14 +42,14 @@ interface ProfileResponse {
       trust: TrustBadgeData & { reasons: string[]; factors: { onTimeRatio: number | null; lateInstallmentCount: number; maxDaysLate: number } }
       metrics: {
         contractValue: NativeMoney
-        cashCollected: NativeMoney
         dueToday: NativeMoney
         overdue: NativeMoney
-        refunds: NativeMoney
-        writeOffs: NativeMoney
-        accountingAccrualGrossProfitUzs: number
-        nasiyaInterestUzs: number
-        legacyUsdPaymentCount: number
+        cashCollected?: NativeMoney
+        refunds?: NativeMoney
+        writeOffs?: NativeMoney
+        accountingAccrualGrossProfitUzs?: number
+        nasiyaInterestUzs?: number
+        legacyUsdPaymentCount?: number
       }
       counts: Record<string, number>
     }
@@ -102,6 +104,8 @@ export function CustomerProfileClient({
   initialSection: CustomerProfileSection
   initialPage: number
 }) {
+  const { memberKind } = useShopAccess()
+  const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const scope = useAuthenticatedQueryScope()
   const section = initialSection
   const page = initialPage
@@ -132,13 +136,17 @@ export function CustomerProfileClient({
   const customer = overview.customer
   const metricCards = [
     ['Shartnomalar qiymati', nativeMoney(overview.metrics.contractValue)],
-    ["Jami tushgan pul", nativeMoney(overview.metrics.cashCollected)],
     ["Bugun to'lanadi", nativeMoney(overview.metrics.dueToday)],
     ["Muddati o'tgan", nativeMoney(overview.metrics.overdue)],
-    ['Qaytarilgan pul', nativeMoney(overview.metrics.refunds)],
-    ['Hisobdan chiqarilgan qarz', nativeMoney(overview.metrics.writeOffs)],
-    ['Hisob siyosati bo‘yicha yalpi foyda', `${Math.round(overview.metrics.accountingAccrualGrossProfitUzs).toLocaleString('ru-RU')} UZS`],
-    ['Nasiya foizi', `${Math.round(overview.metrics.nasiyaInterestUzs).toLocaleString('ru-RU')} UZS`],
+    ...(overview.metrics.cashCollected && overview.metrics.refunds && overview.metrics.writeOffs && overview.metrics.accountingAccrualGrossProfitUzs != null && overview.metrics.nasiyaInterestUzs != null
+      ? [
+          ["Jami tushgan pul", nativeMoney(overview.metrics.cashCollected)],
+          ['Qaytarilgan pul', nativeMoney(overview.metrics.refunds)],
+          ['Hisobdan chiqarilgan qarz', nativeMoney(overview.metrics.writeOffs)],
+          ['Hisob siyosati bo‘yicha yalpi foyda', `${Math.round(overview.metrics.accountingAccrualGrossProfitUzs).toLocaleString('ru-RU')} UZS`],
+          ['Nasiya foizi', `${Math.round(overview.metrics.nasiyaInterestUzs).toLocaleString('ru-RU')} UZS`],
+        ]
+      : []),
   ] as const
   const totalPages = Math.max(1, Math.ceil(history.total / history.take))
 
@@ -176,7 +184,7 @@ export function CustomerProfileClient({
           </div>
         ))}
       </section>
-      {overview.metrics.legacyUsdPaymentCount > 0 && (
+      {overview.metrics.legacyUsdPaymentCount != null && overview.metrics.legacyUsdPaymentCount > 0 && (
         <p className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
           {overview.metrics.legacyUsdPaymentCount} ta eski USD to‘lovida shartnoma-valyuta miqdori saqlanmagan; jami ichiga taxminiy konvertatsiya qo‘shilmadi.
         </p>
@@ -186,7 +194,9 @@ export function CustomerProfileClient({
         <div className="border-b border-zinc-200 p-4">
           <h2 id="customer-history-title" className="text-sm font-semibold text-zinc-900">Mijoz tarixi</h2>
           <nav aria-label="Mijoz tarixi bo'limlari" className="mt-3 flex gap-2 overflow-x-auto pb-1">
-            {(Object.keys(SECTION_LABELS) as CustomerProfileSection[]).map((candidate) => (
+            {(Object.keys(SECTION_LABELS) as CustomerProfileSection[])
+              .filter((candidate) => canSeeOwnerFinancials || candidate !== 'resolutions')
+              .map((candidate) => (
               <Link
                 key={candidate}
                 href={href(candidate)}
@@ -195,7 +205,7 @@ export function CustomerProfileClient({
               >
                 {SECTION_LABELS[candidate]}
               </Link>
-            ))}
+              ))}
           </nav>
         </div>
 
@@ -203,30 +213,42 @@ export function CustomerProfileClient({
           <p className="p-8 text-center text-sm text-zinc-500">Bu bo‘limda ma’lumot yo‘q</p>
         ) : (
           <ul className="divide-y divide-zinc-100">
-            {history.items.map((item) => (
-              <li key={item.id} className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">
-                <div className="min-w-0">
-                  {historyHref(item) ? (
-                    <Link href={historyHref(item)!} className="truncate text-sm font-medium text-zinc-900 hover:underline">
-                      {item.kind === 'resolution' ? historyStatusLabel(item.title) : item.title}
-                    </Link>
-                  ) : (
+            {history.items.map((item) => {
+              const itemHref = historyHref(item)
+              const content = (
+                <>
+                  <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-zinc-900">
                       {item.kind === 'resolution' ? historyStatusLabel(item.title) : item.title}
                     </p>
+                    <p className="mt-0.5 text-xs text-zinc-500">
+                      {item.subtitle
+                        ? item.kind.endsWith('payment') ? paymentMethodLabel(item.subtitle) : item.subtitle
+                        : historyStatusLabel(item.status)} · {uzDate(item.occurredAt)}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-left sm:text-right">
+                    <p className="text-sm font-semibold text-zinc-800">{historyAmount(item)}</p>
+                    {item.status && <p className="mt-0.5 text-[11px] text-zinc-500">{historyStatusLabel(item.status)}</p>}
+                  </div>
+                </>
+              )
+
+              return (
+                <li key={item.id}>
+                  {itemHref ? (
+                    <IntentPrefetchLink
+                      href={itemHref}
+                      className="flex flex-col gap-2 p-4 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-zinc-900 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      {content}
+                    </IntentPrefetchLink>
+                  ) : (
+                    <div className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">{content}</div>
                   )}
-                  <p className="mt-0.5 text-xs text-zinc-500">
-                    {item.subtitle
-                      ? item.kind.endsWith('payment') ? paymentMethodLabel(item.subtitle) : item.subtitle
-                      : historyStatusLabel(item.status)} · {uzDate(item.occurredAt)}
-                  </p>
-                </div>
-                <div className="shrink-0 text-left sm:text-right">
-                  <p className="text-sm font-semibold text-zinc-800">{historyAmount(item)}</p>
-                  {item.status && <p className="mt-0.5 text-[11px] text-zinc-500">{historyStatusLabel(item.status)}</p>}
-                </div>
-              </li>
-            ))}
+                </li>
+              )
+            })}
           </ul>
         )}
 

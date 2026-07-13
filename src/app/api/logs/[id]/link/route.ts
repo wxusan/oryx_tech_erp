@@ -35,7 +35,13 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     const { shopId } = resolved
 
     const log = await prisma.log.findFirst({
-      where: { id: logId, shopId },
+      where: {
+        id: logId,
+        shopId,
+        ...(session.user.role === 'SHOP_ADMIN'
+          ? { NOT: { action: 'RESTOCK', targetType: 'Device' } }
+          : {}),
+      },
       select: { targetType: true, targetId: true },
     })
     if (!log) return notFound('Log topilmadi')

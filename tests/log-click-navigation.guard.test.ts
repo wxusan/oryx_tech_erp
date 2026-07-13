@@ -24,10 +24,13 @@ describe('GET /api/logs/[id]/link resolves each target type to a shop-scoped hre
 
   it('every entity lookup filters by the resolved shopId, never targetId alone', () => {
     const lookups = source.match(/prisma\.\w+\.findFirst\(\{[\s\S]{0,120}?\}\)/g) ?? []
-    expect(lookups.length).toBeGreaterThanOrEqual(6)
+    // Five target resolvers are compact enough for this source extraction;
+    // the initial Log lookup is formatted over multiple lines below.
+    expect(lookups.length).toBeGreaterThanOrEqual(5)
     for (const lookup of lookups) {
       expect(lookup).toContain('shopId')
     }
+    expect(source).toContain('id: logId,\n        shopId,')
   })
 
   it('resolves Device -> qurilmalar profile, Nasiya -> nasiyalar profile', () => {
@@ -51,25 +54,31 @@ describe('GET /api/logs/[id]/link resolves each target type to a shop-scoped hre
   })
 })
 
-describe('logs page: rows are clickable and navigate via the resolved link', () => {
+describe('logs page: rows are real, directly navigable links', () => {
   const source = read('src/app/(shop)/shop/logs/logs-client.tsx')
+  const apiSource = read('src/app/api/logs/route.ts')
+  const initialSource = read('src/lib/server/shop-lists.ts')
+  const linkSource = read('src/lib/server/log-links.ts')
 
-  it('only Device/Nasiya/NasiyaSchedule/Sale/SupplierPayable rows are marked linkable', () => {
-    expect(source).toContain("new Set(['Device', 'Nasiya', 'NasiyaSchedule', 'Sale', 'SupplierPayable'])")
+  it('uses a focusable StretchedLink instead of a click-only table row', () => {
+    expect(source).toContain("import { StretchedLink } from '@/components/ui/stretched-link'")
+    expect(source).toContain('<StretchedLink')
+    expect(source).toContain('href={log.href}')
+    expect(source).not.toContain('onClick={() => openLogTarget(log)}')
   })
 
-  it('clicking a row calls the link-resolution endpoint and navigates on success', () => {
-    expect(source).toContain('fetch(`/api/logs/${log.id}/link`)')
-    expect(source).toContain('router.push(json.data.href)')
+  it('returns server-resolved hrefs for both the initial payload and paginated API payload', () => {
+    expect(apiSource).toContain('resolveShopLogTargetHrefs(shopId, logs)')
+    expect(apiSource).toContain('href: hrefs.get(shopLogTargetKey(log)) ?? null')
+    expect(initialSource).toContain('resolveShopLogTargetHrefs(shopId, logs)')
+    expect(initialSource).toContain('href: hrefs.get(shopLogTargetKey(log)) ?? null')
   })
 
-  it('a non-linkable row (or a resolution that returns no href) never navigates', () => {
-    expect(source).toContain('if (!log.linkable || resolvingLogId) return')
-  })
-
-  it('a failed lookup is caught and does not crash the page', () => {
-    const fnStart = source.indexOf('async function openLogTarget')
-    const fn = source.slice(fnStart, fnStart + 700)
-    expect(fn).toContain('catch')
+  it('uses bounded, tenant-scoped batch queries instead of an N+1 client lookup', () => {
+    expect(linkSource).toContain('resolveShopLogTargetHrefs')
+    expect(linkSource).toContain('where: { shopId, id: { in: deviceIds } }')
+    expect(linkSource).toContain('where: { shopId, id: { in: nasiyaIds } }')
+    expect(linkSource).toContain('where: { shopId, id: { in: scheduleIds } }')
+    expect(linkSource).toContain('where: { shopId, id: { in: saleIds } }')
   })
 })

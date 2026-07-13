@@ -32,8 +32,8 @@ describe('nasiyalar list loader derives overdue server-side', () => {
 describe('nasiyalar list client renders the derived display status', () => {
   const src = read('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')
 
-  it('status filtering requests the server’s contract-derived status, not a client-side raw status check', () => {
-    expect(src).toContain("params.set('status', filter)")
+  it('tab filtering requests the server’s contract-derived cohort/status, not a client-side raw status check', () => {
+    expect(src).toContain("params.set('tab', filter)")
     expect(src).not.toContain('n.status === activeFilter')
   })
 

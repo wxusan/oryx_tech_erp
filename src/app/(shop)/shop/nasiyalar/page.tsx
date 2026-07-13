@@ -8,7 +8,7 @@ import { latestChangeCursorForSession } from '@/lib/server/change-events'
 import { IncrementalSnapshotBoundary } from '@/components/incremental-snapshot-boundary'
 
 interface NasiyalarPageProps {
-  searchParams?: Promise<{ status?: string | string[]; q?: string | string[]; page?: string | string[] }>
+  searchParams?: Promise<{ tab?: string | string[]; status?: string | string[]; q?: string | string[]; page?: string | string[] }>
 }
 
 // Matches PER_PAGE in nasiyalar-client.tsx (first page is server-rendered
@@ -21,19 +21,31 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
   if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
 
   const params = await searchParams
-  const status = Array.isArray(params?.status) ? params?.status[0] : params?.status
+  const tab = Array.isArray(params?.tab) ? params?.tab[0] : params?.tab
+  const status = tab ?? (Array.isArray(params?.status) ? params?.status[0] : params?.status)
   const initialSearch = scalarParam(params?.q).slice(0, 100)
   const initialPage = positivePage(params?.page)
-  const validStatuses = ['ACTIVE', 'OVERDUE', 'COMPLETED', 'CANCELLED', 'ARCHIVED', 'WRITTEN_OFF'] as const
-  const initialFilter = validStatuses.includes(status as (typeof validStatuses)[number])
-    ? (status as (typeof validStatuses)[number])
+  const statusFilters = ['ACTIVE', 'OVERDUE', 'COMPLETED', 'CANCELLED'] as const
+  const validFilters = [...statusFilters, 'DUE_TODAY', 'UPCOMING', 'ARCHIVED', 'WRITTEN_OFF'] as const
+  const requestedFilter = validFilters.includes(status as (typeof validFilters)[number])
+    ? (status as (typeof validFilters)[number])
     : 'Barchasi'
+  const canViewResolutionHistory = guarded.principal?.memberKind === 'SHOP_OWNER'
+  if (!canViewResolutionHistory && (requestedFilter === 'ARCHIVED' || requestedFilter === 'WRITTEN_OFF')) {
+    redirect('/shop/nasiyalar')
+  }
+  const initialFilter = requestedFilter
+  const initialCohort = tab && ['ACTIVE', 'OVERDUE', 'DUE_TODAY', 'UPCOMING'].includes(initialFilter)
+    ? initialFilter as 'ACTIVE' | 'OVERDUE' | 'DUE_TODAY' | 'UPCOMING'
+    : undefined
+  const initialStatus = !initialCohort && statusFilters.includes(initialFilter as (typeof statusFilters)[number])
+    ? initialFilter as (typeof statusFilters)[number]
+    : undefined
   const cursor = await latestChangeCursorForSession(guarded.session)
   const [{ items: nasiyalar, total }, currency] = await Promise.all([
     getShopNasiyalarList(guarded.shopId, {
-      status: initialFilter === 'Barchasi' || initialFilter === 'ARCHIVED' || initialFilter === 'WRITTEN_OFF'
-        ? undefined
-        : initialFilter,
+      status: initialStatus,
+      cohort: initialCohort,
       resolutionState: initialFilter === 'ARCHIVED' || initialFilter === 'WRITTEN_OFF'
         ? initialFilter
         : undefined,

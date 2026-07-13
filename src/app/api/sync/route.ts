@@ -41,13 +41,13 @@ function allowedDomainsForGuard(guarded: Awaited<ReturnType<typeof requireApiSes
   allow('CUSTOMER_VIEW', ['customers'])
   allow('NASIYA_VIEW', ['nasiyas'])
   allow('OLIB_VIEW', ['olibSotdim'])
-  const canViewReceivables = (
+  const canViewReceivables = guarded.principal.memberKind === 'SHOP_OWNER' && ((
     principalHasFeature(guarded.principal, 'CASH_SALES') &&
     principalHasPermission(guarded.principal, 'INVENTORY_VIEW')
   ) || (
     principalHasFeature(guarded.principal, 'NASIYA') &&
     principalHasPermission(guarded.principal, 'NASIYA_VIEW')
-  )
+  ))
   if (canViewReceivables) domains.add('overdue')
   if (
     principalHasPermission(guarded.principal, 'PAYMENT_RECEIVE') &&
@@ -130,8 +130,10 @@ export async function GET(request: NextRequest) {
       ...nasiyas.map((row) => row.deviceId),
       ...payables.map((row) => row.deviceId),
     ])]
+    const includeOwnerFinancials =
+      guarded.session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
     const devices = guarded.shopId
-      ? await getShopDeviceListItemsByIds(guarded.shopId, deviceIds)
+      ? await getShopDeviceListItemsByIds(guarded.shopId, deviceIds, { includeOwnerFinancials })
       : []
     const tombstones = batch.events
       .filter((event) => event.operation === 'deleted')

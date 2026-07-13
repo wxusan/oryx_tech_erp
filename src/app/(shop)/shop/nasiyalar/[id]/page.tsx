@@ -8,8 +8,9 @@ import { commitNavigationMutation } from '@/lib/client-events'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
-import { formatUzPhoneDisplay } from '@/lib/phone'
+import { formatUzPhoneDisplay, isValidPhone } from '@/lib/phone'
 import { Textarea } from '@/components/ui/textarea'
+import { Field } from '@/components/ui/field'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
@@ -33,6 +34,13 @@ import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempote
 type NasiyaPayment = NasiyaPaymentDisplayRecord
 type ResolutionState = 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
 type ResolutionAction = 'ARCHIVE' | 'WRITE_OFF' | 'REOPEN'
+
+interface NasiyaEditPatch {
+  note: string | null
+  importNote: string | null
+  reminderEnabled: boolean
+  customer: { name: string; phone: string }
+}
 
 interface ResolutionEvent {
   id: string
@@ -73,7 +81,8 @@ interface Nasiya {
   status: string
   resolutionState: ResolutionState
   resolutionUpdatedAt: string | null
-  resolutionEvents: ResolutionEvent[]
+  /** Omitted from the server DTO for staff because it contains owner-only write-off/archive amounts. */
+  resolutionEvents?: ResolutionEvent[]
   displayStatus?: 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
   reminderEnabled: boolean
   note?: string | null
@@ -180,6 +189,7 @@ function AuthorizedNasiyaDetailPage() {
   const [editReminderEnabled, setEditReminderEnabled] = useState(true)
   const [editSaving, setEditSaving] = useState(false)
   const [editError, setEditError] = useState('')
+  const [editFieldErrors, setEditFieldErrors] = useState<{ customerName?: string; customerPhone?: string }>({})
 
   const fetchNasiya = useCallback(() => {
     if (!id) return
@@ -253,13 +263,30 @@ function AuthorizedNasiyaDetailPage() {
     setEditImportNote(nasiya?.importNote ?? '')
     setEditReminderEnabled(nasiya?.reminderEnabled ?? true)
     setEditError('')
+    setEditFieldErrors({})
     setEditOpen(true)
   }
 
   async function handleEditSave() {
     if (!nasiya || editSaving) return
+    const customerName = editCustomerName.trim()
+    const customerPhone = editCustomerPhone.trim()
+    const fieldErrors = {
+      ...(customerName.length < 2 ? { customerName: "Mijoz ismi kamida 2 ta harfdan iborat bo'lishi kerak" } : {}),
+      ...(!isValidPhone(customerPhone) ? { customerPhone: "Telefon raqam noto'g'ri. Masalan: +998 90 123 45 67" } : {}),
+    }
+    if (Object.keys(fieldErrors).length > 0) {
+      setEditFieldErrors(fieldErrors)
+      // Keep the dialog usable with a keyboard: the first invalid editable
+      // field receives focus instead of leaving the user at the save button.
+      requestAnimationFrame(() => {
+        document.getElementById(fieldErrors.customerName ? 'nasiya-edit-customer' : 'nasiya-edit-phone')?.focus()
+      })
+      return
+    }
     setEditSaving(true)
     setEditError('')
+    setEditFieldErrors({})
     try {
       const res = await fetch(`/api/nasiya/${nasiya.id}`, {
         method: 'PATCH',
@@ -270,17 +297,25 @@ function AuthorizedNasiyaDetailPage() {
           note: editNote.trim(),
           importNote: nasiya.isImported ? editImportNote.trim() : undefined,
           reminderEnabled: editReminderEnabled,
-          reason: editNote.trim() || editImportNote.trim() || "Nasiya ma'lumotlari tuzatildi",
         }),
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        await commitNavigationMutation({
+        const updated = json.data as NasiyaEditPatch
+        setNasiya((current) => current
+          ? {
+              ...current,
+              note: updated.note,
+              importNote: updated.importNote,
+              reminderEnabled: updated.reminderEnabled,
+              customer: { ...current.customer, ...updated.customer },
+            }
+          : current)
+        void commitNavigationMutation({
           kind: 'nasiya.updated',
           nasiyaId: nasiya.id,
         })
         setEditOpen(false)
-        fetchNasiya()
       } else {
         setEditError(json.error || 'Saqlashda xatolik')
       }
@@ -390,6 +425,7 @@ function AuthorizedNasiyaDetailPage() {
   const displayStatus = nasiya.displayStatus ?? (nasiya.status as 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED')
   const isCompleted = displayStatus === 'COMPLETED'
   const isOperationallyActive = nasiya.resolutionState === 'ACTIVE'
+  const resolutionEvents = nasiya.resolutionEvents ?? []
   const statusBadgeStyles: Record<string, string> = {
     ACTIVE: 'bg-zinc-100 text-zinc-700',
     OVERDUE: 'bg-red-100 text-red-700',
@@ -642,14 +678,14 @@ function AuthorizedNasiyaDetailPage() {
         )}
       </div>
 
-      {nasiya.resolutionEvents.length > 0 && (
+      {canResolveNasiya && resolutionEvents.length > 0 && (
         <Card className="rounded-lg">
           <CardHeader>
             <CardTitle>Undirish holati tarixi</CardTitle>
             <CardDescription>O'zgarmas arxiv, hisobdan chiqarish va qayta ochish dalillari</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {nasiya.resolutionEvents.map((event) => (
+            {resolutionEvents.map((event) => (
               <div key={event.id} className="rounded-lg border border-zinc-200 p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-medium text-zinc-900">
@@ -786,65 +822,126 @@ function AuthorizedNasiyaDetailPage() {
       </Dialog>
 
       {/* Edit (safe fields) Dialog */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="w-[calc(100vw-2rem)] max-w-md rounded-xl sm:w-full">
+      <Dialog open={editOpen} onOpenChange={(open) => {
+        setEditOpen(open)
+        if (!open) {
+          setEditError('')
+          setEditFieldErrors({})
+        }
+      }}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-lg rounded-xl sm:w-full">
           <DialogHeader>
             <DialogTitle className="text-zinc-900">Nasiya ma'lumotlarini tahrirlash</DialogTitle>
             <DialogDescription className="text-sm text-zinc-500">
-              Pul summalari to'lovlar va hisobotlarga bog'langan. Ularni tuzatish uchun alohida adjustment kerak.
+              Bu oynada mijoz ma'lumotlari, ixtiyoriy izoh va eslatma sozlamasi yangilanadi. Pul summalari va to'lov jadvali bu yerda o'zgarmaydi.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-3 py-1">
+          <div className="max-h-[min(60vh,34rem)] space-y-5 overflow-y-auto py-1 pr-1">
             {editError && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{editError}</div>}
-            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <section aria-labelledby="nasiya-edit-contact-title" className="space-y-3">
               <div>
-                <label htmlFor="nasiya-edit-customer" className="mb-1.5 block text-xs font-medium text-zinc-700">Mijoz ismi</label>
-                <Input
-                  id="nasiya-edit-customer"
-                  value={editCustomerName}
-                  onChange={(e) => setEditCustomerName(e.target.value)}
-                  className="h-9 rounded-lg border-zinc-200 text-sm"
-                />
+                <h3 id="nasiya-edit-contact-title" className="text-sm font-semibold text-zinc-900">Mijoz va aloqa</h3>
+                <p className="mt-0.5 text-xs text-zinc-500">Mijozni tanib olish uchun kerak bo'lgan ma'lumotlar.</p>
               </div>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <Field label="Mijoz ismi" required error={editFieldErrors.customerName}>
+                  <Input
+                    id="nasiya-edit-customer"
+                    value={editCustomerName}
+                    onChange={(event) => setEditCustomerName(event.target.value)}
+                    autoComplete="name"
+                    className="h-9 rounded-lg border-zinc-200 text-sm"
+                  />
+                </Field>
+                <Field label="Telefon" required error={editFieldErrors.customerPhone}>
+                  <PhoneInput
+                    id="nasiya-edit-phone"
+                    value={editCustomerPhone}
+                    onChange={setEditCustomerPhone}
+                    className="h-9 rounded-lg border-zinc-200 text-sm"
+                  />
+                </Field>
+              </div>
+            </section>
+
+            <section aria-labelledby="nasiya-edit-note-title" className="space-y-3 border-t border-zinc-100 pt-4">
               <div>
-                <label htmlFor="nasiya-edit-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">Telefon</label>
-                <PhoneInput
-                  id="nasiya-edit-phone"
-                  value={editCustomerPhone}
-                  onChange={setEditCustomerPhone}
-                  className="h-9 rounded-lg border-zinc-200 text-sm"
-                />
+                <h3 id="nasiya-edit-note-title" className="text-sm font-semibold text-zinc-900">Ishchi ma'lumotlar</h3>
+                <p className="mt-0.5 text-xs text-zinc-500">Izoh majburiy emas; kerak bo'lsa ichki eslatma yozing.</p>
               </div>
-            </div>
-            <Textarea
-              aria-label="Nasiya izohi"
-              value={editNote}
-              onChange={(e) => setEditNote(e.target.value)}
-              placeholder="Nasiya bo'yicha izoh..."
-              className="min-h-[100px] rounded-lg border-zinc-200 text-sm"
-            />
-            {nasiya?.isImported && (
-              <Textarea
-                aria-label="Import izohi"
-                value={editImportNote}
-                onChange={(e) => setEditImportNote(e.target.value)}
-                placeholder="Import izohi..."
-                className="min-h-[80px] rounded-lg border-zinc-200 text-sm"
-              />
-            )}
-            <label htmlFor="edit-nasiya-reminder" className="flex items-start gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
-              <input
-                id="edit-nasiya-reminder"
-                type="checkbox"
-                checked={editReminderEnabled}
-                onChange={(e) => setEditReminderEnabled(e.target.checked)}
-                className="mt-0.5 h-4 w-4 rounded border-zinc-300"
-              />
-              <span>Eslatma yoqilgan</span>
-            </label>
+              <Field label="Ichki izoh" help="Ixtiyoriy">
+                <Textarea
+                  id="nasiya-edit-note"
+                  value={editNote}
+                  onChange={(event) => setEditNote(event.target.value)}
+                  placeholder="Masalan: mijoz bilan kelishilgan qo'shimcha ma'lumot"
+                  className="min-h-24 rounded-lg border-zinc-200 text-sm"
+                />
+              </Field>
+              {nasiya.isImported && (
+                <Field label="Import izohi" help="Ixtiyoriy">
+                  <Textarea
+                    id="nasiya-edit-import-note"
+                    value={editImportNote}
+                    onChange={(event) => setEditImportNote(event.target.value)}
+                    placeholder="Import manbasi yoki eski kelishuv haqida eslatma"
+                    className="min-h-20 rounded-lg border-zinc-200 text-sm"
+                  />
+                </Field>
+              )}
+              <fieldset className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
+                <legend className="px-1 text-xs font-medium text-zinc-700">Eslatma sozlamasi</legend>
+                <label htmlFor="edit-nasiya-reminder" className="flex cursor-pointer items-start gap-2 text-sm text-zinc-700">
+                  <input
+                    id="edit-nasiya-reminder"
+                    type="checkbox"
+                    checked={editReminderEnabled}
+                    onChange={(event) => setEditReminderEnabled(event.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-zinc-300"
+                  />
+                  <span>
+                    <span className="block font-medium">To'lov eslatmasi yoqilgan</span>
+                    <span className="mt-0.5 block text-xs text-zinc-500">Yoqilganda, faol nasiya uchun belgilangan eslatmalar yuboriladi.</span>
+                  </span>
+                </label>
+              </fieldset>
+            </section>
+
+            <section aria-labelledby="nasiya-edit-contract-title" className="space-y-3 border-t border-zinc-100 pt-4">
+              <div>
+                <h3 id="nasiya-edit-contract-title" className="text-sm font-semibold text-zinc-900">Shartnoma va moliyaviy ma'lumotlar</h3>
+                <p className="mt-0.5 text-xs text-zinc-500">Faqat ko'rish uchun. To'lov tarixi saqlanishi uchun summa, foiz va jadval bu oynada tahrirlanmaydi.</p>
+              </div>
+              <dl className="grid grid-cols-2 gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm sm:grid-cols-3">
+                {[
+                  { label: 'Sotilish narxi', value: dfmt(nasiya.contractTotalAmount) },
+                  { label: 'Nasiya jami', value: dfmt(nasiya.contractFinalAmount) },
+                  { label: "To'langan", value: dfmt(nasiya.contractPaidAmount) },
+                  { label: 'Qarz qoldig\'i', value: dfmt(nasiya.contractRemainingAmount) },
+                  { label: "Oylik to'lov", value: dfmt(contractMonthlyPayment) },
+                  { label: 'Valyuta', value: nasiya.contractCurrency },
+                ].map((item) => (
+                  <div key={item.label} className="min-w-0">
+                    <dt className="text-xs text-zinc-500">{item.label}</dt>
+                    <dd className="mt-0.5 truncate font-medium text-zinc-900">{item.value}</dd>
+                  </div>
+                ))}
+              </dl>
+              <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Moliyaviy xatoni tuzatish uchun alohida, tasdiqlangan moliyaviy tuzatish amali kerak. Bu oynada tarixni o'zgartirish mumkin emas.
+              </p>
+            </section>
           </div>
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setEditOpen(false)} className="rounded-lg border-zinc-200 text-zinc-700">
+            <Button
+              variant="outline"
+              onClick={() => {
+                setEditOpen(false)
+                setEditError('')
+                setEditFieldErrors({})
+              }}
+              className="rounded-lg border-zinc-200 text-zinc-700"
+            >
               Bekor qilish
             </Button>
             <Button

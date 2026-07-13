@@ -5,6 +5,7 @@ import { Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { displayImei } from '@/lib/device-display'
+import { useShopAccess } from '@/components/shop/shop-access-context'
 
 const PAGE_SIZE = 25
 const SEARCH_DEBOUNCE_MS = 250
@@ -16,7 +17,8 @@ export interface InStockPickerDevice {
   storage: string | null
   storageDisplay: string | null
   batteryHealth: number | null
-  purchasePrice: number
+  /** Present only for a shop owner; omitted by the server for staff. */
+  purchasePrice?: number
   imei: string
   secondaryImei: string | null
   conditionLabel: string
@@ -57,10 +59,16 @@ function deviceMeta(device: InStockPickerDevice) {
 }
 
 function normalizeDevice(device: InStockPickerDevice): InStockPickerDevice {
-  return { ...device, purchasePrice: Number(device.purchasePrice) }
+  const { purchasePrice, ...safeDevice } = device
+  return {
+    ...safeDevice,
+    ...(purchasePrice != null ? { purchasePrice: Number(purchasePrice) } : {}),
+  }
 }
 
 export function InStockDevicePicker({ selectedDevice, onSelect, onDeepLinkSelect, formatPrice }: Props) {
+  const { memberKind } = useShopAccess()
+  const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [devices, setDevices] = useState<InStockPickerDevice[]>([])
@@ -246,7 +254,9 @@ export function InStockDevicePicker({ selectedDevice, onSelect, onDeepLinkSelect
                           Tanlandi
                         </span>
                       )}
-                      <div className="text-sm font-bold text-zinc-900">{formatPrice(device.purchasePrice)}</div>
+                      {canSeeOwnerFinancials && device.purchasePrice != null && (
+                        <div className="text-sm font-bold text-zinc-900">{formatPrice(device.purchasePrice)}</div>
+                      )}
                     </div>
                   </div>
                 </button>

@@ -76,15 +76,18 @@ describe('qurilmalar client: mobile card view alongside the desktop table', () =
   it('desktop table is hidden below sm:, shown from sm: up', () => {
     expect(client).toContain('hidden sm:block border border-zinc-200 rounded overflow-x-auto')
     expect(client).toContain('const DeviceTableRow = memo(')
-    expect(client).toContain('<DeviceTableRow key={device.id} device={device} currency={currency} />')
+    expect(client).toContain('<DeviceTableRow key={device.id} device={device} currency={currency} showOwnerFinancials={showOwnerFinancials} />')
   })
 
-  it('a separate card list is shown only below sm:, with a directly-visible Ko\'rish link (not an overflow menu)', () => {
+  it('a separate card list is shown only below sm:, with the complete card as a real detail link', () => {
     expect(client).toContain('sm:hidden space-y-3')
-    expect(client).toContain('<DeviceMobileCard key={device.id} device={device} currency={currency} />')
+    expect(client).toContain('<DeviceMobileCard key={device.id} device={device} currency={currency} showOwnerFinancials={showOwnerFinancials} />')
     const mobileCardStart = client.indexOf('const DeviceMobileCard')
     const mobileCard = client.slice(mobileCardStart, mobileCardStart + 4000)
-    expect(mobileCard).toContain("Ko&apos;rish")
+    expect(mobileCard).toContain('<IntentPrefetchLink')
+    expect(mobileCard).toContain('href={`/shop/qurilmalar/${d.id}`}')
+    expect(mobileCard).toContain("aria-label={`${d.model} qurilmasi ma'lumotlarini ochish`}")
+    expect(mobileCard).not.toContain("Ko&apos;rish")
     expect(mobileCard).toContain('displayImei(d.primaryImei)')
     expect(mobileCard).toContain('displayImei(d.secondaryImei)')
     expect(client).toContain('const DeviceMobileCard = memo(')

@@ -6,13 +6,21 @@ export interface DeviceListSaleInfo {
   saleType: 'CASH' | 'NASIYA'
   soldPrice: number
   interestAmount: number
-  profit: number | null
+  /**
+   * Owner-only margin. This property is deliberately omitted (rather than
+   * zeroed) from every SHOP_STAFF response so a cached device DTO cannot
+   * reveal inventory cost or margin after a role change.
+   */
+  profit?: number | null
   contractCurrency: CurrencyCode
   contractSoldPrice: number
   contractRemainingAmount: number | null
-  contractProfit: number | null
+  /** Owner-only native-currency margin; omitted for SHOP_STAFF. */
+  contractProfit?: number | null
   customerName: string | null
   soldAt: string
+  /** Current Qarz deadline; null for fully paid or Nasiya device sales. */
+  dueDate: string | null
   returned: boolean
   refundAmount: number | null
 }
@@ -28,7 +36,8 @@ export interface DeviceListItem {
   conditionCode: 'NEW' | 'USED' | null
   conditionLabel: 'Yangi' | 'B/U' | 'Belgilanmagan'
   batteryHealth: number | null
-  purchasePrice: number
+  /** Owner-only inventory cost; omitted from SHOP_STAFF DTOs. */
+  purchasePrice?: number
   imei: string
   primaryImei: string
   secondaryImei: string | null

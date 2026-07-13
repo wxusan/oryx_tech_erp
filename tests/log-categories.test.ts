@@ -7,7 +7,7 @@ describe('log categories', () => {
     expect(logCategoryFor('SELL', 'Device')).toBe('sale')
     expect(logCategoryFor('PAYMENT', 'Sale')).toBe('payment')
     expect(logCategoryFor('RETURN', 'Device')).toBe('return')
-    expect(logCategoryFor('RESTOCK', 'Device')).toBe('restock')
+    expect(logCategoryFor('RESTOCK', 'Device')).toBe('device')
     expect(logCategoryFor('CREATE', 'Device')).toBe('device')
     expect(logCategoryFor('UPDATE_TELEGRAM_ID', 'ShopAdmin')).toBe('telegram')
   })
@@ -16,6 +16,7 @@ describe('log categories', () => {
     expect(isLogCategory('nasiya')).toBe(true)
     expect(isLogCategory('nasiya_payment')).toBe(true)
     expect(isLogCategory('sale')).toBe(true)
+    expect(isLogCategory('restock')).toBe(false)
     expect(isLogCategory('bad-value')).toBe(false)
     expect(logCategoryLabel('payment')).toBe("Sotuv to'lovlari")
     expect(logCategoryLabel('nasiya_payment')).toBe("Nasiya to'lovlari")
@@ -86,5 +87,9 @@ describe('item 11: nasiya vs nasiya-payment log separation', () => {
       expect(values.has(option.value)).toBe(false)
       values.add(option.value)
     }
+  })
+
+  it('does not expose the legacy restock audit category in shop-facing filters', () => {
+    expect(logCategoryOptions.some((option) => option.label === 'Qayta sotuv')).toBe(false)
   })
 })

@@ -11,7 +11,7 @@ import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireShopPermission } from '@/lib/api-auth'
-import { ok, badRequest, conflict, notFound, serverError } from '@/lib/api-helpers'
+import { ok, badRequest, conflict, forbidden, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { Prisma } from '@/generated/prisma/client'
@@ -28,6 +28,15 @@ import {
 } from '@/lib/server/private-upload-reference'
 
 type RouteContext = { params: Promise<{ id: string }> }
+
+const STAFF_HIDDEN_DEVICE_DETAIL_FIELDS = [
+  'purchasePrice',
+  'purchaseCurrency',
+  'purchaseInputAmount',
+  'purchaseExchangeRateAtCreation',
+  'purchaseAmountUzsSnapshot',
+  'returns',
+] as const
 
 // ---------------------------------------------------------------------------
 // Validation schemas
@@ -68,6 +77,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     const guarded = await requireShopPermission('INVENTORY_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
+    const includeOwnerFinancials =
+      session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
 
     const { id: deviceId } = await ctx.params
 
@@ -98,8 +109,13 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       if (!pickerDevice) return notFound("Qurilma topilmadi")
       return ok(
         {
-          ...pickerDevice,
-          purchasePrice: Number(pickerDevice.purchasePrice),
+          ...(() => {
+            const { purchasePrice, ...safeDevice } = pickerDevice
+            return {
+              ...safeDevice,
+              ...(includeOwnerFinancials ? { purchasePrice: Number(purchasePrice) } : {}),
+            }
+          })(),
           storageDisplay: formatDeviceStorage(pickerDevice) || null,
           secondaryImei: pickerDevice.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
           conditionLabel: deviceConditionLabel(pickerDevice.conditionCode),
@@ -245,7 +261,19 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       return []
     })
 
-    return ok({ ...device, imageUrls }, "Qurilma ma'lumotlari")
+    // A worker may need the device, sale, and payment information required to
+    // complete an authorized operation. The inventory cost basis, margin
+    // inputs, and return-accounting ledger are owner-only and must not enter
+    // the browser response (or its query/navigation caches).
+    const deviceForViewer = includeOwnerFinancials
+      ? device
+      : (() => {
+          const staffSafeDevice: Record<string, unknown> = { ...device }
+          for (const field of STAFF_HIDDEN_DEVICE_DETAIL_FIELDS) delete staffSafeDevice[field]
+          return staffSafeDevice
+        })()
+
+    return ok({ ...deviceForViewer, imageUrls }, "Qurilma ma'lumotlari")
   } catch (err) {
     logger.error('[GET /api/devices/[id]]', { event: 'api.route_error', error: err })
     return serverError()
@@ -261,6 +289,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const guarded = await requireShopPermission('INVENTORY_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
+    const includeOwnerFinancials =
+      session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
 
     const { id: deviceId } = await ctx.params
     const body: unknown = await req.json()
@@ -298,6 +328,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     }
 
     const { reason, inputCurrency, secondaryImei: secondaryImeiInput, ...updateData } = parsed.data
+    if (!includeOwnerFinancials && updateData.purchasePrice !== undefined) {
+      return forbidden("Kelish narxini faqat do'kon egasi o'zgartira oladi")
+    }
     if (resolvedImageUrls) updateData.imageUrls = resolvedImageUrls as string[]
     const identityChanged = updateData.imei !== undefined || secondaryImeiInput !== undefined
     const imeiUpdate = resolveImeiPairUpdate(
@@ -314,11 +347,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       (updateData as typeof updateData & { storage?: string }).storage = formatDeviceStorage(updateData)
     }
     if (updateData.conditionCode) (updateData as typeof updateData & { condition?: string }).condition = updateData.conditionCode === 'NEW' ? 'Yangi' : 'B/U'
-    const hasDeviceChanges = identityChanged || Object.entries(updateData).some(([key, value]) => {
-      if (value === undefined) return false
-      return String(existing[key as keyof typeof existing] ?? '') !== String(value)
-    })
-
     const [saleCount, nasiyaCount] = await prisma.$transaction([
       prisma.sale.count({ where: { deviceId, deletedAt: null } }),
       prisma.nasiya.count({ where: { deviceId, deletedAt: null } }),
@@ -359,17 +387,6 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const auditNote = reason?.trim() || updateData.note?.trim()
     const { imageUrls: _privateImageKeys, ...auditedUpdateData } = updateData
     void _privateImageKeys
-    if (hasDeviceChanges && isFinanciallyLinked) {
-      if (!auditNote) {
-        return badRequest(
-          "Sotilgan yoki nasiya qurilma ma'lumotlarini o'zgartirish uchun izoh yoki sabab kiritilishi shart",
-        )
-      }
-      if (auditNote.length < 5) {
-        return badRequest("Qurilma ma'lumotlarini o'zgartirish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
-      }
-    }
-
     const device = await prisma.$transaction(async (tx) => {
       const guardedUpdate = await tx.device.updateMany({
         where: {
@@ -436,9 +453,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
             ...auditedUpdateData,
             ...(parsed.data.imageUrls !== undefined ? { imageCount: parsed.data.imageUrls.length } : {}),
             ...(purchaseMeta ? moneyInputMeta(purchaseMeta) : {}),
-            ...(auditNote && isFinanciallyLinked ? { editReason: auditNote } : {}),
+            ...(auditNote ? { editNote: auditNote } : {}),
           },
-          note: auditNote && isFinanciallyLinked ? auditNote : undefined,
+          note: auditNote,
         },
       })
 
@@ -448,7 +465,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     invalidateShopDeviceMutation(existing.shopId)
 
     const [item, changeCursor] = await Promise.all([
-      getShopDeviceListItemsByIds(existing.shopId, [device.id]).then((items) => items[0]),
+      getShopDeviceListItemsByIds(existing.shopId, [device.id], { includeOwnerFinancials }).then((items) => items[0]),
       latestChangeCursorForShop(existing.shopId),
     ])
     if (!item) throw new Error('UPDATED_DEVICE_DTO_NOT_FOUND')
