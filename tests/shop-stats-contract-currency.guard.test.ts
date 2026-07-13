@@ -79,6 +79,8 @@ describe('shop-stats-formulas.ts consumes native partitions without mixing curre
     const block = source.slice(idx, idx + 1_200)
     expect(block).toContain("payment.nasiya.contractCurrency === 'USD'")
     expect(block).toContain("convertContractAmountToUzs(Number(amount), 'USD', usdUzsRate) ?? 0")
+    expect(block).toContain('contractExpectedAmount: Number(payment.contractExpectedAmount)')
+    expect(block).toContain('contractPaidAmount: Number(payment.contractPaidAmount)')
     expect(block).toContain('expectedAmount: toUzs(payment.contractExpectedAmount)')
     expect(block).toContain('paidAmount: toUzs(payment.contractPaidAmount)')
   })

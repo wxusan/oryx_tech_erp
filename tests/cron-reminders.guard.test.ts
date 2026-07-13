@@ -35,7 +35,8 @@ describe('cron overdue-reminder guard (req 12)', () => {
     const selection = src.slice(src.indexOf("'NASIYA_OVERDUE'"), src.indexOf("'NASIYA_EARLY'"))
     expect(selection).not.toContain('reminderEnabled: true')
     expect(selection).toContain("status: { in: ['ACTIVE', 'OVERDUE'] }")
-    expect(src).toContain('if (schedule.nasiya.reminderEnabled)')
+    expect(src).toContain('schedule.nasiya.reminderEnabled && reminderEnabledShopIds.has(schedule.nasiya.shopId)')
+    expect(src).toContain("activeShopIdsForFeature('REMINDERS')")
   })
 
   it('respects disabled sale reminders for both due-today and overdue sales', () => {

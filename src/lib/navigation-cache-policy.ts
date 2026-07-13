@@ -14,6 +14,7 @@ export const navigationDomains = [
   'overdue',
   'olibSotdim',
   'settings',
+  'access',
   'adminShops',
   'adminPayments',
   'adminReports',
@@ -36,6 +37,10 @@ export type NavigationMutationKind =
   | 'nasiya.updated'
   | 'nasiya.reminderUpdated'
   | 'nasiya.paymentRecorded'
+  | 'nasiya.deferred'
+  | 'nasiya.archived'
+  | 'nasiya.writtenOff'
+  | 'nasiya.reopened'
   | 'return.created'
   | 'olibSotdim.created'
   | 'olibSotdim.paymentRecorded'
@@ -50,6 +55,9 @@ export type NavigationMutationKind =
   | 'admin.shopDeleted'
   | 'admin.shopPaymentRecorded'
   | 'admin.shopAdminsUpdated'
+  | 'admin.shopPackageUpdated'
+  | 'admin.shopOwnerUpdated'
+  | 'shop.staffUpdated'
 
 export interface NavigationMutation {
   kind: NavigationMutationKind
@@ -126,6 +134,14 @@ export function navigationImpactForMutation(mutation: NavigationMutation): Navig
         ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
         ['/shop/qurilmalar', '/shop/nasiyalar', deviceDetail, nasiyaDetail, '/shop/mijozlar', ...SHOP_FINANCIAL_PATHS],
       )
+    case 'nasiya.deferred':
+    case 'nasiya.archived':
+    case 'nasiya.writtenOff':
+    case 'nasiya.reopened':
+      return shopImpact(
+        ['nasiyas', 'customers', 'reports', 'logs', 'overdue'],
+        ['/shop/nasiyalar', nasiyaDetail, '/shop/mijozlar', ...SHOP_FINANCIAL_PATHS],
+      )
     case 'nasiya.reminderUpdated':
       return shopImpact(
         ['nasiyas', 'logs', 'overdue'],
@@ -133,10 +149,14 @@ export function navigationImpactForMutation(mutation: NavigationMutation): Navig
       )
     case 'return.created':
       return shopImpact(
-        ['devices', 'sales', 'nasiyas', 'returns', 'reports', 'logs', 'overdue'],
-        [...SHOP_INVENTORY_PATHS, '/shop/nasiyalar', deviceDetail, nasiyaDetail, ...SHOP_FINANCIAL_PATHS],
+        ['devices', 'sales', 'nasiyas', 'returns', 'customers', 'reports', 'logs', 'overdue'],
+        [...SHOP_INVENTORY_PATHS, '/shop/nasiyalar', '/shop/mijozlar', deviceDetail, nasiyaDetail, ...SHOP_FINANCIAL_PATHS],
       )
     case 'olibSotdim.created':
+      return shopImpact(
+        ['olibSotdim', 'devices', 'sales', 'payments', 'customers', 'reports', 'logs'],
+        ['/shop/olib-sotdim', '/shop/qurilmalar', '/shop/mijozlar', deviceDetail, ...SHOP_FINANCIAL_PATHS],
+      )
     case 'olibSotdim.paymentRecorded':
       return shopImpact(
         ['olibSotdim', 'devices', 'sales', 'payments', 'reports', 'logs'],
@@ -166,9 +186,16 @@ export function navigationImpactForMutation(mutation: NavigationMutation): Navig
     case 'admin.shopDeleted':
     case 'admin.shopPaymentRecorded':
     case 'admin.shopAdminsUpdated':
+    case 'admin.shopPackageUpdated':
+    case 'admin.shopOwnerUpdated':
       return shopImpact(
-        ['adminShops', 'adminPayments', 'adminReports', 'adminLogs', 'adminOps'],
+        ['adminShops', 'adminPayments', 'adminReports', 'adminLogs', 'adminOps', 'access'],
         [...ADMIN_CORE_PATHS, adminShopDetail],
+      )
+    case 'shop.staffUpdated':
+      return shopImpact(
+        ['access', 'settings', 'logs'],
+        ['/shop/xodimlar', '/shop/settings', '/shop/logs'],
       )
   }
 }
@@ -182,7 +209,11 @@ export function navigationScopeForSession(user: {
   role: string
   shopId?: string | null
   sessionVersion?: number | null
+  memberKind?: 'SHOP_OWNER' | 'SHOP_STAFF' | null
+  authorizationVersion?: number | null
+  permissionVersion?: number | null
 }) {
   const tenant = user.role === 'SHOP_ADMIN' ? user.shopId : user.id
-  return `${user.role}:${tenant ?? 'missing'}:${user.sessionVersion ?? 0}`
+  const memberKind = user.role === 'SUPER_ADMIN' ? 'SUPER_ADMIN' : (user.memberKind ?? 'SHOP_STAFF')
+  return `${user.role}:${tenant ?? 'missing'}:${user.sessionVersion ?? 0}:${memberKind}:${user.authorizationVersion ?? 0}:${user.permissionVersion ?? 0}`
 }

@@ -3,6 +3,7 @@ import {
   addDeviceSchema,
   addSalePaymentSchema,
   addNasiyaPaymentSchema,
+  deferNasiyaScheduleSchema,
   createShopSchema,
   importNasiyaSchema,
 } from '@/lib/validations'
@@ -11,6 +12,7 @@ describe('validation hardening', () => {
   it('rejects arbitrary external device image URLs for new devices', () => {
     const base = {
       model: 'iPhone 15',
+      color: 'Qora',
       purchasePrice: 10_000_000,
       imei: '123456789012345',
       storageAmount: 256,
@@ -20,11 +22,21 @@ describe('validation hardening', () => {
 
     expect(addDeviceSchema.safeParse({ ...base, imageUrls: ['https://example.com/device.jpg'] }).success).toBe(false)
     expect(addDeviceSchema.safeParse({ ...base, imageUrls: ['shops/shop_1/devices/file.webp'] }).success).toBe(true)
+    expect(addDeviceSchema.safeParse({ ...base, imageUrls: ['v1.a-b.c_d.e-f'] }).success).toBe(true)
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      imageUrls: ['/api/uploads/device?reference=v1.a-b.c_d.e-f'],
+    }).success).toBe(true)
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      imageUrls: ['https://example.com/api/uploads/device?reference=v1.a-b.c_d.e-f'],
+    }).success).toBe(false)
   })
 
   it('does not trust a conflicting client-composed storage label', () => {
     const parsed = addDeviceSchema.parse({
       model: 'iPhone 15',
+      color: 'Qora',
       purchasePrice: 10_000_000,
       imei: '123456789012345',
       storage: '1TBTB',
@@ -58,18 +70,15 @@ describe('validation hardening', () => {
     expect(addSalePaymentSchema.safeParse({ amount: 0, paymentMethod: 'CASH' }).success).toBe(false)
     expect(addSalePaymentSchema.safeParse({ amount: 1000, paymentMethod: 'CASH' }).success).toBe(true)
 
-    // Nasiya payments: negative is always rejected; zero is only valid when
-    // deferring to next month (no money changes hands), never as a real payment.
+    // Nasiya payments are money-only. Deferral is a separate command schema.
     const base = { nasiyaScheduleId: 'sched_1', date: '2026-08-01' }
     expect(addNasiyaPaymentSchema.safeParse({ ...base, amount: -1000, paymentMethod: 'CASH' }).success).toBe(false)
     expect(addNasiyaPaymentSchema.safeParse({ ...base, amount: 0, paymentMethod: 'CASH' }).success).toBe(false)
     expect(
-      addNasiyaPaymentSchema.safeParse({
-        ...base,
-        amount: 0,
-        deferredToNext: true,
-        delayedUntil: '2026-09-01',
-        note: 'mijoz so\'radi',
+      deferNasiyaScheduleSchema.safeParse({
+        nasiyaScheduleId: 'sched_1',
+        newDueDate: '2026-09-01',
+        reason: 'mijoz so\'radi',
       }).success,
     ).toBe(true)
     expect(addNasiyaPaymentSchema.safeParse({ ...base, amount: 1000, paymentMethod: 'CASH' }).success).toBe(true)

@@ -23,6 +23,8 @@ import { ArrowLeft, Check } from 'lucide-react'
 import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
 import { navigateAfterMutation } from '@/lib/client-events'
 import type { PaymentMethod } from '@/lib/domain-types'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
+import { CustomerCombobox, type CustomerPickerOption } from '@/components/shop/customer-combobox'
 
 type Device = InStockPickerDevice
 
@@ -44,6 +46,12 @@ function deviceMeta(device: Device) {
 }
 
 export default function NewSotuvPage() {
+  const { can } = useShopAccess()
+  if (!can('CASH_SALE_CREATE')) return <ShopAccessDenied />
+  return <AuthorizedNewSotuvPage />
+}
+
+function AuthorizedNewSotuvPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
   const [step, setStep] = useState<1 | 2>(1)
@@ -52,6 +60,8 @@ export default function NewSotuvPage() {
   // Step 2 form
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
+  const [customerMode, setCustomerMode] = useState<'PICK' | 'EXISTING' | 'NEW'>('PICK')
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerPickerOption | null>(null)
   const [phoneError, setPhoneError] = useState('')
   const phoneRef = useRef<HTMLInputElement>(null)
   // null = untouched (show the device's price as a live currency-aware
@@ -95,8 +105,7 @@ export default function NewSotuvPage() {
 
   const canSubmit =
     !!selectedDevice &&
-    customerName.trim() &&
-    customerPhone.trim() &&
+    (customerMode === 'EXISTING' ? Boolean(selectedCustomer) : customerMode === 'NEW' && customerName.trim() && customerPhone.trim()) &&
     salePrice.trim() &&
     payMethod &&
     fullyPaid !== null &&
@@ -108,7 +117,7 @@ export default function NewSotuvPage() {
     if (!canSubmit || !selectedDevice || submitting) return
     // Phone format is checked here (not only server-side) so the error lands
     // under the field instead of as a late toast.
-    if (!isValidPhone(customerPhone)) {
+    if (customerMode === 'NEW' && !isValidPhone(customerPhone)) {
       setPhoneError(PHONE_ERROR)
       phoneRef.current?.focus()
       return
@@ -126,8 +135,10 @@ export default function NewSotuvPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deviceId: selectedDevice.id,
-          customerName: customerName.trim(),
-          customerPhone: customerPhone.trim(),
+          customerMode: customerMode === 'EXISTING' ? 'EXISTING' : 'NEW',
+          customerId: selectedCustomer?.id,
+          customerName: customerMode === 'NEW' ? customerName.trim() : undefined,
+          customerPhone: customerMode === 'NEW' ? customerPhone.trim() : undefined,
           salePrice: Number(salePrice),
           inputCurrency: currency.currency,
           paymentMethod: payMethod,
@@ -257,7 +268,37 @@ export default function NewSotuvPage() {
             <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
               <span className="text-sm font-semibold text-zinc-900">Mijoz ma&apos;lumotlari</span>
             </div>
-            <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="p-4 space-y-4">
+              <div>
+                <label htmlFor="sale-customer-picker" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                  Mavjud mijozni tanlang yoki yangisini yarating <span aria-hidden="true" className="text-red-500">*</span>
+                </label>
+                <CustomerCombobox
+                  inputId="sale-customer-picker"
+                  selected={selectedCustomer}
+                  onSelect={(customer) => {
+                    setSelectedCustomer(customer)
+                    setCustomerMode('EXISTING')
+                    setCustomerName(customer.name)
+                    setCustomerPhone(customer.phone)
+                    setPhoneError('')
+                  }}
+                  onClear={() => {
+                    setSelectedCustomer(null)
+                    setCustomerMode('PICK')
+                    setCustomerName('')
+                    setCustomerPhone('')
+                  }}
+                  onCreateNew={(searchText) => {
+                    setSelectedCustomer(null)
+                    setCustomerMode('NEW')
+                    if (/\d/.test(searchText)) setCustomerPhone(searchText)
+                    else setCustomerName(searchText)
+                  }}
+                  disabled={submitting}
+                />
+              </div>
+              {customerMode === 'NEW' && <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="sale-customer-name" className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Mijoz ismi <span className="text-red-500">*</span>
@@ -290,6 +331,8 @@ export default function NewSotuvPage() {
                 />
                 {phoneError && <p id="sale-customer-phone-error" role="alert" className="mt-1 text-xs text-red-600">{phoneError}</p>}
               </div>
+              </div>}
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div>
                 <label htmlFor="sale-price" className="block text-xs font-medium text-zinc-700 mb-1.5">
                   Sotuv narxi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
@@ -319,6 +362,7 @@ export default function NewSotuvPage() {
                     <SelectItem value="OTHER">Boshqa</SelectItem>
                   </SelectContent>
                 </Select>
+              </div>
               </div>
             </div>
           </div>

@@ -76,7 +76,7 @@ export interface NasiyaPaymentModalProps {
   nasiyaId: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  /** Called after a successful payment/defer so the caller can revalidate. */
+  /** Called after a successful payment so the caller can revalidate. */
   onSuccess: () => void
   /** Optional context shown instantly while schedules load. */
   customerName?: string
@@ -102,7 +102,6 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   const [payAmount, setPayAmount] = useState('')
   const [payMethod, setPayMethod] = useState('')
   const [payDate, setPayDate] = useState('')
-  const [carryOver, setCarryOver] = useState(false)
   const [payNote, setPayNote] = useState('')
   // Split payment (e.g. half cash, half card). `payMethod` above doubles as
   // the FIRST part's method; `splitMethod2` is the second part's method.
@@ -142,7 +141,6 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
       setPayAmount('')
       setPayMethod('')
       setPayDate(tashkentTodayInputValue())
-      setCarryOver(false)
       setPayNote('')
       setSplitPayment(false)
       setSplitMethod2('')
@@ -236,12 +234,12 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   // so the overpayment explanation and the "exceeds remaining debt" guard work
   // the same regardless of the shop's selected display currency.
   const payAmountUzs =
-    !carryOver && hasEffectiveAmount
+    hasEffectiveAmount
       ? currency.currency === 'USD' && currency.usdUzsRate
         ? convertUsdToUzs(effectiveAmountNumber, currency.usdUzsRate)
         : effectiveAmountNumber
       : 0
-  const exceedsRemaining = !carryOver && payAmountUzs > nasiyaRemainingAmount
+  const exceedsRemaining = payAmountUzs > nasiyaRemainingAmount
 
   // Purely informational preview of what would be applied to THIS deal's own
   // (frozen) contract currency, shown only when it differs from what's being
@@ -252,29 +250,24 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   // fetched when its display currency is USD). See
   // docs/currency-accounting-model.md.
   const contractPreviewAmount =
-    !carryOver && hasEffectiveAmount && contractCurrency !== currency.currency && currency.usdUzsRate
+    hasEffectiveAmount && contractCurrency !== currency.currency && currency.usdUzsRate
       ? convertPaymentToContractCurrency(effectiveAmountNumber, currency.currency, contractCurrency, currency.usdUzsRate)
       : null
 
   // Contract-currency view of the same typed amount, used for the overpay
   // explanation below — same-currency case needs no rate at all.
   const payAmountContract =
-    !carryOver && hasEffectiveAmount ? (contractCurrency === currency.currency ? effectiveAmountNumber : (contractPreviewAmount ?? 0)) : 0
+    hasEffectiveAmount ? (contractCurrency === currency.currency ? effectiveAmountNumber : (contractPreviewAmount ?? 0)) : 0
   const rawOverpayExtraContract = Math.max(0, payAmountContract - selectedScheduleContractOutstanding)
   const overpayExtraContract = isContractCurrencyDust(rawOverpayExtraContract, contractCurrency)
     ? 0
     : roundContractMoney(rawOverpayExtraContract, contractCurrency)
 
-  // "Izoh" is optional for a regular payment — only the carry-over/defer flow
-  // ("Mijoz bu oy to'lamadi, muddatni uzaytirish") still requires a reason,
-  // since that's a debt-schedule change, not a routine payment note.
-  const canSubmit = carryOver
-    ? Boolean(payDate.trim() && selectedScheduleId && payNote.trim().length >= 5)
-    : Boolean(hasEffectiveAmount && payMethod && payDate.trim() && selectedScheduleId && !exceedsRemaining && splitValid)
+  const canSubmit = Boolean(hasEffectiveAmount && payMethod && payDate.trim() && selectedScheduleId && !exceedsRemaining && splitValid)
 
   async function handleSubmit() {
     if (!canSubmit || submitting) return
-    if (!carryOver && currency.currency === 'USD' && !currency.usdUzsRate) {
+    if (currency.currency === 'USD' && !currency.usdUzsRate) {
       setPayError("USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko'ring.")
       return
     }
@@ -285,19 +278,17 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
         nasiyaScheduleId: selectedScheduleId,
         // Split mode: the submitted total is always the SUM of the two
         // parts (never a total-minus-second-part subtraction).
-        amount: carryOver ? 0 : splitPayment ? splitTotal : Number(payAmount),
+        amount: splitPayment ? splitTotal : Number(payAmount),
         inputCurrency: currency.currency,
-        paymentMethod: carryOver ? undefined : payMethod,
+        paymentMethod: payMethod,
         paymentBreakdown:
-          !carryOver && splitPayment
+          splitPayment
             ? [
                 { method: payMethod, amount: Number(splitAmount1Input) },
                 { method: splitMethod2, amount: Number(splitAmount2Input) },
               ]
             : undefined,
         date: payDate,
-        delayedUntil: carryOver ? payDate : undefined,
-        deferredToNext: carryOver,
         note: payNote || undefined,
       }
       const res = await fetch(`/api/nasiya/${nasiyaId}/payment`, {
@@ -388,24 +379,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                 </div>
               )}
 
-              <label htmlFor="nasiya-carry-over" className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-zinc-200 px-3 py-2.5 hover:bg-zinc-50">
-                <input
-                  id="nasiya-carry-over"
-                  type="checkbox"
-                  checked={carryOver}
-                  onChange={(e) => setCarryOver(e.target.checked)}
-                  className="mt-0.5 h-4 w-4 rounded border-zinc-300"
-                />
-                <span className="text-sm text-zinc-700">
-                  Mijoz bu oy to&apos;lamadi, muddatni uzaytirish
-                  <span className="mt-0.5 block text-xs text-zinc-400">
-                    Belgilansa, to&apos;lov emas — tanlangan oy keyingi sanaga suriladi.
-                  </span>
-                </span>
-              </label>
-
-              {!carryOver && (
-                <label htmlFor="nasiya-split-payment" className="flex items-center gap-2 text-xs font-medium text-zinc-700">
+              <label htmlFor="nasiya-split-payment" className="flex items-center gap-2 text-xs font-medium text-zinc-700">
                   <input
                     id="nasiya-split-payment"
                     type="checkbox"
@@ -423,10 +397,9 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                     className="h-4 w-4 rounded border-zinc-300"
                   />
                   Aralash to&apos;lov (masalan: yarmi naqd, yarmi karta)
-                </label>
-              )}
+              </label>
 
-              {!carryOver && !splitPayment && (
+              {!splitPayment && (
                 <div className="space-y-2">
                   <label htmlFor="nasiya-payment-amount" className="block text-xs font-medium text-zinc-700">
                     Miqdor ({currencyLabel(currency.currency)}) <span aria-hidden="true" className="text-red-500">*</span>
@@ -486,7 +459,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                   with its own method select + amount input — never a single
                   total field re-purposed as "first part". The total below is
                   ALWAYS the sum of the two parts and is never itself editable. */}
-              {!carryOver && splitPayment && (
+              {splitPayment && (
                 <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
                   <fieldset className="space-y-1.5">
                     <legend className="block text-xs font-medium text-zinc-700">
@@ -639,7 +612,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                 </div>
               )}
 
-              {!carryOver && hasEffectiveAmount && (
+              {hasEffectiveAmount && (
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs text-zinc-500">
                     <span>Jami qolgan qarz</span>
@@ -659,7 +632,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
               )}
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                {!carryOver && !splitPayment && (
+                {!splitPayment && (
                   <div className="space-y-2">
                     <label htmlFor="nasiya-payment-method" className="block text-xs font-medium text-zinc-700">
                       To&apos;lov usuli <span aria-hidden="true" className="text-red-500">*</span>
@@ -678,9 +651,9 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                   </div>
                 )}
                 <Field
-                  label={carryOver ? "Yangi to'lov sanasi" : "To'lov sanasi"}
+                  label="To'lov sanasi"
                   required
-                  className={carryOver || splitPayment ? 'sm:col-span-2' : undefined}
+                  className={splitPayment ? 'sm:col-span-2' : undefined}
                 >
                   <DateInput
                     value={payDate}
@@ -690,11 +663,11 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                 </Field>
               </div>
 
-              <Field label="Izoh" required={carryOver}>
+              <Field label="Izoh">
                 <Textarea
                   value={payNote}
                   onChange={(e) => setPayNote(e.target.value)}
-                  placeholder={carryOver ? "Masalan: mijoz 10 kunga kechiktirishni so'radi" : "Masalan: mijoz oylik to'lovni naqd berdi"}
+                  placeholder="Masalan: mijoz oylik to'lovni naqd berdi"
                   className="min-h-[80px] rounded-lg border-zinc-200 text-sm"
                 />
               </Field>
@@ -718,7 +691,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
             onClick={handleSubmit}
             className="rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
           >
-            {submitting ? 'Saqlanmoqda...' : carryOver ? 'Muddatni uzaytirish' : "To'lovni saqlash"}
+            {submitting ? 'Saqlanmoqda...' : "To'lovni saqlash"}
           </Button>
         </DialogFooter>
       </DialogContent>

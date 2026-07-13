@@ -36,7 +36,8 @@ describe('production release guard', () => {
       "BEGIN TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY",
     )
     expect(preflightScript).toContain('blockingIssueCount')
-    expect(preflightScript).toContain('ambiguous live Telegram ownership')
+    expect(preflightScript).toContain('pending_notifications_without_intended_recipient')
+    expect(preflightScript).toContain('pending_notification_recipient_identity_mismatch')
     expect(preflightScript).toContain("phase === 'post'")
     expect(preflightScript).toContain('appliedMigrations.length !== RELEASE_MIGRATIONS.length')
     expect(preflightScript).not.toContain('SELECT *')

@@ -10,14 +10,18 @@ import { formatUzPhoneDisplay } from '@/lib/phone'
 import type { CurrencyContext } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
+import { NasiyaDeferModal } from '@/components/shop/nasiya-defer-modal'
 import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 import { replaceListUrlState } from '@/lib/list-url-state'
 import type { PaymentScoreColor, PaymentScoreLabel } from '@/lib/nasiya-payment-score'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import type { NasiyaStatus } from '@/lib/domain-types'
+import { useShopAccess } from '@/components/shop/shop-access-context'
 
 type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan' | 'Bekor qilingan'
+type ResolutionState = 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
+type ListFilter = NasiyaStatus | Exclude<ResolutionState, 'ACTIVE'> | 'Barchasi'
 
 interface NasiyaSchedule {
   id: string
@@ -47,6 +51,8 @@ interface Nasiya {
   contractFinalAmount: number
   contractRemainingAmount: number
   status: NasiyaStatus
+  resolutionState: ResolutionState
+  resolutionUpdatedAt: string | null
   isImported: boolean
   createdAt: string
   note: string | null
@@ -80,12 +86,14 @@ const statusMap: Record<NasiyaStatus, DisplayStatus> = {
   CANCELLED: 'Bekor qilingan',
 }
 
-const filterTabs: { label: string; value: NasiyaStatus | 'Barchasi' }[] = [
+const filterTabs: { label: string; value: ListFilter }[] = [
   { label: 'Barchasi', value: 'Barchasi' },
   { label: 'Faol', value: 'ACTIVE' },
   { label: "Muddati o'tgan", value: 'OVERDUE' },
   { label: 'Yakunlangan', value: 'COMPLETED' },
   { label: 'Bekor qilingan', value: 'CANCELLED' },
+  { label: 'Arxivlangan', value: 'ARCHIVED' },
+  { label: 'Hisobdan chiqarilgan', value: 'WRITTEN_OFF' },
 ]
 
 function StatusBadge({ status }: { status: NasiyaStatus }) {
@@ -99,6 +107,18 @@ function StatusBadge({ status }: { status: NasiyaStatus }) {
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${styles[label]}`}>
       {label}
+    </span>
+  )
+}
+
+function ResolutionBadge({ state }: { state: Exclude<ResolutionState, 'ACTIVE'> }) {
+  return (
+    <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
+      state === 'WRITTEN_OFF'
+        ? 'bg-red-100 text-red-800'
+        : 'bg-blue-100 text-blue-800'
+    }`}>
+      {state === 'WRITTEN_OFF' ? 'Hisobdan chiqarilgan' : 'Arxivlangan'}
     </span>
   )
 }
@@ -126,7 +146,7 @@ function PaymentScoreBadge({ score }: { score: PaymentScore }) {
 // single unbounded-in-spirit fetch capped at a fixed ceiling.
 const PER_PAGE = 25
 
-function buildRequestKey(search: string, filter: NasiyaStatus | 'Barchasi', page: number) {
+function buildRequestKey(search: string, filter: ListFilter, page: number) {
   const params = new URLSearchParams()
   if (search.trim()) params.set('search', search.trim())
   // Filtering happens server-side (GET /api/nasiya) on the native
@@ -147,17 +167,24 @@ export default function NasiyalarClient({
 }: {
   initialNasiyalar: Nasiya[]
   initialTotal: number
-  initialFilter?: NasiyaStatus | 'Barchasi'
+  initialFilter?: ListFilter
   initialSearch?: string
   initialPage?: number
   currency: CurrencyContext
 }) {
   const scope = useAuthenticatedQueryScope()
+  const { can } = useShopAccess()
+  const canCreate = can('NASIYA_CREATE')
+  const canImport = can('IMPORT_DATA')
+  const canExport = can('EXPORT_DATA')
+  const canReceivePayment = can('PAYMENT_RECEIVE')
+  const canManageNasiya = can('NASIYA_MANAGE')
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState(initialSearch)
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch)
-  const [activeFilter, setActiveFilter] = useState<NasiyaStatus | 'Barchasi'>(initialFilter)
+  const [activeFilter, setActiveFilter] = useState<ListFilter>(initialFilter)
   const [payFor, setPayFor] = useState<Nasiya | null>(null)
+  const [deferFor, setDeferFor] = useState<Nasiya | null>(null)
   const initialRequestKey = useMemo(
     () => buildRequestKey(initialSearch, initialFilter, initialPage),
     [initialFilter, initialPage, initialSearch],
@@ -216,22 +243,28 @@ export default function NasiyalarClient({
           <p className="text-sm text-zinc-500 mt-0.5">Barcha nasiya shartnomalar</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={() => { window.location.href = '/api/export/nasiya?format=xlsx' }}
-            className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors"
-          >
-            Excel yuklab olish
-          </button>
-          <Link href="/shop/nasiyalar/import">
-            <button className="h-9 px-4 text-sm border border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded transition-colors">
-              + Eski nasiya kiritish
+          {canExport && (
+            <button
+              onClick={() => { window.location.href = '/api/export/nasiya?format=xlsx' }}
+              className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors"
+            >
+              Excel yuklab olish
             </button>
-          </Link>
-          <Link href="/shop/nasiyalar/new">
-            <button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors">
-              + Yangi nasiya
-            </button>
-          </Link>
+          )}
+          {canImport && (
+            <Link href="/shop/nasiyalar/import">
+              <button className="h-9 px-4 text-sm border border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded transition-colors">
+                + Eski nasiya kiritish
+              </button>
+            </Link>
+          )}
+          {canCreate && (
+            <Link href="/shop/nasiyalar/new">
+              <button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded transition-colors">
+                + Yangi nasiya
+              </button>
+            </Link>
+          )}
         </div>
       </div>
 
@@ -282,7 +315,8 @@ export default function NasiyalarClient({
               const dfmt = (amount: number) => formatDisplayMoneyFromContract(amount, n.contractCurrency, currency.currency, currency.usdUzsRate)
               const contractPaidAmount = n.contractFinalAmount - n.contractRemainingAmount
               const isOverdue = n.isOverdue
-              const canPay = (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              const canPay = canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              const canDefer = canManageNasiya && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
               return (
                 <div
                   key={n.id}
@@ -296,6 +330,7 @@ export default function NasiyalarClient({
                         <div className="flex items-center gap-2 mb-1">
                           <span className="font-medium text-sm text-zinc-900">{n.customer.name}</span>
                           <StatusBadge status={n.displayStatus} />
+                          {n.resolutionState !== 'ACTIVE' && <ResolutionBadge state={n.resolutionState} />}
                           <PaymentScoreBadge score={n.paymentScore} />
                           {n.isImported && (
                             <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
@@ -348,6 +383,15 @@ export default function NasiyalarClient({
                           To&apos;lov qabul qilish
                         </button>
                       )}
+                      {canDefer && (
+                        <button
+                          type="button"
+                          onClick={() => setDeferFor(n)}
+                          className="w-full rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 whitespace-nowrap"
+                        >
+                          Muddatni uzaytirish
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -363,7 +407,8 @@ export default function NasiyalarClient({
           <div className="sm:hidden space-y-3">
             {nasiyalar.map((n) => {
               const dfmt = (amount: number) => formatDisplayMoneyFromContract(amount, n.contractCurrency, currency.currency, currency.usdUzsRate)
-              const canPay = (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              const canPay = canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              const canDefer = canManageNasiya && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
               return (
                 <div
                   key={n.id}
@@ -384,6 +429,7 @@ export default function NasiyalarClient({
                         Eski nasiya
                       </span>
                     )}
+                    {n.resolutionState !== 'ACTIVE' && <ResolutionBadge state={n.resolutionState} />}
                     {n.isOverdue && (
                       <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
                         Muddati o&apos;tgan
@@ -408,6 +454,15 @@ export default function NasiyalarClient({
                         className="flex-1 rounded-md bg-zinc-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-zinc-800 whitespace-nowrap"
                       >
                         To&apos;lov qabul qilish
+                      </button>
+                    )}
+                    {canDefer && (
+                      <button
+                        type="button"
+                        onClick={() => setDeferFor(n)}
+                        className="flex-1 rounded-md border border-zinc-200 px-3 py-1.5 text-xs font-medium text-zinc-700 hover:bg-zinc-50 whitespace-nowrap"
+                      >
+                        Uzaytirish
                       </button>
                     )}
                   </div>
@@ -448,14 +503,26 @@ export default function NasiyalarClient({
         </div>
       )}
 
-      <NasiyaPaymentModal
-        nasiyaId={payFor?.id ?? ''}
-        open={payFor !== null}
-        onOpenChange={(o) => { if (!o) setPayFor(null) }}
-        customerName={payFor?.customer.name}
-        deviceName={payFor?.device.model}
-        onSuccess={handlePaymentSuccess}
-      />
+      {canReceivePayment && (
+        <NasiyaPaymentModal
+          nasiyaId={payFor?.id ?? ''}
+          open={payFor !== null}
+          onOpenChange={(o) => { if (!o) setPayFor(null) }}
+          customerName={payFor?.customer.name}
+          deviceName={payFor?.device.model}
+          onSuccess={handlePaymentSuccess}
+        />
+      )}
+      {canManageNasiya && (
+        <NasiyaDeferModal
+          nasiyaId={deferFor?.id ?? ''}
+          open={deferFor !== null}
+          onOpenChange={(open) => { if (!open) setDeferFor(null) }}
+          customerName={deferFor?.customer.name}
+          deviceName={deferFor?.device.model}
+          onSuccess={handlePaymentSuccess}
+        />
+      )}
     </div>
   )
 }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -22,12 +22,14 @@ import { displayImei } from '@/lib/device-display'
 import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { useShopCurrency } from '@/lib/use-shop-currency'
-import { TrustBadge, type TrustBadgeData } from '@/components/shop/trust-badge'
 import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
 import { navigateAfterMutation } from '@/lib/client-events'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import type { PaymentMethod } from '@/lib/domain-types'
 import { NasiyaSchedulePreview } from '@/components/shop/nasiya-schedule-preview'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
+import { CustomerCombobox, type CustomerPickerOption } from '@/components/shop/customer-combobox'
+import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
 
 type Device = InStockPickerDevice
 
@@ -54,6 +56,12 @@ function deviceMeta(device: Device) {
 }
 
 export default function NewNasiyaPage() {
+  const { can } = useShopAccess()
+  if (!can('NASIYA_CREATE')) return <ShopAccessDenied />
+  return <AuthorizedNewNasiyaPage />
+}
+
+function AuthorizedNewNasiyaPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
   const [step, setStep] = useState<1 | 2 | 3>(1)
@@ -62,13 +70,15 @@ export default function NewNasiyaPage() {
   // Step 2
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
-  const [passportFile, setPassportFile] = useState<File | null>(null)
+  const [customerMode, setCustomerMode] = useState<'PICK' | 'EXISTING' | 'NEW'>('PICK')
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerPickerOption | null>(null)
+  const passportSelection = useImageSelection({
+    mode: 'single',
+    uploadEndpoint: '/api/uploads/passport',
+  })
   const [nameError, setNameError] = useState('')
   const [phoneError, setPhoneError] = useState('')
   const phoneRef = useRef<HTMLInputElement>(null)
-  // Item 12 — if the entered phone matches an existing customer, show their
-  // trust badge before the deal is even created.
-  const [existingCustomerTrust, setExistingCustomerTrust] = useState<TrustBadgeData | null>(null)
 
   // Step 3
   // null = untouched (show the device's price as a live currency-aware
@@ -131,46 +141,21 @@ export default function NewNasiyaPage() {
   // re-validates on submit (source of truth).
   function handleContinueToTerms() {
     let ok = true
-    if (customerName.trim().length < 2) {
+    if (customerMode === 'PICK') return
+    if (customerMode === 'NEW' && customerName.trim().length < 2) {
       setNameError("Ism kamida 2 ta harfdan iborat bo'lishi kerak")
       ok = false
     }
-    if (!isValidPhone(customerPhone)) {
+    if (customerMode === 'NEW' && !isValidPhone(customerPhone)) {
       setPhoneError(PHONE_ERROR)
       ok = false
     }
     if (!ok) {
-      if (!isValidPhone(customerPhone)) phoneRef.current?.focus()
+      if (customerMode === 'NEW' && !isValidPhone(customerPhone)) phoneRef.current?.focus()
       return
     }
     setStep(3)
   }
-
-  // Item 12 — debounced existing-customer trust lookup as the phone is
-  // typed in step 2. A brand-new phone (no match) just clears the badge.
-  useEffect(() => {
-    let ignore = false
-    const timer = setTimeout(() => {
-      if (!isValidPhone(customerPhone)) {
-        if (!ignore) setExistingCustomerTrust(null)
-        return
-      }
-      fetch(`/api/customers/by-phone?phone=${encodeURIComponent(customerPhone)}`)
-        .then((res) => res.json())
-        .then((json) => {
-          if (ignore) return
-          if (json.success && json.data?.found) setExistingCustomerTrust(json.data.trust)
-          else setExistingCustomerTrust(null)
-        })
-        .catch(() => {
-          if (!ignore) setExistingCustomerTrust(null)
-        })
-    }, 400)
-    return () => {
-      ignore = true
-      clearTimeout(timer)
-    }
-  }, [customerPhone])
 
   const totalPriceUzs = currency.currency === 'USD' && currency.usdUzsRate
     ? convertUsdToUzs(Number(totalPrice) || 0, currency.usdUzsRate)
@@ -229,7 +214,11 @@ export default function NewNasiyaPage() {
     }))
   }, [startDate, months, finalNasiyaAmount])
 
-  const step2Valid = customerName.trim() && customerPhone.trim() && passportFile
+  const needsPassportPhoto = customerMode === 'NEW' || (customerMode === 'EXISTING' && !selectedCustomer?.hasPassportPhoto)
+  const step2Valid =
+    (customerMode === 'EXISTING' ? Boolean(selectedCustomer) : customerMode === 'NEW' && customerName.trim() && customerPhone.trim()) &&
+    (!needsPassportPhoto || passportSelection.items.length === 1) &&
+    !passportSelection.hasBlockingErrors
   const step3Valid =
     !!selectedDevice &&
     totalPrice.trim() &&
@@ -241,7 +230,7 @@ export default function NewNasiyaPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!step3Valid || !selectedDevice || !passportFile || submitting) return
+    if (!step3Valid || !selectedDevice || !step2Valid || submitting) return
     if (currency.currency === 'USD' && !currency.usdUzsRate) {
       setSubmitError('USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko\'ring.')
       return
@@ -250,28 +239,17 @@ export default function NewNasiyaPage() {
     setSubmitting(true)
     setSubmitError('')
     try {
-      const formData = new FormData()
-      formData.append('file', passportFile)
-
-      const uploadRes = await fetch('/api/uploads/passport', {
-        method: 'POST',
-        body: formData,
-      })
-      const uploadJson = await uploadRes.json()
-
-      if (!uploadRes.ok || !uploadJson.success) {
-        throw new Error(uploadJson.error || 'Pasport rasmini yuklashda xatolik')
-      }
-
-      const passportPhotoUrl = uploadJson.data.key
+      const [passportPhotoUrl] = await passportSelection.uploadAll()
 
       const res = await fetch(`/api/devices/${selectedDevice.id}/nasiya`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           deviceId: selectedDevice.id,
-          customerName: customerName.trim(),
-          customerPhone: customerPhone.trim(),
+          customerMode: customerMode === 'EXISTING' ? 'EXISTING' : 'NEW',
+          customerId: selectedCustomer?.id,
+          customerName: customerMode === 'NEW' ? customerName.trim() : undefined,
+          customerPhone: customerMode === 'NEW' ? customerPhone.trim() : undefined,
           passportPhotoUrl,
           totalAmount: Number(totalPrice),
           downPayment: Number(downPayment),
@@ -404,6 +382,40 @@ export default function NewNasiyaPage() {
               <span className="text-sm font-semibold text-zinc-900">Mijoz ma&apos;lumotlari</span>
             </div>
             <div className="p-4 space-y-4">
+              <div>
+                <label htmlFor="nasiya-customer-picker" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                  Mavjud mijozni tanlang yoki yangisini yarating <span aria-hidden="true" className="text-red-500">*</span>
+                </label>
+                <CustomerCombobox
+                  inputId="nasiya-customer-picker"
+                  selected={selectedCustomer}
+                  onSelect={(customer) => {
+                    setSelectedCustomer(customer)
+                    setCustomerMode('EXISTING')
+                    setCustomerName(customer.name)
+                    setCustomerPhone(customer.phone)
+                    setNameError('')
+                    setPhoneError('')
+                    passportSelection.clear()
+                  }}
+                  onClear={() => {
+                    setSelectedCustomer(null)
+                    setCustomerMode('PICK')
+                    setCustomerName('')
+                    setCustomerPhone('')
+                    passportSelection.clear()
+                  }}
+                  onCreateNew={(searchText) => {
+                    setSelectedCustomer(null)
+                    setCustomerMode('NEW')
+                    passportSelection.clear()
+                    if (/\d/.test(searchText)) setCustomerPhone(searchText)
+                    else setCustomerName(searchText)
+                  }}
+                  disabled={submitting}
+                />
+              </div>
+              {customerMode === 'NEW' && <>
               <Field label="Mijoz ismi" required error={nameError || undefined}>
                 <Input
                   value={customerName}
@@ -426,38 +438,23 @@ export default function NewNasiyaPage() {
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
               </Field>
-              {existingCustomerTrust && (
-                <div className="mt-1.5 flex items-center gap-1.5">
-                  <span className="text-xs text-zinc-500">Mavjud mijoz:</span>
-                  <TrustBadge trust={existingCustomerTrust} />
-                </div>
+              </>}
+              {customerMode === 'EXISTING' && selectedCustomer?.hasPassportPhoto && (
+                <p className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
+                  Tanlangan mijozning private pasport rasmi mavjud; qayta yuklash shart emas.
+                </p>
               )}
-              <fieldset>
-                <legend className="mb-1.5 block text-xs font-medium text-zinc-700">
-                  Pasport rasmi <span aria-hidden="true" className="text-red-500">*</span>
-                </legend>
-                <label htmlFor="nasiya-passport-image" className="flex items-center justify-center w-full h-24 border-2 border-dashed border-zinc-200 rounded cursor-pointer hover:border-zinc-400 hover:bg-zinc-50 transition-colors">
-                  <input
-                    id="nasiya-passport-image"
-                    type="file"
-                    accept="image/*"
-                    required
-                    aria-required="true"
-                    className="sr-only"
-                    onChange={(e) => setPassportFile(e.target.files?.[0] ?? null)}
-                  />
-                  <div className="text-center">
-                    {passportFile ? (
-                      <div className="text-sm text-zinc-700 font-medium">{passportFile.name}</div>
-                    ) : (
-                      <>
-                        <div className="text-sm text-zinc-500">Rasm yuklash uchun bosing</div>
-                        <div className="text-xs text-zinc-400 mt-0.5">PNG, JPG, WEBP</div>
-                      </>
-                    )}
-                  </div>
-                </label>
-              </fieldset>
+              {needsPassportPhoto && (
+                <ImageSelectionField
+                  inputId="nasiya-passport-image"
+                  label="Pasport rasmi"
+                  mode="single"
+                  required
+                  selection={passportSelection}
+                  disabled={submitting}
+                  help="Private saqlanadi; Telegram qurilma rasmlariga qo‘shilmaydi. JPG, PNG yoki WEBP, 5 MB gacha."
+                />
+              )}
             </div>
           </div>
 

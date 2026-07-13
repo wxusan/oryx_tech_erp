@@ -257,6 +257,11 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
             : Number(amount)
         return {
           ...payment,
+          // Prisma Decimal instances cannot cross a Server Component →
+          // Client Component boundary. Keep the native contract amounts as
+          // plain numbers and expose the converted UZS helpers separately.
+          contractExpectedAmount: Number(payment.contractExpectedAmount),
+          contractPaidAmount: Number(payment.contractPaidAmount),
           expectedAmount: toUzs(payment.contractExpectedAmount),
           paidAmount: toUzs(payment.contractPaidAmount),
         }

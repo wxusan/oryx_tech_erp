@@ -1,97 +1,87 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import Link from 'next/link'
-import { AlertTriangle } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { AlertTriangle, CalendarCheck2 } from 'lucide-react'
 import { formatPartitionedMoney, type CurrencyContext } from '@/lib/currency'
 import { FINANCIAL_DATA_CHANGED_EVENT } from '@/lib/client-events'
+import { queryKeys } from '@/lib/query-keys'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import type { ReceivableCohortSummary } from '@/lib/server/shop-stats-queries'
 
-const FALLBACK_REFRESH_MS = 5 * 60_000
-
-interface DueOverdueSummary {
-  overdueDealCount: number
-  overdueMoneyUzs: number
-  overdueNativeUzs: number
-  overdueNativeUsd: number
-  overdueMoneyComplete: boolean
+export interface DueOverdueSummary {
+  dueToday: ReceivableCohortSummary
+  overdue: ReceivableCohortSummary
   currency: CurrencyContext
-  singleDeal: { type: 'nasiya' | 'sale'; id: string } | null
+  dayKey: string
 }
 
-/**
- * Item 10 — persistent, shop-wide banner for overdue nasiya/sale debt.
- * Shown in the layout (every shop page, not just the dashboard), so it
- * can't be missed. Deliberately has NO dismiss button — "persistent until
- * paid" per the ticket — it simply stops rendering itself once the shop's
- * overdue count drops to 0 (checked on every mount/navigation via the
- * layout's client-side fetch). No spam: one summarized banner, not one per
- * overdue deal, and a direct link only when there is exactly one deal.
- */
-export function DueOverdueBanner() {
-  const [summary, setSummary] = useState<DueOverdueSummary | null>(null)
+function amountText(summary: ReceivableCohortSummary, currency: CurrencyContext) {
+  return formatPartitionedMoney({
+    amountUzs: summary.nativeUzs,
+    amountUsd: summary.nativeUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+}
+
+function countText(summary: ReceivableCohortSummary) {
+  return `${summary.customerCount} ta mijoz · ${summary.dealCount} ta qarz`
+}
+
+export function DueOverdueBanner({ initialData }: { initialData?: DueOverdueSummary | null }) {
+  const scope = useAuthenticatedQueryScope()
+  const queryClient = useQueryClient()
+  const queryKey = useMemo(() => queryKeys.list(scope, 'overdue', { view: 'summary' }), [scope])
+  const query = useQuery({
+    queryKey,
+    queryFn: async ({ signal }) => {
+      const response = await fetch('/api/stats/due-overdue', { signal, cache: 'no-store' })
+      const json = await response.json() as { success: boolean; data?: DueOverdueSummary; error?: string }
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error || "To'lovlar xulosasi yuklanmadi")
+      return json.data
+    },
+    initialData: initialData ?? undefined,
+  })
 
   useEffect(() => {
-    let ignore = false
-    let activeController: AbortController | null = null
-    function load() {
-      activeController?.abort()
-      activeController = new AbortController()
-      fetch('/api/stats/due-overdue', { signal: activeController.signal })
-        .then((res) => res.json())
-        .then((json) => {
-          if (!ignore && json.success) setSummary(json.data)
-        })
-        .catch(() => {})
-    }
-    load()
-    // Refresh immediately after local money mutations and when the user
-    // returns to the app. The five-minute interval is only a safety net for
-    // changes made in another tab/device, replacing the old 60-second poll.
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') load()
-    }
-    const interval = window.setInterval(refreshWhenVisible, FALLBACK_REFRESH_MS)
-    window.addEventListener('focus', refreshWhenVisible)
-    window.addEventListener('online', refreshWhenVisible)
-    window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, load)
-    document.addEventListener('visibilitychange', refreshWhenVisible)
-    return () => {
-      ignore = true
-      activeController?.abort()
-      window.clearInterval(interval)
-      window.removeEventListener('focus', refreshWhenVisible)
-      window.removeEventListener('online', refreshWhenVisible)
-      window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, load)
-      document.removeEventListener('visibilitychange', refreshWhenVisible)
-    }
-  }, [])
+    const refresh = () => queryClient.invalidateQueries({ queryKey })
+    window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, refresh)
+    return () => window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, refresh)
+  }, [queryClient, queryKey])
 
-  if (!summary || summary.overdueDealCount === 0) return null
-
-  const amountText = formatPartitionedMoney({
-    amountUzs: summary.overdueNativeUzs,
-    amountUsd: summary.overdueNativeUsd,
-    displayCurrency: summary.currency.currency,
-    rate: summary.currency.usdUzsRate,
-  })
-  const href = summary.singleDeal
-    ? summary.singleDeal.type === 'nasiya'
-      ? `/shop/nasiyalar/${summary.singleDeal.id}`
-      : `/shop/qurilmalar` // Sale detail lives on the device page; no standalone sale route today.
-    : '/shop/nasiyalar?status=OVERDUE'
+  const summary = query.data
+  if (!summary || (summary.overdue.dealCount === 0 && summary.dueToday.dealCount === 0)) return null
 
   return (
-    <Link
-      href={href}
-      className="flex items-center gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-800 hover:bg-red-100 sm:text-sm"
-    >
-      <AlertTriangle size={14} className="flex-shrink-0" />
-      <span className="min-w-0 flex-1 truncate">
-        {summary.overdueDealCount === 1
-          ? `1 ta mijozning to'lovi muddati o'tgan — ${amountText}`
-          : `${summary.overdueDealCount} ta mijozning to'lovi muddati o'tgan — jami ${amountText}`}
-      </span>
-      <span className="flex-shrink-0 underline">Ko&apos;rish</span>
-    </Link>
+    <div className="sticky top-14 z-30 flex shrink-0 flex-col" aria-label="To'lov muddati xabarlari">
+      {summary.overdue.dealCount > 0 && (
+        <Link
+          href="/shop/tolovlar?cohort=OVERDUE"
+          className="flex min-h-10 items-center gap-2 border-b border-red-200 bg-red-50 px-4 py-2 text-xs text-red-800 hover:bg-red-100 sm:px-6 sm:text-sm"
+        >
+          <AlertTriangle className="size-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            <span className="font-semibold">Muddati o'tgan:</span>{' '}
+            {countText(summary.overdue)} · {amountText(summary.overdue, summary.currency)}
+          </span>
+          <span className="shrink-0 underline">Ko'rish</span>
+        </Link>
+      )}
+      {summary.dueToday.dealCount > 0 && (
+        <Link
+          href="/shop/tolovlar?cohort=DUE_TODAY"
+          className="flex min-h-10 items-center gap-2 border-b border-emerald-200 bg-emerald-50 px-4 py-2 text-xs text-emerald-900 hover:bg-emerald-100 sm:px-6 sm:text-sm"
+        >
+          <CalendarCheck2 className="size-4 shrink-0" aria-hidden="true" />
+          <span className="min-w-0 flex-1">
+            <span className="font-semibold">Bugun to'lanadi:</span>{' '}
+            {countText(summary.dueToday)} · {amountText(summary.dueToday, summary.currency)}
+          </span>
+          <span className="shrink-0 underline">Ko'rish</span>
+        </Link>
+      )}
+    </div>
   )
 }

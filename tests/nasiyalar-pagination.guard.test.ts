@@ -20,7 +20,7 @@ describe('GET /api/nasiya: real pagination envelope', () => {
   })
 
   it('delegates to getShopNasiyalarList (shared with the SSR first page, so they never drift apart)', () => {
-    expect(route).toContain('getShopNasiyalarList(shopId, { search, status, skip, take })')
+    expect(route).toContain('getShopNasiyalarList(shopId, { search, status, resolutionState, skip, take })')
   })
 
   it('page size is a real per-page size, not the old 200/500 load-everything default', () => {

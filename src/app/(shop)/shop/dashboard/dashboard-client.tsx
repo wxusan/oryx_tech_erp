@@ -26,8 +26,8 @@ interface UpcomingPayment {
   dueDate: string | Date
   expectedAmount: number
   paidAmount: number
-  contractExpectedAmount: unknown
-  contractPaidAmount: unknown
+  contractExpectedAmount: number
+  contractPaidAmount: number
   status: string
 }
 

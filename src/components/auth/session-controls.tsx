@@ -7,7 +7,7 @@ import { Button } from '@/components/ui/button'
 import { clearNavigationClientState } from '@/lib/client-events'
 
 const LOGOUT_EVENT_KEY = 'oryx:last-logout'
-const ADMIN_ACTIVITY_KEY = 'oryx:admin-last-activity'
+const USER_ACTIVITY_KEY = 'oryx:last-user-activity'
 
 type SessionControlsProps = {
   callbackUrl: string
@@ -26,7 +26,7 @@ export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsP
     signingOutRef.current = true
     try {
       if (broadcast) window.localStorage.setItem(LOGOUT_EVENT_KEY, String(Date.now()))
-      window.localStorage.removeItem(ADMIN_ACTIVITY_KEY)
+      window.localStorage.removeItem(USER_ACTIVITY_KEY)
     } catch {}
     clearNavigationClientState()
     void signOut({ callbackUrl })
@@ -41,8 +41,6 @@ export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsP
   }, [logout])
 
   useEffect(() => {
-    if (idleTimeoutMs == null) return
-
     const touchServerSession = (now: number) => {
       if (now - lastServerTouchRef.current < 60_000) return
       lastServerTouchRef.current = now
@@ -59,6 +57,7 @@ export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsP
     }
 
     const scheduleFrom = (lastActivity: number) => {
+      if (idleTimeoutMs == null) return
       if (timerRef.current) window.clearTimeout(timerRef.current)
       const remaining = lastActivity + idleTimeoutMs - Date.now()
       if (remaining <= 0) {
@@ -68,55 +67,39 @@ export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsP
       timerRef.current = window.setTimeout(() => logout(), remaining)
     }
 
-    const readLastActivity = () => {
-      try {
-        const stored = Number(window.localStorage.getItem(ADMIN_ACTIVITY_KEY))
-        return Number.isFinite(stored) && stored > 0 ? stored : Date.now()
-      } catch { return Date.now() }
-    }
-
     const recordActivity = () => {
       const now = Date.now()
       // Pointer movement and key repeat can be noisy; one cross-tab write per
       // second is sufficient while the local deadline still remains exact.
       if (now - lastBroadcastRef.current < 1000) return
       lastBroadcastRef.current = now
-      try { window.localStorage.setItem(ADMIN_ACTIVITY_KEY, String(now)) } catch {}
+      try { window.localStorage.setItem(USER_ACTIVITY_KEY, String(now)) } catch {}
       scheduleFrom(now)
       touchServerSession(now)
     }
 
     const handleStorage = (event: StorageEvent) => {
-      if (event.key !== ADMIN_ACTIVITY_KEY) return
+      if (event.key !== USER_ACTIVITY_KEY) return
       const timestamp = Number(event.newValue)
       if (Number.isFinite(timestamp)) scheduleFrom(timestamp)
-    }
-    const checkDeadline = () => {
-      if (document.visibilityState === 'visible') scheduleFrom(readLastActivity())
-      if (document.visibilityState === 'visible') touchServerSession(Date.now())
     }
     const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart', 'wheel']
     activityEvents.forEach((name) => window.addEventListener(name, recordActivity, { passive: true }))
     window.addEventListener('storage', handleStorage)
-    document.addEventListener('visibilitychange', checkDeadline)
-
-    // Mounting the authenticated admin shell follows a successful login,
-    // reload, or intentional navigation. Count that as real activity so a
-    // stale timestamp left by a prior session cannot immediately sign out the
-    // newly authenticated administrator.
+    // Initialize only the local deadline. This does not touch the durable
+    // session: mounting, navigation, polling, and tab visibility are not user
+    // activity. Only the listeners above call the activity endpoint.
     const initial = Date.now()
-    lastBroadcastRef.current = initial
+    lastBroadcastRef.current = 0
     try {
-      window.localStorage.setItem(ADMIN_ACTIVITY_KEY, String(initial))
+      window.localStorage.setItem(USER_ACTIVITY_KEY, String(initial))
     } catch {}
     scheduleFrom(initial)
-    touchServerSession(initial)
 
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current)
       activityEvents.forEach((name) => window.removeEventListener(name, recordActivity))
       window.removeEventListener('storage', handleStorage)
-      document.removeEventListener('visibilitychange', checkDeadline)
     }
   }, [idleTimeoutMs, logout])
 

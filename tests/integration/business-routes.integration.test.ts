@@ -31,7 +31,7 @@ async function resetBusinessData() {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "ReminderGenerationState", "AuthSession", "ChangeEvent", "OpsEvent", "Log", "Notification", "DeviceReturn",
-      "NasiyaDeferral", "NasiyaPayment", "NasiyaSchedule", "Nasiya",
+      "NasiyaResolutionEvent", "NasiyaDeferral", "NasiyaPayment", "NasiyaSchedule", "Nasiya",
       "SupplierPayable", "SalePayment", "Sale", "Customer", "Device",
       "Supplier", "ShopAdmin", "ShopPayment", "CurrencyRate", "Shop", "SuperAdmin"
     RESTART IDENTITY CASCADE
@@ -63,6 +63,33 @@ async function seedActor(suffix: string) {
       passwordHash: 'audit-only',
     },
   })
+  await prisma.shop.update({
+    where: { id: shop.id },
+    data: {
+      ownerAdminId: admin.id,
+      ownershipStatus: 'RESOLVED',
+      ownershipResolvedAt: new Date('2026-07-01T00:00:00.000Z'),
+      ownershipResolvedById: owner.id,
+    },
+  })
+  const packageVersion = await prisma.shopPackageVersion.create({
+    data: {
+      shopId: shop.id,
+      effectiveOn: new Date('2026-01-01T00:00:00.000Z'),
+      basePrice: 1_000,
+      currency: 'UZS',
+      discountAmount: 0,
+      pricingNeedsReview: false,
+      note: 'Disposable integration package',
+      createdById: owner.id,
+      features: {
+        create: [
+          'INVENTORY', 'CASH_SALES', 'NASIYA', 'OLIB_SOTDIM', 'CUSTOMER_CRM',
+          'TELEGRAM', 'REMINDERS', 'REPORTS', 'IMPORTS', 'EXPORTS', 'STAFF_ACCESS',
+        ].map((featureCode) => ({ featureCode, enabled: true, recurringPrice: 0 })),
+      },
+    },
+  })
   const authSession = await prisma.authSession.create({
     data: {
       id: `route-session-${suffix}`,
@@ -70,10 +97,12 @@ async function seedActor(suffix: string) {
       actorType: 'SHOP_ADMIN',
       shopId: shop.id,
       sessionVersion: admin.sessionVersion,
+      packageVersionId: packageVersion.id,
+      policy: 'IDLE_10_MINUTES',
       expiresAt: new Date('2099-01-01T00:00:00.000Z'),
     },
   })
-  return { owner, shop, admin, authSession }
+  return { owner, shop, admin, authSession, packageVersion }
 }
 
 function useShopAdmin(actor: Awaited<ReturnType<typeof seedActor>>) {
@@ -85,9 +114,62 @@ function useShopAdmin(actor: Awaited<ReturnType<typeof seedActor>>) {
       shopId: actor.shop.id,
       sessionVersion: actor.admin.sessionVersion,
       sessionId: actor.authSession.id,
+      sessionPolicy: actor.authSession.policy,
+      packageVersionId: actor.authSession.packageVersionId,
     },
     expires: '2099-01-01T00:00:00.000Z',
   }
+}
+
+async function seedStaff(
+  actor: Awaited<ReturnType<typeof seedActor>>,
+  suffix: string,
+  permissionCodes: string[],
+) {
+  const admin = await prisma.shopAdmin.create({
+    data: {
+      shopId: actor.shop.id,
+      name: `Staff ${suffix}`,
+      phone: `+99893${suffix.padStart(7, '0').slice(-7)}`,
+      login: `staff_route_${suffix}`,
+      passwordHash: 'audit-only',
+    },
+  })
+  if (permissionCodes.length) {
+    await prisma.shopMemberPermission.createMany({
+      data: permissionCodes.map((permissionCode) => ({
+        shopId: actor.shop.id,
+        shopAdminId: admin.id,
+        permissionCode,
+        grantedById: actor.admin.id,
+      })),
+    })
+  }
+  const authSession = await prisma.authSession.create({
+    data: {
+      id: `staff-route-session-${suffix}`,
+      actorId: admin.id,
+      actorType: 'SHOP_ADMIN',
+      shopId: actor.shop.id,
+      sessionVersion: admin.sessionVersion,
+      packageVersionId: actor.packageVersion.id,
+      policy: 'IDLE_10_MINUTES',
+      expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+    },
+  })
+  return { ...actor, admin, authSession }
+}
+
+async function deviceListRequest() {
+  const { NextRequest } = await import('next/server')
+  const { GET } = await import('@/app/api/devices/route')
+  return GET(new NextRequest('http://localhost/api/devices?paginated=1'))
+}
+
+async function shopStatsRequest() {
+  const { NextRequest } = await import('next/server')
+  const { GET } = await import('@/app/api/stats/shop/route')
+  return GET(new NextRequest('http://localhost/api/stats/shop'))
 }
 
 async function useSuperAdmin(actor: Awaited<ReturnType<typeof seedActor>>) {
@@ -97,6 +179,7 @@ async function useSuperAdmin(actor: Awaited<ReturnType<typeof seedActor>>) {
       actorId: actor.owner.id,
       actorType: 'SUPER_ADMIN',
       sessionVersion: actor.owner.sessionVersion,
+      policy: 'IDLE_10_MINUTES',
       expiresAt: new Date('2099-01-01T00:00:00.000Z'),
     },
   })
@@ -108,6 +191,8 @@ async function useSuperAdmin(actor: Awaited<ReturnType<typeof seedActor>>) {
       shopId: null,
       sessionVersion: actor.owner.sessionVersion,
       sessionId: authSession.id,
+      sessionPolicy: authSession.policy,
+      packageVersionId: null,
     },
     expires: '2099-01-01T00:00:00.000Z',
   }
@@ -179,8 +264,6 @@ async function nasiyaPaymentRequest(input: {
   key: string
   note?: string
   date?: string
-  delayedUntil?: string
-  deferredToNext?: boolean
 }) {
   const { NextRequest } = await import('next/server')
   const { POST } = await import('@/app/api/nasiya/[id]/payment/route')
@@ -190,15 +273,48 @@ async function nasiyaPaymentRequest(input: {
     body: JSON.stringify({
       nasiyaScheduleId: input.scheduleId,
       amount: input.amount,
-      paymentMethod: input.deferredToNext ? undefined : 'CASH',
+      paymentMethod: 'CASH',
       date: input.date ?? '2026-07-13T08:00:00.000Z',
-      delayedUntil: input.delayedUntil,
-      deferredToNext: input.deferredToNext,
       note: input.note ?? 'Audit payment reason',
       inputCurrency: 'UZS',
     }),
   })
   return POST(request, { params: Promise.resolve({ id: input.nasiyaId }) })
+}
+
+async function nasiyaDeferRequest(input: {
+  nasiyaId: string
+  scheduleId: string
+  newDueDate: string
+  reason: string
+  key: string
+}) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/nasiya/[id]/defer/route')
+  return POST(new NextRequest(`http://localhost/api/nasiya/${input.nasiyaId}/defer`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': input.key },
+    body: JSON.stringify({
+      nasiyaScheduleId: input.scheduleId,
+      newDueDate: input.newDueDate,
+      reason: input.reason,
+    }),
+  }), { params: Promise.resolve({ id: input.nasiyaId }) })
+}
+
+async function nasiyaResolutionRequest(input: {
+  nasiyaId: string
+  action: 'ARCHIVE' | 'WRITE_OFF' | 'REOPEN'
+  reason: string
+  key: string
+}) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/nasiya/[id]/resolution/route')
+  return POST(new NextRequest(`http://localhost/api/nasiya/${input.nasiyaId}/resolution`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': input.key },
+    body: JSON.stringify({ action: input.action, reason: input.reason }),
+  }), { params: Promise.resolve({ id: input.nasiyaId }) })
 }
 
 async function salePaymentRequest(input: {
@@ -339,6 +455,19 @@ afterAll(async () => {
 })
 
 describe('real-PostgreSQL route evidence', () => {
+  it('enforces live staff permissions on real routes while preserving allowed inventory access', async () => {
+    const actor = await seedActor('staff_matrix')
+    const staff = await seedStaff(actor, 'staff_matrix', ['INVENTORY_VIEW'])
+    useShopAdmin(staff)
+
+    expect((await deviceListRequest()).status).toBe(200)
+    expect((await shopStatsRequest()).status).toBe(403)
+
+    await prisma.shopMemberPermission.deleteMany({ where: { shopAdminId: staff.admin.id } })
+    await prisma.shopAdmin.update({ where: { id: staff.admin.id }, data: { permissionVersion: { increment: 1 } } })
+    expect((await deviceListRequest()).status).toBe(403)
+  })
+
   it('preserves the original Sale and receipts while posting an allocated return event', async () => {
     const actor = await seedActor('immutable_return')
     useShopAdmin(actor)
@@ -844,38 +973,158 @@ describe('real-PostgreSQL route evidence', () => {
     expect(Number((await prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } })).contractRemainingAmount)).toBe(1_500)
   })
 
-  it('rejects a changed Nasiya deferral payload under the same idempotency key', async () => {
+  it('records deferral separately without a payment or paid-total mutation and rejects a changed replay', async () => {
     const actor = await seedActor('deferral_payload_retry')
     useShopAdmin(actor)
     const contract = await seedNasiya(actor, 'deferral_payload_retry', 2_000)
     const key = 'deferral-payload-mismatch-key'
 
-    const first = await nasiyaPaymentRequest({
+    const before = await prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } })
+    const first = await nasiyaDeferRequest({
       nasiyaId: contract.nasiya.id,
       scheduleId: contract.schedule.id,
-      amount: 0,
       key,
-      date: '2026-09-01T00:00:00.000Z',
-      delayedUntil: '2026-09-01T00:00:00.000Z',
-      deferredToNext: true,
-      note: 'Customer requested September',
+      newDueDate: '2026-09-01T00:00:00.000Z',
+      reason: 'Customer requested September',
     })
     expect(first.status).toBe(200)
 
-    const changed = await nasiyaPaymentRequest({
+    const changed = await nasiyaDeferRequest({
       nasiyaId: contract.nasiya.id,
       scheduleId: contract.schedule.id,
-      amount: 0,
       key,
-      date: '2026-10-01T00:00:00.000Z',
-      delayedUntil: '2026-10-01T00:00:00.000Z',
-      deferredToNext: true,
-      note: 'Customer requested October',
+      newDueDate: '2026-10-01T00:00:00.000Z',
+      reason: 'Customer requested October',
     })
     expect(changed.status).toBe(409)
     expect(await prisma.nasiyaDeferral.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(1)
+    expect(await prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(0)
+    const after = await prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } })
+    expect(Number(after.contractPaidAmount)).toBe(Number(before.contractPaidAmount))
+    expect(Number(after.contractRemainingAmount)).toBe(Number(before.contractRemainingAmount))
     expect((await prisma.nasiyaSchedule.findUniqueOrThrow({ where: { id: contract.schedule.id } })).delayedUntil)
       .toEqual(new Date('2026-09-01T00:00:00.000Z'))
+    const event = await prisma.nasiyaDeferral.findFirstOrThrow({ where: { nasiyaId: contract.nasiya.id } })
+    expect(event.originalDueDate).toEqual(new Date('2026-08-01T00:00:00.000Z'))
+    expect(event.newDueDate).toEqual(new Date('2026-09-01T00:00:00.000Z'))
+  })
+
+  it('archives a Nasiya without changing balances and blocks payment until a compensating reopen', async () => {
+    const actor = await seedActor('archive_reopen')
+    useShopAdmin(actor)
+    const contract = await seedNasiya(actor, 'archive_reopen', 5_000)
+
+    expect((await nasiyaResolutionRequest({
+      nasiyaId: contract.nasiya.id,
+      action: 'ARCHIVE',
+      reason: 'Collection queue cleanup',
+      key: 'archive-reopen-archive',
+    })).status).toBe(200)
+
+    const archived = await prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } })
+    expect(archived.resolutionState).toBe('ARCHIVED')
+    expect(Number(archived.contractRemainingAmount)).toBe(5_000)
+    expect(Number(archived.contractPaidAmount)).toBe(0)
+    expect(await prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(0)
+    expect((await nasiyaPaymentRequest({
+      nasiyaId: contract.nasiya.id,
+      scheduleId: contract.schedule.id,
+      amount: 1_000,
+      key: 'archived-payment-blocked',
+    })).status).toBe(404)
+
+    expect((await nasiyaResolutionRequest({
+      nasiyaId: contract.nasiya.id,
+      action: 'REOPEN',
+      reason: 'Customer resumed payments',
+      key: 'archive-reopen-reopen',
+    })).status).toBe(200)
+    const events = await prisma.nasiyaResolutionEvent.findMany({
+      where: { nasiyaId: contract.nasiya.id },
+      orderBy: { createdAt: 'asc' },
+    })
+    expect(events.map((event) => event.eventType)).toEqual(['ARCHIVE', 'REOPEN'])
+    expect(events[1].reversesEventId).toBe(events[0].id)
+    expect(Number(events[1].nativeRemainingAmount)).toBe(Number(events[0].nativeRemainingAmount))
+    expect(Number(events[1].frozenUzsAmount)).toBe(Number(events[0].frozenUzsAmount))
+    expect((await prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } })).resolutionState).toBe('ACTIVE')
+  })
+
+  it('writes off once under concurrency and never rewrites payment or schedule balances', async () => {
+    const actor = await seedActor('writeoff_concurrency')
+    useShopAdmin(actor)
+    const contract = await seedNasiya(actor, 'writeoff_concurrency', 8_000)
+
+    const responses = await Promise.all([
+      nasiyaResolutionRequest({
+        nasiyaId: contract.nasiya.id,
+        action: 'WRITE_OFF',
+        reason: 'Uncollectible debt attempt one',
+        key: 'writeoff-concurrency-a',
+      }),
+      nasiyaResolutionRequest({
+        nasiyaId: contract.nasiya.id,
+        action: 'WRITE_OFF',
+        reason: 'Uncollectible debt attempt two',
+        key: 'writeoff-concurrency-b',
+      }),
+    ])
+    expect(responses.map((response) => response.status).sort()).toEqual([200, 409])
+    const [nasiya, schedule, events, paymentCount] = await Promise.all([
+      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
+      prisma.nasiyaSchedule.findUniqueOrThrow({ where: { id: contract.schedule.id } }),
+      prisma.nasiyaResolutionEvent.findMany({ where: { nasiyaId: contract.nasiya.id } }),
+      prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } }),
+    ])
+    expect(nasiya.resolutionState).toBe('WRITTEN_OFF')
+    expect(Number(nasiya.contractRemainingAmount)).toBe(8_000)
+    expect(Number(nasiya.contractPaidAmount)).toBe(0)
+    expect(Number(schedule.contractPaidAmount)).toBe(0)
+    expect(events).toHaveLength(1)
+    expect(events[0].eventType).toBe('WRITE_OFF')
+    expect(Number(events[0].nativeRemainingAmount)).toBe(8_000)
+    expect(paymentCount).toBe(0)
+  })
+
+  it('permits explicitly granted WRITEOFF_MANAGE staff and denies ungranted staff', async () => {
+    const actor = await seedActor('writeoff_rbac')
+    const contract = await seedNasiya(actor, 'writeoff_rbac', 3_000)
+    const deniedStaff = await seedStaff(actor, 'writeoff_denied', ['NASIYA_VIEW'])
+    useShopAdmin(deniedStaff)
+    expect((await nasiyaResolutionRequest({
+      nasiyaId: contract.nasiya.id,
+      action: 'ARCHIVE',
+      reason: 'Denied staff archive attempt',
+      key: 'writeoff-rbac-denied',
+    })).status).toBe(403)
+
+    const grantedStaff = await seedStaff(actor, 'writeoff_granted', ['NASIYA_VIEW', 'WRITEOFF_MANAGE'])
+    useShopAdmin(grantedStaff)
+    expect((await nasiyaResolutionRequest({
+      nasiyaId: contract.nasiya.id,
+      action: 'ARCHIVE',
+      reason: 'Explicitly granted archive action',
+      key: 'writeoff-rbac-granted',
+    })).status).toBe(200)
+    const event = await prisma.nasiyaResolutionEvent.findFirstOrThrow({ where: { nasiyaId: contract.nasiya.id } })
+    expect(event.actorId).toBe(grantedStaff.admin.id)
+    expect(event.actorType).toBe('SHOP_ADMIN')
+  })
+
+  it('does not let a shop resolve another shop Nasiya', async () => {
+    const first = await seedActor('resolution_tenant_a')
+    const second = await seedActor('resolution_tenant_b')
+    const foreign = await seedNasiya(second, 'resolution_foreign', 4_000)
+    useShopAdmin(first)
+    const response = await nasiyaResolutionRequest({
+      nasiyaId: foreign.nasiya.id,
+      action: 'WRITE_OFF',
+      reason: 'Cross-tenant action must fail',
+      key: 'resolution-cross-tenant',
+    })
+    expect(response.status).toBe(404)
+    expect(await prisma.nasiyaResolutionEvent.count()).toBe(0)
+    expect((await prisma.nasiya.findUniqueOrThrow({ where: { id: foreign.nasiya.id } })).resolutionState).toBe('ACTIVE')
   })
 
   it('replays only the exact Sale payment command and rejects changed durable fields', async () => {
@@ -935,6 +1184,14 @@ describe('real-PostgreSQL route evidence', () => {
     expect((await shopPaymentRequest({ ...command, months: 2 })).status).toBe(409)
     expect((await shopPaymentRequest({ ...command, note: 'Changed note' })).status).toBe(409)
     expect(await prisma.shopPayment.count({ where: { shopId: actor.shop.id } })).toBe(1)
+    const receipt = await prisma.shopPayment.findFirstOrThrow({ where: { shopId: actor.shop.id } })
+    expect(receipt.allocationStatus).toBe('PACKAGE_ALLOCATED')
+    expect(receipt.currency).toBe('UZS')
+    expect(Number(receipt.packageMonthlyPriceSnapshot)).toBe(1_000)
+    expect(receipt.packageVersionId).not.toBeNull()
+    expect(receipt.commandHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(receipt.servicePeriodStart).not.toBeNull()
+    expect(receipt.servicePeriodEnd).not.toBeNull()
   })
 
   it('does not let a shop admin pay another shop Nasiya', async () => {

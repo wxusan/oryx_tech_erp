@@ -10,7 +10,7 @@ import { NextRequest } from 'next/server'
 import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { badRequest, ok, serverError } from '@/lib/api-helpers'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireShopPermission } from '@/lib/api-auth'
 import { enrichLogsWithActors } from '@/lib/server/log-actors'
 import { isLogCategory, logCategoryWhere } from '@/lib/log-categories'
 import { logger } from '@/lib/logger'
@@ -23,7 +23,7 @@ function parseDateParam(value: string | null | undefined, endOfDay = false) {
 
 export async function GET(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('LOG_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

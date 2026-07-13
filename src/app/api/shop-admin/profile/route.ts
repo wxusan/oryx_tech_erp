@@ -246,6 +246,10 @@ export async function PATCH(req: NextRequest) {
           sessionVersion: { increment: 1 },
         },
       })
+      await tx.authSession.updateMany({
+        where: { actorType: 'SHOP_ADMIN', actorId: admin.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      })
 
       await tx.log.create({
         data: {

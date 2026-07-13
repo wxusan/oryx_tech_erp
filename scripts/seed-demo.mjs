@@ -104,6 +104,20 @@ async function resetExistingDemoData() {
 
   if (!shopIds.length) return
 
+  // The ERP 2.0 owner invariant protects a current owner from deletion, and
+  // package snapshots are immutable during normal application work. This
+  // explicit, transaction-local maintenance flag only permits deleting demo
+  // snapshots after SEED_DEMO_RESET=yes was confirmed above.
+  await client.query("set local oryx.allow_package_snapshot_delete = 'on'")
+  await client.query(
+    `update "Shop"
+     set "ownerAdminId" = null,
+         "ownershipStatus" = 'UNMATCHED',
+         "ownershipResolvedAt" = null,
+         "ownershipResolvedById" = null
+     where id = any($1)`,
+    [shopIds],
+  )
   await client.query('delete from "ChangeEvent" where "scopeType" = \'SHOP\' and "scopeId" = any($1)', [shopIds])
   await client.query('delete from "Log" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Notification" where "shopId" = any($1)', [shopIds])
@@ -111,14 +125,56 @@ async function resetExistingDemoData() {
   await client.query('delete from "NasiyaSchedule" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Nasiya" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "SalePayment" where "shopId" = any($1)', [shopIds])
+  await client.query('delete from "SupplierPayable" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Sale" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "DeviceReturn" where "shopId" = any($1)', [shopIds])
+  await client.query('delete from "DeviceImei" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Device" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Customer" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Supplier" where "shopId" = any($1)', [shopIds])
-  await client.query('delete from "ShopAdmin" where "shopId" = any($1)', [shopIds])
+  await client.query('delete from "ShopMemberPermission" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "ShopPayment" where "shopId" = any($1)', [shopIds])
+  await client.query(
+    `delete from "ShopPackageFeature"
+     where "packageVersionId" in (
+       select id from "ShopPackageVersion" where "shopId" = any($1)
+     )`,
+    [shopIds],
+  )
+  await client.query('delete from "ShopPackageVersion" where "shopId" = any($1)', [shopIds])
+  await client.query('delete from "ShopAdmin" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Shop" where id = any($1)', [shopIds])
+}
+
+async function createFullDemoPackage(shopId, superAdminId) {
+  const packageVersionId = id('pkg')
+  await insert('ShopPackageVersion', {
+    id: packageVersionId,
+    shopId,
+    effectiveOn: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate())),
+    basePrice: decimal(150000),
+    currency: 'UZS',
+    discountAmount: decimal(0),
+    pricingNeedsReview: false,
+    note: 'Demo full package',
+    createdById: superAdminId,
+    createdAt: now,
+  })
+
+  const features = await client.query(
+    `select code from "FeatureDefinition" where "isActive" = true order by "sortOrder", code`,
+  )
+  for (const feature of features.rows) {
+    await insert('ShopPackageFeature', {
+      id: id('pkgf'),
+      packageVersionId,
+      featureCode: feature.code,
+      enabled: true,
+      recurringPrice: decimal(0),
+    })
+  }
+
+  return packageVersionId
 }
 
 async function seedShop(superAdminId, index, shop) {
@@ -156,6 +212,17 @@ async function seedShop(superAdminId, index, shop) {
     isActive: true,
     createdAt: dateFromNow(-50 + index),
   })
+
+  await client.query(
+    `update "Shop"
+     set "ownerAdminId" = $1,
+         "ownershipStatus" = 'RESOLVED',
+         "ownershipResolvedAt" = $2,
+         "ownershipResolvedById" = $3
+     where id = $4`,
+    [adminId, now, superAdminId, shopId],
+  )
+  await createFullDemoPackage(shopId, superAdminId)
 
   await insert('ShopPayment', {
     id: id('spay'),
@@ -224,6 +291,7 @@ async function seedShop(superAdminId, index, shop) {
 
   for (const sale of shop.sales) {
     const saleId = id('sale')
+    const remainingAmount = sale.salePrice - sale.amountPaid
     await insert('Sale', {
       id: saleId,
       shopId,
@@ -233,10 +301,14 @@ async function seedShop(superAdminId, index, shop) {
       paymentMethod: sale.paymentMethod,
       paidFully: sale.paidFully,
       amountPaid: decimal(sale.amountPaid),
-      remainingAmount: decimal(sale.salePrice - sale.amountPaid),
+      remainingAmount: decimal(remainingAmount),
       dueDate: sale.dueDays === null ? null : dateFromNow(sale.dueDays),
       reminderEnabled: sale.reminderEnabled,
       note: sale.note,
+      contractCurrency: 'UZS',
+      contractSalePrice: decimal(sale.salePrice),
+      contractAmountPaid: decimal(sale.amountPaid),
+      contractRemainingAmount: decimal(remainingAmount),
       createdAt: dateFromNow(sale.createdDays),
       createdBy: adminId,
     })
@@ -250,6 +322,7 @@ async function seedShop(superAdminId, index, shop) {
         paymentMethod: sale.paymentMethod,
         paidAt: dateFromNow(sale.createdDays),
         note: 'Demo sale payment',
+        appliedAmountInContractCurrency: decimal(sale.amountPaid),
         idempotencyKey: `demo-sale-${saleId}`,
         createdBy: adminId,
         createdAt: dateFromNow(sale.createdDays),
@@ -259,6 +332,11 @@ async function seedShop(superAdminId, index, shop) {
 
   for (const plan of shop.nasiya) {
     const nasiyaId = id('nas')
+    const baseRemainingAmount = plan.totalAmount - plan.downPayment
+    const finalNasiyaAmount = plan.months * plan.monthlyPayment
+    const paidAmountBeforeSeed = plan.paidMonths * plan.monthlyPayment + (plan.partialMonth ? plan.partialPaid : 0)
+    const remainingAmount = finalNasiyaAmount - paidAmountBeforeSeed
+    const interestAmount = finalNasiyaAmount - baseRemainingAmount
     await insert('Nasiya', {
       id: nasiyaId,
       shopId,
@@ -266,13 +344,26 @@ async function seedShop(superAdminId, index, shop) {
       customerId: customerIds[plan.customerIndex],
       totalAmount: decimal(plan.totalAmount),
       downPayment: decimal(plan.downPayment),
-      remainingAmount: decimal(plan.remainingAmount),
+      baseRemainingAmount: decimal(baseRemainingAmount),
+      interestPercent: decimal(baseRemainingAmount > 0 ? (interestAmount / baseRemainingAmount) * 100 : 0),
+      interestAmount: decimal(interestAmount),
+      finalNasiyaAmount: decimal(finalNasiyaAmount),
+      remainingAmount: decimal(remainingAmount),
       months: plan.months,
       monthlyPayment: decimal(plan.monthlyPayment),
       startDate: dateFromNow(plan.startDays),
       status: plan.status,
       reminderEnabled: true,
       note: plan.note,
+      contractCurrency: 'UZS',
+      contractTotalAmount: decimal(plan.totalAmount),
+      contractDownPayment: decimal(plan.downPayment),
+      contractBaseRemainingAmount: decimal(baseRemainingAmount),
+      contractInterestAmount: decimal(interestAmount),
+      contractFinalAmount: decimal(finalNasiyaAmount),
+      contractMonthlyPayment: decimal(plan.monthlyPayment),
+      contractRemainingAmount: decimal(remainingAmount),
+      contractPaidAmount: decimal(paidAmountBeforeSeed),
       createdAt: dateFromNow(plan.startDays),
       createdBy: adminId,
       updatedAt: now,
@@ -305,6 +396,10 @@ async function seedShop(superAdminId, index, shop) {
         delayedUntil: null,
         deferredToNext: false,
         note: status === 'OVERDUE' ? 'Demo overdue installment' : null,
+        contractCurrency: 'UZS',
+        contractExpectedAmount: decimal(plan.monthlyPayment),
+        contractPaidAmount: decimal(paidAmount),
+        contractRemainingAmount: decimal(plan.monthlyPayment - paidAmount),
         createdAt: dateFromNow(plan.startDays),
       })
 
@@ -318,6 +413,7 @@ async function seedShop(superAdminId, index, shop) {
           paymentMethod: 'CARD',
           paidAt: dateFromNow(plan.startDays + month * 30 - 2),
           note: 'Demo installment payment',
+          appliedAmountInContractCurrency: decimal(paidAmount),
           idempotencyKey: `demo-nasiya-${scheduleId}`,
           createdBy: adminId,
           createdAt: dateFromNow(plan.startDays + month * 30 - 2),
@@ -334,6 +430,7 @@ async function seedShop(superAdminId, index, shop) {
       type: notification.type,
       message: notification.message,
       telegramId: shop.telegramId || 'demo-telegram',
+      recipientShopAdminId: adminId,
       status: notification.status,
       scheduledAt: dateFromNow(notification.scheduledDays),
       sentAt: notification.status === 'SENT' ? dateFromNow(notification.scheduledDays) : null,

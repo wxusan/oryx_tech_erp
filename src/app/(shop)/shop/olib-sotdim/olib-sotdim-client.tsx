@@ -33,6 +33,7 @@ import { replaceListUrlState } from '@/lib/list-url-state'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import type { PaymentMethod, SupplierPayableStatus } from '@/lib/domain-types'
+import { useShopAccess } from '@/components/shop/shop-access-context'
 
 type PayableStatus = SupplierPayableStatus
 
@@ -80,6 +81,9 @@ interface OlibSotdimRow {
 export default function OlibSotdimClient({ initialSearch, initialPage }: { initialSearch: string; initialPage: number }) {
   const { currency } = useShopCurrency()
   const scope = useAuthenticatedQueryScope()
+  const { can } = useShopAccess()
+  const canManage = can('OLIB_MANAGE')
+  const canReceivePayment = can('PAYMENT_RECEIVE')
   const [search, setSearch] = useState(initialSearch)
   const [committedSearch, setCommittedSearch] = useState(initialSearch)
   const [page, setPage] = useState(initialPage)
@@ -176,11 +180,13 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
           <h1 className="text-xl font-bold text-zinc-900">Olib-sotdim</h1>
           <p className="text-sm text-zinc-500 mt-0.5">Boshqa do&apos;kondan olib sotilgan qurilmalar va yetkazib beruvchi qarzlari</p>
         </div>
-        <Link href="/shop/olib-sotdim/new">
-          <Button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">
-            + Olib-sotdim
-          </Button>
-        </Link>
+        {canManage && (
+          <Link href="/shop/olib-sotdim/new">
+            <Button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">
+              + Olib-sotdim
+            </Button>
+          </Link>
+        )}
       </div>
 
       <div className="flex max-w-md gap-2">
@@ -236,7 +242,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
               <div><dt className="text-zinc-400">Farq</dt><dd className={`mt-0.5 font-medium ${row.profit < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{fmt(row.profit, row.contractCurrency)}</dd></div>
               <div><dt className="text-zinc-400">Sana</dt><dd className="mt-0.5 text-zinc-700">{uzDate(row.createdAt)}</dd></div>
             </dl>
-            {(row.status === 'PENDING' || row.status === 'OVERDUE') && (
+            {canReceivePayment && (row.status === 'PENDING' || row.status === 'OVERDUE') && (
               <Button variant="outline" className="h-10 w-full" onClick={() => openPay(row)}>
                 To&apos;landi deb belgilash
               </Button>
@@ -291,7 +297,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                     </span>
                   </td>
                   <td className="px-4 py-3">
-                    {(row.status === 'PENDING' || row.status === 'OVERDUE') && (
+                    {canReceivePayment && (row.status === 'PENDING' || row.status === 'OVERDUE') && (
                       <button
                         type="button"
                         onClick={() => openPay(row)}

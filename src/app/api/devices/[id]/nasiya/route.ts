@@ -9,7 +9,7 @@
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { createNasiyaSchema } from '@/lib/validations'
 import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
@@ -19,17 +19,18 @@ import { logger } from '@/lib/logger'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
-import { normalizePhone } from '@/lib/phone'
+import { CustomerSelectionError, resolveCustomerSelection } from '@/lib/server/customer-selection'
 import { createMoneyInputConverter, moneyInputMeta, type MoneyInputResult } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
+import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('NASIYA_CREATE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
 
     const {
-      customerName, customerPhone, passportPhotoUrl,
+      customerMode, customerId, customerName, customerPhone, passportPhotoUrl,
       totalAmount, downPayment, months, interestPercent,
       monthlyPayment: monthlyPaymentOverrideInput, useMonthlyPaymentOverride,
       startDate, paymentMethod, note,
@@ -59,10 +60,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currency = await getShopCurrencyContext(shopId)
-    if (passportPhotoUrl && !passportPhotoUrl.startsWith(`shops/${shopId}/passports/`)) {
-      return badRequest("Pasport rasmi boshqa do'konga tegishli")
+    const passportPhotoKey = passportPhotoUrl
+      ? resolvePrivateUploadReference({
+          value: passportPhotoUrl,
+          shopId,
+          kind: 'passport',
+          allowLegacyRawKey: true,
+        }) ?? undefined
+      : undefined
+    if (passportPhotoUrl && !passportPhotoKey) {
+      return badRequest("Pasport rasmi boshqa do'konga tegishli yoki havola muddati tugagan")
     }
-    const normalizedPhone = normalizePhone(customerPhone)
     let totalInput: MoneyInputResult
     let downPaymentInput: MoneyInputResult
     let monthlyPaymentOverrideUzs: number | undefined
@@ -150,34 +158,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
       if (reserved.count !== 1) throw { status: 409, message: "Qurilma allaqachon sotilgan" }
 
-      const existingCustomer = await tx.customer.findFirst({
-        where: {
-          shopId,
-          deletedAt: null,
-          OR: [
-            ...(normalizedPhone ? [{ normalizedPhone }] : []),
-            { phone: customerPhone },
-          ],
-        },
+      const customer = await resolveCustomerSelection(tx, {
+        shopId,
+        mode: customerMode,
+        customerId,
+        customerName,
+        customerPhone,
+        passportPhotoUrl: passportPhotoKey,
+        requirePassportPhoto: true,
       })
-      const customer = existingCustomer
-        ? await tx.customer.update({
-            where: { id: existingCustomer.id },
-            data: {
-              name: customerName,
-              normalizedPhone,
-              passportPhotoUrl: passportPhotoUrl ?? existingCustomer.passportPhotoUrl,
-            },
-          })
-        : await tx.customer.create({
-            data: {
-              shopId,
-              name: customerName,
-              phone: customerPhone,
-              normalizedPhone,
-              passportPhotoUrl,
-            },
-          })
 
       const nasiya = await tx.nasiya.create({
         data: {
@@ -255,8 +244,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
       const nasiyaMessage = nasiyaCreatedMessage({
         shopName: device.shop.name,
-        customerName,
-        customerPhone,
+        customerName: customer.name,
+        customerPhone: customer.phone,
         device: presentDeviceSpecs(device),
         totalAmount: amounts.totalAmount,
         downPayment: amounts.downPayment,
@@ -277,6 +266,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             type: 'NASIYA',
             message: nasiyaMessage,
             telegramId: admin.telegramId!,
+            recipientShopAdminId: admin.id,
             scheduledAt: new Date(),
             relatedId: nasiya.id,
             relatedType: 'Nasiya',
@@ -293,7 +283,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           targetType: 'Nasiya',
           targetId: nasiya.id,
           newValue: {
-            customerName,
+            customerId: customer.id,
+            customerName: customer.name,
             totalAmount: amounts.totalAmount,
             inputTotalAmount: totalAmount,
             downPayment: amounts.downPayment,
@@ -319,13 +310,18 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     return created(result, "Nasiya muvaffaqiyatli yaratildi")
   } catch (err: unknown) {
+    if (err instanceof CustomerSelectionError) {
+      if (err.status === 404) return notFound(err.message)
+      if (err.status === 409) return conflict(err.message)
+      return badRequest(err.message)
+    }
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
     }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      return conflict('Bu telefon raqam bilan faol mijoz allaqachon mavjud')
+      return conflict('Bu telefon bilan faol mijoz mavjud. Uni qidiruvdan tanlang; mijozlar avtomatik birlashtirilmaydi.')
     }
     logger.error('[POST /api/devices/[id]/nasiya]', { event: 'api.route_error', error: err })
     return serverError()

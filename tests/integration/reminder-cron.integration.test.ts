@@ -28,7 +28,7 @@ async function resetBusinessData() {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "ReminderGenerationState", "AuthSession", "ChangeEvent", "OpsEvent", "Log", "Notification",
-      "ReturnRefundAllocation", "DeviceReturn", "NasiyaDeferral", "NasiyaPayment", "NasiyaSchedule", "Nasiya",
+      "ReturnRefundAllocation", "DeviceReturn", "NasiyaResolutionEvent", "NasiyaDeferral", "NasiyaPayment", "NasiyaSchedule", "Nasiya",
       "SupplierPayable", "SalePayment", "Sale", "Customer", "DeviceImei", "Device",
       "Supplier", "ShopAdmin", "ShopPayment", "CurrencyRate", "Shop", "SuperAdmin"
     RESTART IDENTITY CASCADE
@@ -70,7 +70,7 @@ describe('daily reminder generation against PostgreSQL', () => {
         createdById: owner.id,
       },
     })
-    await prisma.shopAdmin.create({
+    const admin = await prisma.shopAdmin.create({
       data: {
         shopId: shop.id,
         name: 'Cron admin',
@@ -81,11 +81,42 @@ describe('daily reminder generation against PostgreSQL', () => {
         telegramVerifiedAt: new Date('2026-07-01T00:00:00.000Z'),
       },
     })
+    await prisma.shop.update({
+      where: { id: shop.id },
+      data: {
+        ownerAdminId: admin.id,
+        ownershipStatus: 'RESOLVED',
+        ownershipResolvedAt: new Date('2026-07-01T00:00:00.000Z'),
+        ownershipResolvedById: owner.id,
+      },
+    })
+    await prisma.shopPackageVersion.create({
+      data: {
+        shopId: shop.id,
+        effectiveOn: new Date('2026-01-01T00:00:00.000Z'),
+        basePrice: 0,
+        currency: 'UZS',
+        discountAmount: 0,
+        pricingNeedsReview: false,
+        note: 'Reminder integration package',
+        createdById: owner.id,
+        features: {
+          create: [
+            'INVENTORY', 'CASH_SALES', 'NASIYA', 'OLIB_SOTDIM', 'CUSTOMER_CRM',
+            'TELEGRAM', 'REMINDERS', 'REPORTS', 'IMPORTS', 'EXPORTS', 'STAFF_ACCESS',
+          ].map((featureCode) => ({ featureCode, enabled: true, recurringPrice: 0 })),
+        },
+      },
+    })
     const customer = await prisma.customer.create({
       data: { shopId: shop.id, name: 'Cron customer', phone: '+998901414143', normalizedPhone: '998901414143' },
     })
 
-    async function overdueContract(suffix: string, returnedAt: Date | null) {
+    async function overdueContract(
+      suffix: string,
+      returnedAt: Date | null,
+      resolutionState: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF' = 'ACTIVE',
+    ) {
       const device = await prisma.device.create({
         data: {
           shopId: shop.id,
@@ -112,6 +143,8 @@ describe('daily reminder generation against PostgreSQL', () => {
           monthlyPayment: 1_000,
           startDate: new Date('2026-07-01T00:00:00.000Z'),
           status: 'OVERDUE',
+          resolutionState,
+          resolutionUpdatedAt: resolutionState === 'ACTIVE' ? null : new Date('2026-07-12T00:00:00.000Z'),
           reminderEnabled: true,
           contractTotalAmount: 1_000,
           contractBaseRemainingAmount: 1_000,
@@ -139,6 +172,8 @@ describe('daily reminder generation against PostgreSQL', () => {
 
     const active = await overdueContract('active', null)
     const returned = await overdueContract('returned', new Date('2026-07-11T00:00:00.000Z'))
+    const archived = await overdueContract('archived', null, 'ARCHIVED')
+    const writtenOff = await overdueContract('written-off', null, 'WRITTEN_OFF')
 
     vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-07-13T08:00:00.000Z').getTime())
     expect((await callCron()).status).toBe(200)
@@ -155,5 +190,7 @@ describe('daily reminder generation against PostgreSQL', () => {
     expect(activeRows).toHaveLength(2)
     expect(new Set(activeRows.map(({ dedupeKey }) => dedupeKey?.split(':')[1])).size).toBe(2)
     expect(await prisma.notification.count({ where: { relatedId: returned.id } })).toBe(0)
+    expect(await prisma.notification.count({ where: { relatedId: archived.id } })).toBe(0)
+    expect(await prisma.notification.count({ where: { relatedId: writtenOff.id } })).toBe(0)
   })
 })

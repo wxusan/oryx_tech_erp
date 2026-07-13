@@ -622,6 +622,16 @@ describe('adversarial notification and identity persistence', () => {
 
   it('reclaims a PROCESSING notification whose claim timestamp was never persisted', async () => {
     const { shop } = await seedShop('notification_claim')
+    const recipient = await prisma.shopAdmin.create({
+      data: {
+        shopId: shop.id,
+        name: 'Notification claim recipient',
+        phone: '+998905555552',
+        login: 'notification_claim_recipient',
+        telegramId: '123456789',
+        passwordHash: 'audit-only',
+      },
+    })
     const future = new Date(Date.now() + 60 * 60 * 1000)
     const notification = await prisma.notification.create({
       data: {
@@ -629,6 +639,7 @@ describe('adversarial notification and identity persistence', () => {
         type: 'AUDIT',
         message: 'No customer data',
         telegramId: '123456789',
+        recipientShopAdminId: recipient.id,
         status: 'PROCESSING',
         scheduledAt: new Date(Date.now() - 60_000),
         lastAttemptAt: null,

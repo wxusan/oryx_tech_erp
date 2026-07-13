@@ -10,7 +10,7 @@
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-auth'
 import { markSupplierPayablePaidSchema } from '@/lib/validations'
 import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -29,7 +29,7 @@ const PAYABLE_NOT_OPEN_MESSAGE = "Faqat kutilayotgan yoki muddati o'tgan qarzdor
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermissionAndFeature('PAYMENT_RECEIVE', 'OLIB_SOTDIM')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -101,6 +101,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
             type: 'SUPPLIER_PAYABLE_PAID',
             message,
             telegramId: admin.telegramId!,
+            recipientShopAdminId: admin.id,
             scheduledAt: new Date(),
             relatedId: id,
             relatedType: 'SupplierPayable',

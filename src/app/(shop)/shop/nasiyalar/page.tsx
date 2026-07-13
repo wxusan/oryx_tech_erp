@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireCurrentShopPermission } from '@/lib/api-auth'
 import { getShopNasiyalarList } from '@/lib/server/shop-lists'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import NasiyalarClient from './nasiyalar-client'
@@ -17,21 +17,26 @@ interface NasiyalarPageProps {
 const PER_PAGE = 25
 
 export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps) {
-  const guarded = await requireApiSession()
-  if (!guarded.ok || !guarded.shopId) redirect('/shop/login')
+  const guarded = await requireCurrentShopPermission('NASIYA_VIEW')
+  if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
 
   const params = await searchParams
   const status = Array.isArray(params?.status) ? params?.status[0] : params?.status
   const initialSearch = scalarParam(params?.q).slice(0, 100)
   const initialPage = positivePage(params?.page)
-  const validStatuses = ['ACTIVE', 'OVERDUE', 'COMPLETED', 'CANCELLED'] as const
+  const validStatuses = ['ACTIVE', 'OVERDUE', 'COMPLETED', 'CANCELLED', 'ARCHIVED', 'WRITTEN_OFF'] as const
   const initialFilter = validStatuses.includes(status as (typeof validStatuses)[number])
     ? (status as (typeof validStatuses)[number])
     : 'Barchasi'
   const cursor = await latestChangeCursorForSession(guarded.session)
   const [{ items: nasiyalar, total }, currency] = await Promise.all([
     getShopNasiyalarList(guarded.shopId, {
-      status: initialFilter === 'Barchasi' ? undefined : initialFilter,
+      status: initialFilter === 'Barchasi' || initialFilter === 'ARCHIVED' || initialFilter === 'WRITTEN_OFF'
+        ? undefined
+        : initialFilter,
+      resolutionState: initialFilter === 'ARCHIVED' || initialFilter === 'WRITTEN_OFF'
+        ? initialFilter
+        : undefined,
       search: initialSearch || undefined,
       skip: (initialPage - 1) * PER_PAGE,
       take: PER_PAGE,

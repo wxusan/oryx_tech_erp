@@ -12,20 +12,25 @@ function read(rel: string): string {
  * total, no next/prev). Item 1 — mobile card view alongside the desktop
  * table.
  */
-describe('GET /api/customers: real pagination envelope', () => {
+describe('customer list query: real pagination envelope', () => {
   const route = read('src/app/api/customers/route.ts')
+  const query = read('src/lib/server/customer-list.ts')
+  const searchRoute = read('src/app/api/customers/search/route.ts')
 
   it('returns items/total/skip/take (same envelope shape /api/logs already established)', () => {
-    expect(route).toContain('ok({ items: withTrust, total, skip, take }')
+    expect(query).toContain('return { items, total, skip: input.skip, take: input.take }')
+    expect(route).toContain('return ok(data, "Mijozlar ro\'yxati")')
+    expect(searchRoute).toContain("const response = ok(data, 'Mijoz qidiruvi')")
   })
 
   it('runs count() with the exact same where clause as findMany, in parallel', () => {
-    expect(route).toContain('prisma.customer.count({ where })')
-    expect(route).toContain('Promise.all([')
+    expect(query).toContain('prisma.customer.count({ where })')
+    expect(query).toContain('Promise.all([')
   })
 
   it('page size is a real per-page size, not the old 200/500 load-everything default', () => {
     expect(route).toContain("Number(searchParams.get('take') ?? 25)")
+    expect(searchRoute).toContain('take: z.number().int().min(1).max(100).default(25)')
   })
 })
 
@@ -39,7 +44,18 @@ describe('mijozlar page: page state, total, and a submit-triggered search that r
   })
 
   it('a new search always resets to page 1', () => {
-    expect(page).toContain('function submitSearch() {\n    loadCustomers(search, 1)')
+    expect(page).toContain('function submitSearch() {\n    setCommittedSearch(search.trim())')
+    expect(page).toContain('loadPage(1)')
+  })
+
+  it('keeps the private search in a POST body and out of URL/history/query keys', () => {
+    expect(page).toContain("'/api/customers/search'")
+    expect(page).toContain('customerSearchRequest({')
+    expect(read('src/lib/customer-search-transport.ts')).toContain("method: 'POST'")
+    expect(page).toContain('requestRevision: searchRevision')
+    expect(page).not.toContain('search: committedSearch,\n      page,')
+    expect(page).toContain('replaceListUrlState({ q: null, page')
+    expect(page).not.toContain('replaceListUrlState({ q: query')
   })
 
   it('reads items/total from the new response envelope, not a raw array', () => {

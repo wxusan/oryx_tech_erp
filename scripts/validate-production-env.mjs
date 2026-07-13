@@ -39,6 +39,8 @@ const telegramToken = required('TELEGRAM_BOT_TOKEN')
 const telegramWebhookSecret = required('TELEGRAM_WEBHOOK_SECRET')
 const supabaseUrl = required('SUPABASE_URL')
 const supabaseServiceRoleKey = required('SUPABASE_SERVICE_ROLE_KEY')
+const customerPiiEncryptionKey = required('CUSTOMER_PII_ENCRYPTION_KEY')
+const customerPiiSearchKey = required('CUSTOMER_PII_SEARCH_KEY')
 required('SUPABASE_PRIVATE_BUCKET')
 
 validUrl('DATABASE_URL', databaseUrl, ['postgres:', 'postgresql:'])
@@ -49,6 +51,8 @@ minimumLength('AUTH_SECRET/NEXTAUTH_SECRET', authSecret, 32)
 minimumLength('CRON_SECRET', cronSecret, 16)
 minimumLength('TELEGRAM_WEBHOOK_SECRET', telegramWebhookSecret, 16)
 minimumLength('SUPABASE_SERVICE_ROLE_KEY', supabaseServiceRoleKey, 20)
+minimumLength('CUSTOMER_PII_ENCRYPTION_KEY', customerPiiEncryptionKey, 32)
+minimumLength('CUSTOMER_PII_SEARCH_KEY', customerPiiSearchKey, 32)
 
 if (telegramToken && !/^\d+:[A-Za-z0-9_-]{20,}$/.test(telegramToken)) {
   errors.push('TELEGRAM_BOT_TOKEN has an invalid shape')

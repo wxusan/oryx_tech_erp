@@ -15,6 +15,7 @@ async function cleanupFixtures() {
   await prisma.authSession.deleteMany({ where: { id: { startsWith: 'retention-' } } })
   await prisma.log.deleteMany({ where: { action: { startsWith: 'RETENTION_' } } })
   await prisma.opsEvent.deleteMany({ where: { event: { startsWith: 'retention.' } } })
+  await prisma.shopAdmin.deleteMany({ where: { shopId: { in: shopIds } } })
   await prisma.shop.deleteMany({ where: { id: { in: shopIds } } })
   await prisma.superAdmin.deleteMany({ where: { login: 'retention-owner' } })
 }
@@ -45,6 +46,16 @@ describe('operational retention against PostgreSQL', () => {
         createdById: owner.id,
       },
     })
+    const recipient = await prisma.shopAdmin.create({
+      data: {
+        shopId: shop.id,
+        name: 'Retention recipient',
+        phone: '+998901111112',
+        login: 'retention-recipient',
+        telegramId: '10001',
+        passwordHash: 'integration-only',
+      },
+    })
 
     await Promise.all([
       prisma.notification.create({
@@ -53,6 +64,7 @@ describe('operational retention against PostgreSQL', () => {
           type: 'RETENTION_SENT',
           message: 'terminal old row',
           telegramId: '10001',
+          recipientShopAdminId: recipient.id,
           status: 'SENT',
           scheduledAt: old,
           createdAt: old,
@@ -64,6 +76,7 @@ describe('operational retention against PostgreSQL', () => {
           type: 'RETENTION_PENDING',
           message: 'retryable old row',
           telegramId: '10002',
+          recipientShopAdminId: recipient.id,
           status: 'PENDING',
           scheduledAt: old,
           createdAt: old,
@@ -75,6 +88,7 @@ describe('operational retention against PostgreSQL', () => {
           type: 'RETENTION_RECENT',
           message: 'recent terminal row',
           telegramId: '10003',
+          recipientShopAdminId: recipient.id,
           status: 'CANCELLED',
           scheduledAt: recent,
           createdAt: recent,

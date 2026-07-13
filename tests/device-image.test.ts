@@ -2,16 +2,18 @@ import { describe, it, expect } from 'vitest'
 import { getDeviceImageSrc } from '@/lib/device-image'
 
 describe('getDeviceImageSrc', () => {
-  it('proxies a raw private-storage object key through the uploads endpoint', () => {
-    expect(getDeviceImageSrc('shops/shop-1/devices/abc.jpg')).toBe(
-      '/api/uploads/device?key=shops%2Fshop-1%2Fdevices%2Fabc.jpg',
+  it('never turns a raw private-storage object key into a browser URL', () => {
+    expect(getDeviceImageSrc('shops/shop-1/devices/abc.jpg')).toBe('')
+  })
+
+  it('normalizes an opaque reference proxy URL to a same-origin URL', () => {
+    expect(getDeviceImageSrc('https://example.com/api/uploads/device?reference=v1.opaque.token')).toBe(
+      '/api/uploads/device?reference=v1.opaque.token',
     )
   })
 
-  it('collapses an already-absolute uploads-endpoint URL back to its path + query', () => {
-    expect(getDeviceImageSrc('https://example.com/api/uploads/device?key=shops%2Fshop-1%2Fdevices%2Fabc.jpg')).toBe(
-      '/api/uploads/device?key=shops%2Fshop-1%2Fdevices%2Fabc.jpg',
-    )
+  it('rejects a legacy proxy URL that exposes the storage key', () => {
+    expect(getDeviceImageSrc('https://example.com/api/uploads/device?key=shops%2Fshop-1%2Fdevices%2Fabc.jpg')).toBe('')
   })
 
   it('returns an unrelated absolute URL unchanged', () => {

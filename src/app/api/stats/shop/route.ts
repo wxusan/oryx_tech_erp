@@ -7,14 +7,14 @@
  */
 
 import { NextRequest } from 'next/server'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, serverError } from '@/lib/api-helpers'
 import { getShopStats } from '@/lib/server/shop-stats'
 import { logger } from '@/lib/logger'
 
 export async function GET(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('REPORT_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

@@ -16,7 +16,7 @@ import { NextRequest, after } from 'next/server'
 import { randomBytes } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession } from '@/lib/api-auth'
+import { requireShopPermissionAndFeature } from '@/lib/api-auth'
 import { importNasiyaSchema } from '@/lib/validations'
 import { generateImportSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, conflict, forbidden, serverError, tooManyRequests } from '@/lib/api-helpers'
@@ -32,10 +32,11 @@ import { getShopCurrencyContext } from '@/lib/server/currency'
 import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
 import { formatDeviceStorage, normalizeImei } from '@/lib/device-specs'
+import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 
 export async function POST(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermissionAndFeature('IMPORT_DATA', 'NASIYA')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -58,6 +59,18 @@ export async function POST(req: NextRequest) {
     }
     const data = parsed.data
     const storage = formatDeviceStorage(data) || null
+
+    const passportPhotoKey = data.passportPhotoUrl
+      ? resolvePrivateUploadReference({
+          value: data.passportPhotoUrl,
+          shopId,
+          kind: 'passport',
+          allowLegacyRawKey: true,
+        })
+      : undefined
+    if (data.passportPhotoUrl && !passportPhotoKey) {
+      return badRequest("Pasport rasmi boshqa do'konga tegishli yoki havola muddati tugagan")
+    }
 
     const enteredImei = data.imei ? normalizeImei(data.imei) ?? '' : ''
     const secondaryImei = data.secondaryImei ? normalizeImei(data.secondaryImei) : null
@@ -135,6 +148,7 @@ export async function POST(req: NextRequest) {
         deletedAt: null,
         isImported: true,
         status: { not: 'CANCELLED' },
+        resolutionState: { not: 'WRITTEN_OFF' },
         remainingAtImport: Math.round(remainingDebtInput.amountUzs),
         monthlyPayment: Math.round(monthlyPaymentInput.amountUzs),
         ...(data.originalSaleDate ? { originalSaleDate: data.originalSaleDate } : {}),
@@ -172,10 +186,22 @@ export async function POST(req: NextRequest) {
       const customer = existingCustomer
         ? await tx.customer.update({
             where: { id: existingCustomer.id },
-            data: { name: data.customerName, normalizedPhone },
+            data: {
+              name: data.customerName,
+              normalizedPhone,
+              ...(!existingCustomer.passportPhotoUrl && passportPhotoKey
+                ? { passportPhotoUrl: passportPhotoKey }
+                : {}),
+            },
           })
         : await tx.customer.create({
-            data: { shopId, name: data.customerName, phone: data.customerPhone, normalizedPhone },
+            data: {
+              shopId,
+              name: data.customerName,
+              phone: data.customerPhone,
+              normalizedPhone,
+              passportPhotoUrl: passportPhotoKey,
+            },
           })
 
       // Device exists only to carry the debt — SOLD_NASIYA, cost 0, imported.
@@ -321,6 +347,7 @@ export async function POST(req: NextRequest) {
             type: 'NASIYA_IMPORTED',
             message,
             telegramId: admin.telegramId!,
+            recipientShopAdminId: admin.id,
             scheduledAt: new Date(),
             relatedId: nasiya.id,
             relatedType: 'Nasiya',

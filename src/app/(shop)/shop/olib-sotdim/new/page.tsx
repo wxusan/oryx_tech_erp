@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { navigateAfterMutation } from '@/lib/client-events'
@@ -19,11 +19,17 @@ import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import { ArrowLeft, Loader2, Check } from 'lucide-react'
 import type { PaymentMethod } from '@/lib/domain-types'
-import { DeviceImagePicker } from '@/components/shop/device-image-picker'
+import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
+import { CustomerCombobox, type CustomerPickerOption } from '@/components/shop/customer-combobox'
 
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024
-const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 export default function NewOlibSotdimPage() {
+  const { can } = useShopAccess()
+  if (!can('OLIB_MANAGE')) return <ShopAccessDenied />
+  return <AuthorizedNewOlibSotdimPage />
+}
+
+function AuthorizedNewOlibSotdimPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
   const today = tashkentTodayInputValue()
@@ -41,11 +47,11 @@ export default function NewOlibSotdimPage() {
   const [imei, setImei] = useState('')
   const [secondaryImei, setSecondaryImei] = useState('')
   const [deviceNote, setDeviceNote] = useState('')
-  const [imageFiles, setImageFiles] = useState<File[]>([])
-  const imagePreviews = useMemo(() => imageFiles.map((file) => URL.createObjectURL(file)), [imageFiles])
-  useEffect(() => {
-    return () => imagePreviews.forEach((preview) => URL.revokeObjectURL(preview))
-  }, [imagePreviews])
+  const imageSelection = useImageSelection({
+    mode: 'multiple',
+    uploadEndpoint: '/api/uploads/device',
+    maxFiles: 10,
+  })
 
   // Section 2 — supplier ("kimdan olindi")
   const [supplierName, setSupplierName] = useState('')
@@ -65,6 +71,8 @@ export default function NewOlibSotdimPage() {
   // Section 3 — customer ("kimga sotildi")
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
+  const [customerMode, setCustomerMode] = useState<'PICK' | 'EXISTING' | 'NEW'>('PICK')
+  const [selectedCustomer, setSelectedCustomer] = useState<CustomerPickerOption | null>(null)
   const [customerPhoneError, setCustomerPhoneError] = useState('')
   const customerPhoneRef = useRef<HTMLInputElement>(null)
 
@@ -78,28 +86,6 @@ export default function NewOlibSotdimPage() {
   const [note, setNote] = useState('')
 
   const fmt = (n: number) => formatUserFacingMoney({ amount: n, amountCurrency: currency.currency, displayCurrency: currency.currency, rate: currency.usdUzsRate })
-
-  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? [])
-    e.target.value = ''
-    if (files.length === 0) return
-    const invalidType = files.find((file) => !ALLOWED_IMAGE_TYPES.has(file.type))
-    if (invalidType) {
-      setSubmitError('Faqat JPG, PNG yoki WEBP rasm yuklash mumkin')
-      return
-    }
-    const oversized = files.find((file) => file.size > MAX_IMAGE_SIZE)
-    if (oversized) {
-      setSubmitError('Har bir rasm hajmi 5 MB dan oshmasligi kerak')
-      return
-    }
-    setSubmitError('')
-    setImageFiles((prev) => [...prev, ...files])
-  }
-
-  function removeImage(index: number) {
-    setImageFiles((prev) => prev.filter((_, i) => i !== index))
-  }
 
   const profit = Number(salePrice || 0) - Number(purchasePrice || 0)
   const priceWarning = purchasePrice && salePrice && Number(salePrice) < Number(purchasePrice)
@@ -118,43 +104,26 @@ export default function NewOlibSotdimPage() {
     (!supplierPaidNow || !!supplierPaymentMethod) &&
     (supplierPaidNow || supplierDueDate.trim().length > 0) &&
     (!earlyReminder || (Number(earlyReminderDays) >= 1 && Number(earlyReminderDays) <= 60)) &&
-    customerName.trim().length >= 2 &&
-    isValidPhone(customerPhone) &&
+    (customerMode === 'EXISTING' ? Boolean(selectedCustomer) : customerMode === 'NEW' && customerName.trim().length >= 2 && isValidPhone(customerPhone)) &&
     salePrice.trim().length > 0 &&
     Number(salePrice) > 0 &&
     !!paymentMethod &&
     fullyPaid !== null &&
-    (fullyPaid || (partialAmount.trim().length > 0 && partialDate.trim().length > 0))
+    (fullyPaid || (partialAmount.trim().length > 0 && partialDate.trim().length > 0)) &&
+    !imageSelection.hasBlockingErrors
 
   function handleContinue() {
     if (!isValidPhone(supplierPhone)) {
       setSupplierPhoneError(PHONE_ERROR)
       return
     }
-    if (!isValidPhone(customerPhone)) {
+    if (customerMode === 'NEW' && !isValidPhone(customerPhone)) {
       setCustomerPhoneError(PHONE_ERROR)
       customerPhoneRef.current?.focus()
       return
     }
     if (!step1Valid) return
     setStep(2)
-  }
-
-  async function uploadDeviceImages() {
-    if (imageFiles.length === 0) return []
-    return Promise.all(
-      imageFiles.map(async (file) => {
-        const formData = new FormData()
-        formData.append('file', file)
-        const res = await fetch('/api/uploads/device', {
-          method: 'POST',
-          body: formData,
-        })
-        const json = await res.json()
-        if (!res.ok || !json.success) throw new Error(json.error || 'Qurilma rasmini yuklashda xatolik')
-        return json.data.key as string
-      }),
-    )
   }
 
   async function handleSave() {
@@ -166,7 +135,7 @@ export default function NewOlibSotdimPage() {
     setSubmitting(true)
     setSubmitError('')
     try {
-      const imageUrls = await uploadDeviceImages()
+      const imageUrls = await imageSelection.uploadAll()
       const res = await fetch('/api/olib-sotdim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -193,8 +162,10 @@ export default function NewOlibSotdimPage() {
           supplierReminderEnabled: !supplierPaidNow ? supplierReminderEnabled : undefined,
           earlyReminderEnabled: !supplierPaidNow ? earlyReminder : undefined,
           earlyReminderDays: !supplierPaidNow && earlyReminder ? Number(earlyReminderDays) : undefined,
-          customerName: customerName.trim(),
-          customerPhone: customerPhone.trim(),
+          customerMode: customerMode === 'EXISTING' ? 'EXISTING' : 'NEW',
+          customerId: selectedCustomer?.id,
+          customerName: customerMode === 'NEW' ? customerName.trim() : undefined,
+          customerPhone: customerMode === 'NEW' ? customerPhone.trim() : undefined,
           salePrice: Number(salePrice),
           paymentMethod,
           paidFully: fullyPaid,
@@ -305,12 +276,12 @@ export default function NewOlibSotdimPage() {
               >
                 <Input value={secondaryImei} onChange={(e) => setSecondaryImei(e.target.value)} placeholder="351234560012346" inputMode="numeric" maxLength={15} className="h-9 text-sm border-zinc-200 rounded font-mono" />
               </Field>
-              <DeviceImagePicker
+              <ImageSelectionField
                 inputId="olib-images"
-                label="Rasm (ixtiyoriy)"
-                previews={imagePreviews}
-                onChange={handleImageChange}
-                onRemove={removeImage}
+                label="Qurilma rasmlari (ixtiyoriy)"
+                mode="multiple"
+                selection={imageSelection}
+                disabled={submitting}
                 className="sm:col-span-2"
               />
               <Field label="Izoh" className="sm:col-span-2">
@@ -483,7 +454,37 @@ export default function NewOlibSotdimPage() {
             <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
               <span className="text-sm font-semibold text-zinc-900">3. Kimga sotildi</span>
             </div>
-            <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="p-4 space-y-4">
+              <div>
+                <label htmlFor="olib-customer-picker" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                  Mavjud mijozni tanlang yoki yangisini yarating <span aria-hidden="true" className="text-red-500">*</span>
+                </label>
+                <CustomerCombobox
+                  inputId="olib-customer-picker"
+                  selected={selectedCustomer}
+                  onSelect={(customer) => {
+                    setSelectedCustomer(customer)
+                    setCustomerMode('EXISTING')
+                    setCustomerName(customer.name)
+                    setCustomerPhone(customer.phone)
+                    setCustomerPhoneError('')
+                  }}
+                  onClear={() => {
+                    setSelectedCustomer(null)
+                    setCustomerMode('PICK')
+                    setCustomerName('')
+                    setCustomerPhone('')
+                  }}
+                  onCreateNew={(searchText) => {
+                    setSelectedCustomer(null)
+                    setCustomerMode('NEW')
+                    if (/\d/.test(searchText)) setCustomerPhone(searchText)
+                    else setCustomerName(searchText)
+                  }}
+                  disabled={submitting}
+                />
+              </div>
+              {customerMode === 'NEW' && <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <Field label="Mijoz ismi" required>
                 <Input
                   value={customerName}
@@ -503,6 +504,7 @@ export default function NewOlibSotdimPage() {
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
               </Field>
+              </div>}
             </div>
           </div>
 

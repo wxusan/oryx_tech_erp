@@ -6,7 +6,47 @@ import { Select as SelectPrimitive } from "@base-ui/react/select"
 import { cn } from "@/lib/utils"
 import { ChevronDownIcon, CheckIcon, ChevronUpIcon } from "lucide-react"
 
-const Select = SelectPrimitive.Root
+type InferredSelectItem = { value: unknown; label: React.ReactNode }
+
+function inferSelectItems(children: React.ReactNode): InferredSelectItem[] {
+  const items: InferredSelectItem[] = []
+
+  function visit(nodes: React.ReactNode) {
+    React.Children.forEach(nodes, (child) => {
+      if (!React.isValidElement(child)) return
+      const childProps = child.props as { value?: unknown; children?: React.ReactNode }
+      if (child.type === SelectItem && childProps.value !== undefined) {
+        items.push({ value: childProps.value, label: childProps.children })
+        return
+      }
+      if (childProps.children !== undefined) visit(childProps.children)
+    })
+  }
+
+  visit(children)
+  return items
+}
+
+/**
+ * Base UI intentionally renders the raw stored value unless Root receives an
+ * `items` label map. Infer that map from our SelectItem children so every
+ * shared select displays the same human label shown in its popup.
+ */
+function Select<Value, Multiple extends boolean | undefined = false>({
+  children,
+  items,
+  ...props
+}: SelectPrimitive.Root.Props<Value, Multiple>) {
+  const inferredItems = React.useMemo(
+    () => items ?? inferSelectItems(children),
+    [children, items],
+  )
+  return (
+    <SelectPrimitive.Root {...props} items={inferredItems}>
+      {children}
+    </SelectPrimitive.Root>
+  )
+}
 
 function SelectGroup({ className, ...props }: SelectPrimitive.Group.Props) {
   return (

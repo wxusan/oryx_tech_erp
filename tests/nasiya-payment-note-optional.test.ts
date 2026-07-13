@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
-import { addNasiyaPaymentSchema } from '@/lib/validations'
+import { addNasiyaPaymentSchema, deferNasiyaScheduleSchema } from '@/lib/validations'
 
 function read(rel: string): string {
   return readFileSync(resolve(process.cwd(), rel), 'utf8')
@@ -33,20 +33,19 @@ describe('addNasiyaPaymentSchema — Izoh is optional for a regular payment', ()
     expect(result.success).toBe(true)
   })
 
-  it('still requires a reason (>=5 chars) for the defer/carry-over flow specifically', () => {
-    const withoutReason = addNasiyaPaymentSchema.safeParse(
-      baseInput({ amount: 0, deferredToNext: true, delayedUntil: new Date('2026-08-08'), note: '' }),
-    )
+  it('the separate defer command requires a reason (>=5 chars)', () => {
+    const withoutReason = deferNasiyaScheduleSchema.safeParse({
+      nasiyaScheduleId: 'sched_1',
+      newDueDate: new Date('2026-08-08'),
+      reason: '',
+    })
     expect(withoutReason.success).toBe(false)
 
-    const withReason = addNasiyaPaymentSchema.safeParse(
-      baseInput({
-        amount: 0,
-        deferredToNext: true,
-        delayedUntil: new Date('2026-08-08'),
-        note: "Mijoz 10 kunga so'radi",
-      }),
-    )
+    const withReason = deferNasiyaScheduleSchema.safeParse({
+      nasiyaScheduleId: 'sched_1',
+      newDueDate: new Date('2026-08-08'),
+      reason: "Mijoz 10 kunga so'radi",
+    })
     expect(withReason.success).toBe(true)
   })
 })
@@ -55,18 +54,12 @@ describe('nasiya payment modal: Izoh is optional in the UI', () => {
   const source = read('src/components/shop/nasiya-payment-modal.tsx')
 
   it('does not show a required star on Izoh for a regular payment', () => {
-    expect(source).toContain('<Field label="Izoh" required={carryOver}>')
+    expect(source).toContain('<Field label="Izoh">')
   })
 
   it('canSubmit for a regular payment does not require a note length', () => {
     const canSubmitBlock = source.slice(source.indexOf('const canSubmit ='), source.indexOf('const canSubmit =') + 400)
-    // The non-carryOver branch must not gate on payNote length.
-    const nonCarryOverBranch = canSubmitBlock.split(': Boolean(')[1] ?? ''
-    expect(nonCarryOverBranch).not.toContain('payNote')
-  })
-
-  it('the carry-over/defer flow still requires a note (unchanged)', () => {
-    expect(source).toContain('payDate.trim() && selectedScheduleId && payNote.trim().length >= 5')
+    expect(canSubmitBlock).not.toContain('payNote')
   })
 
   it('submits an empty note as undefined, never a fake placeholder string', () => {

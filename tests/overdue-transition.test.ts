@@ -43,6 +43,7 @@ describe('transitionNasiyaToOverdue', () => {
         dedupeKey: 'OVERDUE:future',
         message: 'future',
         telegramId: '123',
+        recipientShopAdminId: 'admin-1',
         scheduledAt: cutoff,
       }],
     })
@@ -74,6 +75,7 @@ describe('transitionNasiyaToOverdue', () => {
         dedupeKey: 'OVERDUE:past',
         message: 'past',
         telegramId: '123',
+        recipientShopAdminId: 'admin-1',
         scheduledAt: cutoff,
       }],
     })
@@ -90,7 +92,7 @@ describe('transitionNasiyaToOverdue', () => {
       data: { status: 'OVERDUE' },
     }))
     expect(tx.nasiya.updateMany).toHaveBeenCalledWith({
-      where: { id: 'nasiya-1', shopId: 'shop-1', status: 'ACTIVE', deletedAt: null },
+      where: { id: 'nasiya-1', shopId: 'shop-1', status: 'ACTIVE', resolutionState: 'ACTIVE', deletedAt: null },
       data: { status: 'OVERDUE' },
     })
     expect(tx.changeEvent.create).toHaveBeenCalledWith(expect.objectContaining({
@@ -122,7 +124,7 @@ describe('transitionNasiyaToOverdue', () => {
       nasiyaId: 'nasiya-1',
       shopId: 'shop-1',
       overdueBefore: cutoff,
-      notifications: [{ dedupeKey: 'OVERDUE:again', message: 'again', telegramId: '123', scheduledAt: cutoff }],
+      notifications: [{ dedupeKey: 'OVERDUE:again', message: 'again', telegramId: '123', recipientShopAdminId: 'admin-1', scheduledAt: cutoff }],
     })).toBe(false)
 
     expect(tx.notification.upsert).toHaveBeenCalledTimes(1)

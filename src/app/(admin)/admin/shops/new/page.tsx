@@ -9,6 +9,10 @@ import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { Textarea } from '@/components/ui/textarea'
 import { Field } from '@/components/ui/field'
+import { ShopPackageEditor } from '@/components/admin/shop-package-editor'
+import { SHOP_FEATURE_CODES } from '@/lib/access-control'
+import type { ShopAccessMode, ShopPackageDraft } from '@/lib/shop-package-contract'
+import { tashkentTodayInputValue } from '@/lib/timezone'
 
 interface AdminForm {
   id: string
@@ -43,6 +47,19 @@ export default function NewShopPage() {
 
   // Admins
   const [admins, setAdmins] = useState<AdminForm[]>([makeAdmin()])
+  const [accessMode, setAccessMode] = useState<ShopAccessMode>('OWNER_ONLY')
+  const [initialPackage] = useState<ShopPackageDraft>(() => ({
+    effectiveOn: tashkentTodayInputValue(),
+    basePrice: 0,
+    currency: 'UZS',
+    discountAmount: 0,
+    note: "Boshlang'ich paket",
+    features: SHOP_FEATURE_CODES.map((featureCode) => ({
+      featureCode,
+      enabled: featureCode !== 'STAFF_ACCESS',
+      recurringPrice: 0,
+    })),
+  }))
 
   const [submitted, setSubmitted] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -58,7 +75,13 @@ export default function NewShopPage() {
   }
 
   const addAdmin = () => {
+    if (accessMode !== 'OWNER_AND_STAFF') return
     setAdmins((prev) => [...prev, makeAdmin()])
+  }
+
+  const changeAccessMode = (mode: ShopAccessMode) => {
+    setAccessMode(mode)
+    if (mode === 'OWNER_ONLY') setAdmins((current) => current.slice(0, 1))
   }
 
   const err = (val: string) => submitted && val.trim() === ''
@@ -75,12 +98,16 @@ export default function NewShopPage() {
       admin.password.length >= 10
     )
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const handleSubmit = async (packageDraft: ShopPackageDraft) => {
     setSubmitted(true)
     setFormError(null)
 
-    if (!formValid) return
+    if (!formValid) {
+      const message = "Do'kon va kirish profili maydonlarini tekshiring"
+      setFormError(message)
+      requestAnimationFrame(() => document.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus())
+      throw new Error(message)
+    }
 
     setSaving(true)
     try {
@@ -94,6 +121,8 @@ export default function NewShopPage() {
           shopNumber: shopNumber.trim(),
           address: address.trim() || undefined,
           note: note.trim() || undefined,
+          accessMode,
+          package: packageDraft,
           admins: admins.map((admin) => ({
             name: admin.name.trim(),
             phone: admin.phone.trim(),
@@ -111,10 +140,14 @@ export default function NewShopPage() {
           shopId: json.data?.id,
         })
       } else {
-        setFormError(json.error ?? "Do'kon yaratishda xatolik")
+        const message = json.error ?? "Do'kon yaratishda xatolik"
+        setFormError(message)
+        throw new Error(message)
       }
-    } catch {
-      setFormError('Xatolik yuz berdi')
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : 'Xatolik yuz berdi'
+      setFormError(message)
+      throw caught
     } finally {
       setSaving(false)
     }
@@ -137,9 +170,9 @@ export default function NewShopPage() {
         <span className="text-red-500">*</span> belgili maydonlar majburiy
       </p>
 
-      <form onSubmit={handleSubmit} className="space-y-5">
+      <div className="space-y-5">
         {formError && (
-          <div className="p-3 border border-red-200 bg-red-50 text-sm text-red-600">
+          <div role="alert" className="p-3 border border-red-200 bg-red-50 text-sm text-red-600">
             {formError}
           </div>
         )}
@@ -150,7 +183,7 @@ export default function NewShopPage() {
             <h2 className="text-sm font-semibold text-zinc-900">Do&apos;kon ma&apos;lumotlari</h2>
           </div>
           <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Do'kon nomi" required error={err(shopName) ? "Bu maydon to'ldirilishi shart" : undefined}>
+            <Field controlId="new-shop-name" label="Do'kon nomi" required error={err(shopName) ? "Bu maydon to'ldirilishi shart" : undefined}>
               <Input
                 placeholder="Masalan: Malika Electronics"
                 value={shopName}
@@ -161,7 +194,7 @@ export default function NewShopPage() {
                 ].join(' ')}
               />
             </Field>
-            <Field label="Egasining ismi" required error={err(ownerName) ? "Bu maydon to'ldirilishi shart" : undefined}>
+            <Field controlId="new-shop-owner-name" label="Egasining ismi" required error={err(ownerName) ? "Bu maydon to'ldirilishi shart" : undefined}>
               <Input
                 placeholder="To'liq ism"
                 value={ownerName}
@@ -172,7 +205,7 @@ export default function NewShopPage() {
                 ].join(' ')}
               />
             </Field>
-            <Field label="Tel raqami" required error={submitted && !isValidPhone(ownerPhone) ? "Telefon raqami noto'g'ri" : undefined}>
+            <Field controlId="new-shop-owner-phone" label="Tel raqami" required error={submitted && !isValidPhone(ownerPhone) ? "Telefon raqami noto'g'ri" : undefined}>
               <PhoneInput
                 value={ownerPhone}
                 onChange={setOwnerPhone}
@@ -182,7 +215,7 @@ export default function NewShopPage() {
                 ].join(' ')}
               />
             </Field>
-            <Field label="Do'kon raqami" required error={err(shopNumber) ? "Bu maydon to'ldirilishi shart" : undefined}>
+            <Field controlId="new-shop-number" label="Do'kon raqami" required error={err(shopNumber) ? "Bu maydon to'ldirilishi shart" : undefined}>
               <Input
                 placeholder="Masalan: 42"
                 value={shopNumber}
@@ -216,16 +249,18 @@ export default function NewShopPage() {
         <section className="border border-zinc-200 bg-white">
           <div className="px-5 py-4 border-b border-zinc-200 flex items-center justify-between">
             <div>
-              <h2 className="text-sm font-semibold text-zinc-900">Adminlar</h2>
-              <p className="text-xs text-zinc-400 mt-0.5">Kamida 1 ta admin qo&apos;shilishi kerak</p>
+              <h2 className="text-sm font-semibold text-zinc-900">Kirish profillari</h2>
+              <p className="text-xs text-zinc-400 mt-0.5">Birinchi profil do&apos;kon egasi hisoblanadi</p>
             </div>
-            <button
-              type="button"
-              onClick={addAdmin}
-              className="text-xs text-zinc-600 hover:text-zinc-900 border border-zinc-200 px-2.5 py-1.5 hover:bg-zinc-50 transition-colors"
-            >
-              + Yana admin qo&apos;shish
-            </button>
+            {accessMode === 'OWNER_AND_STAFF' && (
+              <button
+                type="button"
+                onClick={addAdmin}
+                className="text-xs text-zinc-600 hover:text-zinc-900 border border-zinc-200 px-2.5 py-1.5 hover:bg-zinc-50 transition-colors"
+              >
+                + Xodim qo&apos;shish
+              </button>
+            )}
           </div>
 
           <div className="divide-y divide-zinc-100">
@@ -236,19 +271,19 @@ export default function NewShopPage() {
                     <span className="w-5 h-5 bg-zinc-900 text-white text-[10px] font-bold flex items-center justify-center">
                       {idx + 1}
                     </span>
-                    <span className="text-xs font-medium text-zinc-600">Admin #{idx + 1}</span>
+                    <span className="text-xs font-medium text-zinc-600">{idx === 0 ? "Do'kon egasi" : `Xodim #${idx}`}</span>
                   </div>
                   <button
                     type="button"
                     onClick={() => removeAdmin(admin.id)}
-                    disabled={admins.length <= 1}
+                    disabled={idx === 0}
                     className="text-xs text-red-500 hover:text-red-700 disabled:opacity-30 disabled:pointer-events-none transition-colors"
                   >
                     O&apos;chirish
                   </button>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Ism" required error={err(admin.name) ? "Bu maydon to'ldirilishi shart" : undefined}>
+                  <Field controlId={`new-shop-admin-${admin.id}-name`} label="Ism" required error={err(admin.name) ? "Bu maydon to'ldirilishi shart" : undefined}>
                     <Input
                       placeholder="To'liq ism"
                       value={admin.name}
@@ -259,7 +294,7 @@ export default function NewShopPage() {
                       ].join(' ')}
                     />
                   </Field>
-                  <Field label="Tel" required error={submitted && !isValidPhone(admin.phone) ? "Telefon raqami noto'g'ri" : undefined}>
+                  <Field controlId={`new-shop-admin-${admin.id}-phone`} label="Tel" required error={submitted && !isValidPhone(admin.phone) ? "Telefon raqami noto'g'ri" : undefined}>
                     <PhoneInput
                       value={admin.phone}
                       onChange={(phone) => updateAdmin(admin.id, 'phone', phone)}
@@ -271,13 +306,14 @@ export default function NewShopPage() {
                   </Field>
                   <Field label="Telegram ID">
                     <Input
-                      placeholder="@username"
+                      placeholder="123456789"
+                      inputMode="numeric"
                       value={admin.telegramId}
-                      onChange={(e) => updateAdmin(admin.id, 'telegramId', e.target.value)}
+                      onChange={(e) => updateAdmin(admin.id, 'telegramId', e.target.value.replace(/\D/g, ''))}
                       className="h-8 text-sm rounded-none border-zinc-200"
                     />
                   </Field>
-                  <Field label="Login" required error={err(admin.login) ? "Bu maydon to'ldirilishi shart" : undefined}>
+                  <Field controlId={`new-shop-admin-${admin.id}-login`} label="Login" required error={err(admin.login) ? "Bu maydon to'ldirilishi shart" : undefined}>
                     <Input
                       placeholder="login"
                       value={admin.login}
@@ -288,7 +324,7 @@ export default function NewShopPage() {
                       ].join(' ')}
                     />
                   </Field>
-                  <Field label="Parol" required error={submitted && admin.password.length < 10 ? "Parol kamida 10 ta belgidan iborat bo'lishi kerak" : undefined} className="sm:col-span-2">
+                  <Field controlId={`new-shop-admin-${admin.id}-password`} label="Parol" required error={submitted && admin.password.length < 10 ? "Parol kamida 10 ta belgidan iborat bo'lishi kerak" : undefined} className="sm:col-span-2">
                     <Input
                       type="password"
                       placeholder="Kamida 10 ta belgi"
@@ -306,15 +342,15 @@ export default function NewShopPage() {
           </div>
         </section>
 
-        {/* Submit */}
-        <button
-          type="submit"
-          disabled={saving}
-          className="w-full h-10 bg-zinc-900 text-white text-sm font-medium hover:bg-zinc-700 transition-colors"
-        >
-          {saving ? 'Saqlanmoqda...' : "Do'konni yaratish"}
-        </button>
-      </form>
+        <ShopPackageEditor
+          initialValue={initialPackage}
+          onSubmit={handleSubmit}
+          onAccessModeChange={changeAccessMode}
+          isSaving={saving}
+          minimumEffectiveOn={initialPackage.effectiveOn}
+          submitLabel="Do'kon va paketni yaratish"
+        />
+      </div>
     </div>
   )
 }

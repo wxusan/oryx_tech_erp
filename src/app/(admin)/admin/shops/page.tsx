@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useSyncExternalStore } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useState, useSyncExternalStore } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -67,6 +67,7 @@ function getPaymentViewSnapshot(): PaymentView {
 export default function ShopsPage() {
   const scope = useAuthenticatedQueryScope()
   const [search, setSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [activeTab, setActiveTab] = useState<FilterTab>('barchasi')
   const paymentView = useSyncExternalStore(
     subscribeToLocation,
@@ -74,14 +75,23 @@ export default function ShopsPage() {
     () => 'all',
   )
 
+  useEffect(() => {
+    const timeout = window.setTimeout(() => setDebouncedSearch(search.trim()), 300)
+    return () => window.clearTimeout(timeout)
+  }, [search])
+
   const shopsQuery = useQuery({
-    queryKey: queryKeys.domain(scope, 'adminShops'),
+    queryKey: queryKeys.list(scope, 'adminShops', { search: debouncedSearch, status: activeTab }),
     queryFn: async ({ signal }) => {
-      const response = await fetch('/api/shops?includeDeleted=true', { signal, cache: 'no-store' })
+      const params = new URLSearchParams({ includeDeleted: 'true', take: '500' })
+      if (debouncedSearch) params.set('search', debouncedSearch)
+      if (activeTab !== 'barchasi') params.set('status', activeTab)
+      const response = await fetch(`/api/shops?${params.toString()}`, { signal, cache: 'no-store' })
       const json = await response.json() as { success: boolean; data?: Shop[]; error?: string }
       if (!response.ok || !json.success || !json.data) throw new Error(json.error ?? "Do'konlar yuklanmadi")
       return json.data
     },
+    placeholderData: keepPreviousData,
   })
   const shops = shopsQuery.data ?? []
   const loading = shopsQuery.isPending && !shopsQuery.data
@@ -90,7 +100,7 @@ export default function ShopsPage() {
   const filtered = shops
     .filter((s) => {
       const matchTab = activeTab === 'barchasi' || s.status === activeTab
-      const q = search.toLowerCase()
+      const q = debouncedSearch.toLowerCase()
       const matchSearch =
         !q ||
         s.name.toLowerCase().includes(q) ||
@@ -129,6 +139,7 @@ export default function ShopsPage() {
       {/* Search + Tabs */}
       <div className="flex flex-col sm:flex-row gap-3 mb-5">
         <Input
+          aria-label="Do'konlarni qidirish"
           placeholder="Do'kon nomi, egasi, tel bo'yicha..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}

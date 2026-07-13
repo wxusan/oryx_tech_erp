@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -19,10 +19,8 @@ import { useQueryClient } from '@tanstack/react-query'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { patchDeviceUpsert } from '@/lib/device-query-cache'
 import type { DeviceListItem } from '@/lib/device-list-contract'
-import { DeviceImagePicker } from '@/components/shop/device-image-picker'
-
-const MAX_IMAGE_SIZE = 5 * 1024 * 1024
-const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
+import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 
 interface FormData {
   model: string
@@ -40,6 +38,12 @@ interface FormData {
 }
 
 export default function NewDevicePage() {
+  const { can } = useShopAccess()
+  if (!can('INVENTORY_MANAGE')) return <ShopAccessDenied />
+  return <AuthorizedNewDevicePage />
+}
+
+function AuthorizedNewDevicePage() {
   const router = useRouter()
   const queryClient = useQueryClient()
   const queryScope = useAuthenticatedQueryScope()
@@ -60,65 +64,16 @@ export default function NewDevicePage() {
   })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [imageFiles, setImageFiles] = useState<File[]>([])
-  const imagePreviews = useMemo(() => imageFiles.map((file) => URL.createObjectURL(file)), [imageFiles])
-
-  useEffect(() => {
-    return () => imagePreviews.forEach((preview) => URL.revokeObjectURL(preview))
-  }, [imagePreviews])
+  const imageSelection = useImageSelection({
+    mode: 'multiple',
+    uploadEndpoint: '/api/uploads/device',
+    maxFiles: 10,
+  })
 
   const set = (field: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }))
 
-  const isValid = form.model.trim() && form.color.trim() && form.storage.trim() && form.conditionCode && form.purchasePrice.trim() && /^\d{15}$/.test(form.imei) && (!form.secondaryImei || /^\d{15}$/.test(form.secondaryImei))
-
-  function handleImageChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const files = Array.from(e.target.files ?? [])
-    e.target.value = ''
-    if (files.length === 0) return
-
-    const invalidType = files.find((file) => !ALLOWED_IMAGE_TYPES.has(file.type))
-    if (invalidType) {
-      setError('Faqat JPG, PNG yoki WEBP rasm yuklash mumkin')
-      return
-    }
-
-    const oversized = files.find((file) => file.size > MAX_IMAGE_SIZE)
-    if (oversized) {
-      setError('Har bir rasm hajmi 5 MB dan oshmasligi kerak')
-      return
-    }
-
-    setError('')
-    setImageFiles((prev) => [...prev, ...files])
-  }
-
-  function removeImage(index: number) {
-    setImageFiles((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  async function uploadDeviceImages() {
-    if (imageFiles.length === 0) return []
-
-    return Promise.all(
-      imageFiles.map(async (file) => {
-        const formData = new FormData()
-        formData.append('file', file)
-
-        const res = await fetch('/api/uploads/device', {
-          method: 'POST',
-          body: formData,
-        })
-        const json = await res.json()
-
-        if (!res.ok || !json.success) {
-          throw new Error(json.error || 'Qurilma rasmini yuklashda xatolik')
-        }
-
-        return json.data.key as string
-      }),
-    )
-  }
+  const isValid = form.model.trim() && form.color.trim() && form.storage.trim() && form.conditionCode && form.purchasePrice.trim() && /^\d{15}$/.test(form.imei) && (!form.secondaryImei || /^\d{15}$/.test(form.secondaryImei)) && !imageSelection.hasBlockingErrors
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -131,7 +86,7 @@ export default function NewDevicePage() {
       return
     }
     try {
-      const imageUrls = await uploadDeviceImages()
+      const imageUrls = await imageSelection.uploadAll()
       const res = await fetch('/api/devices', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -166,8 +121,8 @@ export default function NewDevicePage() {
       } else {
         setError(json.error || 'Saqlashda xatolik yuz berdi')
       }
-    } catch {
-      setError('Saqlashda xatolik yuz berdi')
+    } catch (submitError) {
+      setError(submitError instanceof Error ? submitError.message : 'Saqlashda xatolik yuz berdi')
     } finally {
       setLoading(false)
     }
@@ -301,7 +256,13 @@ export default function NewDevicePage() {
             <span className="text-sm font-semibold text-zinc-900">Qo'shimcha</span>
           </div>
           <div className="p-4 space-y-4">
-            <DeviceImagePicker inputId="device-images" previews={imagePreviews} onChange={handleImageChange} onRemove={removeImage} />
+            <ImageSelectionField
+              inputId="device-images"
+              label="Qurilma rasmlari"
+              mode="multiple"
+              selection={imageSelection}
+              disabled={loading}
+            />
 
             <Field label="Izoh">
               <Textarea

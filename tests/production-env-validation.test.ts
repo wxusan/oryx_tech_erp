@@ -17,6 +17,8 @@ const validEnvironment: TestEnvironment = {
   SUPABASE_URL: 'https://project.supabase.co',
   SUPABASE_SERVICE_ROLE_KEY: 'service-role-key-long-enough',
   SUPABASE_PRIVATE_BUCKET: 'oryx-private',
+  CUSTOMER_PII_ENCRYPTION_KEY: 'test-only-customer-pii-encryption-key-at-least-32-bytes',
+  CUSTOMER_PII_SEARCH_KEY: 'test-only-customer-pii-search-key-at-least-32-bytes',
   DATABASE_POOL_MAX: '5',
 }
 

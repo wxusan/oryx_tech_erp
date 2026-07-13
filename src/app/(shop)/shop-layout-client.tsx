@@ -2,31 +2,85 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, ScrollText, Settings } from 'lucide-react'
+import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, ScrollText, Settings, UserCog } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
-import { DueOverdueBanner } from '@/components/shop/due-overdue-banner'
+import { DueOverdueBanner, type DueOverdueSummary } from '@/components/shop/due-overdue-banner'
+import {
+  principalCan,
+  type ShopFeatureCode,
+  type ShopMemberKind,
+  type ShopPermissionCode,
+} from '@/lib/access-control'
+import { ShopAccessProvider } from '@/components/shop/shop-access-context'
 
 const navLinks = [
-  { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard, prefetch: true },
-  { href: '/shop/qurilmalar', label: 'Qurilmalar', icon: Smartphone, prefetch: true },
-  { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users, prefetch: false },
-  { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard, prefetch: true },
-  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus, prefetch: false },
-  { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3, prefetch: false },
-  { href: '/shop/logs', label: 'Loglar', icon: ScrollText, prefetch: false },
-  { href: '/shop/settings', label: 'Sozlamalar', icon: Settings, prefetch: false },
-]
+  { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard, prefetch: true, permission: null, anyPermissions: [] },
+  { href: '/shop/qurilmalar', label: 'Qurilmalar', icon: Smartphone, prefetch: true, permission: 'INVENTORY_VIEW', anyPermissions: [] },
+  { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users, prefetch: false, permission: 'CUSTOMER_VIEW', anyPermissions: [] },
+  { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard, prefetch: true, permission: 'NASIYA_VIEW', anyPermissions: [] },
+  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus, prefetch: false, permission: null, anyPermissions: ['INVENTORY_MANAGE', 'CASH_SALE_CREATE', 'NASIYA_CREATE', 'OLIB_MANAGE'] },
+  { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3, prefetch: false, permission: 'REPORT_VIEW', anyPermissions: [] },
+  { href: '/shop/logs', label: 'Loglar', icon: ScrollText, prefetch: false, permission: 'LOG_VIEW', anyPermissions: [] },
+  { href: '/shop/xodimlar', label: 'Xodimlar', icon: UserCog, prefetch: false, permission: 'MEMBER_MANAGE', anyPermissions: [] },
+  { href: '/shop/settings', label: 'Sozlamalar', icon: Settings, prefetch: false, permission: null, anyPermissions: [] },
+] satisfies Array<{
+  href: string
+  label: string
+  icon: typeof LayoutDashboard
+  prefetch: boolean
+  permission: ShopPermissionCode | null
+  anyPermissions: ShopPermissionCode[]
+}>
 
 function initials(name: string) {
   return name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'DA'
 }
 
-export function ShopLayoutClient({ children, shopName, adminName }: { children: React.ReactNode; shopName: string; adminName: string }) {
+export function ShopLayoutClient({
+  children,
+  shopName,
+  adminName,
+  memberKind,
+  enabledFeatures,
+  grantedPermissions,
+  legacyFullAccess,
+  sessionPolicy,
+  initialDueSummary,
+}: {
+  children: React.ReactNode
+  shopName: string
+  adminName: string
+  memberKind: ShopMemberKind
+  enabledFeatures: ShopFeatureCode[]
+  grantedPermissions: ShopPermissionCode[]
+  legacyFullAccess: boolean
+  sessionPolicy: 'IDLE_10_MINUTES' | 'REMEMBERED_30_DAYS'
+  initialDueSummary: DueOverdueSummary | null
+}) {
   const pathname = usePathname()
+  const principal = {
+    memberKind,
+    legacyFullAccess,
+    enabledFeatures: new Set(enabledFeatures),
+    grantedPermissions: new Set(grantedPermissions),
+  }
+  const visibleNavLinks = navLinks.filter((link) =>
+    (!link.permission || principalCan(principal, link.permission)) &&
+    (!link.anyPermissions.length || link.anyPermissions.some((permission) => principalCan(principal, permission))),
+  )
+  const canSeeReceivables = (
+    enabledFeatures.includes('CASH_SALES') && principalCan(principal, 'INVENTORY_VIEW')
+  ) || principalCan(principal, 'NASIYA_VIEW')
 
   return (
-    <div className="flex min-h-screen flex-col bg-zinc-50 md:h-screen md:flex-row md:overflow-hidden">
+    <ShopAccessProvider
+      memberKind={memberKind}
+      enabledFeatures={enabledFeatures}
+      grantedPermissions={grantedPermissions}
+      legacyFullAccess={legacyFullAccess}
+    >
+      <div className="flex min-h-screen flex-col bg-zinc-50 md:h-screen md:flex-row md:overflow-hidden">
       <aside className="flex w-full flex-shrink-0 flex-col border-b border-zinc-200 bg-white/95 md:w-64 md:border-b-0 md:border-r">
         <div className="px-4 py-5 border-b border-zinc-200">
           <div className="flex items-center justify-between gap-2">
@@ -39,7 +93,7 @@ export function ShopLayoutClient({ children, shopName, adminName }: { children: 
         </div>
 
         <nav className="flex gap-1 overflow-x-auto px-2 py-3 md:block md:flex-1 md:space-y-0.5">
-          {navLinks.map(({ href, label, icon: Icon, prefetch }) => {
+          {visibleNavLinks.map(({ href, label, icon: Icon, prefetch }) => {
             const isActive = pathname === href || pathname.startsWith(href + '/')
             return (
               <Link
@@ -68,21 +122,28 @@ export function ShopLayoutClient({ children, shopName, adminName }: { children: 
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
-        <header className="flex h-14 flex-shrink-0 items-center justify-end gap-2 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur sm:justify-between sm:px-6">
+        <header className="sticky top-0 z-40 flex h-14 flex-shrink-0 items-center justify-end gap-2 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur sm:justify-between sm:px-6">
           <span className="hidden text-sm font-medium text-zinc-900 sm:inline">Do&apos;kon portali</span>
           <div className="flex min-w-0 items-center gap-2">
-            <span className="max-w-32 truncate text-xs text-zinc-500 sm:max-w-40 sm:text-sm">{adminName}</span>
+            <div className="min-w-0 text-right">
+              <div className="max-w-32 truncate text-xs text-zinc-500 sm:max-w-40 sm:text-sm">{adminName}</div>
+              <div className="text-[10px] text-zinc-400">{memberKind === 'SHOP_OWNER' ? "Do'kon egasi" : 'Xodim'}</div>
+            </div>
             <div className="w-8 h-8 rounded-full bg-zinc-900 text-white text-xs flex items-center justify-center font-medium shadow-sm">
               {initials(adminName)}
             </div>
-            <SessionControls callbackUrl="/shop/login" idleTimeoutMs={null} />
+            <SessionControls
+              callbackUrl="/shop/login"
+              idleTimeoutMs={sessionPolicy === 'IDLE_10_MINUTES' ? 10 * 60 * 1000 : null}
+            />
           </div>
         </header>
 
-        <DueOverdueBanner />
+        {canSeeReceivables && <DueOverdueBanner initialData={initialDueSummary} />}
 
         <main className="min-w-0 flex-1 overflow-auto bg-zinc-50">{children}</main>
       </div>
-    </div>
+      </div>
+    </ShopAccessProvider>
   )
 }

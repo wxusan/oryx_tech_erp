@@ -25,6 +25,7 @@ import { cleanupRetainedOperationalData } from '@/lib/server/data-retention'
 import { transitionNasiyaToOverdue } from '@/lib/server/overdue-transition'
 import { presentDeviceSpecs } from '@/lib/device-specs'
 import { initializeRequestAuditContext } from '@/lib/server/request-context'
+import { activeShopIdsForFeature } from '@/lib/server/shop-access'
 import {
   acquireReminderGenerationLease,
   checkpointReminderGeneration,
@@ -99,6 +100,7 @@ export async function GET(request: NextRequest): Promise<Response> {
 
   try {
     const { start: today, end: tomorrow, dayKey } = tashkentDayRange(new Date(Date.now()))
+    const reminderEnabledShopIds = await activeShopIdsForFeature('REMINDERS')
     const acquired = await acquireReminderGenerationLease(today, tomorrow)
     let generationStatus: GenerationStatus = acquired.acquired ? 'running' : 'busy'
     let activePhase: ReminderGenerationPhase | null = acquired.acquired ? acquired.state.phase : null
@@ -181,6 +183,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             ],
             status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
             nasiya: {
+              resolutionState: 'ACTIVE',
               deletedAt: null,
               returnedAt: null,
               status: { in: ['ACTIVE', 'OVERDUE'] },
@@ -202,6 +205,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           ...pageAfter(cursor),
         }),
         async (schedule) => {
+          if (!reminderEnabledShopIds.has(schedule.nasiya.shopId)) return
           summary.reminders++
           const { nasiya } = schedule
           const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
@@ -227,6 +231,7 @@ export async function GET(request: NextRequest): Promise<Response> {
                 type: 'REMINDER',
                 message: msg,
                 telegramId: admin.telegramId!,
+                recipientShopAdminId: admin.id,
                 scheduledAt: scheduledReminderSendAt(dedupeKey, effectiveDue),
                 relatedId: schedule.id,
                 relatedType: 'NasiyaSchedule',
@@ -246,6 +251,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             ],
             status: { in: ['PENDING', 'PARTIAL', 'DEFERRED', 'OVERDUE'] },
             nasiya: {
+              resolutionState: 'ACTIVE',
               deletedAt: null,
               returnedAt: null,
               status: { in: ['ACTIVE', 'OVERDUE'] },
@@ -269,8 +275,14 @@ export async function GET(request: NextRequest): Promise<Response> {
           summary.overdue++
           const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
           const daysLate = Math.floor((today.getTime() - effectiveDue.getTime()) / DAY_MS)
-          const notifications: Array<{ dedupeKey: string; message: string; telegramId: string; scheduledAt: Date }> = []
-          if (schedule.nasiya.reminderEnabled) {
+          const notifications: Array<{
+            dedupeKey: string
+            message: string
+            telegramId: string
+            recipientShopAdminId: string
+            scheduledAt: Date
+          }> = []
+          if (schedule.nasiya.reminderEnabled && reminderEnabledShopIds.has(schedule.nasiya.shopId)) {
             const msg = nasiyaOverdueMessage({
               customerName: schedule.nasiya.customer.name,
               customerPhone: schedule.nasiya.customer.phone,
@@ -288,6 +300,7 @@ export async function GET(request: NextRequest): Promise<Response> {
                 dedupeKey,
                 message: msg,
                 telegramId: admin.telegramId!,
+                recipientShopAdminId: admin.id,
                 scheduledAt: scheduledReminderSendAt(dedupeKey, today),
               }
             }))
@@ -313,6 +326,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             ],
             status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
             nasiya: {
+              resolutionState: 'ACTIVE',
               deletedAt: null,
               returnedAt: null,
               status: { in: ['ACTIVE', 'OVERDUE'] },
@@ -336,6 +350,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         }),
         async (schedule) => {
           const { nasiya } = schedule
+          if (!reminderEnabledShopIds.has(nasiya.shopId)) return
           const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
           const triggerDay = earlyTriggerDay(effectiveDue, nasiya.earlyReminderDays)
           if (!triggerDay || !isWithin(triggerDay, windowStart, windowEnd)) return
@@ -363,6 +378,7 @@ export async function GET(request: NextRequest): Promise<Response> {
                 type: 'EARLY_REMINDER',
                 message: msg,
                 telegramId: admin.telegramId!,
+                recipientShopAdminId: admin.id,
                 scheduledAt: scheduledReminderSendAt(dedupeKey, triggerDay),
                 relatedId: schedule.id,
                 relatedType: 'NasiyaSchedule',
@@ -395,6 +411,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         }),
         async (sale) => {
           if (!sale.dueDate) return
+          if (!reminderEnabledShopIds.has(sale.shopId)) return
           summary.saleReminders++
           const triggerDay = tashkentDayRange(sale.dueDate)
           const msg = saleDueTodayMessage({
@@ -417,6 +434,7 @@ export async function GET(request: NextRequest): Promise<Response> {
                 type: 'SALE_REMINDER',
                 message: msg,
                 telegramId: admin.telegramId!,
+                recipientShopAdminId: admin.id,
                 scheduledAt: scheduledReminderSendAt(dedupeKey, sale.dueDate),
                 relatedId: sale.id,
                 relatedType: 'Sale',
@@ -449,6 +467,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         }),
         async (sale) => {
           if (!sale.dueDate) return
+          if (!reminderEnabledShopIds.has(sale.shopId)) return
           summary.saleOverdue++
           const daysLate = Math.floor((today.getTime() - sale.dueDate.getTime()) / DAY_MS)
           const msg = saleOverdueMessage({
@@ -472,6 +491,7 @@ export async function GET(request: NextRequest): Promise<Response> {
                 type: 'SALE_OVERDUE',
                 message: msg,
                 telegramId: admin.telegramId!,
+                recipientShopAdminId: admin.id,
                 scheduledAt: scheduledReminderSendAt(dedupeKey, today),
                 relatedId: sale.id,
                 relatedType: 'Sale',
@@ -505,6 +525,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         }),
         async (sale) => {
           if (!sale.dueDate) return
+          if (!reminderEnabledShopIds.has(sale.shopId)) return
           const triggerDay = earlyTriggerDay(sale.dueDate, sale.earlyReminderDays)
           if (!triggerDay || !isWithin(triggerDay, windowStart, windowEnd)) return
           summary.saleEarlyReminders++
@@ -530,6 +551,7 @@ export async function GET(request: NextRequest): Promise<Response> {
                 type: 'SALE_EARLY_REMINDER',
                 message: msg,
                 telegramId: admin.telegramId!,
+                recipientShopAdminId: admin.id,
                 scheduledAt: scheduledReminderSendAt(dedupeKey, triggerDay),
                 relatedId: sale.id,
                 relatedType: 'Sale',
@@ -558,6 +580,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           ...pageAfter(cursor),
         }),
         async (payable) => {
+          if (!reminderEnabledShopIds.has(payable.shopId)) return
           summary.supplierPayableReminders++
           const triggerDay = tashkentDayRange(payable.dueDate)
           const msg = supplierPayableDueTodayMessage({
@@ -580,6 +603,7 @@ export async function GET(request: NextRequest): Promise<Response> {
                 type: 'SUPPLIER_PAYABLE_REMINDER',
                 message: msg,
                 telegramId: admin.telegramId!,
+                recipientShopAdminId: admin.id,
                 scheduledAt: scheduledReminderSendAt(dedupeKey, payable.dueDate),
                 relatedId: payable.id,
                 relatedType: 'SupplierPayable',
@@ -608,34 +632,37 @@ export async function GET(request: NextRequest): Promise<Response> {
           ...pageAfter(cursor),
         }),
         async (payable) => {
-          summary.supplierPayableOverdue++
-          const daysLate = Math.floor((today.getTime() - payable.dueDate.getTime()) / DAY_MS)
-          const msg = supplierPayableOverdueMessage({
-            device: presentDeviceSpecs(payable.device),
-            supplierName: payable.supplierName,
-            supplierPhone: payable.supplierPhone,
-            amount: Number(payable.contractAmount),
-            contractCurrency: payable.contractCurrency,
-            dueDate: payable.dueDate,
-            daysLate,
-            currency: await reminderCurrency(payable.shop),
-          })
-          for (const admin of payable.shop.admins) {
-            const dedupeKey = `SUPPLIER_PAYABLE_OVERDUE:${dayKey}:${admin.telegramId}:${payable.id}`
-            await prisma.notification.upsert({
-              where: { dedupeKey },
-              update: {},
-              create: {
-                dedupeKey,
-                shopId: payable.shopId,
-                type: 'SUPPLIER_PAYABLE_OVERDUE',
-                message: msg,
-                telegramId: admin.telegramId!,
-                scheduledAt: scheduledReminderSendAt(dedupeKey, today),
-                relatedId: payable.id,
-                relatedType: 'SupplierPayable',
-              },
+          if (reminderEnabledShopIds.has(payable.shopId)) {
+            summary.supplierPayableOverdue++
+            const daysLate = Math.floor((today.getTime() - payable.dueDate.getTime()) / DAY_MS)
+            const msg = supplierPayableOverdueMessage({
+              device: presentDeviceSpecs(payable.device),
+              supplierName: payable.supplierName,
+              supplierPhone: payable.supplierPhone,
+              amount: Number(payable.contractAmount),
+              contractCurrency: payable.contractCurrency,
+              dueDate: payable.dueDate,
+              daysLate,
+              currency: await reminderCurrency(payable.shop),
             })
+            for (const admin of payable.shop.admins) {
+              const dedupeKey = `SUPPLIER_PAYABLE_OVERDUE:${dayKey}:${admin.telegramId}:${payable.id}`
+              await prisma.notification.upsert({
+                where: { dedupeKey },
+                update: {},
+                create: {
+                  dedupeKey,
+                  shopId: payable.shopId,
+                  type: 'SUPPLIER_PAYABLE_OVERDUE',
+                  message: msg,
+                  telegramId: admin.telegramId!,
+                  recipientShopAdminId: admin.id,
+                  scheduledAt: scheduledReminderSendAt(dedupeKey, today),
+                  relatedId: payable.id,
+                  relatedType: 'SupplierPayable',
+                },
+              })
+            }
           }
           if (payable.status !== 'OVERDUE') {
             await prisma.$transaction(async (tx) => {
@@ -683,6 +710,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         async (payable) => {
           const triggerDay = earlyTriggerDay(payable.dueDate, payable.earlyReminderDays)
           if (!triggerDay || !isWithin(triggerDay, windowStart, windowEnd)) return
+          if (!reminderEnabledShopIds.has(payable.shopId)) return
           summary.supplierPayableEarlyReminders++
           const triggerKey = tashkentDayRange(triggerDay).dayKey
           const msg = supplierPayableEarlyReminderMessage({
@@ -706,6 +734,7 @@ export async function GET(request: NextRequest): Promise<Response> {
                 type: 'SUPPLIER_PAYABLE_EARLY_REMINDER',
                 message: msg,
                 telegramId: admin.telegramId!,
+                recipientShopAdminId: admin.id,
                 scheduledAt: scheduledReminderSendAt(dedupeKey, triggerDay),
                 relatedId: payable.id,
                 relatedType: 'SupplierPayable',

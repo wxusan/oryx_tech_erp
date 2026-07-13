@@ -56,6 +56,12 @@ describe('authenticated query keys', () => {
       queryKeys.devices.list({ ...scopeA, sessionVersion: 3 }, baseQuery),
     )
     expect(queryKeys.devices.list(scopeA, baseQuery)).not.toEqual(
+      queryKeys.devices.list({ ...scopeA, authorizationVersion: 3 }, baseQuery),
+    )
+    expect(queryKeys.devices.list(scopeA, baseQuery)).not.toEqual(
+      queryKeys.devices.list({ ...scopeA, permissionVersion: 2 }, baseQuery),
+    )
+    expect(queryKeys.devices.list(scopeA, baseQuery)).not.toEqual(
       queryKeys.devices.list(scopeA, { ...baseQuery, page: 2 }),
     )
     expect(queryKeys.devices.list(scopeA, baseQuery)).not.toEqual(

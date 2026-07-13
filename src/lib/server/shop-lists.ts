@@ -75,6 +75,9 @@ export interface ShopNasiyaListItem {
   contractRemainingAmount: number
   /** Stored parent status (kept for reference / debugging). */
   status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
+  /** Operational collection state; separate from the immutable financial ledger. */
+  resolutionState: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
+  resolutionUpdatedAt: string | null
   /** True for imported (pre-Oryx) nasiyas — shown with an "Eski nasiya" badge. */
   isImported: boolean
   /** Live display status derived from schedules (matches the dashboard). */
@@ -149,6 +152,7 @@ export function buildShopDevicesWhere(shopId: string, query: Pick<ShopDevicesQue
             { color: { contains: search, mode: 'insensitive' as const } },
             { storage: { contains: search, mode: 'insensitive' as const } },
             { note: { contains: search, mode: 'insensitive' as const } },
+            { supplier: { name: { contains: search, mode: 'insensitive' as const } } },
             { supplierPhone: { contains: search, mode: 'insensitive' as const } },
             { supplier: { phone: { contains: search, mode: 'insensitive' as const } } },
             { sales: { some: { customer: { phone: { contains: search, mode: 'insensitive' as const } } } } },
@@ -399,11 +403,16 @@ export interface ShopNasiyalarQuery {
    * COMPLETED while its native schedule still owes money.
    */
   status?: NasiyaStatusFilter
+  /** Defaults to ACTIVE so normal collection lists are operational work queues. */
+  resolutionState?: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
   skip?: number
   take?: number
 }
 
-export function buildShopNasiyalarWhere(shopId: string, query: Pick<ShopNasiyalarQuery, 'search'>): Prisma.NasiyaWhereInput {
+export function buildShopNasiyalarWhere(
+  shopId: string,
+  query: Pick<ShopNasiyalarQuery, 'search' | 'resolutionState'>,
+): Prisma.NasiyaWhereInput {
   const search = query.search?.trim() || undefined
   const searchDigits = search ? normalizePhone(search) : null
   const searchImei = search?.replace(/[\s-]/g, '') || null
@@ -411,6 +420,7 @@ export function buildShopNasiyalarWhere(shopId: string, query: Pick<ShopNasiyala
   return {
     shopId,
     deletedAt: null,
+    resolutionState: query.resolutionState ?? 'ACTIVE',
     ...(search
       ? {
           OR: [
@@ -518,6 +528,7 @@ export async function findShopNasiyaIdsByDerivedStatus(input: {
       JOIN "Device" d ON d."id" = n."deviceId" AND d."shopId" = n."shopId"
       LEFT JOIN "NasiyaSchedule" s ON s."nasiyaId" = n."id" AND s."shopId" = n."shopId"
       WHERE n."shopId" = ${input.shopId} AND n."deletedAt" IS NULL
+        AND n."resolutionState" = 'ACTIVE'
       ${searchPredicate}
       GROUP BY n."id"
     ), derived AS (
@@ -593,6 +604,8 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
       contractFinalAmount: true,
       contractRemainingAmount: true,
       status: true,
+      resolutionState: true,
+      resolutionUpdatedAt: true,
       isImported: true,
       createdAt: true,
       note: true,
@@ -685,6 +698,8 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
         contractFinalAmount: Number(nasiya.contractFinalAmount),
         contractRemainingAmount: Number(nasiya.contractRemainingAmount),
         status: nasiya.status,
+        resolutionState: nasiya.resolutionState,
+        resolutionUpdatedAt: nasiya.resolutionUpdatedAt?.toISOString() ?? null,
         isImported: nasiya.isImported,
         displayStatus: derived.displayStatus,
         isOverdue: derived.isOverdue,

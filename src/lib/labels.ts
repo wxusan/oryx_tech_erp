@@ -51,3 +51,27 @@ export function scheduleStatusLabel(value?: string | null) {
   if (!value) return '-'
   return scheduleStatusLabels[value] ?? value
 }
+
+const historyStatusLabels: Record<string, string> = {
+  ...deviceStatusLabels,
+  ...nasiyaStatusLabels,
+  ...scheduleStatusLabels,
+  PAID: "To'langan",
+  DEBT: 'Qarz',
+  RECORDED: 'Qayd etilgan',
+  LEGACY_AMOUNT_UNAVAILABLE: 'Eski yozuvda aniq summa mavjud emas',
+  ARCHIVED: 'Arxivlangan',
+  WRITTEN_OFF: 'Hisobdan chiqarilgan',
+  ARCHIVE: 'Arxivlash',
+  WRITE_OFF: 'Hisobdan chiqarish',
+  REOPEN: 'Qayta ochish',
+}
+
+/** Localize compact database-state evidence shown in customer histories. */
+export function historyStatusLabel(value?: string | null) {
+  if (!value) return '-'
+  return value
+    .split(':')
+    .map((part) => historyStatusLabels[part] ?? part)
+    .join(' → ')
+}

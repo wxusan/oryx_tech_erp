@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
+import { tashkentTodayInputValue } from '@/lib/timezone'
 
 export const telegramIdSchema = z
   .string()
@@ -34,13 +35,27 @@ export async function findTelegramOwner(telegramId: string) {
         telegramId,
         deletedAt: null,
         isActive: true,
-        shop: { deletedAt: null, status: 'ACTIVE' },
+        telegramNotificationsEnabled: true,
+        shop: { deletedAt: null, status: 'ACTIVE', telegramNotificationsEnabled: true },
       },
       select: {
         id: true,
         name: true,
         login: true,
-        shop: { select: { id: true, name: true, status: true } },
+        shop: {
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            ownerAdminId: true,
+            packageVersions: {
+              where: { effectiveOn: { lte: new Date(`${tashkentTodayInputValue()}T00:00:00.000Z`) } },
+              orderBy: [{ effectiveOn: 'desc' }, { createdAt: 'desc' }],
+              take: 1,
+              select: { features: { select: { featureCode: true, enabled: true } } },
+            },
+          },
+        },
       },
     }),
   ])
@@ -50,6 +65,11 @@ export async function findTelegramOwner(telegramId: string) {
   }
 
   if (shopAdmin) {
+    const enabled = new Set(shopAdmin.shop.packageVersions[0]?.features
+      .filter((feature) => feature.enabled)
+      .map((feature) => feature.featureCode) ?? [])
+    const memberAllowed = shopAdmin.id === shopAdmin.shop.ownerAdminId || enabled.has('STAFF_ACCESS')
+    if (!enabled.has('TELEGRAM') || !memberAllowed) return null
     return { type: 'SHOP_ADMIN' as const, user: shopAdmin }
   }
 

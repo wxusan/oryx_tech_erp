@@ -56,9 +56,9 @@ describe('dashboard links', () => {
 describe('nasiyalar list payment action', () => {
   const src = read(NASIYALAR_CLIENT)
 
-  it('shows "To\'lov qabul qilish" only for active/overdue with remaining > 0', () => {
+  it('shows "To\'lov qabul qilish" only with permission and an active/overdue remaining balance', () => {
     expect(src).toContain(
-      "const canPay = (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0",
+      "const canPay = canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0",
     )
     expect(src).toContain('{canPay && (')
     expect(src).toContain("To&apos;lov qabul qilish")
@@ -98,8 +98,8 @@ describe('payment modal is the single shared implementation', () => {
 
   it('detail + list pages route payment through the component, not a duplicate fetch', () => {
     // Neither page should still contain its own payment POST / idempotency header.
-    expect(detail).not.toContain('Idempotency-Key')
-    expect(list).not.toContain('Idempotency-Key')
+    expect(detail).not.toContain('fetch(`/api/nasiya/${nasiya.id}/payment`')
+    expect(list).not.toContain('/payment`, {')
     expect(detail).toContain('<NasiyaPaymentModal')
     expect(list).toContain('<NasiyaPaymentModal')
   })

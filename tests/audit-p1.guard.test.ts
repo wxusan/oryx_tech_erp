@@ -76,14 +76,23 @@ describe('P1 imported old nasiya duplicate guard', () => {
 })
 
 describe('P1 device image write restriction guard', () => {
-  it('stores private upload keys and rejects cross-shop image keys', () => {
+  it('stores private upload keys server-side while browsers use opaque tenant references', () => {
     const validations = read('src/lib/validations.ts')
     const route = read('src/app/api/devices/route.ts')
+    const uploadRoute = read('src/app/api/uploads/device/route.ts')
     const ui = read('src/app/(shop)/shop/qurilmalar/new/page.tsx')
+    const sharedImageSelection = read('src/components/ui/image-selection-field.tsx')
 
     expect(validations).toContain('deviceImageKeySchema')
-    expect(validations).toContain('shops\\/[^/]+\\/devices')
-    expect(route).toContain('!url.startsWith(`shops/${resolvedShopId}/devices/`)')
-    expect(ui).toContain('return json.data.key as string')
+    expect(route).toContain('resolvePrivateUploadReference')
+    expect(route).toContain("kind: 'device'")
+    expect(uploadRoute).toContain('createPrivateUploadReference')
+    expect(uploadRoute).toContain('return ok({')
+    expect(uploadRoute).toContain('reference,')
+    expect(uploadRoute).not.toContain('return ok({ key')
+    expect(ui).toContain("uploadEndpoint: '/api/uploads/device'")
+    expect(ui).toContain('await imageSelection.uploadAll()')
+    expect(sharedImageSelection).toContain('uploadedKey: reference')
+    expect(sharedImageSelection).toContain('return Promise.resolve(item.uploadedKey)')
   })
 })

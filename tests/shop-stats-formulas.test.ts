@@ -157,6 +157,33 @@ describe('nasiya payments received this month affect turnover, not future unpaid
   })
 })
 
+describe('dashboard server/client serialization', () => {
+  it('returns upcoming contract amounts as plain numbers instead of ORM decimal objects', () => {
+    const stats = computeShopStatsFromRows(baseRows({
+      upcomingPayments: [{
+        dueDate: new Date('2026-07-20'),
+        delayedUntil: null,
+        expectedAmount: 75,
+        paidAmount: 25,
+        contractExpectedAmount: { valueOf: () => 75 },
+        contractPaidAmount: { valueOf: () => 25 },
+        status: 'PARTIAL',
+        nasiya: {
+          id: 'nasiya-serialization',
+          contractCurrency: 'USD',
+          customer: { name: 'Serialization Customer' },
+          device: { model: 'Serialization Device' },
+        },
+      }],
+    }))
+
+    expect(stats.upcomingPayments[0]?.contractExpectedAmount).toBe(75)
+    expect(stats.upcomingPayments[0]?.contractPaidAmount).toBe(25)
+    expect(typeof stats.upcomingPayments[0]?.contractExpectedAmount).toBe('number')
+    expect(typeof stats.upcomingPayments[0]?.contractPaidAmount).toBe('number')
+  })
+})
+
 describe('USD-native sale turnover does not drift after a rate change', () => {
   it('cashReceivedThisMonth reads the frozen SalePayment.amount snapshot, never re-derived from a later rate', () => {
     // A $500 sale paid in full at creation-time rate 12,500 writes a

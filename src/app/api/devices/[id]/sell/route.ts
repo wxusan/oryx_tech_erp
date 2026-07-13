@@ -8,7 +8,7 @@
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { createSaleSchema } from '@/lib/validations'
 import { created, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -17,7 +17,7 @@ import { logger } from '@/lib/logger'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
-import { normalizePhone } from '@/lib/phone'
+import { CustomerSelectionError, resolveCustomerSelection } from '@/lib/server/customer-selection'
 import { createMoneyInputConverter, moneyInputMeta, type MoneyInputResult } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { roundContractMoney, computeSaleContractMargin } from '@/lib/nasiya-contract'
@@ -28,7 +28,7 @@ type RouteContext = { params: Promise<{ id: string }> }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('CASH_SALE_CREATE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -42,7 +42,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
 
     const {
-      customerName, customerPhone,
+      customerMode, customerId, customerName, customerPhone,
       salePrice, paymentMethod,
       paidFully, amountPaid,
       dueDate, reminderEnabled, note,
@@ -59,7 +59,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currency = await getShopCurrencyContext(shopId)
-    const normalizedPhone = normalizePhone(customerPhone)
     let salePriceInput: MoneyInputResult
     let amountPaidInput: MoneyInputResult | null = null
     try {
@@ -99,24 +98,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
       if (reserved.count !== 1) throw { status: 409, message: "Qurilma allaqachon sotilgan" }
 
-      const existingCustomer = await tx.customer.findFirst({
-        where: {
-          shopId,
-          deletedAt: null,
-          OR: [
-            ...(normalizedPhone ? [{ normalizedPhone }] : []),
-            { phone: customerPhone },
-          ],
-        },
+      const customer = await resolveCustomerSelection(tx, {
+        shopId,
+        mode: customerMode,
+        customerId,
+        customerName,
+        customerPhone,
       })
-      const customer = existingCustomer
-        ? await tx.customer.update({
-            where: { id: existingCustomer.id },
-            data: { name: customerName, normalizedPhone },
-          })
-        : await tx.customer.create({
-            data: { shopId, name: customerName, phone: customerPhone, normalizedPhone },
-          })
 
       const sale = await tx.sale.create({
         data: {
@@ -176,8 +164,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             message: deviceSoldMessage({
               shopName: device.shop.name,
               device: presentDeviceSpecs(device),
-              customerName,
-              customerPhone,
+              customerName: customer.name,
+              customerPhone: customer.phone,
               salePrice: contractSalePrice,
               paidAmount: contractPaid,
               remaining: contractRemaining,
@@ -193,6 +181,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               }),
             }),
             telegramId: admin.telegramId!,
+            recipientShopAdminId: admin.id,
             scheduledAt: new Date(),
             relatedId: sale.id,
             relatedType: 'Sale',
@@ -211,7 +200,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           newValue: {
             salePrice: salePriceUzs,
             inputAmount: salePrice,
-            customerName,
+            customerId: customer.id,
+            customerName: customer.name,
             paymentMethod,
             amountPaid: paid,
             remainingAmount: remaining,
@@ -234,13 +224,18 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     return created(result, "Qurilma muvaffaqiyatli sotildi")
   } catch (err: unknown) {
+    if (err instanceof CustomerSelectionError) {
+      if (err.status === 404) return notFound(err.message)
+      if (err.status === 409) return conflict(err.message)
+      return badRequest(err.message)
+    }
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
     }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      return conflict('Bu telefon raqam bilan faol mijoz allaqachon mavjud')
+      return conflict('Bu telefon bilan faol mijoz mavjud. Uni qidiruvdan tanlang; mijozlar avtomatik birlashtirilmaydi.')
     }
     logger.error('[POST /api/devices/[id]/sell]', { event: 'api.route_error', error: err })
     return serverError()

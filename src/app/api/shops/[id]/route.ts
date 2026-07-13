@@ -48,7 +48,13 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     if (!shop) return notFound("Do'kon topilmadi")
 
-    return ok(shop)
+    return ok({
+      ...shop,
+      admins: shop.admins.map((admin) => ({
+        ...admin,
+        memberKind: admin.id === shop.ownerAdminId ? 'SHOP_OWNER' as const : 'SHOP_STAFF' as const,
+      })),
+    })
   } catch (err) {
     logger.error('[GET /api/shops/[id]]', { event: 'api.route_error', error: err })
     return serverError()
@@ -108,6 +114,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         where: { id },
         data: updateData,
       })
+      if (statusChanged) {
+        await tx.shopAdmin.updateMany({
+          where: { shopId: id, deletedAt: null },
+          data: { sessionVersion: { increment: 1 } },
+        })
+        await tx.authSession.updateMany({
+          where: { actorType: 'SHOP_ADMIN', shopId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        })
+      }
       await tx.log.create({
         data: {
           shopId: id,
@@ -173,6 +189,14 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
           deletedBy: session.user.id,
           deleteNote,
         },
+      })
+      await tx.shopAdmin.updateMany({
+        where: { shopId: id, deletedAt: null },
+        data: { sessionVersion: { increment: 1 } },
+      })
+      await tx.authSession.updateMany({
+        where: { actorType: 'SHOP_ADMIN', shopId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
       })
 
       await tx.log.create({

@@ -65,9 +65,12 @@ function scopeWhere(session: Session, requestedDomains?: readonly NavigationDoma
   return OR.length ? { OR } : { sequence: { lt: BigInt(0) } }
 }
 
-export async function latestChangeCursorForSession(session: Session): Promise<string> {
+export async function latestChangeCursorForSession(
+  session: Session,
+  domains?: readonly NavigationDomain[],
+): Promise<string> {
   const latest = await prisma.changeEvent.aggregate({
-    where: scopeWhere(session),
+    where: scopeWhere(session, domains),
     _max: { sequence: true },
   })
   return (latest._max.sequence ?? BigInt(0)).toString()
@@ -116,8 +119,9 @@ export function affectedDomainsForChange(
       ? ['settings', 'logs']
       : ['adminShops', 'adminPayments', 'adminReports', 'adminLogs', 'adminOps'],
     ShopAdmin: primary === 'settings'
-      ? ['settings', 'logs']
-      : ['adminShops', 'adminLogs', 'adminOps'],
+      ? ['settings', 'logs', 'access']
+      : ['adminShops', 'adminLogs', 'adminOps', 'access'],
+    ShopPackageVersion: ['access', 'settings', 'adminShops', 'adminLogs', 'adminOps'],
     SuperAdmin: ['settings', 'adminLogs'],
   }
   return [...new Set([primary, ...(byEntity[entityType] ?? ['logs'])])]

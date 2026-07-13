@@ -18,6 +18,8 @@ import { uzDate } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { navigateAfterMutation } from '@/lib/client-events'
 import { isValidPhone } from '@/lib/phone'
+import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
+import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
 
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
   if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
@@ -46,6 +48,12 @@ function previewSchedule(remainingDebt: number, monthlyPayment: number, nextPaym
 }
 
 export default function ImportNasiyaPage() {
+  const { can } = useShopAccess()
+  if (!can('IMPORT_DATA')) return <ShopAccessDenied />
+  return <AuthorizedImportNasiyaPage />
+}
+
+function AuthorizedImportNasiyaPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
   const [form, setForm] = useState({
@@ -69,6 +77,10 @@ export default function ImportNasiyaPage() {
   })
   const [error, setError] = useState('')
   const [saving, setSaving] = useState(false)
+  const passportSelection = useImageSelection({
+    mode: 'single',
+    uploadEndpoint: '/api/uploads/passport',
+  })
 
   const set = (key: keyof typeof form) => (value: string) => setForm((f) => ({ ...f, [key]: value }))
   const moneyToUzs = useCallback(
@@ -103,7 +115,8 @@ export default function ImportNasiyaPage() {
     Number(form.remainingDebt) > 0 &&
     Number(form.monthlyPayment) > 0 &&
     form.nextPaymentDate.trim().length > 0 &&
-    !saving
+    !saving &&
+    !passportSelection.hasBlockingErrors
 
   async function handleSubmit() {
     if (!canSubmit) return
@@ -114,12 +127,14 @@ export default function ImportNasiyaPage() {
     setSaving(true)
     setError('')
     try {
+      const [passportPhotoUrl] = await passportSelection.uploadAll()
       const res = await fetch('/api/nasiya/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           customerName: form.customerName.trim(),
           customerPhone: form.customerPhone.trim(),
+          passportPhotoUrl,
           deviceModel: form.deviceModel.trim(),
           imei: form.imei.trim() || undefined,
           secondaryImei: form.secondaryImei.trim() || undefined,
@@ -180,6 +195,15 @@ export default function ImportNasiyaPage() {
         <Field label="Telefon" required>
           <PhoneInput value={form.customerPhone} onChange={set('customerPhone')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
+        <ImageSelectionField
+          inputId="import-nasiya-passport-image"
+          label="Pasport rasmi (ixtiyoriy)"
+          mode="single"
+          selection={passportSelection}
+          disabled={saving}
+          help="Private saqlanadi; Telegram qurilma rasmlariga qo‘shilmaydi. JPG, PNG yoki WEBP, 5 MB gacha."
+          className="sm:col-span-2"
+        />
       </Section>
 
       <Section title="Qurilma">

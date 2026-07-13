@@ -2,7 +2,7 @@ import { NextRequest, after } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { invalidateShopReturnMutation } from '@/lib/server/cache-tags'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -62,7 +62,7 @@ function paymentSource(
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('RETURN_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -281,7 +281,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       const shopAdmins = await tx.shopAdmin.findMany({
         where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
-        select: { telegramId: true },
+        select: { id: true, telegramId: true },
       })
       if (shopAdmins.length > 0) {
         const message = deviceReturnedMessage({
@@ -299,6 +299,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             type: 'RETURN',
             message,
             telegramId: admin.telegramId!,
+            recipientShopAdminId: admin.id,
             scheduledAt: now,
             relatedId: returnRecord.id,
             relatedType: 'DeviceReturn',

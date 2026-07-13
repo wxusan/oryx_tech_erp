@@ -17,6 +17,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { Label } from '@/components/ui/label'
+import { Field } from '@/components/ui/field'
 import { Textarea } from '@/components/ui/textarea'
 import { uzDateTime } from '@/lib/dates'
 import { isValidPhone } from '@/lib/phone'
@@ -24,6 +25,7 @@ import { useShopCurrency } from '@/lib/use-shop-currency'
 import type { ApiResponse } from '@/types'
 import { SettingsInfo as Info } from '@/components/shop/settings-info'
 import { SettingsPasswordField as PasswordField } from '@/components/shop/settings-password-field'
+import { useShopAccess } from '@/components/shop/shop-access-context'
 
 interface ShopAdminProfile {
   id: string
@@ -52,6 +54,7 @@ interface ShopProfile {
   subscriptionDue: string
   preferredCurrency: 'UZS' | 'USD'
   usdUzsRate: number | null
+  telegramNotificationsEnabled: boolean
 }
 
 interface PasswordForm {
@@ -81,6 +84,8 @@ function formatDate(value: string | null | undefined) {
 
 export default function ShopSettingsPage() {
   const { setCurrency } = useShopCurrency()
+  const { can } = useShopAccess()
+  const canManageShop = can('SETTINGS_MANAGE')
   const [profile, setProfile] = useState<ShopAdminProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -102,7 +107,7 @@ export default function ShopSettingsPage() {
 
   // Shop profile editing
   const [shop, setShop] = useState<ShopProfile | null>(null)
-  const [shopForm, setShopForm] = useState({ name: '', ownerName: '', ownerPhone: '', address: '', note: '', preferredCurrency: 'UZS' as 'UZS' | 'USD' })
+  const [shopForm, setShopForm] = useState({ name: '', ownerName: '', ownerPhone: '', address: '', note: '', preferredCurrency: 'UZS' as 'UZS' | 'USD', telegramNotificationsEnabled: true })
   const [shopError, setShopError] = useState('')
   const [shopSuccess, setShopSuccess] = useState('')
   const [shopSaving, setShopSaving] = useState(false)
@@ -115,10 +120,12 @@ export default function ShopSettingsPage() {
         if (!response.ok) throw new Error(await readApiError(response))
         return (await response.json()) as ApiResponse<ShopAdminProfile>
       }),
-      fetch('/api/shop/profile').then(async (response) => {
-        if (!response.ok) return null
-        return (await response.json()) as ApiResponse<ShopProfile>
-      }),
+      canManageShop
+        ? fetch('/api/shop/profile').then(async (response) => {
+            if (!response.ok) return null
+            return (await response.json()) as ApiResponse<ShopProfile>
+          })
+        : Promise.resolve(null),
     ])
       .then(([profileJson, shopJson]) => {
         if (!mounted) return
@@ -135,6 +142,7 @@ export default function ShopSettingsPage() {
             address: shopJson.data.address ?? '',
             note: shopJson.data.note ?? '',
             preferredCurrency: shopJson.data.preferredCurrency ?? 'UZS',
+            telegramNotificationsEnabled: shopJson.data.telegramNotificationsEnabled,
           })
         }
       })
@@ -148,7 +156,7 @@ export default function ShopSettingsPage() {
     return () => {
       mounted = false
     }
-  }, [])
+  }, [canManageShop])
 
   const telegramStatus = useMemo(() => {
     if (!profile) return { label: '-', tone: 'secondary' as const }
@@ -170,10 +178,12 @@ export default function ShopSettingsPage() {
 
     if (accountName.trim().length < 2) {
       setAccountError("Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      requestAnimationFrame(() => document.getElementById('account-name')?.focus())
       return
     }
     if (!isValidPhone(accountPhone)) {
       setAccountError("Telefon raqam noto'g'ri. Masalan: +998 90 123 45 67")
+      requestAnimationFrame(() => document.getElementById('account-phone')?.focus())
       return
     }
 
@@ -203,14 +213,17 @@ export default function ShopSettingsPage() {
 
     if (shopForm.name.trim().length < 2) {
       setShopError("Do'kon nomi kamida 2 ta harfdan iborat bo'lishi kerak")
+      requestAnimationFrame(() => document.getElementById('shop-name')?.focus())
       return
     }
     if (shopForm.ownerName.trim().length < 2) {
       setShopError("Egasi ismi kamida 2 ta harfdan iborat bo'lishi kerak")
+      requestAnimationFrame(() => document.getElementById('shop-owner')?.focus())
       return
     }
     if (!isValidPhone(shopForm.ownerPhone)) {
       setShopError("Telefon raqam noto'g'ri. Masalan: +998 90 123 45 67")
+      requestAnimationFrame(() => document.getElementById('shop-owner-phone')?.focus())
       return
     }
 
@@ -226,6 +239,7 @@ export default function ShopSettingsPage() {
           address: shopForm.address.trim(),
           note: shopForm.note.trim(),
           preferredCurrency: shopForm.preferredCurrency,
+          telegramNotificationsEnabled: shopForm.telegramNotificationsEnabled,
         }),
       })
       if (!response.ok) throw new Error(await readApiError(response))
@@ -253,6 +267,7 @@ export default function ShopSettingsPage() {
 
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
       setPasswordError('Yangi parol va tasdiq bir xil emas')
+      requestAnimationFrame(() => document.getElementById('shop-confirm-password')?.focus())
       return
     }
 
@@ -352,7 +367,7 @@ export default function ShopSettingsPage() {
             <CardContent className="space-y-4">
               <form onSubmit={handleAccountSubmit} className="space-y-3">
                 {accountError && (
-                  <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                  <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
                     {accountError}
                   </div>
                 )}
@@ -363,28 +378,22 @@ export default function ShopSettingsPage() {
                   </div>
                 )}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <Label htmlFor="account-name" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                      Ism
-                    </Label>
+                  <Field label="Ism" required controlId="account-name">
                     <Input
                       id="account-name"
                       value={accountName}
                       onChange={(event) => setAccountName(event.target.value)}
                       className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                     />
-                  </div>
-                  <div>
-                    <Label htmlFor="account-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                      Telefon
-                    </Label>
+                  </Field>
+                  <Field label="Telefon" required controlId="account-phone">
                     <PhoneInput
                       id="account-phone"
                       value={accountPhone}
                       onChange={setAccountPhone}
                       className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                     />
-                  </div>
+                  </Field>
                   <Info label="Login" value={profile.login} mono />
                   <Info label="Do'kon raqami" value={profile.shop.shopNumber} />
                 </div>
@@ -419,7 +428,7 @@ export default function ShopSettingsPage() {
               <CardContent>
                 <form onSubmit={handleShopSubmit} className="space-y-4">
                   {shopError && (
-                    <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                    <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
                       {shopError}
                     </div>
                   )}
@@ -430,39 +439,30 @@ export default function ShopSettingsPage() {
                     </div>
                   )}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div>
-                      <Label htmlFor="shop-name" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                        Do'kon nomi
-                      </Label>
+                    <Field label="Do'kon nomi" required controlId="shop-name">
                       <Input
                         id="shop-name"
                         value={shopForm.name}
                         onChange={(e) => setShopForm((f) => ({ ...f, name: e.target.value }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                       />
-                    </div>
-                    <div>
-                      <Label htmlFor="shop-owner" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                        Egasi ismi
-                      </Label>
+                    </Field>
+                    <Field label="Egasi ismi" required controlId="shop-owner">
                       <Input
                         id="shop-owner"
                         value={shopForm.ownerName}
                         onChange={(e) => setShopForm((f) => ({ ...f, ownerName: e.target.value }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                       />
-                    </div>
-                    <div>
-                      <Label htmlFor="shop-owner-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                        Egasi telefoni
-                      </Label>
+                    </Field>
+                    <Field label="Egasi telefoni" required controlId="shop-owner-phone">
                       <PhoneInput
                         id="shop-owner-phone"
                         value={shopForm.ownerPhone}
                         onChange={(ownerPhone) => setShopForm((f) => ({ ...f, ownerPhone }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                       />
-                    </div>
+                    </Field>
                     <div>
                       <Label htmlFor="shop-address" className="mb-1.5 block text-xs font-medium text-zinc-700">
                         Manzil
@@ -500,6 +500,18 @@ export default function ShopSettingsPage() {
                         UZS bazaviy hisob bo'lib qoladi; USD faqat ko'rish va kiritish uchun.
                       </p>
                     </fieldset>
+                    <label htmlFor="shop-telegram-notifications" className="flex items-center justify-between gap-3 rounded-md border border-zinc-200 p-3 text-sm">
+                      <span>
+                        <span className="block font-medium text-zinc-800">Do&apos;kon Telegram xabarlari</span>
+                        <span className="mt-0.5 block text-xs text-zinc-500">Barcha ruxsat berilgan oluvchilar uchun umumiy kalit</span>
+                      </span>
+                      <input
+                        id="shop-telegram-notifications"
+                        type="checkbox"
+                        checked={shopForm.telegramNotificationsEnabled}
+                        onChange={(event) => setShopForm((form) => ({ ...form, telegramNotificationsEnabled: event.target.checked }))}
+                      />
+                    </label>
                   </div>
                   <div>
                     <Label htmlFor="shop-note" className="mb-1.5 block text-xs font-medium text-zinc-700">

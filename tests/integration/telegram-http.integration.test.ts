@@ -55,7 +55,7 @@ async function seedShop(suffix: string) {
       createdById: owner.id,
     },
   })
-  await prisma.shopAdmin.create({
+  const admin = await prisma.shopAdmin.create({
     data: {
       shopId: shop.id,
       name: `Telegram admin ${suffix}`,
@@ -66,7 +66,35 @@ async function seedShop(suffix: string) {
       passwordHash: 'audit-only',
     },
   })
-  return { owner, shop }
+  await prisma.shop.update({
+    where: { id: shop.id },
+    data: {
+      ownerAdminId: admin.id,
+      ownershipStatus: 'RESOLVED',
+      ownershipResolvedAt: new Date('2026-07-01T00:00:00.000Z'),
+      ownershipResolvedById: owner.id,
+      telegramNotificationsEnabled: true,
+    },
+  })
+  await prisma.shopPackageVersion.create({
+    data: {
+      shopId: shop.id,
+      effectiveOn: new Date('2026-01-01T00:00:00.000Z'),
+      basePrice: 1_000,
+      currency: 'UZS',
+      discountAmount: 0,
+      pricingNeedsReview: false,
+      note: 'Telegram integration package',
+      createdById: owner.id,
+      features: {
+        create: [
+          'INVENTORY', 'CASH_SALES', 'NASIYA', 'OLIB_SOTDIM', 'CUSTOMER_CRM',
+          'TELEGRAM', 'REMINDERS', 'REPORTS', 'IMPORTS', 'EXPORTS', 'STAFF_ACCESS',
+        ].map((featureCode) => ({ featureCode, enabled: true, recurringPrice: 0 })),
+      },
+    },
+  })
+  return { owner, shop, admin }
 }
 
 beforeAll(async () => {
@@ -132,13 +160,14 @@ afterAll(async () => {
 
 describe('real PostgreSQL notification queue with a stub Telegram HTTP server', () => {
   it('delivers a queued text message through Grammy and marks it SENT', async () => {
-    const { shop } = await seedShop('success')
+    const { shop, admin } = await seedShop('success')
     const notification = await prisma.notification.create({
       data: {
         shopId: shop.id,
         type: 'AUDIT_TEXT',
         message: '<b>Audit message</b>',
         telegramId: '123456789',
+        recipientShopAdminId: admin.id,
         scheduledAt: new Date(Date.now() - 1_000),
       },
     })
@@ -156,13 +185,14 @@ describe('real PostgreSQL notification queue with a stub Telegram HTTP server', 
   })
 
   it('honors retry_after and sends a failed text only once inside one queue attempt', async () => {
-    const { shop } = await seedShop('rate_limit')
+    const { shop, admin } = await seedShop('rate_limit')
     const notification = await prisma.notification.create({
       data: {
         shopId: shop.id,
         type: 'AUDIT_429',
         message: 'Rate limit audit',
         telegramId: '123456789',
+        recipientShopAdminId: admin.id,
         scheduledAt: new Date(Date.now() - 1_000),
       },
     })
@@ -183,13 +213,14 @@ describe('real PostgreSQL notification queue with a stub Telegram HTTP server', 
   })
 
   it.each([400, 401, 403] as const)('cancels permanent Telegram %i failures after one HTTP request', async (errorCode) => {
-    const { shop } = await seedShop(`permanent_${errorCode}`)
+    const { shop, admin } = await seedShop(`permanent_${errorCode}`)
     const notification = await prisma.notification.create({
       data: {
         shopId: shop.id,
         type: `AUDIT_${errorCode}`,
         message: `Permanent failure ${errorCode}`,
         telegramId: '123456789',
+        recipientShopAdminId: admin.id,
         scheduledAt: new Date(Date.now() - 1_000),
       },
     })
@@ -208,7 +239,7 @@ describe('real PostgreSQL notification queue with a stub Telegram HTTP server', 
   it('cancels a previously queued message after its recipient admin is disabled', async () => {
     const { shop } = await seedShop('revoked_recipient')
     const telegramId = '987654321'
-    await prisma.shopAdmin.create({
+    const revokedAdmin = await prisma.shopAdmin.create({
       data: {
         shopId: shop.id,
         name: 'Revoked recipient',
@@ -226,6 +257,7 @@ describe('real PostgreSQL notification queue with a stub Telegram HTTP server', 
         type: 'AUDIT_REVOKED',
         message: 'Queued before recipient revocation',
         telegramId,
+        recipientShopAdminId: revokedAdmin.id,
         scheduledAt: new Date(Date.now() - 1_000),
       },
     })
@@ -241,7 +273,7 @@ describe('real PostgreSQL notification queue with a stub Telegram HTTP server', 
   })
 
   it('cancels a queued sale reminder when the related debt is already paid', async () => {
-    const { shop } = await seedShop('resolved_sale')
+    const { shop, admin } = await seedShop('resolved_sale')
     const device = await prisma.device.create({
       data: {
         shopId: shop.id,
@@ -281,6 +313,7 @@ describe('real PostgreSQL notification queue with a stub Telegram HTTP server', 
         type: 'SALE_REMINDER',
         message: 'This resolved debt must not be sent',
         telegramId: '123456789',
+        recipientShopAdminId: admin.id,
         scheduledAt: new Date(Date.now() - 1_000),
         relatedId: sale.id,
         relatedType: 'Sale',

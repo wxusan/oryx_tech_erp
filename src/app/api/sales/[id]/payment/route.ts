@@ -1,7 +1,7 @@
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-auth'
 import { addSalePaymentSchema } from '@/lib/validations'
 import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -65,7 +65,7 @@ function matchesExistingSalePaymentPayload(
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermissionAndFeature('PAYMENT_RECEIVE', 'CASH_SALES')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -334,6 +334,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 type: 'PAYMENT_RECEIVED',
                 message: paymentMessage,
                 telegramId: admin.telegramId!,
+                recipientShopAdminId: admin.id,
                 scheduledAt: new Date(),
                 relatedId: saleId,
                 relatedType: 'Sale',

@@ -50,11 +50,13 @@ describe('Amallar tarixi — event label coverage (the concrete gaps this ticket
 
 describe('Amallar tarixi — payment route creates a distinct, non-duplicated, correctly-typed log per event', () => {
   const route = read('src/app/api/nasiya/[id]/payment/route.ts')
+  const deferRoute = read('src/app/api/nasiya/[id]/defer/route.ts')
 
   it('logs a defer as NASIYA_DEFER, not PAYMENT, with old/new due dates in newValue', () => {
-    expect(route).toContain("action: deferredToNext ? 'NASIYA_DEFER' : 'PAYMENT'")
-    expect(route).toContain('oldDueDate: (selectedSchedule.delayedUntil ?? selectedSchedule.dueDate).toISOString()')
-    expect(route).toContain('newDueDate: delayedUntil!.toISOString()')
+    expect(deferRoute).toContain("action: 'NASIYA_DEFER'")
+    expect(deferRoute).toContain('oldDueDate: originalDueDate.toISOString()')
+    expect(deferRoute).toContain('newDueDate: newDueDate.toISOString()')
+    expect(route).toContain("action: 'PAYMENT'")
   })
 
   it('logs the completion event once, only on the real transition (guarded by justCompleted)', () => {

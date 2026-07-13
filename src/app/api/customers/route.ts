@@ -1,32 +1,20 @@
 import { NextRequest } from 'next/server'
+import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
-import { ok, serverError } from '@/lib/api-helpers'
-import { normalizePhone } from '@/lib/phone'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { badRequest, conflict, created, ok, serverError } from '@/lib/api-helpers'
+import { normalizeAdditionalPhones, normalizePhone } from '@/lib/phone'
 import { logger } from '@/lib/logger'
-import {
-  computeCustomerTrustRatingFromFactors,
-  isValidTrustTier,
-  type CustomerTrustFactors,
-} from '@/lib/nasiya-customer-trust'
-import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
-
-const EMPTY_TRUST_FACTORS: CustomerTrustFactors = {
-  totalNasiyaCount: 0,
-  completedNasiyaCount: 0,
-  activeNasiyaCount: 0,
-  cancelledNasiyaCount: 0,
-  paidInstallmentCount: 0,
-  onTimeRatio: null,
-  lateInstallmentCount: 0,
-  maxDaysLate: 0,
-  currentOverdueScheduleCount: 0,
-  hasCurrentOverdue: false,
-}
+import { passportIdentifierStorage } from '@/lib/customer-passport'
+import { phoneSchema } from '@/lib/validations'
+import { invalidateShopCustomerMutation } from '@/lib/server/cache-tags'
+import { Prisma } from '@/generated/prisma/client'
+import { getCustomerList } from '@/lib/server/customer-list'
+import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 
 export async function GET(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermission('CUSTOMER_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -34,7 +22,8 @@ export async function GET(req: NextRequest) {
     const resolved = await resolveActiveShopId(session, searchParams.get('shopId'))
     if (!resolved.ok) return resolved.response
 
-    const search = searchParams.get('search')?.trim()
+    // Sensitive customer search is intentionally POST-only at
+    // /api/customers/search. GET remains an unfiltered pagination endpoint.
     // Item 2 — page size deliberately smaller than the old 200/500 defaults
     // now that this is real pagination (page/skip/take + total), not a
     // single load-everything-up-to-a-cap fetch.
@@ -43,72 +32,105 @@ export async function GET(req: NextRequest) {
     const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 100)) : 25
     const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
 
-    // Phone search handles spaces/plus signs by also matching the normalized
-    // (digits-only) phone, so "90 123 45 67" finds "+998901234567".
-    const searchDigits = search ? normalizePhone(search) : null
-
-    const where = {
+    const data = await getCustomerList({
       shopId: resolved.shopId,
-      deletedAt: null,
-      ...(search
-        ? {
-            OR: [
-              { name: { contains: search, mode: 'insensitive' as const } },
-              { phone: { contains: search, mode: 'insensitive' as const } },
-              { note: { contains: search, mode: 'insensitive' as const } },
-              ...(searchDigits ? [{ normalizedPhone: { contains: searchDigits } }] : []),
-              ...(searchDigits ? [{ additionalPhones: { has: searchDigits } }] : []),
-            ],
-          }
-        : {}),
-    }
-
-    const [customers, total] = await Promise.all([
-      prisma.customer.findMany({
-      where,
-      orderBy: { createdAt: 'desc' },
-      take,
       skip,
-      select: {
-        id: true,
-        shopId: true,
-        name: true,
-        phone: true,
-        phoneNormalizationNeedsReview: true,
-        additionalPhones: true,
-        note: true,
-        createdAt: true,
-        trustOverride: true,
-        _count: {
-          select: {
-            sales: { where: { deletedAt: null } },
-            nasiya: { where: { deletedAt: null, status: { not: 'CANCELLED' } } },
-          },
-        },
-      },
-      }),
-      prisma.customer.count({ where }),
-    ])
-
-    const trustFactors = await getCustomerTrustFactorsForList({
-      shopId: resolved.shopId,
-      customerIds: customers.map((customer) => customer.id),
-    })
-    const withTrust = customers.map(({ trustOverride, ...rest }) => {
-      const override = isValidTrustTier(trustOverride) ? trustOverride : null
-      const trust = computeCustomerTrustRatingFromFactors(
-        trustFactors.get(rest.id) ?? EMPTY_TRUST_FACTORS,
-        override,
-      )
-      return { ...rest, trust: { tier: trust.tier, label: trust.label, color: trust.color } }
+      take,
     })
 
     // Item 2 — real pagination envelope (items/total/skip/take), the same
     // shape /api/logs already established. mijozlar/page.tsx is this
     // route's only consumer, so this is a safe shape change.
-    return ok({ items: withTrust, total, skip, take }, "Mijozlar ro'yxati")
+    return ok(data, "Mijozlar ro'yxati")
   } catch (err) {
     logger.error('[GET /api/customers]', { event: 'api.route_error', error: err })
+    return serverError()
+  }
+}
+
+const createCustomerSchema = z.object({
+  name: z.string().trim().min(2, "Ism kamida 2 ta belgidan iborat bo'lishi kerak").max(100),
+  phone: phoneSchema,
+  additionalPhones: z.array(z.string()).max(5).optional(),
+  passportIdentifier: z.string().trim().max(64).optional(),
+  passportPhotoUrl: z.string().max(500).optional(),
+  note: z.string().trim().max(1000).optional(),
+  shopId: z.string().optional(),
+})
+
+export async function POST(req: NextRequest) {
+  try {
+    const guarded = await requireShopPermission('CUSTOMER_MANAGE')
+    if (!guarded.ok) return guarded.response
+
+    const body: unknown = await req.json()
+    const parsed = createCustomerSchema.safeParse(body)
+    if (!parsed.success) {
+      return badRequest((parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot")
+    }
+    const resolved = await resolveActiveShopId(guarded.session, parsed.data.shopId)
+    if (!resolved.ok) return resolved.response
+    const { shopId } = resolved
+
+    const passportPhotoKey = parsed.data.passportPhotoUrl
+      ? resolvePrivateUploadReference({
+          value: parsed.data.passportPhotoUrl,
+          shopId,
+          kind: 'passport',
+          allowLegacyRawKey: true,
+        })
+      : undefined
+    if (parsed.data.passportPhotoUrl && !passportPhotoKey) {
+      return badRequest("Pasport rasmi boshqa do'konga tegishli yoki havola muddati tugagan")
+    }
+    const passport = parsed.data.passportIdentifier
+      ? passportIdentifierStorage(parsed.data.passportIdentifier)
+      : {}
+    const normalizedPhone = normalizePhone(parsed.data.phone)
+    const customer = await prisma.$transaction(async (tx) => {
+      const inserted = await tx.customer.create({
+        data: {
+          shopId,
+          name: parsed.data.name,
+          phone: parsed.data.phone,
+          normalizedPhone,
+          additionalPhones: normalizeAdditionalPhones(parsed.data.additionalPhones ?? [], parsed.data.phone),
+          passportPhotoUrl: passportPhotoKey,
+          note: parsed.data.note,
+          ...passport,
+        },
+        select: { id: true, name: true, phone: true, additionalPhones: true, passportIdentifierLast4: true, createdAt: true },
+      })
+      await tx.log.create({
+        data: {
+          shopId,
+          actorId: guarded.session.user.id,
+          actorType: guarded.session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
+          action: 'CUSTOMER_CREATE',
+          targetType: 'Customer',
+          targetId: inserted.id,
+          newValue: {
+            name: inserted.name,
+            phone: inserted.phone,
+            additionalPhoneCount: inserted.additionalPhones.length,
+            hasPassportIdentifier: Boolean(inserted.passportIdentifierLast4),
+            hasPassportPhoto: Boolean(passportPhotoKey),
+          },
+        },
+      })
+      return inserted
+    })
+    invalidateShopCustomerMutation(shopId)
+    return created({
+      ...customer,
+      passportMasked: customer.passportIdentifierLast4 ? `••••${customer.passportIdentifierLast4}` : null,
+      passportIdentifierLast4: undefined,
+    }, 'Mijoz yaratildi')
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      return conflict('Bu telefon yoki pasport bilan faol mijoz mavjud. Mavjud mijozni qidiruvdan tanlang.')
+    }
+    logger.error('[POST /api/customers]', { event: 'api.route_error', error })
     return serverError()
   }
 }

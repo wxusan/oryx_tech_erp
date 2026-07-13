@@ -52,13 +52,22 @@ describe('hisobot page: month selector + admin filter UI', () => {
   const page = read('src/app/(shop)/shop/hisobot/page.tsx')
   const client = read('src/app/(shop)/shop/hisobot/hisobot-client.tsx')
   const filters = read('src/app/(shop)/shop/hisobot/hisobot-filters.tsx')
+  const rangeQuery = read('src/lib/server/shop-report-range.ts')
+  const exportRoute = read('src/app/api/export/[entity]/route.ts')
 
   it('parses month/admin from searchParams and passes them through to getShopStats', () => {
     expect(page).toContain('getShopStats(guarded.session, guarded.shopId, { monthKey, adminId })')
   })
 
-  it('an invalid/missing month falls back to the current month rather than crashing', () => {
-    expect(page).toContain('tashkentMonthRangeFromKey(monthParam).monthKey')
+  it('single-month options come from real data, while explicit ranges use the shared bounded resolver', () => {
+    expect(page).toContain('getShopReportDataMonths(guarded.shopId)')
+    expect(page).toContain('resolveReportRange({')
+    expect(page).toContain("availableMonths[0] ?? tashkentMonthRange().monthKey")
+    expect(page).not.toContain('recentTashkentMonthKeys(12)')
+    expect(filters).toContain('<SelectItem value="trailing3">')
+    expect(filters).toContain('<SelectItem value="trailing6">')
+    expect(filters).toContain('<SelectItem value="trailing12">')
+    expect(filters).toContain('<SelectItem value="custom">')
   })
 
   it('the month label is parsed from the YYYY-MM key directly, never a Date\'s local-timezone getters', () => {
@@ -67,11 +76,34 @@ describe('hisobot page: month selector + admin filter UI', () => {
   })
 
   it('shows an explicit non-attribution note when an admin filter is active', () => {
-    expect(client).toContain('{stats.filteredByAdmin && (')
+    expect(client).toContain('{adminId && (')
     expect(client).toContain("bitta adminga bog'lab bo'lmaydi")
   })
 
-  it('the filter UI navigates via query params, not client-only state (so the server component re-fetches)', () => {
+  it('puts the complete range/admin contract in both the URL and React Query key', () => {
     expect(filters).toContain('router.push(`${pathname}?${params.toString()}`)')
+    expect(client).toContain("view: 'hisobot-range'")
+    expect(client).toContain('startMonth,')
+    expect(client).toContain('endMonth,')
+    expect(client).toContain('adminId,')
+  })
+
+  it('uses one set-based SQL range statement and preserves native currency partitions', () => {
+    expect(rangeQuery).toContain('WITH months AS (')
+    expect(rangeQuery).toContain('WITH ORDINALITY')
+    expect(rangeQuery).toContain("FILTER (WHERE currency = 'UZS')")
+    expect(rangeQuery).toContain("FILTER (WHERE currency = 'USD')")
+    expect(rangeQuery).toContain('n."isImported" = false')
+    expect(rangeQuery).toContain('n."resolutionState" <> \'WRITTEN_OFF\'')
+  })
+
+  it('exports the identical URL range/admin contract with separate UZS and USD columns', () => {
+    expect(client).toContain('/api/export/report?')
+    expect(exportRoute).toContain("report-${range.startMonth}-${range.endMonth}")
+    expect(exportRoute).toContain("'cashCollectedUzs'")
+    expect(exportRoute).toContain("'cashCollectedUsd'")
+    expect(exportRoute).toContain("'expectedReceivablesUzs'")
+    expect(exportRoute).toContain("'expectedReceivablesUsd'")
+    expect(exportRoute).toContain("requireShopPermissionAndFeature('REPORT_VIEW', 'REPORTS')")
   })
 })

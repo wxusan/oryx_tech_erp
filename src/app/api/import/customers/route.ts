@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { normalizePhone } from '@/lib/phone'
 import { phoneSchema } from '@/lib/validations'
@@ -22,7 +22,7 @@ const customerImportSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    const guarded = await requireApiSession()
+    const guarded = await requireShopPermissionAndFeature('IMPORT_DATA', 'CUSTOMER_CRM')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
