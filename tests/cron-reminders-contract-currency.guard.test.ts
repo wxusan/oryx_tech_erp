@@ -17,11 +17,15 @@ describe('cron reminders use contract-currency remaining amounts', () => {
     expect(contractCurrencyFields).toBeGreaterThanOrEqual(3)
   })
 
-  it('dedupe keys, jitter, and bounded-query patterns are unchanged', () => {
-    expect(cron).toContain('REMINDER:${dayKey}:${admin.telegramId}:${schedule.id}')
+  it('dedupe keys preserve original trigger days and every query is bounded', () => {
+    expect(cron).toContain('REMINDER:${triggerDay.dayKey}:${admin.telegramId}:${schedule.id}')
     expect(cron).toContain('OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}')
-    expect(cron).toContain('EARLY_REMINDER:${dayKey}:${admin.telegramId}:${schedule.id}')
-    expect(cron).toContain('scheduledReminderSendAt(dedupeKey)')
+    expect(cron).toContain('EARLY_REMINDER:${triggerKey}:${admin.telegramId}:${schedule.id}')
+    expect(cron).toContain('scheduledReminderSendAt(dedupeKey,')
+    expect(cron.split('findMany({').length - 1).toBe(9)
+    expect(cron.split('orderBy: { id: \'asc\' }').length - 1).toBe(9)
+    expect(cron.split('...pageAfter(cursor)').length - 1).toBe(9)
+    expect(cron).toContain("generationStatus = acquired.state.windowEnd >= tomorrow ? 'complete' : 'partial'")
   })
 })
 

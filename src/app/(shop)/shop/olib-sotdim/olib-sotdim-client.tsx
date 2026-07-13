@@ -32,9 +32,9 @@ import { commitNavigationMutation } from '@/lib/client-events'
 import { replaceListUrlState } from '@/lib/list-url-state'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import type { PaymentMethod, SupplierPayableStatus } from '@/lib/domain-types'
 
-type PayableStatus = 'PENDING' | 'PAID' | 'CANCELLED' | 'OVERDUE'
-type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
+type PayableStatus = SupplierPayableStatus
 
 const statusLabels: Record<PayableStatus, string> = {
   PENDING: 'Kutilmoqda',

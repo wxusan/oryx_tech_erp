@@ -32,23 +32,46 @@ The drill fails if the restore is not usable within the approved RTO, if
 diagnostics reveal new inconsistencies, or if any migration cannot be safely
 forward-fixed.
 
-## Artifact-first production release
+## Guarded artifact-first production release
 
 The manually dispatched `release-production.yml` workflow requires the GitHub
 `production` environment to have named reviewers and these secrets:
 
-- `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`;
-- `PRODUCTION_DATABASE_URL`, `PRODUCTION_DIRECT_URL`.
+- `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`.
 
-The workflow deliberately:
+`vercel pull --environment=production` copies production variables into the
+ephemeral Actions runner so the remote deployment can be linked correctly.
+They must never be printed, uploaded as artifacts, cached, or committed; the
+workflow does not copy them into explicit GitHub secrets or command output.
 
-1. builds an immutable Vercel production artifact before schema mutation;
-2. applies only reviewed backward-compatible migrations;
-3. promotes that exact prebuilt artifact.
+The workflow refuses any ref other than the exact current `main` SHA and
+requires a successful `push`-event `CI` run on `main` for that exact SHA. It
+passes a build-only release marker that `scripts/vercel-build.mjs` requires in
+production, while `vercel.json` disables automatic Git deployment for `main`
+without disabling branch previews. The marker is a defense in depth against
+accidental automatic production builds, but is not an
+authorization boundary. Vercel production access/scoped tokens and GitHub's
+named environment reviewers remain the authorization controls. The guarded
+deployment is created without the production domain, inspected, and probed
+through authenticated `vercel curl`; the response must prove database health
+and the exact short commit. The workflow rechecks remote `main` immediately
+before promoting the artifact.
 
-`vercel.json` must never run a migration as part of `buildCommand`. A build can
-fail after an already-successful database mutation, leaving the previous app on
-the new schema.
+The workflow starts a remote Vercel production build. Its guarded builder
+deliberately:
+
+1. builds the application artifact before schema mutation;
+2. runs `scripts/production-release-preflight.mjs --phase=pre` using count-only,
+   read-only queries and aborts on a migration-blocking identity conflict;
+3. applies only reviewed backward-compatible migrations;
+4. runs the post-migration preflight and proves every release migration is
+   recorded;
+5. publishes the artifact created in step 1.
+
+`vercel.json` must keep `node scripts/vercel-build.mjs` as its `buildCommand`.
+Replacing it with bare `next build`, `npm run build`, or an unguarded migration
+command bypasses this ordering. No preflight query may print row contents or
+perform a repair.
 
 ## Pre-release gate
 
@@ -57,6 +80,7 @@ the new schema.
 - Migration classified and rehearsed on a restored staging copy.
 - Backup/PITR status confirmed immediately before the release.
 - Migration is backward-compatible with the currently deployed version.
+- Production preflight reports zero blocking issues.
 - Forward-fix and stop conditions documented.
 - No unapproved historic data repair bundled into the schema release.
 

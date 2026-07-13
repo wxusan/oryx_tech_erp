@@ -1,11 +1,13 @@
-export const paymentMethodLabels: Record<string, string> = {
+import type { DeviceStatus, NasiyaStatus, PaymentMethod } from '@/lib/domain-types'
+
+export const paymentMethodLabels: Record<PaymentMethod, string> = {
   CASH: 'Naqd',
   TRANSFER: "Bank o'tkazmasi",
   CARD: 'Karta',
   OTHER: 'Boshqa',
 }
 
-export const deviceStatusLabels: Record<string, string> = {
+export const deviceStatusLabels: Record<DeviceStatus, string> = {
   IN_STOCK: 'Omborda',
   SOLD_CASH: 'Naqd sotildi',
   SOLD_DEBT: 'Qarzga sotilgan',
@@ -14,7 +16,7 @@ export const deviceStatusLabels: Record<string, string> = {
   DELETED: "O'chirilgan",
 }
 
-export const nasiyaStatusLabels: Record<string, string> = {
+export const nasiyaStatusLabels: Record<NasiyaStatus, string> = {
   ACTIVE: 'Faol',
   COMPLETED: 'Yopilgan',
   OVERDUE: "Muddati o'tgan",
@@ -27,21 +29,22 @@ export const scheduleStatusLabels: Record<string, string> = {
   PARTIAL: 'Qisman',
   OVERDUE: "Muddati o'tgan",
   DEFERRED: 'Kechiktirilgan',
+  CANCELLED: 'Bekor qilingan',
 }
 
 export function paymentMethodLabel(value?: string | null) {
   if (!value) return '-'
-  return paymentMethodLabels[value] ?? value
+  return (paymentMethodLabels as Record<string, string>)[value] ?? value
 }
 
 export function deviceStatusLabel(value?: string | null) {
   if (!value) return '-'
-  return deviceStatusLabels[value] ?? value
+  return (deviceStatusLabels as Record<string, string>)[value] ?? value
 }
 
 export function nasiyaStatusLabel(value?: string | null) {
   if (!value) return '-'
-  return nasiyaStatusLabels[value] ?? value
+  return (nasiyaStatusLabels as Record<string, string>)[value] ?? value
 }
 
 export function scheduleStatusLabel(value?: string | null) {

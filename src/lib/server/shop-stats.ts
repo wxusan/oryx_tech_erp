@@ -4,10 +4,14 @@ import { unstable_cache } from 'next/cache'
 import type { Session } from 'next-auth'
 import { prisma } from '@/lib/prisma'
 import { shopCacheTag } from '@/lib/server/cache-tags'
-import { tashkentMonthRangeFromKey } from '@/lib/timezone'
+import { tashkentDayRange, tashkentMonthRangeFromKey } from '@/lib/timezone'
 import { getUsdUzsRate } from '@/lib/server/currency'
 import { computeShopStatsFromRows } from '@/lib/shop-stats-formulas'
-import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
+import {
+  getShopAccrualAggregate,
+  getShopObligationAggregate,
+  getUpcomingScheduleIds,
+} from '@/lib/server/shop-stats-queries'
 
 type StatsRole = Session['user']['role']
 
@@ -61,6 +65,7 @@ export async function getShopStats(session: Session, shopId: string, options: Sh
 async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: string | null, adminId: string | null) {
   const now = new Date()
   const { start: monthStart, end: monthEnd } = tashkentMonthRangeFromKey(monthKey, now)
+  const { start: todayStart } = tashkentDayRange(now)
   const attributedTo = adminId ? { createdBy: adminId } : {}
   // Single rate fetch for the whole batch, matching every other "live view"
   // conversion in this codebase — best-effort, never blocks the dashboard.
@@ -68,18 +73,16 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
 
   const [
     totalDevices,
-    cashSalesThisMonth,
+    accrualAggregate,
     saleReceivedAgg,
-    nasiyaSoldThisMonth,
     nasiyaReceivedAgg,
     activeNasiyalar,
-    nasiyaSchedulesForStats,
-    unpaidSales,
+    obligationAggregate,
     inventoryAgg,
-    returnRefundAgg,
+    returnAccountingAgg,
     returnsThisMonth,
     recentActivity,
-    upcomingPayments,
+    upcomingScheduleIds,
   ] = await Promise.all([
     prisma.device.count({
       // Imported devices exist only to carry pre-Oryx debt — they were never
@@ -87,18 +90,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
       where: { shopId, deletedAt: null, isImported: false },
     }),
 
-    prisma.sale.findMany({
-      where: {
-        shopId,
-        deletedAt: null,
-        createdAt: { gte: monthStart, lt: monthEnd },
-        ...attributedTo,
-      },
-      select: {
-        salePrice: true,
-        device: { select: { purchasePrice: true } },
-      },
-    }),
+    getShopAccrualAggregate({ shopId, monthStart, monthEnd, adminId }),
 
     prisma.salePayment.aggregate({
       _sum: { amount: true },
@@ -107,24 +99,6 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
         deletedAt: null,
         paidAt: { gte: monthStart, lt: monthEnd },
         ...attributedTo,
-      },
-    }),
-
-    prisma.nasiya.findMany({
-      where: {
-        shopId,
-        deletedAt: null,
-        createdAt: { gte: monthStart, lt: monthEnd },
-        // CRITICAL: imported (pre-Oryx) nasiyas are carried-over debt, not new
-        // sales. Their originalTotalAmount / interest / device cost must NEVER
-        // enter this month's gross, interest or profit.
-        isImported: false,
-        ...attributedTo,
-      },
-      select: {
-        totalAmount: true,
-        interestAmount: true,
-        device: { select: { purchasePrice: true } },
       },
     }),
 
@@ -142,44 +116,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
       where: { shopId, deletedAt: null, status: { in: ['ACTIVE', 'OVERDUE'] } },
     }),
 
-    prisma.nasiyaSchedule.findMany({
-      where: {
-        shopId,
-        status: { in: ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'] },
-        nasiya: { is: { deletedAt: null, status: { not: 'CANCELLED' } } },
-      },
-      select: {
-        dueDate: true,
-        delayedUntil: true,
-        expectedAmount: true,
-        paidAmount: true,
-        status: true,
-        contractExpectedAmount: true,
-        contractPaidAmount: true,
-        nasiya: {
-          select: {
-            id: true,
-            status: true,
-            contractCurrency: true,
-          },
-        },
-      },
-    }),
-
-    prisma.sale.findMany({
-      where: {
-        shopId,
-        deletedAt: null,
-        paidFully: false,
-        remainingAmount: { gt: 0 },
-      },
-      select: {
-        dueDate: true,
-        remainingAmount: true,
-        contractCurrency: true,
-        contractRemainingAmount: true,
-      },
-    }),
+    getShopObligationAggregate({ shopId, monthStart, monthEnd, todayStart }),
 
     prisma.device.aggregate({
       _sum: { purchasePrice: true },
@@ -191,7 +128,13 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     }),
 
     prisma.deviceReturn.aggregate({
-      _sum: { refundAmount: true },
+      _sum: {
+        refundAmount: true,
+        revenueReversalAmountUzs: true,
+        interestReversalAmountUzs: true,
+        inventoryCostRecoveryUzs: true,
+        retainedValueAmountUzs: true,
+      },
       where: {
         shopId,
         createdAt: { gte: monthStart, lt: monthEnd },
@@ -223,53 +166,36 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
       },
     }),
 
-    prisma.nasiyaSchedule.findMany({
-      where: {
-        shopId,
-        status: { in: ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'] },
-        nasiya: { is: { deletedAt: null, status: { not: 'CANCELLED' } } },
-      },
-      orderBy: { dueDate: 'asc' },
-      take: 50,
-      select: {
-        id: true,
-        dueDate: true,
-        delayedUntil: true,
-        expectedAmount: true,
-        paidAmount: true,
-        status: true,
-        contractExpectedAmount: true,
-        contractPaidAmount: true,
-        nasiya: {
-          select: {
-            id: true,
-            contractCurrency: true,
-            customer: { select: { name: true } },
-            device: { select: { model: true } },
-          },
-        },
-      },
-    }),
+    getUpcomingScheduleIds(shopId, 5),
   ])
 
-  // Parent status is normally maintained by the payment transaction. Older
-  // rows can however be marked COMPLETED by legacy-UZS status derivation
-  // while a PARTIAL/OVERDUE native schedule still owes money after FX drift.
-  // Include those contracts in the active count without writing historical
-  // data during a dashboard read; the repair plan covers persistent cleanup.
-  const falseCompletedNasiyaIds = new Set(
-    nasiyaSchedulesForStats
-      .filter(
-        (schedule) =>
-          schedule.nasiya.status === 'COMPLETED' &&
-          contractScheduleOutstanding(
-            Number(schedule.contractExpectedAmount),
-            Number(schedule.contractPaidAmount),
-            schedule.nasiya.contractCurrency,
-          ) > 0,
-      )
-      .map((schedule) => schedule.nasiya.id),
-  )
+  const upcomingRows = upcomingScheduleIds.length
+    ? await prisma.nasiyaSchedule.findMany({
+        where: { id: { in: upcomingScheduleIds }, shopId },
+        select: {
+          id: true,
+          dueDate: true,
+          delayedUntil: true,
+          expectedAmount: true,
+          paidAmount: true,
+          status: true,
+          contractExpectedAmount: true,
+          contractPaidAmount: true,
+          nasiya: {
+            select: {
+              id: true,
+              contractCurrency: true,
+              customer: { select: { name: true } },
+              device: { select: { model: true } },
+            },
+          },
+        },
+      })
+    : []
+  const upcomingById = new Map(upcomingRows.map((row) => [row.id, row]))
+  const upcomingPayments = upcomingScheduleIds
+    .map((id) => upcomingById.get(id))
+    .filter((row): row is NonNullable<typeof row> => Boolean(row))
 
   const computed = computeShopStatsFromRows({
     now,
@@ -277,15 +203,21 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     monthEnd,
     usdUzsRate,
     totalDevices,
-    cashSalesThisMonth,
+    cashSalesThisMonth: [],
+    accrualAggregate,
     saleReceivedSum: saleReceivedAgg._sum.amount,
-    nasiyaSoldThisMonth,
+    nasiyaSoldThisMonth: [],
     nasiyaReceivedSum: nasiyaReceivedAgg._sum.amount,
-    activeNasiyalar: activeNasiyalar + falseCompletedNasiyaIds.size,
-    nasiyaSchedulesForStats,
-    unpaidSales,
+    activeNasiyalar: activeNasiyalar + obligationAggregate.falseCompletedCount,
+    nasiyaSchedulesForStats: [],
+    unpaidSales: [],
+    obligationAggregate,
     inventoryPurchaseCostSum: inventoryAgg._sum.purchasePrice,
-    returnRefundSum: returnRefundAgg._sum.refundAmount,
+    returnRefundSum: returnAccountingAgg._sum.refundAmount,
+    returnRevenueReversalSum: returnAccountingAgg._sum.revenueReversalAmountUzs,
+    returnInterestReversalSum: returnAccountingAgg._sum.interestReversalAmountUzs,
+    returnInventoryCostRecoverySum: returnAccountingAgg._sum.inventoryCostRecoveryUzs,
+    returnRetainedValueSum: returnAccountingAgg._sum.retainedValueAmountUzs,
     returnsThisMonth,
     recentActivity,
     upcomingPayments,

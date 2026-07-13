@@ -13,7 +13,7 @@ describe('cron schedules planned reminders with jitter', () => {
     expect(cron).toContain("import { scheduledReminderSendAt } from '@/lib/notification-schedule'")
     // No planned reminder is scheduled at raw `new Date()` (would fire immediately).
     expect(cron).not.toContain('scheduledAt: new Date(),')
-    const count = cron.split('scheduledAt: scheduledReminderSendAt(dedupeKey)').length - 1
+    const count = cron.split('scheduledAt: scheduledReminderSendAt(dedupeKey,').length - 1
     // REMINDER, OVERDUE, EARLY_REMINDER, SALE_REMINDER, SALE_OVERDUE, SALE_EARLY_REMINDER,
     // SUPPLIER_PAYABLE_REMINDER, SUPPLIER_PAYABLE_OVERDUE, SUPPLIER_PAYABLE_EARLY_REMINDER
     expect(count).toBe(9)

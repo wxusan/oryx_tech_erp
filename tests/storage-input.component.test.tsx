@@ -23,8 +23,7 @@ describe('StorageInput', () => {
     await user.type(amount, '1.5')
     expect((amount as HTMLInputElement).value).toBe('1.5')
 
-    await user.click(screen.getByLabelText('Xotira birligi'))
-    await user.click(screen.getByRole('option', { name: 'TB' }))
+    await user.selectOptions(screen.getByLabelText('Xotira birligi'), 'TB')
     expect(screen.getByLabelText('Xotira birligi').textContent).toContain('TB')
   })
 })

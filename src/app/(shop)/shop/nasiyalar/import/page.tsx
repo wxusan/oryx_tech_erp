@@ -7,6 +7,7 @@ import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { StorageInput } from '@/components/ui/storage-input'
+import { Field } from '@/components/ui/field'
 import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
@@ -233,10 +234,9 @@ export default function ImportNasiyaPage() {
         </Field>
       </Section>
 
-      <div>
-        <label className="mb-1.5 block text-xs font-medium text-zinc-700">Izoh</label>
+      <Field label="Izoh">
         <Textarea value={form.importNote} onChange={(e) => set('importNote')(e.target.value)} className="min-h-[70px] rounded-lg border-zinc-200 text-sm" />
-      </div>
+      </Field>
 
       {preview && (
         <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-4">
@@ -273,17 +273,6 @@ function Section({ title, children }: { title: string; children: React.ReactNode
     <div className="rounded-lg border border-zinc-200 p-4">
       <div className="mb-3 text-sm font-semibold text-zinc-900">{title}</div>
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">{children}</div>
-    </div>
-  )
-}
-
-function Field({ label, required, children }: { label: string; required?: boolean; children: React.ReactNode }) {
-  return (
-    <div>
-      <label className="mb-1.5 block text-xs font-medium text-zinc-700">
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
-      {children}
     </div>
   )
 }

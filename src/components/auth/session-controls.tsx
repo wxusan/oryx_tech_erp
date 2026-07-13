@@ -19,6 +19,7 @@ export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsP
   const timerRef = useRef<number | null>(null)
   const signingOutRef = useRef(false)
   const lastBroadcastRef = useRef(0)
+  const lastServerTouchRef = useRef(0)
 
   const logout = useCallback((broadcast = true) => {
     if (signingOutRef.current) return
@@ -41,6 +42,21 @@ export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsP
 
   useEffect(() => {
     if (idleTimeoutMs == null) return
+
+    const touchServerSession = (now: number) => {
+      if (now - lastServerTouchRef.current < 60_000) return
+      lastServerTouchRef.current = now
+      void fetch('/api/auth/activity', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }).then((response) => {
+        if (response.status === 401 || response.status === 403) logout()
+      }).catch(() => {
+        // The exact local inactivity timer remains active during a temporary
+        // network failure; a later protected request still enforces the
+        // durable server-side deadline.
+      })
+    }
 
     const scheduleFrom = (lastActivity: number) => {
       if (timerRef.current) window.clearTimeout(timerRef.current)
@@ -67,6 +83,7 @@ export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsP
       lastBroadcastRef.current = now
       try { window.localStorage.setItem(ADMIN_ACTIVITY_KEY, String(now)) } catch {}
       scheduleFrom(now)
+      touchServerSession(now)
     }
 
     const handleStorage = (event: StorageEvent) => {
@@ -76,6 +93,7 @@ export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsP
     }
     const checkDeadline = () => {
       if (document.visibilityState === 'visible') scheduleFrom(readLastActivity())
+      if (document.visibilityState === 'visible') touchServerSession(Date.now())
     }
     const activityEvents: Array<keyof WindowEventMap> = ['pointerdown', 'keydown', 'touchstart', 'wheel']
     activityEvents.forEach((name) => window.addEventListener(name, recordActivity, { passive: true }))
@@ -92,6 +110,7 @@ export function SessionControls({ callbackUrl, idleTimeoutMs }: SessionControlsP
       window.localStorage.setItem(ADMIN_ACTIVITY_KEY, String(initial))
     } catch {}
     scheduleFrom(initial)
+    touchServerSession(initial)
 
     return () => {
       if (timerRef.current) window.clearTimeout(timerRef.current)

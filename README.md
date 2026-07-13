@@ -116,12 +116,11 @@ environment before any destructive Prisma command:
 | `npm run prisma:migrate:dev` | Blocked against a remote/prod DB; allowed for a local DB in dev. |
 | `npm run prisma:migrate:deploy` | The one explicit way to apply migrations to a real DB. |
 
-The **build never runs migrations**: `prebuild`/`postinstall` run only
-`prisma generate`; Vercel's `buildCommand` is `npm run build` (= `next build`).
-Production releases use the manually approved artifact-first workflow in
-`.github/workflows/release-production.yml`: build first, apply a rehearsed
-backward-compatible migration, then deploy the exact prebuilt artifact. See
-`docs/operations/recovery-and-release-runbook.md`.
+Local and preview builds never run migrations: `prebuild`/`postinstall` run
+only `prisma generate`. Vercel production uses the guarded build command in
+`scripts/vercel-build.mjs`: compile first, run the read-only preflight, apply
+reviewed migrations, verify their recorded state, then publish the already-built
+artifact. See `docs/operations/recovery-and-release-runbook.md`.
 
 ### Fresh database (recommended)
 
@@ -169,7 +168,8 @@ If you cannot confirm the DB matches, prefer a fresh database instead of guessin
    `TELEGRAM_BOT_TOKEN`.
 2. Generate `TELEGRAM_WEBHOOK_SECRET` (`openssl rand -hex 32`) and
    `CRON_SECRET` (used to authorize `/api/telegram/send` and `/api/cron/reminders`;
-   `INTERNAL_API_SECRET` overrides it if set).
+   an optional `INTERNAL_API_SECRET` is also accepted independently for
+   app-owned internal calls).
 3. Register the webhook so Telegram can deliver `/start` to the app:
 
    ```bash
@@ -246,8 +246,8 @@ For local QA you can still exercise delivery:
   linked user; if it stays silent, confirm the webhook is registered (inbound
   updates require `bot.init()`, which the route now performs automatically).
 
-> Migrations are never run automatically during a Vercel build (see below). Run
-> them deliberately with `npm run prisma:migrate:deploy`.
+> Production Vercel releases use the guarded builder described below. Local and
+> preview builds never migrate a database.
 
 ## Observability & Ops
 
@@ -291,13 +291,23 @@ Set the variables from `.env.example` in Vercel. Production must include
   host shown earlier was `ap-south-1`; that distance adds latency to every DB
   round trip. Co-locating them is a deployment setting, not a code change.
 
-**Builds never run migrations.** `vercel.json` runs only `npm run build`.
-Production uses the artifact-first workflow in
-`.github/workflows/release-production.yml`: build the immutable artifact,
-apply reviewed backward-compatible migrations, then deploy that exact prebuilt
-artifact. This prevents a failed build from leaving the database ahead of the
-application. An authorized operator can still apply migrations out-of-band
-when following the recovery runbook:
+`vercel.json` runs `scripts/vercel-build.mjs`. Preview and local builds only run
+the application build. A production build follows this guarded order:
+
+1. build the application artifact before touching the database;
+2. run count-only, read-only production preflight checks;
+3. abort on migration-blocking Telegram identity ambiguity;
+4. apply the reviewed additive migrations with `prisma migrate deploy`;
+5. re-run the count-only checks and verify every release migration is recorded;
+6. publish the already-built artifact.
+
+The preflight never repairs historic rows. Any count requiring business-data
+repair remains a separately approved operation under the recovery runbook.
+Production database secrets stay inside Vercel because they are configured as
+write-only sensitive variables. A failed application build therefore occurs
+before migration; a failed preflight or migration prevents the new deployment
+from being published. An authorized operator can still apply migrations
+out-of-band when following the recovery runbook:
 
 ```bash
 # From a trusted environment pointed at the PRODUCTION database:

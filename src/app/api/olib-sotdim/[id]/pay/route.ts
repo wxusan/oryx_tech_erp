@@ -25,6 +25,8 @@ import { presentDeviceSpecs } from '@/lib/device-specs'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
+const PAYABLE_NOT_OPEN_MESSAGE = "Faqat kutilayotgan yoki muddati o'tgan qarzdorlikni to'lash mumkin"
+
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
     const guarded = await requireApiSession()
@@ -43,7 +45,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
-    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    // Distributed when Upstash is configured; bounded in-process fallback otherwise.
     const rate = await checkRateLimitDistributed(rateLimitKey('supplier-payable-pay', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
@@ -56,16 +58,15 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       },
     })
     if (!payable) return notFound('Yozuv topilmadi')
-    if (payable.status === 'PAID') return conflict("Bu to'lov allaqachon qayd etilgan")
+    if (payable.status !== 'PENDING' && payable.status !== 'OVERDUE') return conflict(PAYABLE_NOT_OPEN_MESSAGE)
 
     const paidAt = parsed.data.paidAt ?? new Date()
 
     const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      // Atomic guard: only flip if it is still PENDING (prevents a double
-      // mark-as-paid race — e.g. a double-click — from sending two
-      // confirmation notifications and two log entries for the same payable).
+      // Atomic state-machine guard: only an open supplier debt may become
+      // PAID. This prevents both double-submit races and CANCELLED -> PAID.
       const flipped = await tx.supplierPayable.updateMany({
-        where: { id, shopId, deletedAt: null, status: { not: 'PAID' } },
+        where: { id, shopId, deletedAt: null, status: { in: ['PENDING', 'OVERDUE'] } },
         data: {
           status: 'PAID',
           paidAt,
@@ -74,7 +75,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         },
       })
       if (flipped.count !== 1) {
-        throw { status: 409, message: "Bu to'lov allaqachon qayd etilgan" }
+        throw { status: 409, message: PAYABLE_NOT_OPEN_MESSAGE }
       }
       const u = await tx.supplierPayable.findFirstOrThrow({ where: { id, shopId } })
 

@@ -571,10 +571,10 @@ aggregates that could have raw-mixed currencies (`expectedThisMonth`,
   `purchasePrice: 0` (cost genuinely unknown), which the new
   `purchaseCurrency` defaults already describe correctly with no extra
   code needed.
-- **Sold-device list/CSV exports** (`/api/export/[entity]`) show each row's
-  own legacy-UZS and display-currency amount side by side — this is a
-  per-row historical export, not a summed aggregate, so it was not touched
-  and carries no mixed-currency risk.
+- **Device CSV/XLSX exports** (`/api/export/[entity]`) now expose the frozen
+  native purchase amount/currency/rate and UZS snapshot as separate columns,
+  alongside the legacy-UZS and current shop-display values. This preserves
+  the original acquisition context without raw-mixing currencies.
 
 ## 23. Production incident: device detail page crash on USD-native sales (fixed)
 

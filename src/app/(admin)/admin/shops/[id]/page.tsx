@@ -16,79 +16,13 @@ import { PhoneInput } from '@/components/ui/phone-input'
 import { formatUzPhoneDisplay, isValidPhone } from '@/lib/phone'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
+import { Field } from '@/components/ui/field'
+import { ShopStatusBadge } from '@/components/admin/shop-status-badge'
 import { commitNavigationMutation, navigateAfterMutation } from '@/lib/client-events'
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from '@/components/ui/table'
-
-type ShopStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED'
-
-interface ShopAdmin {
-  id: string
-  name: string
-  phone: string
-  telegramId: string | null
-  telegramVerifiedAt: string | null
-  login: string
-  isActive: boolean
-}
-
-interface ShopPayment {
-  id: string
-  paidAt: string
-  amount: string | number
-  months: number
-  paymentMethod: string
-  note: string | null
-}
-
-interface ShopDetail {
-  id: string
-  name: string
-  ownerName: string
-  ownerPhone: string
-  shopNumber: string
-  address: string
-  note: string | null
-  subscriptionDue: string
-  status: ShopStatus
-  deletedAt: string | null
-  deletedBy: string | null
-  deleteNote: string | null
-  admins: ShopAdmin[]
-  payments: ShopPayment[]
-}
-
-function formatMoney(n: number | string) {
-  return Number(n).toLocaleString('ru-RU') + " so'm"
-}
-
-function StatusBadge({ status }: { status: ShopStatus }) {
-  if (status === 'ACTIVE') {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-900 text-white">
-        Faol
-      </span>
-    )
-  }
-  if (status === 'SUSPENDED') {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-500">
-        To&apos;xtatilgan
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-400">
-      O&apos;chirilgan
-    </span>
-  )
-}
+import { ShopAdminsTable } from '@/components/admin/shop-admins-table'
+import { ShopPaymentsTable } from '@/components/admin/shop-payments-table'
+import type { AdminShopDetail as ShopDetail, AdminShopUser as ShopAdmin } from '@/lib/admin-shop-detail-contract'
+import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 
 function InfoRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
@@ -102,6 +36,7 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
 }
 
 export default function ShopDetailPage() {
+  const paymentCommand = useLogicalCommandIdempotency()
   const params = useParams()
   const router = useRouter()
   const id = params.id as string
@@ -173,7 +108,7 @@ export default function ShopDetailPage() {
     adminName.trim() !== '' &&
     isValidPhone(adminPhone) &&
     adminLogin.trim() !== '' &&
-    adminPassword.trim() !== ''
+    adminPassword.trim().length >= 10
   const passwordResetValid =
     !!passwordAdmin &&
     newAdminPassword.trim().length >= 10 &&
@@ -257,37 +192,32 @@ export default function ShopDetailPage() {
     return 'OTHER'
   }
 
-  function methodFromEnum(m: string) {
-    if (m === 'CASH') return 'Naqd'
-    if (m === 'CARD') return 'Karta'
-    if (m === 'TRANSFER') return 'Bank'
-    return m
-  }
-
   const handlePaymentSubmit = async () => {
     if (!paymentValid) return
     setPayLoading(true)
     setPayError(null)
     try {
-      const idempotencyKey = crypto.randomUUID()
+      const payload = {
+        shopId: id,
+        amount: Number(payAmount),
+        months: Number(payMonths),
+        paymentMethod: methodToEnum(payMethod),
+        note: payNote || undefined,
+      }
       const res = await fetch(`/api/shops/${id}/payment`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': idempotencyKey },
-        body: JSON.stringify({
-          shopId: id,
-          amount: Number(payAmount),
-          months: Number(payMonths),
-          paymentMethod: methodToEnum(payMethod),
-          note: payNote || undefined,
-        }),
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': paymentCommand.keyFor(payload) },
+        body: JSON.stringify(payload),
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        await commitNavigationMutation({ kind: 'admin.shopPaymentRecorded', shopId: id })
+        paymentCommand.committed()
+        await commitNavigationMutation({ kind: 'admin.shopPaymentRecorded', shopId: id }).catch(() => undefined)
         setPaymentModalOpen(false)
         resetPayment()
         fetchShop()
       } else {
+        paymentCommand.rejected(res.status)
         setPayError(json.error ?? "To'lov qo'shishda xatolik")
       }
     } catch {
@@ -525,7 +455,7 @@ export default function ShopDetailPage() {
       <div className="flex flex-wrap items-start justify-between gap-4 mb-6">
         <div className="flex items-center gap-3">
           <h1 className="text-xl font-semibold text-zinc-900">{shop.name}</h1>
-          <StatusBadge status={shop.status} />
+          <ShopStatusBadge status={shop.status} />
         </div>
         <div className="flex items-center gap-2">
           {!isDeleted && (
@@ -595,122 +525,13 @@ export default function ShopDetailPage() {
         </div>
       </div>
 
-      {/* Admins */}
-      <div className="bg-white border border-zinc-200 mb-5">
-        <div className="px-5 py-4 border-b border-zinc-200 flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-zinc-900">Adminlar</h2>
-          <button
-            className="text-xs text-zinc-500 hover:text-zinc-900 border border-zinc-200 px-2.5 py-1 hover:bg-zinc-50 transition-colors"
-            onClick={() => setAddAdminModalOpen(true)}
-          >
-            + Admin qo&apos;shish
-          </button>
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow className="border-zinc-200 bg-zinc-50">
-              <TableHead className="text-xs text-zinc-500 font-medium pl-5">Ism</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">Login</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">Tel</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">Telegram ID</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">Holat</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium pr-5 text-right">Amallar</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {shop.admins.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="text-center py-8 text-sm text-zinc-400">
-                  Admin topilmadi
-                </TableCell>
-              </TableRow>
-            ) : (
-              shop.admins.map((admin) => (
-                <TableRow key={admin.id} className="border-zinc-100 hover:bg-zinc-50">
-                  <TableCell className="pl-5 text-sm font-medium text-zinc-900">{admin.name}</TableCell>
-                  <TableCell className="text-sm text-zinc-500 font-mono">{admin.login}</TableCell>
-                  <TableCell className="text-sm text-zinc-500 font-mono">{formatUzPhoneDisplay(admin.phone)}</TableCell>
-                  <TableCell className="text-sm text-zinc-500">
-                    {admin.telegramVerifiedAt ? (
-                      <span className="text-emerald-700">Ulangan</span>
-                    ) : admin.telegramId ? (
-                      <span className="text-zinc-500">Tasdiqlanmagan</span>
-                    ) : (
-                      '—'
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {admin.isActive ? (
-                      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-900 text-white">
-                        Faol
-                      </span>
-                    ) : (
-                      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-500">
-                        Nofaol
-                      </span>
-                    )}
-                  </TableCell>
-                  <TableCell className="pr-5 text-right">
-                    <div className="flex items-center gap-1.5 justify-end">
-                      <button
-                        onClick={() => openPasswordReset(admin)}
-                        className="text-xs text-zinc-500 hover:text-zinc-900 border border-zinc-200 px-2 py-1 hover:bg-zinc-50 transition-colors"
-                      >
-                        Parol
-                      </button>
-                      <button
-                        onClick={() => openDeleteAdmin(admin)}
-                        className="text-xs text-red-500 hover:text-red-700 border border-red-200 px-2 py-1 hover:bg-red-50 transition-colors"
-                      >
-                        O&apos;chirish
-                      </button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      {/* Payment history */}
-      <div className="bg-white border border-zinc-200">
-        <div className="px-5 py-4 border-b border-zinc-200">
-          <h2 className="text-sm font-semibold text-zinc-900">To&apos;lov tarixi</h2>
-        </div>
-        <Table>
-          <TableHeader>
-            <TableRow className="border-zinc-200 bg-zinc-50">
-              <TableHead className="text-xs text-zinc-500 font-medium pl-5">Sana</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">Miqdor (so&apos;m)</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">Oylar</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">Usul</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {shop.payments.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={4} className="text-center py-8 text-sm text-zinc-400">
-                  To&apos;lovlar tarixi yo&apos;q
-                </TableCell>
-              </TableRow>
-            ) : (
-              shop.payments.map((p) => (
-                <TableRow key={p.id} className="border-zinc-100 hover:bg-zinc-50">
-                  <TableCell className="pl-5 text-sm text-zinc-600">
-                    {p.paidAt ? new Date(p.paidAt).toLocaleDateString('ru-RU') : '—'}
-                  </TableCell>
-                  <TableCell className="text-sm font-medium text-zinc-900">
-                    {formatMoney(p.amount)}
-                  </TableCell>
-                  <TableCell className="text-sm text-zinc-500">{p.months} oy</TableCell>
-                  <TableCell className="text-sm text-zinc-500">{methodFromEnum(p.paymentMethod)}</TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      <ShopAdminsTable
+        admins={shop.admins}
+        onAdd={() => setAddAdminModalOpen(true)}
+        onResetPassword={openPasswordReset}
+        onDelete={openDeleteAdmin}
+      />
+      <ShopPaymentsTable payments={shop.payments} />
 
       {/* ── DELETE DIALOG ── */}
       <Dialog open={deleteModalOpen} onOpenChange={(v) => { setDeleteModalOpen(v); if (!v) { setDeleteNote(''); setDeleteError(null) } }}>
@@ -727,17 +548,14 @@ export default function ShopDetailPage() {
           {deleteError && (
             <p className="text-xs text-red-500 mt-1">{deleteError}</p>
           )}
-          <div className="mt-3">
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-              Sabab <span className="text-red-500">*</span>
-            </label>
+          <Field label="Sabab" required className="mt-3">
             <Textarea
               placeholder="O'chirish sababini kiriting..."
               value={deleteNote}
               onChange={(e) => setDeleteNote(e.target.value)}
               className="min-h-[80px] rounded-none border-zinc-200 text-sm"
             />
-          </div>
+          </Field>
           <DialogFooter className="mt-4 gap-2">
             <button
               onClick={() => { setDeleteModalOpen(false); setDeleteNote(''); setDeleteError(null) }}
@@ -772,10 +590,7 @@ export default function ShopDetailPage() {
           {suspendError && (
             <p className="text-xs text-red-500 mt-2">{suspendError}</p>
           )}
-          <div className="mt-3">
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-              Sabab <span className="text-red-500">*</span>
-            </label>
+          <Field label="Sabab" required className="mt-3">
             <Textarea
               value={suspendReason}
               onChange={(e) => setSuspendReason(e.target.value)}
@@ -786,7 +601,7 @@ export default function ShopDetailPage() {
               }
               className="min-h-[72px] rounded-none border-zinc-200 text-sm"
             />
-          </div>
+          </Field>
           <DialogFooter className="mt-4 gap-2">
             <button
               onClick={() => { setSuspendModalOpen(false); setSuspendError(null) }}
@@ -817,62 +632,48 @@ export default function ShopDetailPage() {
             <p className="text-xs text-red-500 mt-1">{editError}</p>
           )}
           <div className="mt-3 space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Do&apos;kon nomi <span className="text-red-500">*</span>
-              </label>
+            <Field label={<>Do&apos;kon nomi</>} required>
               <Input
                 value={editName}
                 onChange={(e) => setEditName(e.target.value)}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Egasi <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field label="Egasi" required>
               <Input
                 value={editOwnerName}
                 onChange={(e) => setEditOwnerName(e.target.value)}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Tel <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field label="Tel" required>
               <PhoneInput
                 value={editOwnerPhone}
                 onChange={setEditOwnerPhone}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Do&apos;kon raqami <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field label={<>Do&apos;kon raqami</>} required>
               <Input
                 value={editShopNumber}
                 onChange={(e) => setEditShopNumber(e.target.value)}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Manzil</label>
+            </Field>
+            <Field label="Manzil">
               <Input
                 value={editAddress}
                 onChange={(e) => setEditAddress(e.target.value)}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
+            </Field>
+            <Field label="Izoh">
               <Textarea
                 value={editNote}
                 onChange={(e) => setEditNote(e.target.value)}
                 className="min-h-[72px] rounded-none border-zinc-200 text-sm"
               />
-            </div>
+            </Field>
           </div>
           <DialogFooter className="mt-4 gap-2">
             <button
@@ -904,21 +705,15 @@ export default function ShopDetailPage() {
             <p className="text-xs text-red-500 mt-1">{payError}</p>
           )}
           <div className="mt-3 space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Miqdor (so&apos;m) <span className="text-red-500">*</span>
-              </label>
+            <Field label={<>Miqdor (so&apos;m)</>} required>
               <MoneyInput
                 placeholder="500000"
                 value={payAmount}
                 onChange={setPayAmount}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Oylar <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field label="Oylar" required>
               <select
                 value={payMonths}
                 onChange={(e) => setPayMonths(e.target.value)}
@@ -929,11 +724,8 @@ export default function ShopDetailPage() {
                   <option key={m} value={m}>{m} oy</option>
                 ))}
               </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                To&apos;lov usuli <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field label={<>To&apos;lov usuli</>} required>
               <select
                 value={payMethod}
                 onChange={(e) => setPayMethod(e.target.value)}
@@ -945,7 +737,7 @@ export default function ShopDetailPage() {
                 <option value="TRANSFER">Bank</option>
                 <option value="OTHER">Boshqa</option>
               </select>
-            </div>
+            </Field>
             {paymentPreview && (
               <div className="border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs text-zinc-600">
                 <div>Joriy muddat: {new Date(shop.subscriptionDue).toLocaleDateString('uz-UZ')}</div>
@@ -955,15 +747,14 @@ export default function ShopDetailPage() {
                 </div>
               </div>
             )}
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
+            <Field label="Izoh">
               <Input
                 placeholder="Ixtiyoriy izoh..."
                 value={payNote}
                 onChange={(e) => setPayNote(e.target.value)}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
+            </Field>
           </div>
           <DialogFooter className="mt-4 gap-2">
             <button
@@ -995,61 +786,47 @@ export default function ShopDetailPage() {
             <p className="text-xs text-red-500 mt-1">{adminError}</p>
           )}
           <div className="mt-3 space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Ism <span className="text-red-500">*</span>
-              </label>
+            <Field label="Ism" required>
               <Input
                 placeholder="To'liq ism"
                 value={adminName}
                 onChange={(e) => setAdminName(e.target.value)}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Tel <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field label="Tel" required>
               <PhoneInput
                 value={adminPhone}
                 onChange={setAdminPhone}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Telegram ID
-              </label>
+            </Field>
+            <Field label="Telegram ID">
               <Input
                 placeholder="@username"
                 value={adminTelegram}
                 onChange={(e) => setAdminTelegram(e.target.value)}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Login <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field label="Login" required>
               <Input
                 placeholder="login"
                 value={adminLogin}
                 onChange={(e) => setAdminLogin(e.target.value)}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Parol <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field label="Parol" required help="Kamida 10 ta belgi">
               <Input
                 type="password"
-                placeholder="Kamida 6 ta belgi"
+                placeholder="Kamida 10 ta belgi"
+                minLength={10}
                 value={adminPassword}
                 onChange={(e) => setAdminPassword(e.target.value)}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
+            </Field>
           </div>
           <DialogFooter className="mt-4 gap-2">
             <button
@@ -1084,29 +861,24 @@ export default function ShopDetailPage() {
             <p className="text-xs text-red-500 mt-1">{passwordResetError}</p>
           )}
           <div className="mt-3 space-y-3">
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Yangi parol <span className="text-red-500">*</span>
-              </label>
+            <Field label="Yangi parol" required help="Kamida 10 ta belgi">
               <Input
                 type="password"
-                placeholder="Kamida 6 ta belgi"
+                placeholder="Kamida 10 ta belgi"
+                minLength={10}
                 value={newAdminPassword}
                 onChange={(e) => setNewAdminPassword(e.target.value)}
                 className="h-8 text-sm rounded-none border-zinc-200"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Sabab <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field label="Sabab" required>
               <Textarea
                 placeholder="Masalan: admin parolini unutdi..."
                 value={passwordResetNote}
                 onChange={(e) => setPasswordResetNote(e.target.value)}
                 className="min-h-[72px] rounded-none border-zinc-200 text-sm"
               />
-            </div>
+            </Field>
           </div>
           <DialogFooter className="mt-4 gap-2">
             <button
@@ -1139,17 +911,14 @@ export default function ShopDetailPage() {
           {deleteAdminError && (
             <p className="text-xs text-red-500 mt-1">{deleteAdminError}</p>
           )}
-          <div className="mt-3">
-            <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-              Sabab <span className="text-red-500">*</span>
-            </label>
+          <Field label="Sabab" required className="mt-3">
             <Textarea
               placeholder="O'chirish sababini kiriting (kamida 5 belgi)..."
               value={deleteAdminNote}
               onChange={(e) => setDeleteAdminNote(e.target.value)}
               className="min-h-[72px] rounded-none border-zinc-200 text-sm"
             />
-          </div>
+          </Field>
           <DialogFooter className="mt-4 gap-2">
             <button
               onClick={() => { setDeleteAdminTarget(null); setDeleteAdminNote(''); setDeleteAdminError(null) }}

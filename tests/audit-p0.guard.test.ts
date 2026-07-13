@@ -9,12 +9,20 @@ function read(rel: string) {
 describe('P0 refund cap guard', () => {
   const src = read('src/app/api/devices/[id]/return/route.ts')
 
-  it('caps refunds to money actually collected before marking the device returned', () => {
-    expect(src).toContain('const maxRefund = sale')
-    expect(src).toContain('tx.nasiyaPayment.aggregate')
-    expect(src).toContain('refundAmountUzs > maxRefund')
-    expect(src).toContain('Qaytariladigan summa mijozdan olingan summadan oshmasligi kerak')
-    expect(src.indexOf('refundAmountUzs > maxRefund')).toBeLessThan(src.indexOf('tx.device.updateMany'))
+  it('caps the contract-currency refund to immutable receipt rows before returning stock', () => {
+    expect(src).toContain("sale.payments.map((payment) => paymentSource('SALE', payment))")
+    expect(src).toContain("nasiya!.payments.map((payment) => paymentSource('NASIYA', payment))")
+    expect(src).toContain('resolveAppliedContractAmount(source, contractCurrency, frozenRate)')
+    expect(src).toContain('contractRefundAmount > contractReceiptsAtReturn')
+    expect(src).toContain('Qaytariladigan summa mijozdan amalda olingan summadan oshmasligi kerak.')
+    expect(src.indexOf('contractRefundAmount > contractReceiptsAtReturn')).toBeLessThan(src.indexOf('const guardedReturn = await tx.device.updateMany'))
+  })
+
+  it('allocates the refund back to its source receipts without editing or deleting them', () => {
+    expect(src).toContain('allocateReturnRefund({')
+    expect(src).toContain('tx.returnRefundAllocation.createMany')
+    expect(src).toContain('deviceReturnId: returnRecord.id')
+    expect(src).not.toMatch(/tx\.(salePayment|nasiyaPayment)\.(update|updateMany|delete|deleteMany)\b/)
   })
 })
 
@@ -31,7 +39,7 @@ describe('P0 shop subscription idempotency guard', () => {
     expect(schema).toContain('idempotencyKey String?')
     expect(schema).toContain('@@unique([shopId, idempotencyKey])')
     expect(migration).toContain('ShopPayment_shopId_idempotencyKey_key')
-    expect(ui).toContain("'Idempotency-Key': idempotencyKey")
+    expect(ui).toContain("'Idempotency-Key': paymentCommand.keyFor(payload)")
   })
 })
 
@@ -51,6 +59,28 @@ describe('P0 nasiya deferral idempotency guard', () => {
     expect(schema).toContain('model NasiyaDeferral')
     expect(schema).toContain('@@unique([shopId, idempotencyKey])')
     expect(migration).toContain('CREATE TABLE "NasiyaDeferral"')
-    expect(ui).toContain("'Idempotency-Key': idempotencyKey")
+    expect(ui).toContain("'Idempotency-Key': paymentCommand.keyFor(payload)")
+    expect(route).toContain('sameInstant(existingDeferral.delayedUntil, delayedUntil)')
+    expect(route).toContain('sameOptionalText(existingDeferral.note, auditNote)')
+  })
+
+  it('replays a matching final payment before COMPLETED rejection and conflicts on changed durable payload', () => {
+    const replayLookup = route.indexOf('const existingPayment = await tx.nasiyaPayment.findUnique')
+    const completedGuard = route.indexOf("if (currentContractStatus.displayStatus === 'COMPLETED')")
+    expect(replayLookup).toBeGreaterThan(-1)
+    expect(completedGuard).toBeGreaterThan(replayLookup)
+    expect(route).toContain('matchesExistingPaymentPayload(existingPayment')
+    const matcherStart = route.indexOf('function matchesExistingPaymentPayload(')
+    const matcherBlock = route.slice(matcherStart, route.indexOf('export async function POST', matcherStart))
+    expect(matcherStart).toBeGreaterThan(-1)
+    expect(matcherBlock).toContain('existing.nasiyaScheduleId')
+    expect(matcherBlock).toContain('existing.paymentInputAmount ?? existing.amount')
+    expect(matcherBlock).toContain('existing.paymentInputCurrency')
+    expect(matcherBlock).toContain('existing.paymentMethod')
+    expect(matcherBlock).toContain('canonicalPaymentBreakdown(existing.paymentBreakdown')
+    expect(matcherBlock).toContain('sameInstant(existing.paidAt, submitted.paidAt)')
+    expect(matcherBlock).toContain('sameOptionalText(existing.note, submitted.note)')
+    expect(route).toContain('duplicate: true')
+    expect(route).toContain("Idempotency-Key boshqa yoki o'zgartirilgan nasiya to'lovi uchun ishlatilgan")
   })
 })

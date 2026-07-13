@@ -1,5 +1,10 @@
 # Production readiness audit — Oryx Tech ERP
 
+> **Historical snapshot:** deployment behavior below describes 2026-07-08.
+> The current guarded release design and evidence are tracked in
+> `docs/operations/recovery-and-release-runbook.md` and
+> `docs/remediation/remediation-matrix.md`.
+
 Date: 2026-07-08. See `full-production-audit.md` for the overall scorecard.
 
 ## Deployment configuration (verified)

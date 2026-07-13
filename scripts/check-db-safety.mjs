@@ -21,8 +21,12 @@ const allowLocal = process.argv.includes('--allow-local')
 async function loadEnv() {
   try {
     const dotenv = await import('dotenv')
+    const explicitDatabaseUrl = process.env.DATABASE_URL
+    const explicitDirectUrl = process.env.DIRECT_URL
     dotenv.config({ path: '.env' })
     dotenv.config({ path: '.env.local', override: true })
+    if (explicitDatabaseUrl !== undefined) process.env.DATABASE_URL = explicitDatabaseUrl
+    if (explicitDirectUrl !== undefined) process.env.DIRECT_URL = explicitDirectUrl
   } catch {
     // dotenv not available — rely on the already-exported environment.
   }

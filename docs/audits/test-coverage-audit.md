@@ -1,5 +1,10 @@
 # Test coverage audit — Oryx Tech ERP
 
+> **Historical snapshot:** the counts and TODO inventory below are from
+> 2026-07-08. The current remediation suite and latest evidence are tracked in
+> `docs/remediation/remediation-matrix.md`; do not use these old counts as the
+> release gate.
+
 Date: 2026-07-08. See `full-production-audit.md` for the overall scorecard.
 
 ## Current state

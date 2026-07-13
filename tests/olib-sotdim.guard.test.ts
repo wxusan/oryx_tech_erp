@@ -78,7 +78,7 @@ describe('mark supplier payable as paid stops reminders', () => {
 
   it('pay route flips status to PAID and rejects an already-paid payable', () => {
     expect(payRoute).toContain("status: 'PAID'")
-    expect(payRoute).toContain("Bu to'lov allaqachon qayd etilgan")
+    expect(payRoute).toContain('PAYABLE_NOT_OPEN_MESSAGE')
   })
 
   it('cron reminder queries only ever select PENDING/OVERDUE, so a PAID payable is naturally excluded', () => {
@@ -93,9 +93,9 @@ describe('supplier payable reminders: cron + jitter + idempotency', () => {
   const overdueTransition = read('src/lib/server/overdue-transition.ts')
 
   it('has due-today, overdue, and early-reminder blocks for SupplierPayable', () => {
-    expect(cron).toContain('supplierPayableDueToday')
-    expect(cron).toContain('supplierPayableOverdue')
-    expect(cron).toContain('supplierPayableEarlyCandidates')
+    expect(cron).toContain("'SUPPLIER_DUE'")
+    expect(cron).toContain("'SUPPLIER_OVERDUE'")
+    expect(cron).toContain("'SUPPLIER_EARLY'")
   })
 
   it('uses the shared jitter helper and dedupe keys (no separate jitter logic)', () => {
@@ -104,11 +104,10 @@ describe('supplier payable reminders: cron + jitter + idempotency', () => {
     expect(cron).toContain("dedupeKey = `SUPPLIER_PAYABLE_EARLY_REMINDER:")
   })
 
-  it('early reminder is skipped once its date has passed (no backfill) — same day-math as nasiya/sale', () => {
-    // Extracted to matchesEarlyReminderDay (item 9) — see
-    // tests/telegram-3day-reminder.test.ts for the direct unit tests.
-    const block = cron.slice(cron.indexOf('supplierPayableEarlyCandidates'), cron.indexOf('supplierPayableEarlyCandidates') + 1500)
-    expect(block).toContain('matchesEarlyReminderDay(daysUntil, payable.earlyReminderDays)')
+  it('early reminders catch up only when the original trigger day belongs to the watermark window', () => {
+    const block = cron.slice(cron.indexOf("'SUPPLIER_EARLY'"), cron.indexOf('if (activeLeaseToken)'))
+    expect(block).toContain('earlyTriggerDay(payable.dueDate, payable.earlyReminderDays)')
+    expect(block).toContain('isWithin(triggerDay, windowStart, windowEnd)')
   })
 
   it('upsert-by-dedupeKey guarantees no duplicates across repeated cron runs', () => {
@@ -168,13 +167,16 @@ describe('money/currency: MoneyInput used, server converts and stores UZS', () =
 
 describe('reports: no double-counted inventory cost', () => {
   const stats = read('src/lib/server/shop-stats.ts')
+  const queries = read('src/lib/server/shop-stats-queries.ts')
 
   it('inventoryPurchaseCost only sums IN_STOCK devices — SOLD_CASH olib-sotdim devices never enter it', () => {
     expect(stats).toContain("status: 'IN_STOCK'")
   })
 
-  it('this month\'s sale revenue/profit scan already joins Sale -> device.purchasePrice, so olib-sotdim sales count for free', () => {
-    expect(stats).toContain('device: { select: { purchasePrice: true } }')
+  it('the set-based sale accrual joins Sale to Device purchase cost, so olib-sotdim sales count exactly once', () => {
+    expect(stats).toContain('getShopAccrualAggregate({ shopId, monthStart, monthEnd, adminId })')
+    expect(queries).toContain('JOIN "Device" d ON d."id" = s."deviceId" AND d."shopId" = s."shopId"')
+    expect(queries).toContain('coalesce(sum(d."purchasePrice"), 0)::numeric AS sale_device_cost_uzs')
   })
 })
 
@@ -209,13 +211,18 @@ describe('mark supplier payable as paid is race-safe (atomic status-guarded upda
   const payRoute = read('src/app/api/olib-sotdim/[id]/pay/route.ts')
 
   it('flips PAID via updateMany with a status guard, not a plain update by id', () => {
-    expect(payRoute).toContain("const flipped = await tx.supplierPayable.updateMany({\n        where: { id, shopId, deletedAt: null, status: { not: 'PAID' } },")
+    expect(payRoute).toContain("const flipped = await tx.supplierPayable.updateMany({\n        where: { id, shopId, deletedAt: null, status: { in: ['PENDING', 'OVERDUE'] } },")
     expect(payRoute).not.toContain('await tx.supplierPayable.update({\n        where: { id },')
   })
 
   it('rejects with 409 if the atomic flip did not affect exactly one row (already paid by a concurrent request)', () => {
     expect(payRoute).toContain('if (flipped.count !== 1) {')
-    expect(payRoute).toContain('throw { status: 409, message: "Bu to\'lov allaqachon qayd etilgan" }')
+    expect(payRoute).toContain('throw { status: 409, message: PAYABLE_NOT_OPEN_MESSAGE }')
     expect(payRoute).toContain("if (e.status === 409) return conflict(e.message)")
+  })
+
+  it('allows only PENDING/OVERDUE and cannot transition CANCELLED to PAID', () => {
+    expect(payRoute).toContain("payable.status !== 'PENDING' && payable.status !== 'OVERDUE'")
+    expect(payRoute).not.toContain("status: { not: 'PAID' }")
   })
 })

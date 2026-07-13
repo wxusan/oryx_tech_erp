@@ -7,13 +7,18 @@ function read(rel: string) {
 }
 
 describe('P2 upload hardening guard', () => {
-  it('validates image magic bytes before private storage upload', () => {
+  it('validates fully decoded images before private storage upload', () => {
     for (const route of ['src/app/api/uploads/passport/route.ts', 'src/app/api/uploads/device/route.ts']) {
       const src = read(route)
-      expect(src).toContain('hasValidImageSignature')
-      expect(src.indexOf('hasValidImageSignature')).toBeLessThan(src.indexOf('.upload(key, bytes'))
+      expect(src).toContain('validatePrivateUploadImage')
+      expect(src.indexOf('validatePrivateUploadImage(bytes, file.type)')).toBeLessThan(src.indexOf('.upload(key, bytes'))
       expect(src).toContain('Rasm fayli formati')
       expect(src).toContain('shikastlangan')
     }
+
+    const validator = read('src/lib/server/image-validation.ts')
+    expect(validator).toContain('hasValidImageSignature(bytes, mimeType)')
+    expect(validator).toContain('limitInputPixels: PRIVATE_UPLOAD_MAX_PIXELS')
+    expect(validator).toContain('await image.stats()')
   })
 })

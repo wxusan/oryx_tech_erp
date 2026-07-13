@@ -163,7 +163,7 @@ export async function POST(req: NextRequest) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
-    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    // Distributed when Upstash is configured; bounded in-process fallback otherwise.
     const rate = await checkRateLimitDistributed(rateLimitKey('olib-sotdim-create', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 

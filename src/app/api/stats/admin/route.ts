@@ -64,8 +64,8 @@ export async function GET() {
       }),
 
       // Aggregate over every active shop without loading a capped shop/admin/
-      // payment payload into the function. The dashboard already requests the
-      // separately paginated /api/shops list for its table.
+      // payment payload into the function. Due-shop reporting and payment
+      // history have their own authoritative paginated projections.
       prisma.$queryRaw<Array<{ expectedRevenue: number }>>`
         SELECT COALESCE(
           SUM(latest.amount / GREATEST(latest.months, 1)),

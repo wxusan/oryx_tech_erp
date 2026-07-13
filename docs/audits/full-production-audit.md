@@ -12,7 +12,8 @@ reports/Telegram/tenant isolation — see
 review table and updated scores (rate limiting, structured logging
 everywhere, security headers, tenant-isolation guard tests, a pagination
 safety net, and practical mobile fixes). The scores in this document are the
-**2026-07-08 snapshot**; the follow-up doc has the current numbers.
+**2026-07-08 snapshot**; the current implementation/evidence state is tracked
+in `docs/remediation/remediation-matrix.md`.
 
 **Addendum (same day, post-audit)**: a real production crash was reported
 on `/shop/qurilmalar/[id]` after this audit concluded. Root cause: a

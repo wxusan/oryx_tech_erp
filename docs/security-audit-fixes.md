@@ -1,5 +1,10 @@
 # Security Audit Fixes
 
+> **Historical snapshot:** this document records an earlier hardening pass.
+> Its TODO-based integration and notification limitations are superseded by the
+> current evidence in `docs/remediation/remediation-matrix.md` and the current
+> recovery/release runbook.
+
 ## P0
 
 - Telegram ID saves no longer verify manually entered IDs. Existing verified IDs remain trusted; any new, changed, or cleared ID resets `telegramVerifiedAt` until that Telegram account sends `/start`.

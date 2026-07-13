@@ -7,6 +7,7 @@ import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from
 import { processPendingNotifications } from '@/lib/notification-service'
 import { salePaymentMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
+import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
@@ -17,8 +18,50 @@ import { applySalePaymentToContractLedger } from '@/lib/sale-contract-payment'
 import { validatePaymentBreakdown, representativePaymentMethod } from '@/lib/payment-breakdown'
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
+import { canonicalPaymentBreakdown, sameInstant, sameMoney, sameOptionalText } from '@/lib/idempotency-replay'
 
 type RouteContext = { params: Promise<{ id: string }> }
+
+type ExistingSalePaymentForReplay = {
+  saleId: string
+  amount: unknown
+  paymentMethod: string
+  paymentBreakdown: unknown
+  paidAt: Date
+  note: string | null
+  paymentInputAmount: unknown | null
+  paymentInputCurrency: 'UZS' | 'USD' | null
+  paymentDateExplicit: boolean
+  requestedNextDueDate: Date | null
+}
+
+function matchesExistingSalePaymentPayload(
+  existing: ExistingSalePaymentForReplay,
+  submitted: {
+    saleId: string
+    amount: number
+    inputCurrency: 'UZS' | 'USD'
+    paymentMethod: string
+    paymentBreakdown: unknown
+    paidAt?: Date
+    nextDueDate?: Date
+    note?: string
+  },
+) {
+  if (existing.saleId !== submitted.saleId) return false
+  const storedCurrency = existing.paymentInputCurrency ?? 'UZS'
+  if (storedCurrency !== submitted.inputCurrency) return false
+  if (!sameMoney(existing.paymentInputAmount ?? existing.amount, submitted.amount, storedCurrency)) return false
+  if (existing.paymentMethod !== submitted.paymentMethod) return false
+  if (
+    canonicalPaymentBreakdown(existing.paymentBreakdown, storedCurrency)
+    !== canonicalPaymentBreakdown(submitted.paymentBreakdown, submitted.inputCurrency)
+  ) return false
+  if (existing.paymentDateExplicit !== Boolean(submitted.paidAt)) return false
+  if (submitted.paidAt && !sameInstant(existing.paidAt, submitted.paidAt)) return false
+  if (!sameInstant(existing.requestedNextDueDate, submitted.nextDueDate)) return false
+  return sameOptionalText(existing.note, submitted.note)
+}
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
@@ -44,7 +87,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // to the payment amount; the existing paymentMethod field stays
     // populated with a representative value so no existing reader breaks.
     if (parsed.data.paymentBreakdown) {
-      const breakdownError = validatePaymentBreakdown(parsed.data.paymentBreakdown, parsed.data.amount)
+      const breakdownError = validatePaymentBreakdown(
+        parsed.data.paymentBreakdown,
+        parsed.data.amount,
+        parsed.data.inputCurrency ?? 'UZS',
+      )
       if (breakdownError) return badRequest(breakdownError)
     }
     const effectivePaymentMethod = parsed.data.paymentBreakdown
@@ -55,7 +102,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
-    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    // Distributed when Upstash is configured; bounded in-process fallback otherwise.
     const rate = await checkRateLimitDistributed(rateLimitKey('sale-payment', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
@@ -71,7 +118,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // transaction (same reasoning as the nasiya payment route: no slow I/O
     // held inside the serializable transaction). See docs/currency-accounting-model.md.
     const contractLookup = await prisma.sale.findFirst({
-      where: { id: saleId, shopId },
+      where: { id: saleId, shopId, deletedAt: null, returnedAt: null },
       select: { contractCurrency: true },
     })
     const contractCurrency = contractLookup?.contractCurrency ?? 'UZS'
@@ -98,10 +145,19 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
           })
           if (existingPayment) {
-            if (existingPayment.saleId !== saleId) {
+            if (!matchesExistingSalePaymentPayload(existingPayment, {
+              saleId,
+              amount: parsed.data.amount,
+              inputCurrency: amountInput.inputCurrency,
+              paymentMethod: effectivePaymentMethod,
+              paymentBreakdown: parsed.data.paymentBreakdown,
+              paidAt: parsed.data.paidAt,
+              nextDueDate: parsed.data.nextDueDate,
+              note: auditNote,
+            })) {
               throw {
                 status: 409,
-                message: "Idempotency-Key boshqa sotuv to'lovi uchun ishlatilgan",
+                message: "Idempotency-Key boshqa yoki o'zgartirilgan sotuv to'lovi uchun ishlatilgan",
               }
             }
             return { payment: existingPayment, duplicate: true }
@@ -121,7 +177,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           }
 
           const sale = await tx.sale.findFirst({
-            where: { id: saleId, shopId, deletedAt: null },
+            where: { id: saleId, shopId, deletedAt: null, returnedAt: null },
             include: {
               device: { include: { imeis: { where: { deletedAt: null } } } },
               customer: true,
@@ -177,6 +233,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               paymentInputCurrency: amountInput.inputCurrency,
               paymentExchangeRate: contractRate,
               appliedAmountInContractCurrency: contractPayment.appliedAmountInContractCurrency,
+              paymentDateExplicit: parsed.data.paidAt !== undefined,
+              requestedNextDueDate: parsed.data.nextDueDate,
             },
           })
 
@@ -294,7 +352,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         result = await runPaymentTransaction()
         break
       } catch (err) {
-        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034' && attempt < 2) {
+        if (isRetryableTransactionError(err) && attempt < 2) {
           continue
         }
         throw err

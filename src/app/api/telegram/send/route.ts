@@ -20,8 +20,10 @@ import { processPendingNotifications } from '@/lib/notification-service'
 import { hasValidInternalSecret, internalSecret } from '@/lib/api-auth'
 import { logger } from '@/lib/logger'
 import { recordOpsEvent } from '@/lib/server/ops-events'
+import { initializeRequestAuditContext } from '@/lib/server/request-context'
 
 export async function POST(request: Request): Promise<Response> {
+  await initializeRequestAuditContext(request.headers)
   try {
     if (!internalSecret()) {
       return Response.json(
@@ -42,11 +44,11 @@ export async function POST(request: Request): Promise<Response> {
     logger.info('telegram send drain complete', {
       event: 'telegram.send',
       route: '/api/telegram/send',
-      status: result.failed + result.cancelled > 0 ? 'partial' : 'ok',
+      status: result.ok ? 'ok' : result.crashed ? 'error' : 'partial',
       ...result,
     })
 
-    return Response.json(result, { status: 200 })
+    return Response.json(result, { status: result.ok ? 200 : result.crashed ? 500 : 503 })
   } catch (error) {
     await recordOpsEvent({
       level: 'ERROR',

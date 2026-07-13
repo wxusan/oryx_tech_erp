@@ -5,7 +5,7 @@ import { resolve } from 'node:path'
 // These are regression GUARDS, not behavioural tests: active-only uniqueness is
 // enforced by raw-SQL partial indexes that Prisma's schema cannot express, so
 // we assert the migration SQL still contains them (reqs 9 & 10 constraint side).
-// A DB-backed behavioural test is listed in integration.todo.test.ts.
+// DB-backed behavior also runs in tests/integration/database-invariants.integration.test.ts.
 
 const migrationsDir = resolve(process.cwd(), 'prisma/migrations')
 

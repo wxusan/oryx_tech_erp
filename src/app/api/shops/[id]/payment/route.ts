@@ -6,12 +6,14 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { addShopPaymentSchema } from '@/lib/validations'
-import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
+import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { addMonths, max } from 'date-fns'
 import type { ZodError } from 'zod'
 import { logger } from '@/lib/logger'
+import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
+import { sameMoney, sameOptionalText } from '@/lib/idempotency-replay'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -46,6 +48,19 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           where: { shopId_idempotencyKey: { shopId: id, idempotencyKey } },
         })
         if (existingPayment) {
+          if (
+            existingPayment.shopId !== id
+            || existingPayment.recordedById !== session.user.id
+            || !sameMoney(existingPayment.amount, parsed.data.amount, 'UZS')
+            || existingPayment.months !== parsed.data.months
+            || existingPayment.paymentMethod !== parsed.data.paymentMethod
+            || !sameOptionalText(existingPayment.note, parsed.data.note)
+          ) {
+            throw {
+              status: 409,
+              message: "Idempotency-Key boshqa yoki o'zgartirilgan do'kon to'lovi uchun ishlatilgan",
+            }
+          }
           const duplicateShop = await tx.shop.findUniqueOrThrow({
             where: { id },
             include: {
@@ -118,7 +133,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         result = await runPaymentTransaction()
         break
       } catch (err) {
-        if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2034' && attempt < 2) {
+        if (isRetryableTransactionError(err) && attempt < 2) {
           continue
         }
         throw err
@@ -132,6 +147,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }
       if (e.status === 404) return notFound(e.message)
+      if (e.status === 409) return conflict(e.message)
     }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return serverError("Idempotency-Key bo'yicha to'lov allaqachon yozilgan. Iltimos, sahifani yangilang.")

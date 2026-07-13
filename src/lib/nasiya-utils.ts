@@ -240,11 +240,19 @@ export function generateImportSchedule(
   }
 
   const count = monthCountOverride ?? Math.ceil(total / monthly)
+  if (!Number.isInteger(count) || count <= 0 || count > total) {
+    throw new Error("To'lov jadvalini musbat minor birliklarda taqsimlab bo'lmaydi")
+  }
   const schedule: PaymentScheduleItem[] = []
   let allocated = 0
   for (let i = 1; i <= count; i++) {
     const isLast = i === count
-    const expectedAmountUnits = isLast ? total - allocated : monthly
+    const rowsAfter = count - i
+    const maximumWithoutStarvingLaterRows = total - allocated - rowsAfter
+    const expectedAmountUnits = isLast ? total - allocated : Math.min(monthly, maximumWithoutStarvingLaterRows)
+    if (expectedAmountUnits <= 0) {
+      throw new Error("To'lov jadvalida nol yoki manfiy qator bo'lishi mumkin emas")
+    }
     allocated += expectedAmountUnits
     schedule.push({
       monthNumber: i,
@@ -358,22 +366,17 @@ export interface NasiyaOverdueDerivation {
 }
 
 /**
- * Below this UZS amount, a schedule's remaining balance is treated as fully
- * paid. Absorbs cross-currency round-trip rounding dust — e.g. a USD shop's
- * payment modal converts UZS -> USD (rounded to cents) for the "pay full
- * remaining" suggestion, then converts that USD amount back to UZS on
- * submit, which can undershoot the true remaining balance by up to ~1 cent's
- * worth of UZS. 500 so'm is a few US cents at typical exchange rates — far
- * below the smallest unit anyone would realistically still owe — so a
- * nasiya can never get stuck showing "Faol" forever over rounding dust while
- * every card on screen already reads $0.00 / 0 so'm. Never real debt.
+ * The smallest real UZS unit is one whole so'm. Only a fractional remainder
+ * below that unit may be treated as arithmetic dust; 1 so'm is real debt and
+ * must remain visible/payable. New inputs are whole-so'm-only, while this
+ * strict threshold keeps legacy floating snapshots deterministic.
  */
-export const COMPLETION_ROUNDING_TOLERANCE_UZS = 500
+export const COMPLETION_ROUNDING_TOLERANCE_UZS = 1
 
 /** Outstanding (unpaid) balance of a schedule, never negative, snapped to 0 within tolerance. */
 export function scheduleOutstanding(expectedAmount: number, paidAmount: number): number {
   const raw = Math.max(0, Number(expectedAmount) - Number(paidAmount))
-  return raw <= COMPLETION_ROUNDING_TOLERANCE_UZS ? 0 : raw
+  return raw < COMPLETION_ROUNDING_TOLERANCE_UZS ? 0 : raw
 }
 
 /**

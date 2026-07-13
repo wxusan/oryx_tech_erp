@@ -52,23 +52,40 @@ describe('currency source guards', () => {
       'src/app/api/sales/[id]/payment/route.ts',
       'src/app/api/nasiya/[id]/payment/route.ts',
       'src/app/api/nasiya/import/route.ts',
-      'src/app/api/devices/[id]/return/route.ts',
     ]) {
       const src = read(file)
       expect(src, file).toMatch(/moneyInputToUzs|createMoneyInputConverter/)
       expect(src, file).toContain('moneyInputMeta')
     }
+
+    // Returns settle against an existing contract and therefore use the pure
+    // normalizer with one route-scoped rate snapshot, then persist dedicated
+    // refund input/rate fields instead of the generic moneyInputMeta log shape.
+    const returnRoute = read('src/app/api/devices/[id]/return/route.ts')
+    expect(returnRoute).toContain('normalizeMoneyInput(parsed.data.refundAmount, settlementCurrency, liveUsdUzsRate)')
+    expect(returnRoute).toContain('refundAmountUzs = normalized.amountUzs')
+    expect(returnRoute).toContain('refundInputAmount: parsed.data.refundAmount')
+    expect(returnRoute).toContain('refundInputCurrency: settlementCurrency')
+    expect(returnRoute).toContain('refundExchangeRateAtCreation:')
   })
 
-  it('keeps accounting exports with base UZS columns plus display columns', () => {
+  it('labels frozen native values, UZS snapshots, and current display values explicitly', () => {
     const src = read('src/app/api/export/[entity]/route.ts')
 
+    expect(src).toContain('purchaseAmountNative')
+    expect(src).toContain('purchaseCurrency')
+    expect(src).toContain('purchaseExchangeRateAtCreation')
+    expect(src).toContain('purchaseAmountUzsSnapshot')
     expect(src).toContain('purchasePriceUzs')
-    expect(src).toContain('purchasePriceDisplay')
-    expect(src).toContain('salePriceUzs')
-    expect(src).toContain('salePriceDisplay')
-    expect(src).toContain('totalAmountUzs')
-    expect(src).toContain('totalAmountDisplay')
+    expect(src).toContain('purchasePriceCurrentShopDisplay')
+    expect(src).toContain('contractSalePriceNativeDisplay')
+    expect(src).toContain('salePriceUzsSnapshot')
+    expect(src).toContain('salePriceCurrentShopDisplay')
+    expect(src).toContain('contractFinalAmountNativeDisplay')
+    expect(src).toContain('totalAmountUzsSnapshot')
+    expect(src).toContain('totalAmountCurrentShopDisplay')
+    expect(src).toContain('remainingAmountUzsSnapshot')
+    expect(src).toContain('remainingAmountCurrentShopDisplay')
     expect(src).toContain('formatMoneyByCurrency')
   })
 })

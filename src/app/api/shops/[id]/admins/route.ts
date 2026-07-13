@@ -8,13 +8,18 @@ import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import bcrypt from 'bcrypt'
-import { ok, created, badRequest, conflict, notFound, serverError } from '@/lib/api-helpers'
+import { ok, created, badRequest, conflict, notFound, payloadTooLarge, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 import { z, ZodError } from 'zod'
 import { logger } from '@/lib/logger'
-import { phoneSchema } from '@/lib/validations'
+import { passwordSchema, phoneSchema } from '@/lib/validations'
+import {
+  isInvalidRequestBody,
+  isRequestBodyTooLarge,
+  readLimitedJsonBody,
+} from '@/lib/server/request-limits'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -25,7 +30,8 @@ type RouteContext = { params: Promise<{ id: string }> }
 const addAdminSchema = z.object({
   name: z
     .string({ error: "Admin ismi kiritilishi shart" })
-    .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
+    .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+    .max(100, "Ism 100 ta belgidan oshmasligi kerak"),
   phone: phoneSchema,
   telegramId: z
     .string()
@@ -35,27 +41,27 @@ const addAdminSchema = z.object({
     .or(z.literal('')),
   login: z
     .string({ error: "Login kiritilishi shart" })
-    .min(3, "Login kamida 3 ta belgidan iborat bo'lishi kerak"),
-  password: z
-    .string({ error: "Parol kiritilishi shart" })
-    .min(10, "Parol kamida 10 ta belgidan iborat bo'lishi kerak"),
+    .min(3, "Login kamida 3 ta belgidan iborat bo'lishi kerak")
+    .max(64, "Login 64 ta belgidan oshmasligi kerak")
+    .regex(/^[a-zA-Z0-9_]+$/, "Login faqat lotin harflari, raqamlar va _ belgisidan iborat bo'lishi kerak"),
+  password: passwordSchema,
 })
 
 const deleteAdminSchema = z.object({
-  adminId: z.string({ error: "Admin ID kiritilishi shart" }).min(1),
+  adminId: z.string({ error: "Admin ID kiritilishi shart" }).min(1).max(100),
   note: z
     .string({ error: "O'chirish sababi kiritilishi shart" })
-    .min(5, "O'chirish sababi kamida 5 ta belgidan iborat bo'lishi kerak"),
+    .min(5, "O'chirish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
+    .max(1000, "Sabab 1000 ta belgidan oshmasligi kerak"),
 })
 
 const resetPasswordSchema = z.object({
-  adminId: z.string({ error: "Admin ID kiritilishi shart" }).min(1),
-  password: z
-    .string({ error: "Yangi parol kiritilishi shart" })
-    .min(10, "Parol kamida 10 ta belgidan iborat bo'lishi kerak"),
+  adminId: z.string({ error: "Admin ID kiritilishi shart" }).min(1).max(100),
+  password: passwordSchema,
   note: z
     .string({ error: "Sabab kiritilishi shart" })
-    .min(5, "Sabab kamida 5 ta belgidan iborat bo'lishi kerak"),
+    .min(5, "Sabab kamida 5 ta belgidan iborat bo'lishi kerak")
+    .max(1000, "Sabab 1000 ta belgidan oshmasligi kerak"),
 })
 
 // ---------------------------------------------------------------------------
@@ -69,7 +75,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const { session } = guarded
 
     const { id } = await ctx.params
-    const body: unknown = await req.json()
+    const body = await readLimitedJsonBody(req)
     const parsed = addAdminSchema.safeParse(body)
 
     if (!parsed.success) {
@@ -132,6 +138,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     return created(admin, "Admin muvaffaqiyatli qo'shildi")
   } catch (err) {
+    if (isRequestBodyTooLarge(err)) return payloadTooLarge()
+    if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
     logger.error('[POST /api/shops/[id]/admins]', { event: 'api.route_error', error: err })
     return serverError()
   }
@@ -148,7 +156,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const { session } = guarded
 
     const { id } = await ctx.params
-    const body: unknown = await req.json()
+    const body = await readLimitedJsonBody(req)
     const parsed = resetPasswordSchema.safeParse(body)
 
     if (!parsed.success) {
@@ -196,6 +204,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     return ok(updated, "Admin paroli muvaffaqiyatli yangilandi")
   } catch (err) {
+    if (isRequestBodyTooLarge(err)) return payloadTooLarge()
+    if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
     logger.error('[PATCH /api/shops/[id]/admins]', { event: 'api.route_error', error: err })
     return serverError()
   }
@@ -212,7 +222,7 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
     const { session } = guarded
 
     const { id } = await ctx.params
-    const body: unknown = await req.json()
+    const body = await readLimitedJsonBody(req)
     const parsed = deleteAdminSchema.safeParse(body)
 
     if (!parsed.success) {
@@ -258,6 +268,8 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
 
     return ok(deleted, "Admin muvaffaqiyatli o'chirildi")
   } catch (err) {
+    if (isRequestBodyTooLarge(err)) return payloadTooLarge()
+    if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
     logger.error('[DELETE /api/shops/[id]/admins]', { event: 'api.route_error', error: err })
     return serverError()
   }

@@ -13,6 +13,7 @@ import { normalizePhone } from '@/lib/phone'
 import type { DeviceListItem, DeviceListSaleInfo } from '@/lib/device-list-contract'
 import { deviceConditionLabel, formatDeviceStorage } from '@/lib/device-specs'
 import { tashkentDayRange } from '@/lib/timezone'
+import type { DeviceStatus, NasiyaStatus } from '@/lib/domain-types'
 
 /**
  * Real page/skip/take pagination envelope for the devices/nasiyalar list
@@ -119,7 +120,7 @@ export function initialLogsRequestKey() {
   return new URLSearchParams({ skip: '0', take: '10' }).toString()
 }
 
-export type DeviceStatusFilter = 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA' | 'RETURNED' | 'DELETED'
+export type DeviceStatusFilter = DeviceStatus
 
 export interface ShopDevicesQuery {
   search?: string
@@ -256,8 +257,9 @@ function buildDeviceSaleInfo(device: {
 
   const useNasiya = !!latestNasiya && (!latestSale || latestNasiya.createdAt > latestSale.createdAt)
   const purchasePrice = Number(device.purchasePrice)
-  const returned = device.status === 'RETURNED'
   const latestReturn = device.returns[0]
+  const latestContractAt = useNasiya ? latestNasiya!.createdAt : latestSale!.createdAt
+  const returned = device.status === 'RETURNED' || Boolean(latestReturn && latestReturn.createdAt >= latestContractAt)
   const refundAmount = latestReturn ? Number(latestReturn.refundAmount) : null
   // Device's own purchase-currency context — lets a same-currency sale/purchase
   // pair (e.g. bought $400, sold $500) skip FX conversion entirely instead of
@@ -387,7 +389,7 @@ export async function getShopDeviceListItemsByIds(shopId: string, ids: readonly 
   })
 }
 
-export type NasiyaStatusFilter = 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
+export type NasiyaStatusFilter = NasiyaStatus
 
 export interface ShopNasiyalarQuery {
   search?: string
@@ -488,20 +490,25 @@ export async function findShopNasiyaIdsByDerivedStatus(input: {
         n."contractRemainingAmount",
         count(s."id") AS schedule_count,
         coalesce(bool_and(
-          CASE WHEN n."contractCurrency" = 'USD'
-            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-          END <= 0
+          CASE
+            WHEN s."status" = 'CANCELLED' THEN true
+            ELSE CASE WHEN n."contractCurrency" = 'USD'
+              THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+              ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+            END <= 0
+          END
         ) FILTER (WHERE s."id" IS NOT NULL), false) AS all_schedules_paid,
         coalesce(bool_or(
-          (CASE WHEN n."contractCurrency" = 'USD'
+          s."status" <> 'CANCELLED'
+          AND (CASE WHEN n."contractCurrency" = 'USD'
             THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
             ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
           END > 0)
           AND coalesce(s."delayedUntil", s."dueDate") < ${start}
         ), false) AS has_overdue,
         min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
-          CASE WHEN n."contractCurrency" = 'USD'
+          s."status" <> 'CANCELLED'
+          AND CASE WHEN n."contractCurrency" = 'USD'
             THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
             ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
           END > 0

@@ -36,6 +36,11 @@ interface OpsPayload {
   levelCounts: Record<string, number>
   notificationCounts: Record<string, number>
   notificationWarnings: string[]
+  queueHealth: {
+    oldestActionableCreatedAt: string | null
+    oldestActionableAgeSeconds: number
+    oldestActionableStatus: string | null
+  }
   events: OpsEvent[]
   recentFailedNotifications: FailedNotification[]
   lastCron: { event: string; message: string; metadata: unknown; createdAt: string } | null
@@ -55,6 +60,12 @@ function metaSummary(metadata: unknown) {
     .slice(0, 6)
     .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
     .join(' · ')
+}
+
+function queueAge(seconds: number) {
+  if (seconds < 60) return `${seconds} soniya`
+  if (seconds < 3_600) return `${Math.floor(seconds / 60)} daqiqa`
+  return `${Math.floor(seconds / 3_600)} soat ${Math.floor((seconds % 3_600) / 60)} daqiqa`
 }
 
 export default function AdminOpsPage() {
@@ -151,6 +162,18 @@ export default function AdminOpsPage() {
                 </div>
               </div>
             )}
+            <div className="mt-3 border-t border-zinc-100 pt-3 text-sm text-zinc-600">
+              <span className="font-medium text-zinc-900">Navbat yoshi:</span>{' '}
+              {data.queueHealth.oldestActionableCreatedAt ? (
+                <>
+                  {queueAge(data.queueHealth.oldestActionableAgeSeconds)} ·{' '}
+                  {data.queueHealth.oldestActionableStatus} ·{' '}
+                  {uzDateTime(data.queueHealth.oldestActionableCreatedAt)}
+                </>
+              ) : (
+                "hozir yuborilishi kerak bo'lgan navbat yo'q"
+              )}
+            </div>
           </div>
 
           {/* Failed / cancelled notifications */}

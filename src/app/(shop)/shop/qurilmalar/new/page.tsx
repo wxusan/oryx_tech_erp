@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
@@ -10,15 +9,17 @@ import { StorageInput } from '@/components/ui/storage-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
+import { Field } from '@/components/ui/field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { currencyLabel } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
-import { ArrowLeft, ImagePlus, Loader2, X } from 'lucide-react'
+import { ArrowLeft, Loader2 } from 'lucide-react'
 import { navigateAfterMutation } from '@/lib/client-events'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { patchDeviceUpsert } from '@/lib/device-query-cache'
 import type { DeviceListItem } from '@/lib/device-list-contract'
+import { DeviceImagePicker } from '@/components/shop/device-image-picker'
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
@@ -192,29 +193,23 @@ export default function NewDevicePage() {
           <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
             <span className="text-sm font-semibold text-zinc-900">Asosiy ma'lumotlar</span>
           </div>
-          <div className="p-4 grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Model <span className="text-red-500">*</span>
-              </label>
+          <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+            <Field label="Model" required>
               <Input
                 value={form.model}
                 onChange={set('model')}
                 placeholder="iPhone 14 Pro"
                 className="h-9 text-sm border-zinc-200 rounded"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Rang <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field label="Rang" required>
               <Input
                 value={form.color}
                 onChange={set('color')}
                 placeholder="Qora, Oq, Ko'k..."
                 className="h-9 text-sm border-zinc-200 rounded"
               />
-            </div>
+            </Field>
             <StorageInput
               id="device-storage"
               amount={form.storage}
@@ -224,8 +219,7 @@ export default function NewDevicePage() {
               required
               inputClassName="h-9 rounded"
             />
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Akkumulyator %</label>
+            <Field label="Akkumulyator %">
               <Input
                 type="number"
                 min="1"
@@ -235,11 +229,8 @@ export default function NewDevicePage() {
                 placeholder="85"
                 className="h-9 text-sm border-zinc-200 rounded"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Sotib olingan narx ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field label={`Sotib olingan narx (${currencyLabel(currency.currency)})`} required>
               <MoneyInput
                 currency={currency.currency}
                 value={form.purchasePrice}
@@ -247,11 +238,13 @@ export default function NewDevicePage() {
                 placeholder={currency.currency === 'USD' ? '600.00' : '7500000'}
                 className="h-9 text-sm border-zinc-200 rounded"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                Asosiy IMEI <span className="text-red-500">*</span>
-              </label>
+            </Field>
+            <Field
+              label="Asosiy IMEI"
+              required
+              help="15 ta raqam"
+              error={form.imei && !/^\d{15}$/.test(form.imei) ? 'IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
+            >
               <Input
                 value={form.imei}
                 onChange={set('imei')}
@@ -260,15 +253,20 @@ export default function NewDevicePage() {
                 maxLength={15}
                 className="h-9 text-sm border-zinc-200 rounded font-mono"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Ikkinchi IMEI</label>
+            </Field>
+            <Field
+              label="Ikkinchi IMEI"
+              help="Ixtiyoriy, 15 ta raqam"
+              error={form.secondaryImei && !/^\d{15}$/.test(form.secondaryImei) ? 'Ikkinchi IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
+            >
               <Input value={form.secondaryImei} onChange={set('secondaryImei')} placeholder="351234560012346" inputMode="numeric" maxLength={15} className="h-9 text-sm border-zinc-200 rounded font-mono" />
-            </div>
+            </Field>
             <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Holati <span className="text-red-500">*</span></label>
+              <label htmlFor="device-condition" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                Holati <span aria-hidden="true" className="text-red-500">*</span>
+              </label>
               <Select value={form.conditionCode} onValueChange={(value) => value && setForm((prev) => ({ ...prev, conditionCode: value as 'NEW' | 'USED' }))}>
-                <SelectTrigger className="h-9"><SelectValue placeholder="Tanlang" /></SelectTrigger>
+                <SelectTrigger id="device-condition" aria-required="true" className="h-9 w-full"><SelectValue placeholder="Tanlang" /></SelectTrigger>
                 <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
               </Select>
             </div>
@@ -279,24 +277,22 @@ export default function NewDevicePage() {
           <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
             <span className="text-sm font-semibold text-zinc-900">Yetkazib beruvchi</span>
           </div>
-          <div className="p-4 grid grid-cols-2 gap-4">
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Yetkazib beruvchi ismi</label>
+          <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+            <Field label="Yetkazib beruvchi ismi">
               <Input
                 value={form.supplierName}
                 onChange={set('supplierName')}
                 placeholder="To'liq ism"
                 className="h-9 text-sm border-zinc-200 rounded"
               />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Yetkazib beruvchi tel</label>
+            </Field>
+            <Field label="Yetkazib beruvchi tel">
               <PhoneInput
                 value={form.supplierPhone}
                 onChange={(supplierPhone) => setForm((prev) => ({ ...prev, supplierPhone }))}
                 className="h-9 text-sm border-zinc-200 rounded"
               />
-            </div>
+            </Field>
           </div>
         </div>
 
@@ -305,50 +301,16 @@ export default function NewDevicePage() {
             <span className="text-sm font-semibold text-zinc-900">Qo'shimcha</span>
           </div>
           <div className="p-4 space-y-4">
-            <div>
-              <div className="flex items-center justify-between gap-3 mb-2">
-                <label className="block text-xs font-medium text-zinc-700">Rasmlar</label>
-                <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50">
-                  <ImagePlus size={14} />
-                  Rasm tanlash
-                  <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={handleImageChange} className="sr-only" />
-                </label>
-              </div>
-              {imagePreviews.length > 0 ? (
-                <div className="grid grid-cols-3 gap-3">
-                  {imagePreviews.map((preview, index) => (
-                    <div
-                      key={`${preview}-${index}`}
-                      className="relative aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50"
-                    >
-                      <Image src={preview} alt={`Qurilma rasmi ${index + 1}`} fill sizes="160px" unoptimized className="object-cover" />
-                      <button
-                        type="button"
-                        aria-label="Rasmni olib tashlash"
-                        onClick={() => removeImage(index)}
-                        className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded bg-white/90 text-zinc-700 shadow-sm hover:bg-white hover:text-red-600"
-                      >
-                        <X size={14} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="rounded border border-dashed border-zinc-200 bg-zinc-50 px-4 py-5 text-center text-xs text-zinc-500">
-                  JPG, PNG yoki WEBP, 5 MB gacha
-                </div>
-              )}
-            </div>
+            <DeviceImagePicker inputId="device-images" previews={imagePreviews} onChange={handleImageChange} onRemove={removeImage} />
 
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
+            <Field label="Izoh">
               <Textarea
                 value={form.note}
                 onChange={set('note')}
                 placeholder="Qurilma haqida qo'shimcha ma'lumot..."
                 className="text-sm border-zinc-200 rounded min-h-[80px]"
               />
-            </div>
+            </Field>
           </div>
         </div>
 

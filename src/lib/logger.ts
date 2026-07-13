@@ -1,3 +1,5 @@
+import { currentRequestAuditContext } from '@/lib/server/request-context'
+
 /**
  * Small internal structured logger for Oryx ERP.
  *
@@ -23,6 +25,7 @@ export interface LogContext {
   entityType?: string | null
   entityId?: string | null
   requestId?: string | null
+  networkId?: string | null
   durationMs?: number
   attempt?: number
   status?: string
@@ -62,21 +65,31 @@ function isSensitiveKey(key: string): boolean {
  *   - Telegram bot tokens (digits:base64ish) that appear in grammy error URLs
  *   - long signed storage URLs (private passport / device photos)
  */
-function redactStringValue(value: string): string {
+export function redactLogText(value: string): string {
   if (/postgres(?:ql)?:\/\//i.test(value)) return REDACTED
-  if (/\bbot\d{6,}:[A-Za-z0-9_-]{20,}/.test(value)) return value.replace(/\bbot\d{6,}:[A-Za-z0-9_-]{20,}/g, `bot${REDACTED}`)
-  if (/\b\d{6,}:[A-Za-z0-9_-]{30,}\b/.test(value)) return value.replace(/\b\d{6,}:[A-Za-z0-9_-]{30,}\b/g, REDACTED)
-  // Signed storage URLs carry a token query param — drop the query entirely.
-  if (/^https?:\/\/\S+[?&](token|X-Amz|signature|se=)/i.test(value)) {
-    return value.replace(/[?].*$/, '?' + REDACTED)
-  }
-  return value
+  let safe = value
+    .replace(/\bbot\d{6,}:[A-Za-z0-9_-]{20,}/g, `bot${REDACTED}`)
+    .replace(/\b\d{6,}:[A-Za-z0-9_-]{30,}\b/g, REDACTED)
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]+/gi, `Bearer ${REDACTED}`)
+
+  // Signed URLs can appear inside an otherwise harmless sentence. Redact the
+  // entire query instead of trying to enumerate which other query parameters
+  // might also contain private object names or credentials.
+  safe = safe.replace(/https?:\/\/[^\s"'<>]+/gi, (url) => {
+    const queryStart = url.indexOf('?')
+    if (queryStart === -1) return url
+    const query = url.slice(queryStart + 1)
+    const hasSignature = /(?:^|&)(?:token|signature|sig|se|x-amz-[^=&\s]+|x-goog-[^=&\s]+)=/i.test(query)
+    return hasSignature ? `${url.slice(0, queryStart)}?${REDACTED}` : url
+  })
+
+  return safe
 }
 
 export function redact(value: unknown, depth = 0): unknown {
   if (depth > 6) return '[depth-limit]'
   if (value == null) return value
-  if (typeof value === 'string') return redactStringValue(value)
+  if (typeof value === 'string') return redactLogText(value)
   if (typeof value === 'number' || typeof value === 'boolean') return value
   if (value instanceof Error) return serializeError(value)
   if (Array.isArray(value)) return value.slice(0, 50).map((v) => redact(v, depth + 1))
@@ -93,26 +106,32 @@ export function redact(value: unknown, depth = 0): unknown {
 
 export function serializeError(err: unknown): Record<string, unknown> {
   if (!(err instanceof Error)) {
-    return { message: String(err) }
+    return { message: redactLogText(String(err)) }
   }
   const out: Record<string, unknown> = {
     name: err.name,
-    message: redactStringValue(err.message),
+    message: redactLogText(err.message),
   }
   // grammy GrammyError carries a numeric Telegram error_code + description.
   const anyErr = err as unknown as Record<string, unknown>
   if (typeof anyErr.error_code === 'number') out.errorCode = anyErr.error_code
-  if (typeof anyErr.description === 'string') out.description = redactStringValue(anyErr.description)
+  if (typeof anyErr.description === 'string') out.description = redactLogText(anyErr.description)
   // Stack only outside production (may contain paths / inlined values).
   if (process.env.NODE_ENV !== 'production' && err.stack) {
-    out.stack = redactStringValue(err.stack)
+    out.stack = redactLogText(err.stack)
   }
   if (err.cause) out.cause = redact(err.cause, 4)
   return out
 }
 
 function write(level: LogLevel, message: string, context: LogContext = {}) {
-  const safeContext = redact(context) as Record<string, unknown>
+  const active = currentRequestAuditContext()
+  const enrichedContext: LogContext = {
+    ...(active ? { requestId: active.requestId, networkId: active.networkId } : {}),
+    ...context,
+  }
+  const safeContext = redact(enrichedContext) as Record<string, unknown>
+  const safeMessage = redactLogText(message)
   const isProd = process.env.NODE_ENV === 'production'
   const method = level === 'error' ? console.error : level === 'warn' ? console.warn : console.log
 
@@ -120,7 +139,7 @@ function write(level: LogLevel, message: string, context: LogContext = {}) {
     method(
       JSON.stringify({
         level,
-        message,
+        message: safeMessage,
         time: new Date().toISOString(),
         ...safeContext,
       }),
@@ -128,9 +147,9 @@ function write(level: LogLevel, message: string, context: LogContext = {}) {
     return
   }
 
-  const event = context.event ? ` [${context.event}]` : ''
+  const event = typeof safeContext.event === 'string' ? ` [${safeContext.event}]` : ''
   const hasContext = Object.keys(safeContext).length > 0
-  method(`${level.toUpperCase()}${event} ${message}`, hasContext ? safeContext : '')
+  method(`${level.toUpperCase()}${event} ${safeMessage}`, hasContext ? safeContext : '')
 }
 
 export const logger = {

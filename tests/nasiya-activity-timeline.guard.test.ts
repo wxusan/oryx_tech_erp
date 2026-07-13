@@ -24,14 +24,14 @@ describe('Amallar tarixi — data source audit', () => {
 })
 
 describe('Amallar tarixi — event label coverage (the concrete gaps this ticket fixes)', () => {
-  const source = read(detailPage)
+  const source = read('src/components/shop/nasiya-history-sections.tsx')
 
   it('shows "Nasiya yakunlandi" for the completion event (previously fell through to the raw action string)', () => {
-    expect(source).toContain("if (action === 'NASIYA_COMPLETED') return 'Nasiya yakunlandi'")
+    expect(source).toContain("if (log.action === 'NASIYA_COMPLETED') return 'Nasiya yakunlandi'")
   })
 
   it('shows "Muddat uzaytirildi" for a defer, distinct from a regular payment', () => {
-    expect(source).toContain("if (action === 'NASIYA_DEFER') return 'Muddat uzaytirildi'")
+    expect(source).toContain("if (log.action === 'NASIYA_DEFER') return 'Muddat uzaytirildi'")
   })
 
   it('shows the old -> new due date under a defer event', () => {
@@ -39,12 +39,12 @@ describe('Amallar tarixi — event label coverage (the concrete gaps this ticket
   })
 
   it('shows the specific reminder toggle direction (yoqildi/o\'chirildi), not a generic "changed" label', () => {
-    expect(source).toContain("if (enabled === true) return 'Eslatma yoqildi'")
-    expect(source).toContain("if (enabled === false) return \"Eslatma o'chirildi\"")
+    expect(source).toContain("if (log.newValue?.reminderEnabled === true) return 'Eslatma yoqildi'")
+    expect(source).toContain("if (log.newValue?.reminderEnabled === false) return \"Eslatma o'chirildi\"")
   })
 
   it('still shows the regular payment label unchanged', () => {
-    expect(source).toContain("if (action === 'PAYMENT') return \"To'lov qabul qilindi\"")
+    expect(source).toContain("if (log.action === 'PAYMENT') return \"To'lov qabul qilindi\"")
   })
 })
 
@@ -70,19 +70,18 @@ describe('Amallar tarixi — payment route creates a distinct, non-duplicated, c
 })
 
 describe('Amallar tarixi — safe rendering (no broken rows, no leaked private data)', () => {
-  const source = read(detailPage)
+  const source = read('src/components/shop/nasiya-history-sections.tsx')
 
   it('never renders a raw newValue object or passport URL in the timeline', () => {
-    const timelineBlock = source.slice(source.indexOf('{/* Action logs */}'), source.indexOf('{/* Action logs */}') + 1200)
-    expect(timelineBlock).not.toContain('passportPhotoUrl')
-    expect(timelineBlock).not.toContain('JSON.stringify')
+    expect(source).not.toContain('passportPhotoUrl')
+    expect(source).not.toContain('JSON.stringify')
   })
 
   it('shows a clean empty state instead of a broken layout when there are no logs yet', () => {
-    expect(source).toContain("Amallar tarixi yo'q")
+    expect(source).toContain('Amallar tarixi yo&apos;q')
   })
 
   it('formats timestamps with the shared Tashkent-consistent uzDateTime helper', () => {
-    expect(source).toContain('{uzDateTime(l.createdAt)}')
+    expect(source).toContain('{uzDateTime(log.createdAt)}')
   })
 })

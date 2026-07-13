@@ -1,7 +1,6 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import Image from 'next/image'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { navigateAfterMutation } from '@/lib/client-events'
@@ -12,17 +11,18 @@ import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
+import { Field } from '@/components/ui/field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { currencyLabel, formatUserFacingMoney } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { tashkentTodayInputValue } from '@/lib/timezone'
-import { ArrowLeft, ImagePlus, Loader2, X, Check } from 'lucide-react'
+import { ArrowLeft, Loader2, Check } from 'lucide-react'
+import type { PaymentMethod } from '@/lib/domain-types'
+import { DeviceImagePicker } from '@/components/shop/device-image-picker'
 
 const MAX_IMAGE_SIZE = 5 * 1024 * 1024
 const ALLOWED_IMAGE_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
-type PaymentMethod = 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
-
 export default function NewOlibSotdimPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
@@ -240,26 +240,22 @@ export default function NewOlibSotdimPage() {
               <span className="text-sm font-semibold text-zinc-900">1. Qurilma ma&apos;lumotlari</span>
             </div>
             <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Model <span className="text-red-500">*</span>
-                </label>
+              <Field label="Model" required>
                 <Input
                   value={model}
                   onChange={(e) => setModel(e.target.value)}
                   placeholder="iPhone 13 Pro"
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Rang</label>
+              </Field>
+              <Field label="Rang">
                 <Input
                   value={color}
                   onChange={(e) => setColor(e.target.value)}
                   placeholder="Qora, Oq..."
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-              </div>
+              </Field>
               <StorageInput
                 id="olib-storage"
                 amount={storage}
@@ -269,8 +265,7 @@ export default function NewOlibSotdimPage() {
                 required
                 inputClassName="h-9 rounded"
               />
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Akkumulyator %</label>
+              <Field label="Akkumulyator %">
                 <Input
                   type="number"
                   min={1}
@@ -280,16 +275,20 @@ export default function NewOlibSotdimPage() {
                   placeholder="85"
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-              </div>
+              </Field>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Holati <span className="text-red-500">*</span></label>
+                <label htmlFor="olib-condition" className="block text-xs font-medium text-zinc-700 mb-1.5">Holati <span aria-hidden="true" className="text-red-500">*</span></label>
                 <Select value={conditionCode} onValueChange={(value) => value && setConditionCode(value as 'NEW' | 'USED')}>
-                  <SelectTrigger className="h-9"><SelectValue placeholder="Tanlang" /></SelectTrigger>
+                  <SelectTrigger id="olib-condition" aria-required="true" className="h-9 w-full"><SelectValue placeholder="Tanlang" /></SelectTrigger>
                   <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
                 </Select>
               </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Asosiy IMEI <span className="text-red-500">*</span></label>
+              <Field
+                label="Asosiy IMEI"
+                required
+                help="15 ta raqam"
+                error={imei && !/^\d{15}$/.test(imei) ? 'IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
+              >
                 <Input
                   value={imei}
                   onChange={(e) => setImei(e.target.value)}
@@ -298,50 +297,30 @@ export default function NewOlibSotdimPage() {
                   maxLength={15}
                   className="h-9 text-sm border-zinc-200 rounded font-mono"
                 />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Ikkinchi IMEI</label>
+              </Field>
+              <Field
+                label="Ikkinchi IMEI"
+                help="Ixtiyoriy, 15 ta raqam"
+                error={secondaryImei && !/^\d{15}$/.test(secondaryImei) ? 'Ikkinchi IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
+              >
                 <Input value={secondaryImei} onChange={(e) => setSecondaryImei(e.target.value)} placeholder="351234560012346" inputMode="numeric" maxLength={15} className="h-9 text-sm border-zinc-200 rounded font-mono" />
-              </div>
-              <div className="sm:col-span-2">
-                <div className="flex items-center justify-between gap-3 mb-2">
-                  <label className="block text-xs font-medium text-zinc-700">Rasm (ixtiyoriy)</label>
-                  <label className="inline-flex h-8 cursor-pointer items-center gap-1.5 rounded border border-zinc-200 bg-white px-3 text-xs font-medium text-zinc-700 hover:bg-zinc-50">
-                    <ImagePlus size={14} />
-                    Rasm tanlash
-                    <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={handleImageChange} className="sr-only" />
-                  </label>
-                </div>
-                {imagePreviews.length > 0 && (
-                  <div className="grid grid-cols-3 gap-3">
-                    {imagePreviews.map((preview, index) => (
-                      <div
-                        key={`${preview}-${index}`}
-                        className="relative aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50"
-                      >
-                        <Image src={preview} alt={`Qurilma rasmi ${index + 1}`} fill sizes="160px" unoptimized className="object-cover" />
-                        <button
-                          type="button"
-                          aria-label="Rasmni olib tashlash"
-                          onClick={() => removeImage(index)}
-                          className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded bg-white/90 text-zinc-700 shadow-sm hover:bg-white hover:text-red-600"
-                        >
-                          <X size={14} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
+              </Field>
+              <DeviceImagePicker
+                inputId="olib-images"
+                label="Rasm (ixtiyoriy)"
+                previews={imagePreviews}
+                onChange={handleImageChange}
+                onRemove={removeImage}
+                className="sm:col-span-2"
+              />
+              <Field label="Izoh" className="sm:col-span-2">
                 <Textarea
                   value={deviceNote}
                   onChange={(e) => setDeviceNote(e.target.value)}
                   placeholder="Qurilma haqida qo'shimcha ma'lumot..."
                   className="text-sm border-zinc-200 rounded min-h-[60px]"
                 />
-              </div>
+              </Field>
             </div>
           </div>
 
@@ -351,53 +330,40 @@ export default function NewOlibSotdimPage() {
               <span className="text-sm font-semibold text-zinc-900">2. Kimdan olindi</span>
             </div>
             <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Ism / do&apos;kon <span className="text-red-500">*</span>
-                </label>
+              <Field label={<>Ism / do&apos;kon</>} required>
                 <Input
                   value={supplierName}
                   onChange={(e) => setSupplierName(e.target.value)}
                   placeholder="Ali aka, 21-do'kon..."
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Tel raqami <span className="text-red-500">*</span>
-                </label>
+              </Field>
+              <Field label="Tel raqami" required error={supplierPhoneError || undefined}>
                 <PhoneInput
                   value={supplierPhone}
                   onChange={(value) => {
                     setSupplierPhone(value)
                     if (supplierPhoneError) setSupplierPhoneError('')
                   }}
-                  aria-invalid={!!supplierPhoneError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-                {supplierPhoneError && <p className="mt-1 text-xs text-red-600">{supplierPhoneError}</p>}
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Manzil / joylashuv</label>
+              </Field>
+              <Field label="Manzil / joylashuv" className="sm:col-span-2">
                 <Input
                   value={supplierLocation}
                   onChange={(e) => setSupplierLocation(e.target.value)}
                   placeholder="Abu Saxiy 3-qator, Malika Bazar..."
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-              </div>
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
+              </Field>
+              <Field label="Izoh" className="sm:col-span-2">
                 <Textarea
                   value={supplierNote}
                   onChange={(e) => setSupplierNote(e.target.value)}
                   className="text-sm border-zinc-200 rounded min-h-[50px]"
                 />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Olingan narx ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
-                </label>
+              </Field>
+              <Field label={`Olingan narx (${currencyLabel(currency.currency)})`} required>
                 <MoneyInput
                   currency={currency.currency}
                   value={purchasePrice}
@@ -405,15 +371,16 @@ export default function NewOlibSotdimPage() {
                   placeholder={currency.currency === 'USD' ? '500.00' : '6500000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-              </div>
+              </Field>
 
-              <div className="sm:col-span-2 pt-2 border-t border-zinc-100">
-                <label className="block text-xs font-medium text-zinc-700 mb-2">
-                  Yetkazib beruvchiga to&apos;lov <span className="text-red-500">*</span>
-                </label>
+              <fieldset className="sm:col-span-2 pt-2 border-t border-zinc-100">
+                <legend className="block text-xs font-medium text-zinc-700 mb-2">
+                  Yetkazib beruvchiga to&apos;lov <span aria-hidden="true" className="text-red-500">*</span>
+                </legend>
                 <div className="flex gap-2">
                   <button
                     type="button"
+                    aria-pressed={supplierPaidNow === true}
                     onClick={() => setSupplierPaidNow(true)}
                     className={`px-4 py-2 text-sm rounded border transition-colors ${supplierPaidNow === true ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
                   >
@@ -421,22 +388,23 @@ export default function NewOlibSotdimPage() {
                   </button>
                   <button
                     type="button"
+                    aria-pressed={supplierPaidNow === false}
                     onClick={() => setSupplierPaidNow(false)}
                     className={`px-4 py-2 text-sm rounded border transition-colors ${supplierPaidNow === false ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
                   >
                     Keyin to&apos;lanadi
                   </button>
                 </div>
-              </div>
+              </fieldset>
 
               {supplierPaidNow === true && (
                 <>
                   <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                      To&apos;lov usuli <span className="text-red-500">*</span>
+                    <label htmlFor="supplier-payment-method" className="block text-xs font-medium text-zinc-700 mb-1.5">
+                      To&apos;lov usuli <span aria-hidden="true" className="text-red-500">*</span>
                     </label>
                     <Select value={supplierPaymentMethod} onValueChange={(v) => v && setSupplierPaymentMethod(v as PaymentMethod)}>
-                      <SelectTrigger className="h-9 text-sm border-zinc-200 rounded">
+                      <SelectTrigger id="supplier-payment-method" aria-required="true" className="h-9 w-full text-sm border-zinc-200 rounded">
                         <SelectValue placeholder="Tanlang" />
                       </SelectTrigger>
                       <SelectContent>
@@ -447,31 +415,25 @@ export default function NewOlibSotdimPage() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1.5">To&apos;lov sanasi</label>
+                  <Field label={<>To&apos;lov sanasi</>}>
                     <DateInput
-                      aria-label="Yetkazib beruvchiga to'lov sanasi"
                       value={supplierPaidDate}
                       onValueChange={setSupplierPaidDate}
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
-                  </div>
+                  </Field>
                 </>
               )}
 
               {supplierPaidNow === false && (
                 <>
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                      To&apos;lov muddati <span className="text-red-500">*</span>
-                    </label>
+                  <Field label={<>To&apos;lov muddati</>} required>
                     <DateInput
-                      aria-label="Yetkazib beruvchiga to'lov muddati"
                       value={supplierDueDate}
                       onValueChange={setSupplierDueDate}
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
-                  </div>
+                  </Field>
                   <div className="sm:col-span-2 flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -499,10 +461,7 @@ export default function NewOlibSotdimPage() {
                     </div>
                   )}
                   {supplierReminderEnabled && earlyReminder && (
-                    <div>
-                      <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                        Necha kun oldin? <span className="text-red-500">*</span>
-                      </label>
+                    <Field label="Necha kun oldin?" required>
                       <Input
                         type="number"
                         min={1}
@@ -512,7 +471,7 @@ export default function NewOlibSotdimPage() {
                         placeholder="3"
                         className="h-9 text-sm border-zinc-200 rounded"
                       />
-                    </div>
+                    </Field>
                   )}
                 </>
               )}
@@ -525,21 +484,15 @@ export default function NewOlibSotdimPage() {
               <span className="text-sm font-semibold text-zinc-900">3. Kimga sotildi</span>
             </div>
             <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Mijoz ismi <span className="text-red-500">*</span>
-                </label>
+              <Field label="Mijoz ismi" required>
                 <Input
                   value={customerName}
                   onChange={(e) => setCustomerName(e.target.value)}
                   placeholder="To'liq ism"
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-              </div>
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Mijoz tel raqami <span className="text-red-500">*</span>
-                </label>
+              </Field>
+              <Field label="Mijoz tel raqami" required error={customerPhoneError || undefined}>
                 <PhoneInput
                   ref={customerPhoneRef}
                   value={customerPhone}
@@ -547,11 +500,9 @@ export default function NewOlibSotdimPage() {
                     setCustomerPhone(value)
                     if (customerPhoneError) setCustomerPhoneError('')
                   }}
-                  aria-invalid={!!customerPhoneError}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-                {customerPhoneError && <p className="mt-1 text-xs text-red-600">{customerPhoneError}</p>}
-              </div>
+              </Field>
             </div>
           </div>
 
@@ -561,10 +512,7 @@ export default function NewOlibSotdimPage() {
               <span className="text-sm font-semibold text-zinc-900">4. Narxlar va to&apos;lov</span>
             </div>
             <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  Sotilgan narx ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
-                </label>
+              <Field label={`Sotilgan narx (${currencyLabel(currency.currency)})`} required>
                 <MoneyInput
                   currency={currency.currency}
                   value={salePrice}
@@ -572,13 +520,13 @@ export default function NewOlibSotdimPage() {
                   placeholder={currency.currency === 'USD' ? '600.00' : '7500000'}
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
-              </div>
+              </Field>
               <div>
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                  To&apos;lov usuli <span className="text-red-500">*</span>
+                <label htmlFor="customer-payment-method" className="block text-xs font-medium text-zinc-700 mb-1.5">
+                  To&apos;lov usuli <span aria-hidden="true" className="text-red-500">*</span>
                 </label>
                 <Select value={paymentMethod} onValueChange={(v) => v && setPaymentMethod(v as PaymentMethod)}>
-                  <SelectTrigger className="h-9 text-sm border-zinc-200 rounded">
+                  <SelectTrigger id="customer-payment-method" aria-required="true" className="h-9 w-full text-sm border-zinc-200 rounded">
                     <SelectValue placeholder="Tanlang" />
                   </SelectTrigger>
                   <SelectContent>
@@ -596,13 +544,14 @@ export default function NewOlibSotdimPage() {
                 </div>
               )}
 
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-zinc-700 mb-2">
-                  To&apos;liq to&apos;ladimi? <span className="text-red-500">*</span>
-                </label>
+              <fieldset className="sm:col-span-2">
+                <legend className="block text-xs font-medium text-zinc-700 mb-2">
+                  To&apos;liq to&apos;ladimi? <span aria-hidden="true" className="text-red-500">*</span>
+                </legend>
                 <div className="flex gap-2">
                   <button
                     type="button"
+                    aria-pressed={fullyPaid === true}
                     onClick={() => setFullyPaid(true)}
                     className={`px-4 py-2 text-sm rounded border transition-colors ${fullyPaid === true ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
                   >
@@ -610,20 +559,18 @@ export default function NewOlibSotdimPage() {
                   </button>
                   <button
                     type="button"
+                    aria-pressed={fullyPaid === false}
                     onClick={() => setFullyPaid(false)}
                     className={`px-4 py-2 text-sm rounded border transition-colors ${fullyPaid === false ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
                   >
                     Yo&apos;q
                   </button>
                 </div>
-              </div>
+              </fieldset>
 
               {fullyPaid === false && (
                 <>
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                      Qancha to&apos;ladi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
-                    </label>
+                  <Field label={<>Qancha to&apos;ladi ({currencyLabel(currency.currency)})</>} required>
                     <MoneyInput
                       currency={currency.currency}
                       value={partialAmount}
@@ -631,18 +578,14 @@ export default function NewOlibSotdimPage() {
                       placeholder={currency.currency === 'USD' ? '200.00' : '2500000'}
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 mb-1.5">
-                      Qachon to&apos;laydi <span className="text-red-500">*</span>
-                    </label>
+                  </Field>
+                  <Field label={<>Qachon to&apos;laydi</>} required>
                     <DateInput
-                      aria-label="Mijoz to'lov muddati"
                       value={partialDate}
                       onValueChange={setPartialDate}
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
-                  </div>
+                  </Field>
                   <div className="sm:col-span-2 flex items-center gap-2">
                     <input
                       type="checkbox"
@@ -658,15 +601,14 @@ export default function NewOlibSotdimPage() {
                 </>
               )}
 
-              <div className="sm:col-span-2">
-                <label className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
+              <Field label="Izoh" className="sm:col-span-2">
                 <Textarea
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   placeholder="Qo'shimcha ma'lumot..."
                   className="text-sm border-zinc-200 rounded min-h-[60px]"
                 />
-              </div>
+              </Field>
             </div>
           </div>
 

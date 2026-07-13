@@ -2,7 +2,6 @@
 
 import { useId } from 'react'
 import { Input } from '@/components/ui/input'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { cn } from '@/lib/utils'
 
 export type StorageInputUnit = 'GB' | 'TB'
@@ -53,15 +52,15 @@ export function StorageInput({
           aria-required={required}
           className={cn('h-10 rounded-lg border-zinc-200 text-sm', inputClassName)}
         />
-        <Select value={unit} onValueChange={(value) => value && onUnitChange(value as StorageInputUnit)}>
-          <SelectTrigger aria-label={`${label} birligi`} className="h-10 w-full rounded-lg border-zinc-200">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="GB">GB</SelectItem>
-            <SelectItem value="TB">TB</SelectItem>
-          </SelectContent>
-        </Select>
+        <select
+          aria-label={`${label} birligi`}
+          value={unit}
+          onChange={(event) => onUnitChange(event.target.value as StorageInputUnit)}
+          className="h-10 w-full rounded-lg border border-zinc-200 bg-transparent px-2.5 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <option value="GB">GB</option>
+          <option value="TB">TB</option>
+        </select>
       </div>
     </div>
   )

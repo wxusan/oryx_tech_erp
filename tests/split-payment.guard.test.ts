@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { validatePaymentBreakdown } from '@/lib/payment-breakdown'
 
 function read(rel: string): string {
   return readFileSync(resolve(process.cwd(), rel), 'utf8')
@@ -44,12 +45,17 @@ describe('POST /api/sales/[id]/payment validates and stores the split breakdown'
   const source = read('src/app/api/sales/[id]/payment/route.ts')
 
   it('validates the breakdown sums to the payment amount before proceeding', () => {
-    expect(source).toContain('validatePaymentBreakdown(parsed.data.paymentBreakdown, parsed.data.amount)')
+    const validateIndex = source.indexOf('const breakdownError = validatePaymentBreakdown(')
+    const block = source.slice(validateIndex, validateIndex + 300)
+    expect(validateIndex).toBeGreaterThan(-1)
+    expect(block).toContain('parsed.data.paymentBreakdown')
+    expect(block).toContain('parsed.data.amount')
+    expect(block).toContain("parsed.data.inputCurrency ?? 'UZS'")
   })
 
   it('rejects (does not proceed) when validatePaymentBreakdown returns an error', () => {
-    const validateIndex = source.indexOf('validatePaymentBreakdown(parsed.data.paymentBreakdown, parsed.data.amount)')
-    const block = source.slice(validateIndex, validateIndex + 200)
+    const validateIndex = source.indexOf('const breakdownError = validatePaymentBreakdown(')
+    const block = source.slice(validateIndex, validateIndex + 400)
     expect(block).toContain('if (breakdownError) return badRequest(breakdownError)')
   })
 
@@ -68,12 +74,17 @@ describe('POST /api/nasiya/[id]/payment validates and stores the split breakdown
   const source = read('src/app/api/nasiya/[id]/payment/route.ts')
 
   it('validates the breakdown sums to the payment amount before proceeding', () => {
-    expect(source).toContain('validatePaymentBreakdown(paymentBreakdown, amount)')
+    const validateIndex = source.indexOf('const breakdownError = validatePaymentBreakdown(')
+    const block = source.slice(validateIndex, validateIndex + 260)
+    expect(validateIndex).toBeGreaterThan(-1)
+    expect(block).toContain('paymentBreakdown')
+    expect(block).toContain('amount')
+    expect(block).toContain("parsed.data.inputCurrency ?? 'UZS'")
   })
 
   it('rejects (does not proceed) when validatePaymentBreakdown returns an error', () => {
-    const validateIndex = source.indexOf('validatePaymentBreakdown(paymentBreakdown, amount)')
-    const block = source.slice(validateIndex, validateIndex + 200)
+    const validateIndex = source.indexOf('const breakdownError = validatePaymentBreakdown(')
+    const block = source.slice(validateIndex, validateIndex + 320)
     expect(block).toContain('if (breakdownError) return badRequest(breakdownError)')
   })
 
@@ -85,6 +96,22 @@ describe('POST /api/nasiya/[id]/payment validates and stores the split breakdown
 
   it('the legacy paymentMethod column still gets a representative value (never left blank)', () => {
     expect(source).toContain('representativePaymentMethod(paymentBreakdown)')
+  })
+})
+
+describe('split payment minor units follow the submitted currency', () => {
+  it('rejects fractional UZS parts even when their sum matches the total', () => {
+    expect(validatePaymentBreakdown([
+      { method: 'CASH', amount: 500.5 },
+      { method: 'CARD', amount: 499.5 },
+    ], 1_000, 'UZS')).toContain("butun so'mda")
+  })
+
+  it('accepts two-decimal USD parts whose sum matches the total', () => {
+    expect(validatePaymentBreakdown([
+      { method: 'CASH', amount: 50.25 },
+      { method: 'CARD', amount: 49.75 },
+    ], 100, 'USD')).toBeNull()
   })
 })
 
@@ -123,9 +150,9 @@ describe('Telegram messages show the split breakdown when present', () => {
 
 describe('payment history UI shows each split part with its own amount, inline (not hidden in a hover-only tooltip)', () => {
   it('nasiya detail page renders one line per part with formatUserFacingMoney, using the payment\'s own input currency', () => {
-    const source = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
+    const source = read('src/components/shop/nasiya-history-sections.tsx')
     expect(source).toContain('payment.paymentBreakdown?.length')
-    expect(source).toContain('payment.paymentBreakdown.map((p, i) =>')
+    expect(source).toContain('payment.paymentBreakdown.map((part, index) =>')
     expect(source).toContain('amountCurrency: payment.paymentInputCurrency ?? \'UZS\'')
     // The old bug's "Naqd + Karta" (method names only, amounts hidden in a
     // `title=` tooltip) must be gone.
@@ -258,7 +285,7 @@ describe('sale payment modal: split-payment UI has two independent amount fields
 describe('single (non-split) payment mode is unaffected by the split-mode fix', () => {
   it('nasiya modal: single mode still submits the plain "Miqdor" field with no paymentBreakdown', () => {
     const source = read('src/components/shop/nasiya-payment-modal.tsx')
-    expect(source).toContain('paymentBreakdown:\n            !carryOver && splitPayment')
+    expect(source.replace(/\s+/g, ' ')).toContain('paymentBreakdown: !carryOver && splitPayment')
     // Single-mode canSubmit path still requires the plain amount field.
     expect(source).toContain('const hasEffectiveAmount = splitPayment ? splitTotal > 0 : payAmount.trim().length > 0')
   })

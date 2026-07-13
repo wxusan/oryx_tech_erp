@@ -2,9 +2,8 @@ import { describe, it, expect } from 'vitest'
 import { readFileSync, existsSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-// Source-level guards for the "import old nasiya" feature. Behavioural coverage
-// of the DB writes needs a live DB (see integration.todo.test.ts); these fail
-// loudly if a critical accounting/isolation property is reverted.
+// Source-level guards for the "import old nasiya" feature. Behavioral DB
+// coverage also runs in tests/integration/business-routes.integration.test.ts.
 
 function read(rel: string): string {
   return readFileSync(resolve(process.cwd(), rel), 'utf8')
@@ -15,12 +14,13 @@ function readFlat(rel: string): string {
 
 describe('accounting isolation: stats exclude imported nasiyas', () => {
   const src = readFlat('src/lib/server/shop-stats.ts')
+  const queries = readFlat('src/lib/server/shop-stats-queries.ts')
 
-  it('nasiyaSoldThisMonth (gross/interest/profit source) filters isImported=false', () => {
-    // The createdAt-this-month nasiya query MUST carry isImported: false so an
-    // imported original total never enters current gross/interest/profit.
-    const match = src.match(/createdAt: \{ gte: monthStart, lt: monthEnd \},[^]*?isImported: false/)
-    expect(match, 'nasiyaSoldThisMonth is missing isImported:false').not.toBeNull()
+  it('the set-based accrual aggregate excludes imported nasiya revenue, interest, and cost', () => {
+    expect(src).toContain('getShopAccrualAggregate({ shopId, monthStart, monthEnd, adminId })')
+    expect(queries).toContain('AND n."isImported" = false')
+    expect(queries).toContain('coalesce(sum(n."totalAmount"), 0)')
+    expect(queries).toContain('coalesce(sum(n."interestAmount"), 0)')
   })
 
   it('imported devices are excluded from the device count', () => {

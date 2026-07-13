@@ -95,21 +95,25 @@ describe('sale contract payment ledger', () => {
     expect(result).toMatchObject({ accepted: false, reason: 'OVERPAYMENT', newContractRemainingAmount: 100 })
   })
 
-  it('accepts dust beyond a final USD balance but never credits it as debt repayment', () => {
+  it.each([
+    { currency: 'USD' as const, balance: 100, attempted: 100.004 },
+    { currency: 'UZS' as const, balance: 1_000, attempted: 1_001 },
+  ])('rejects every $currency overpayment instead of clipping or crediting it', ({ currency, balance, attempted }) => {
     const result = applySalePaymentToContractLedger({
-      contractCurrency: 'USD',
-      contractSalePrice: 100,
+      contractCurrency: currency,
+      contractSalePrice: balance,
       contractAmountPaid: 0,
-      contractRemainingAmount: 100,
-      appliedAmountInContractCurrency: 100.004,
+      contractRemainingAmount: balance,
+      appliedAmountInContractCurrency: attempted,
     })
 
     expect(result).toMatchObject({
-      accepted: true,
-      appliedAmountInContractCurrency: 100,
-      newContractAmountPaid: 100,
-      newContractRemainingAmount: 0,
-      isFullyPaid: true,
+      accepted: false,
+      reason: 'OVERPAYMENT',
+      appliedAmountInContractCurrency: 0,
+      newContractAmountPaid: 0,
+      newContractRemainingAmount: balance,
+      isFullyPaid: false,
     })
   })
 

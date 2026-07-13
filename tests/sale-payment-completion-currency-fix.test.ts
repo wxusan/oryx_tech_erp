@@ -58,8 +58,8 @@ describe('worked numeric example: legacy vs. contract-currency completion can di
   it('contractScheduleOutstanding applies a currency-aware tolerance (cents for USD, so\'m for UZS), matching the nasiya completion pattern', () => {
     expect(contractScheduleOutstanding(500, 499.99, 'USD')).toBe(0.01) // 1 cent short -> still payable
     expect(contractScheduleOutstanding(500, 499, 'USD')).toBe(1) // $1 short -> real debt
-    expect(contractScheduleOutstanding(6_250_000, 6_249_600, 'UZS')).toBe(0) // 400 so‘m short -> snapped
-    expect(contractScheduleOutstanding(6_250_000, 6_249_000, 'UZS')).toBe(1000) // 1000 so‘m short -> real debt
+    expect(contractScheduleOutstanding(6_250_000, 6_249_600, 'UZS')).toBe(400)
+    expect(contractScheduleOutstanding(6_250_000, 6_249_999, 'UZS')).toBe(1)
   })
 })
 

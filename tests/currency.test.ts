@@ -64,12 +64,13 @@ describe('currency helpers', () => {
     })
   })
 
-  it('keeps UZS input unchanged except for rounding', () => {
-    expect(normalizeMoneyInput(1_506_250.4, 'UZS', null)).toEqual({
+  it("keeps whole-so'm UZS input unchanged and rejects fractional UZS", () => {
+    expect(normalizeMoneyInput(1_506_250, 'UZS', null)).toEqual({
       amountUzs: 1_506_250,
       inputCurrency: 'UZS',
       exchangeRateUsed: null,
     })
+    expect(() => normalizeMoneyInput(1_506_250.4, 'UZS', null)).toThrow("butun so'mda")
   })
 
   it('blocks USD input when no rate is available', () => {

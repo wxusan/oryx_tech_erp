@@ -18,7 +18,9 @@ describe('device detail page: status/action labels extracted to a pure, tested m
   const page = read('src/app/(shop)/shop/qurilmalar/[id]/page.tsx')
 
   it('imports deviceStatusLabel/deviceActionLabel from the shared module', () => {
-    expect(page).toContain("import { displayImei, deviceStatusLabel, deviceActionLabel } from '@/lib/device-display'")
+    const history = read('src/components/shop/device-action-history.tsx')
+    expect(page).toContain("import { displayImei, deviceStatusLabel } from '@/lib/device-display'")
+    expect(history).toContain("import { deviceActionLabel } from '@/lib/device-display'")
   })
 
   it('no longer defines its own inline statusLabels map or deviceActionLabel function', () => {

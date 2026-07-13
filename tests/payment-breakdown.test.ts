@@ -57,7 +57,7 @@ describe('validatePaymentBreakdown (item 12 — split payment)', () => {
     ).toMatch(/yig'indisi/)
   })
 
-  it('tolerates float rounding dust within 0.01', () => {
+  it('accepts valid cent-precise USD parts', () => {
     expect(
       validatePaymentBreakdown(
         [
@@ -66,8 +66,35 @@ describe('validatePaymentBreakdown (item 12 — split payment)', () => {
           { method: 'TRANSFER', amount: 333.34 },
         ],
         1000.01,
+        'USD',
       ),
     ).toBeNull()
+  })
+
+  it("rejects fractional UZS parts because so'm is stored in whole units", () => {
+    expect(
+      validatePaymentBreakdown(
+        [
+          { method: 'CASH', amount: 500 },
+          { method: 'CARD', amount: 499.99 },
+        ],
+        999.99,
+        'UZS',
+      ),
+    ).toMatch(/butun so'm/)
+  })
+
+  it('rejects USD parts with more than two decimal places', () => {
+    expect(
+      validatePaymentBreakdown(
+        [
+          { method: 'CASH', amount: 500 },
+          { method: 'CARD', amount: 499.999 },
+        ],
+        999.999,
+        'USD',
+      ),
+    ).toMatch(/2 kasr xonali/)
   })
 
   it('accepts 3+ parts, not just 2', () => {

@@ -21,8 +21,8 @@ import { convertUsdToUzs, convertUzsToUsd, formatUserFacingMoney, type CurrencyC
 import { scheduleEffectiveDueTime, type OverdueScheduleInput } from '@/lib/nasiya-utils'
 import { isBeforeTashkentToday } from '@/lib/timezone'
 
-/** UZS contracts tolerate 500 so'm of rounding dust; USD contracts (2 decimal places) tolerate 1 cent. */
-const UZS_COMPLETION_TOLERANCE = 500
+/** Completion uses the real stored minor unit: 1 whole so'm or 1 cent. */
+const UZS_COMPLETION_TOLERANCE = 1
 const USD_COMPLETION_TOLERANCE = 0.01
 
 export function getCompletionToleranceForCurrency(currency: CurrencyCode): number {
@@ -48,7 +48,7 @@ export function roundContractMoney(value: number | string, currency: CurrencyCod
 /**
  * True when an amount is too small to be treated as a real payment/allocation
  * in the contract's own currency. This is intentionally a STRICT comparison:
- * $0.009 / 499 so'm are dust, while $0.01 / 500 so'm remain meaningful.
+ * $0.009 / fractional so'm are dust, while $0.01 / 1 so'm remain meaningful.
  */
 export function isContractCurrencyDust(amount: number | string, currency: CurrencyCode): boolean {
   const n = Math.abs(Number(amount))
@@ -71,9 +71,9 @@ export function contractScheduleOutstanding(expectedAmount: number | string, pai
   // the subtraction too: IEEE-754 otherwise turns $100 - $99.99 into
   // 0.010000000000005116 and makes the tolerance boundary non-deterministic.
   const raw = Math.max(0, roundContractMoney(Number(expectedAmount) - Number(paidAmount), currency))
-  // Strict by design: $0.009 / 499 so'm are dust; $0.01 / 500 so'm are
+  // Strict by design: $0.009 / fractional so'm are dust; $0.01 / 1 so'm are
   // meaningful debt. This matches isContractCurrencyDust and prevents a
-  // visible cent/500-so'm balance from being silently forgiven.
+  // visible cent/whole-so'm balance from being silently forgiven.
   return raw < getCompletionToleranceForCurrency(currency) ? 0 : raw
 }
 
@@ -90,10 +90,10 @@ export function convertContractAmountToUzs(
   amount: number | string,
   contractCurrency: CurrencyCode,
   usdUzsRate: number | string | null,
-): number {
+): number | null {
   const n = Number(amount)
   if (contractCurrency === 'UZS') return n
-  if (!usdUzsRate) return n
+  if (!usdUzsRate) return null
   return convertUsdToUzs(n, usdUzsRate)
 }
 
@@ -113,7 +113,7 @@ export function contractOutstandingAsUzs(
   contractPaidAmount: unknown,
   contractCurrency: CurrencyCode,
   usdUzsRate: number | string | null,
-): number {
+): number | null {
   const raw = contractScheduleOutstanding(Number(contractExpectedAmount), Number(contractPaidAmount), contractCurrency)
   return convertContractAmountToUzs(raw, contractCurrency, usdUzsRate)
 }
@@ -123,7 +123,7 @@ export function contractOutstandingAsUzs(
  * stays UZS-only, untouched, for callers still reading the legacy ledger).
  * Feeding contract-currency amounts (e.g. USD cents) through the UZS-only
  * function would misjudge a schedule as settled purely because its balance
- * is smaller than the 500 so'm tolerance — this uses the currency-aware
+ * is smaller than the real whole-so'm unit — this uses the currency-aware
  * tolerance instead. `schedule.expectedAmount/paidAmount` here are expected
  * to already be the CALLER's contract-currency figures (not the legacy UZS
  * ones) — see docs/currency-accounting-model.md.

@@ -15,27 +15,37 @@ function read(rel: string): string {
  */
 describe('GET /api/stats/due-overdue: shop-scoped, contract-currency-aware overdue summary', () => {
   const route = read('src/app/api/stats/due-overdue/route.ts')
+  const queries = read('src/lib/server/shop-stats-queries.ts')
 
   it('resolves the shop via the standard session guard, never trusts a client-supplied shopId', () => {
     expect(route).toContain('const guarded = await requireApiSession()')
     expect(route).toContain('resolveActiveShopId(guarded.session, null)')
   })
 
-  it('uses isContractScheduleOverdue (currency-aware), not the legacy UZS-only predicate', () => {
-    expect(route).toContain('isContractScheduleOverdue(')
+  it('delegates to the set-based overdue helper instead of hydrating debt rows in the route', () => {
+    expect(route).toContain('getCurrentOverdueSummary({ shopId, todayStart: today })')
+    expect(route).not.toContain('prisma.nasiyaSchedule.findMany')
+    expect(route).not.toContain('prisma.sale.findMany')
+    expect(queries).toContain('WITH nasiya_deals AS')
+    expect(queries).toContain('UNION ALL')
   })
 
   it('excludes cancelled nasiyas from the overdue count, same as every other overdue surface', () => {
-    expect(route).toContain("status: { not: 'CANCELLED' }")
+    expect(queries).toContain(`n."status" <> 'CANCELLED'`)
   })
 
   it('only returns a direct singleDeal link when there is exactly one overdue deal in total', () => {
-    expect(route).toContain('if (distinctDealCount === 1)')
+    expect(queries).toContain('CASE WHEN count(*) = 1 THEN min(deal_type) END AS single_type')
+    expect(queries).toContain('CASE WHEN count(*) = 1 THEN min(deal_id) END AS single_id')
+    expect(route).toContain('singleDeal: summary.singleDeal')
   })
 
-  it('sums overdue money by converting each contract-currency balance to UZS the same way shop-stats does', () => {
-    expect(route).toContain('contractOutstandingAsUzs(')
-    expect(route).toContain('convertContractAmountToUzs(')
+  it('keeps native UZS/USD partitions in SQL and converts the aggregated USD partition exactly once', () => {
+    expect(queries).toContain("sum(outstanding) FILTER (WHERE currency = 'UZS')")
+    expect(queries).toContain("sum(outstanding) FILTER (WHERE currency = 'USD')")
+    expect(route).toContain("convertContractAmountToUzs(summary.overdueNativeUsd, 'USD', currency.usdUzsRate)")
+    expect(route).toContain('summary.overdueNativeUzs + (convertedUsd ?? 0)')
+    expect(route).toContain('overdueMoneyComplete: summary.overdueNativeUsd === 0 || convertedUsd !== null')
   })
 })
 

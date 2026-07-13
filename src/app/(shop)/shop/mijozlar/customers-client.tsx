@@ -320,12 +320,13 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
               <label htmlFor="customer-phone" className="block text-xs font-medium text-zinc-700 mb-1.5">Telefon</label>
               <PhoneInput id="customer-phone" value={phone} onChange={setPhone} className="h-9 text-sm border-zinc-200 rounded" />
             </div>
-            <div>
-              <label className="block text-xs font-medium text-zinc-700 mb-1.5">Qo&apos;shimcha raqamlar</label>
+            <fieldset>
+              <legend className="block text-xs font-medium text-zinc-700 mb-1.5">Qo&apos;shimcha raqamlar</legend>
               <div className="space-y-2">
                 {additionalPhones.map((extra, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <PhoneInput
+                      aria-label={`Qo'shimcha telefon ${i + 1}`}
                       value={extra}
                       onChange={(value) => {
                         setAdditionalPhones((prev) => prev.map((p, idx) => (idx === i ? value : p)))
@@ -351,7 +352,7 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
                   + Raqam qo&apos;shish
                 </Button>
               </div>
-            </div>
+            </fieldset>
             {editing && (name !== editing.name || phone !== editing.phone) && (
               <div>
                 <label htmlFor="customer-reason" className="block text-xs font-medium text-zinc-700 mb-1.5">
@@ -372,7 +373,7 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
             </div>
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-medium text-zinc-700">Ishonch darajasi</label>
+                <label htmlFor="customer-trust" className="block text-xs font-medium text-zinc-700">Ishonch darajasi</label>
                 {editing?.trust && <TrustBadge trust={editing.trust} />}
               </div>
               {editing?.trust?.reasons && editing.trust.reasons.length > 0 && (
@@ -383,7 +384,7 @@ export default function CustomersClient({ initialSearch, initialPage }: { initia
                 </ul>
               )}
               <TrustSelect value={trustOverride || 'AUTO'} onValueChange={(v) => setTrustOverride(v === 'AUTO' ? '' : (v as TrustTier))}>
-                <TrustSelectTrigger className="h-9 text-sm border-zinc-200 rounded">
+                <TrustSelectTrigger id="customer-trust" className="h-9 text-sm border-zinc-200 rounded">
                   <TrustSelectValue />
                 </TrustSelectTrigger>
                 <TrustSelectContent>

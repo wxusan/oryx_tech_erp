@@ -21,6 +21,7 @@ import { getBot } from '@/lib/telegram'
 import { prisma } from '@/lib/prisma'
 import { logger } from '@/lib/logger'
 import { recordOpsEvent } from '@/lib/server/ops-events'
+import { initializeRequestAuditContext } from '@/lib/server/request-context'
 import { findTelegramOwner } from '@/lib/telegram-id'
 import {
   startShopAdminMessage,
@@ -122,6 +123,7 @@ async function ensureWebhookBot() {
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest): Promise<Response> {
+  await initializeRequestAuditContext(request.headers)
   // --- Secret token verification ---
   const secret = process.env.TELEGRAM_WEBHOOK_SECRET
   if (!secret) {

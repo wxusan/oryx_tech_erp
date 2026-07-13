@@ -1,14 +1,23 @@
 import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
-import { badRequest, forbidden, ok, serverError, tooManyRequests } from '@/lib/api-helpers'
+import { badRequest, forbidden, ok, payloadTooLarge, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
-import { hasValidImageSignature } from '@/lib/server/image-signature'
+import { validatePrivateUploadImage } from '@/lib/server/image-validation'
 import { getSupabaseAdminClient, PRIVATE_STORAGE_BUCKET } from '@/lib/supabase-admin'
 import { logger } from '@/lib/logger'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
-import { ensurePrivateStorageBucket, PRIVATE_UPLOAD_MAX_FILE_SIZE } from '@/lib/server/private-storage-bucket'
+import {
+  ensurePrivateStorageBucket,
+  PRIVATE_UPLOAD_MAX_FILE_SIZE,
+  PRIVATE_UPLOAD_MAX_REQUEST_SIZE,
+} from '@/lib/server/private-storage-bucket'
+import {
+  isInvalidRequestBody,
+  isRequestBodyTooLarge,
+  readLimitedFormDataBody,
+} from '@/lib/server/request-limits'
 
 export const runtime = 'nodejs'
 
@@ -30,7 +39,7 @@ export async function POST(request: Request) {
   if (!guarded.ok) return guarded.response
 
   try {
-    const formData = await request.formData()
+    const formData = await readLimitedFormDataBody(request, PRIVATE_UPLOAD_MAX_REQUEST_SIZE)
     const file = formData.get('file')
     const requestedShopId = formData.get('shopId')
     const shopId =
@@ -42,7 +51,7 @@ export async function POST(request: Request) {
 
     if (!shopId) return badRequest("shopId talab qilinadi")
 
-    // Per-instance abuse guard (not distributed — see src/lib/rate-limit.ts).
+    // Distributed when Upstash is configured; bounded in-process fallback otherwise.
     const rate = await checkRateLimitDistributed(rateLimitKey('upload-passport', shopId, guarded.session.user.id), { windowMs: 60_000, max: 30 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
@@ -59,12 +68,13 @@ export async function POST(request: Request) {
     })
     if (!shop) return forbidden("Do'kon faol emas yoki topilmadi")
 
-    const supabase = await ensurePrivateStorageBucket()
     const key = `shops/${shopId}/passports/${Date.now()}-${randomUUID()}.${extension}`
     const bytes = Buffer.from(await file.arrayBuffer())
-    if (!hasValidImageSignature(bytes, file.type)) {
+    const imageValidation = await validatePrivateUploadImage(bytes, file.type)
+    if (!imageValidation.ok) {
       return badRequest('Rasm fayli formati noto\'g\'ri yoki shikastlangan')
     }
+    const supabase = await ensurePrivateStorageBucket()
     const { error } = await supabase.storage.from(PRIVATE_STORAGE_BUCKET).upload(key, bytes, {
       contentType: file.type,
       upsert: false,
@@ -74,6 +84,8 @@ export async function POST(request: Request) {
 
     return ok({ key })
   } catch (error) {
+    if (isRequestBodyTooLarge(error)) return payloadTooLarge('Rasm yuklash so\'rovi 5 MB chegaradan oshdi')
+    if (isInvalidRequestBody(error)) return badRequest("Rasm yuklash so'rovi noto'g'ri")
     logger.error('[uploads/passport] upload failed', { event: 'api.route_error', error })
     return serverError('Pasport rasmini yuklashda xatolik')
   }

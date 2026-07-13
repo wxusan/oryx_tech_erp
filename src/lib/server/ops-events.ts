@@ -1,7 +1,8 @@
 import 'server-only'
 
 import { prisma } from '@/lib/prisma'
-import { logger, redact, type LogLevel } from '@/lib/logger'
+import { logger, redact, redactLogText, type LogLevel } from '@/lib/logger'
+import { currentRequestAuditContext } from '@/lib/server/request-context'
 
 /**
  * Persist a system/ops event AND emit a structured log line.
@@ -27,6 +28,7 @@ export interface OpsEventInput {
   entityId?: string | null
   status?: string | null
   errorCode?: string | number | null
+  requestId?: string | null
   metadata?: Record<string, unknown>
 }
 
@@ -52,10 +54,12 @@ function safeMetadata(metadata?: Record<string, unknown>): object | undefined {
 export async function recordOpsEvent(input: OpsEventInput): Promise<void> {
   const level: OpsLevel = input.level ?? 'INFO'
   const errorCode = input.errorCode == null ? null : String(input.errorCode)
+  const safeMessage = redactLogText(input.message)
+  const requestId = input.requestId ?? currentRequestAuditContext()?.requestId ?? null
 
   // Always emit the structured log first — even if the DB write fails, the
   // signal survives in the platform log drain.
-  logger[LEVEL_TO_LOG[level]](input.message, {
+  logger[LEVEL_TO_LOG[level]](safeMessage, {
     event: input.event,
     shopId: input.shopId ?? undefined,
     actorId: input.actorId ?? undefined,
@@ -64,6 +68,7 @@ export async function recordOpsEvent(input: OpsEventInput): Promise<void> {
     entityId: input.entityId ?? undefined,
     status: input.status ?? undefined,
     errorCode: errorCode ?? undefined,
+    requestId: requestId ?? undefined,
     ...(input.metadata ? { metadata: input.metadata } : {}),
   })
 
@@ -72,7 +77,7 @@ export async function recordOpsEvent(input: OpsEventInput): Promise<void> {
       data: {
         level,
         event: input.event,
-        message: input.message,
+        message: safeMessage,
         shopId: input.shopId ?? null,
         actorId: input.actorId ?? null,
         actorType: input.actorType ?? null,
@@ -80,6 +85,7 @@ export async function recordOpsEvent(input: OpsEventInput): Promise<void> {
         entityId: input.entityId ?? null,
         status: input.status ?? null,
         errorCode,
+        requestId,
         metadata: safeMetadata(input.metadata) as object | undefined,
       },
     })

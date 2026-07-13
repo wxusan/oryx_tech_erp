@@ -28,9 +28,13 @@ describe('getShopStats: month/admin filter is additive, existing callers unaffec
     expect(statsRoute).not.toContain('monthKey:')
   })
 
-  it('adminId filters only genuinely admin-attributable queries (Sale/SalePayment/Nasiya/NasiyaPayment/DeviceReturn createdBy, Log actorId)', () => {
+  it('adminId filters only genuinely admin-attributable flows, including set-based Sale/Nasiya accrual SQL', () => {
+    const queries = read('src/lib/server/shop-stats-queries.ts')
     const occurrences = source.split('...attributedTo').length - 1
-    expect(occurrences).toBe(6)
+    expect(occurrences).toBe(4)
+    expect(source).toContain('getShopAccrualAggregate({ shopId, monthStart, monthEnd, adminId })')
+    expect(queries).toContain('Prisma.sql`AND s."createdBy" = ${input.adminId}`')
+    expect(queries).toContain('Prisma.sql`AND n."createdBy" = ${input.adminId}`')
     expect(source).toContain("...(adminId ? { actorId: adminId } : {})")
   })
 

@@ -10,11 +10,11 @@
  */
 import { requireApiSession, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, serverError } from '@/lib/api-helpers'
-import { prisma } from '@/lib/prisma'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { isContractScheduleOverdue, contractOutstandingAsUzs, convertContractAmountToUzs } from '@/lib/nasiya-contract'
+import { convertContractAmountToUzs } from '@/lib/nasiya-contract'
 import { logger } from '@/lib/logger'
 import { tashkentDayRange } from '@/lib/timezone'
+import { getCurrentOverdueSummary } from '@/lib/server/shop-stats-queries'
 
 export async function GET() {
   try {
@@ -26,72 +26,23 @@ export async function GET() {
     const now = new Date()
     const { start: today } = tashkentDayRange(now)
 
-    const [overdueSchedules, overdueSales, currency] = await Promise.all([
-      prisma.nasiyaSchedule.findMany({
-        where: {
-          shopId,
-          status: { in: ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'] },
-          OR: [
-            { delayedUntil: { lt: today } },
-            { delayedUntil: null, dueDate: { lt: today } },
-          ],
-          nasiya: { is: { deletedAt: null, status: { not: 'CANCELLED' } } },
-        },
-        select: {
-          dueDate: true,
-          delayedUntil: true,
-          status: true,
-          contractExpectedAmount: true,
-          contractPaidAmount: true,
-          nasiya: { select: { id: true, contractCurrency: true } },
-        },
-      }),
-      prisma.sale.findMany({
-        where: {
-          shopId,
-          deletedAt: null,
-          paidFully: false,
-          remainingAmount: { gt: 0 },
-          dueDate: { lt: today },
-        },
-        select: { id: true, dueDate: true, contractCurrency: true, contractRemainingAmount: true },
-      }),
+    const [summary, currency] = await Promise.all([
+      getCurrentOverdueSummary({ shopId, todayStart: today }),
       getShopCurrencyContext(shopId),
     ])
 
-    const overdueNasiyaSchedules = overdueSchedules.filter((s) =>
-      isContractScheduleOverdue(
-        { status: s.status, dueDate: s.dueDate, delayedUntil: s.delayedUntil, expectedAmount: Number(s.contractExpectedAmount), paidAmount: Number(s.contractPaidAmount) },
-        s.nasiya.contractCurrency,
-        now,
-      ),
-    )
-    const overdueSalesRows = overdueSales.filter((s) => s.dueDate && s.dueDate < today)
-
-    const overdueMoneyUzs =
-      overdueNasiyaSchedules.reduce(
-        (sum, s) => sum + contractOutstandingAsUzs(s.contractExpectedAmount, s.contractPaidAmount, s.nasiya.contractCurrency, currency.usdUzsRate),
-        0,
-      ) +
-      overdueSalesRows.reduce((sum, s) => sum + convertContractAmountToUzs(Number(s.contractRemainingAmount), s.contractCurrency, currency.usdUzsRate), 0)
-
-    const distinctNasiyaIds = new Set(overdueNasiyaSchedules.map((s) => s.nasiya.id))
-    const distinctDealCount = distinctNasiyaIds.size + overdueSalesRows.length
-
-    // A direct link only when there is exactly one overdue deal in total —
-    // otherwise the banner links to the filtered list instead.
-    let singleDeal: { type: 'nasiya' | 'sale'; id: string } | null = null
-    if (distinctDealCount === 1) {
-      if (distinctNasiyaIds.size === 1) singleDeal = { type: 'nasiya', id: [...distinctNasiyaIds][0] }
-      else singleDeal = { type: 'sale', id: overdueSalesRows[0].id }
-    }
+    const convertedUsd = convertContractAmountToUzs(summary.overdueNativeUsd, 'USD', currency.usdUzsRate)
+    const overdueMoneyUzs = summary.overdueNativeUzs + (convertedUsd ?? 0)
 
     return ok(
       {
-        overdueDealCount: distinctDealCount,
+        overdueDealCount: summary.overdueDealCount,
         overdueMoneyUzs,
+        overdueNativeUzs: summary.overdueNativeUzs,
+        overdueNativeUsd: summary.overdueNativeUsd,
+        overdueMoneyComplete: summary.overdueNativeUsd === 0 || convertedUsd !== null,
         currency,
-        singleDeal,
+        singleDeal: summary.singleDeal,
       },
       'Kechikkan to\'lovlar xulosasi',
     )

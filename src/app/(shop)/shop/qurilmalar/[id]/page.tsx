@@ -12,11 +12,12 @@ import { formatUzPhoneDisplay } from '@/lib/phone'
 import { MoneyInput } from '@/components/ui/money-input'
 import { StorageInput } from '@/components/ui/storage-input'
 import { Textarea } from '@/components/ui/textarea'
+import { Field } from '@/components/ui/field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { paymentMethodLabel } from '@/lib/labels'
 import { uzDate, uzDateTime } from '@/lib/dates'
-import { displayImei, deviceStatusLabel, deviceActionLabel } from '@/lib/device-display'
+import { displayImei, deviceStatusLabel } from '@/lib/device-display'
 import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency, formatUserFacingMoney } from '@/lib/currency'
 import {
   formatDisplayMoneyFromContract,
@@ -38,6 +39,8 @@ import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { patchDeviceUpsert } from '@/lib/device-query-cache'
 import type { DeviceListItem } from '@/lib/device-list-contract'
 import { DeviceConditionBadge } from '@/components/shop/device-condition-badge'
+import { DeviceActionHistory, type DeviceActionLog as DeviceLog } from '@/components/shop/device-action-history'
+import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 
 interface Supplier {
   name: string
@@ -120,6 +123,13 @@ interface DeviceReturnInfo {
   refundInputCurrency: 'UZS' | 'USD' | null
   refundExchangeRateAtCreation: number | string | null
   refundMethod: string | null
+  contractCurrency: 'UZS' | 'USD'
+  contractReceiptsAtReturn: number
+  contractRefundAmount: number
+  contractRetainedAmount: number
+  contractCancelledDebt: number
+  revenueReversalAmountUzs: number
+  inventoryCostRecoveryUzs: number
   note: string | null
   createdAt: string
 }
@@ -152,20 +162,13 @@ interface Device {
   returns?: DeviceReturnInfo[]
 }
 
-interface DeviceLog {
-  id: string
-  action: string
-  note: string | null
-  targetId: string
-  targetType: string
-  createdAt: string
-}
-
 function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']) {
   return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
 }
 
 export default function QurilmaDetailPage() {
+  const salePaymentCommand = useLogicalCommandIdempotency()
+  const returnCommand = useLogicalCommandIdempotency()
   const params = useParams()
   const router = useRouter()
   const queryClient = useQueryClient()
@@ -422,36 +425,39 @@ export default function QurilmaDetailPage() {
     setSalePayLoading(true)
     setSalePayError('')
     try {
+      const payload = {
+        amount: saleEffectiveAmount,
+        inputCurrency: currency.currency,
+        paymentMethod: salePayMethod,
+        paymentBreakdown: saleSplitPayment
+          ? [
+              {
+                method: salePayMethod,
+                amount: Number(saleSplitAmount1Input),
+              },
+              { method: saleSplitMethod2, amount: Number(saleSplitAmount2Input) },
+            ]
+          : undefined,
+        note: salePayNote.trim() || undefined,
+      }
       const res = await fetch(`/api/sales/${latestSale.id}/payment`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Idempotency-Key': crypto.randomUUID(),
+          'Idempotency-Key': salePaymentCommand.keyFor(payload),
         },
-        body: JSON.stringify({
-          amount: saleEffectiveAmount,
-          inputCurrency: currency.currency,
-          paymentMethod: salePayMethod,
-          paymentBreakdown: saleSplitPayment
-            ? [
-                {
-                  method: salePayMethod,
-                  amount: Number(saleSplitAmount1Input),
-                },
-                { method: saleSplitMethod2, amount: Number(saleSplitAmount2Input) },
-              ]
-            : undefined,
-          note: salePayNote.trim() || undefined,
-        }),
+        body: JSON.stringify(payload),
       })
       const json = await res.json()
       if (!res.ok || !json.success) {
+        salePaymentCommand.rejected(res.status)
         throw new Error(json.error || "To'lovni saqlashda xatolik")
       }
+      salePaymentCommand.committed()
       await commitNavigationMutation({
         kind: 'sale.paymentRecorded',
         deviceId: id,
-      })
+      }).catch(() => undefined)
       setSalePaymentOpen(false)
       setSalePayAmount('')
       setSalePayMethod('')
@@ -513,6 +519,7 @@ export default function QurilmaDetailPage() {
 
   async function handleReturnDevice() {
     const refundAmount = Number(returnRefundAmount || 0)
+    const returnCurrency = device?.sales?.[0]?.contractCurrency ?? device?.nasiya?.[0]?.contractCurrency ?? currency.currency
     if (
       returnNote.trim().length < 5 ||
       Number.isNaN(refundAmount) ||
@@ -524,18 +531,26 @@ export default function QurilmaDetailPage() {
     setReturning(true)
     setReturnError('')
     try {
+      const payload = {
+        note: returnNote,
+        refundAmount,
+        inputCurrency: returnCurrency,
+        refundMethod: refundAmount > 0 ? returnRefundMethod : undefined,
+      }
       const res = await fetch(`/api/devices/${id}/return`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          note: returnNote,
-          refundAmount,
-          inputCurrency: currency.currency,
-          refundMethod: refundAmount > 0 ? returnRefundMethod : undefined,
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': returnCommand.keyFor(payload),
+        },
+        body: JSON.stringify(payload),
       })
       const json = await res.json()
-      if (!res.ok || !json.success) throw new Error(json.error || 'Qaytarishda xatolik')
+      if (!res.ok || !json.success) {
+        returnCommand.rejected(res.status)
+        throw new Error(json.error || 'Qaytarishda xatolik')
+      }
+      returnCommand.committed()
       await navigateAfterMutation(router, '/shop/qurilmalar', {
         kind: 'return.created',
         deviceId: id,
@@ -641,6 +656,7 @@ export default function QurilmaDetailPage() {
       ? formatDisplayMoneyFromContract(amount, latestSale.contractCurrency, currency.currency, currency.usdUzsRate)
       : fmt(amount, currency)
   const latestNasiya = device.nasiya?.[0]
+  const returnContractCurrency = latestSale?.contractCurrency ?? latestNasiya?.contractCurrency ?? currency.currency
   // Money TEXT for this nasiya must convert from its own contract currency
   // via today's rate — never reconvert the legacy UZS snapshot (frozen at
   // creation rate), which would stay stuck showing so'm for a USD-native
@@ -1054,7 +1070,8 @@ export default function QurilmaDetailPage() {
         />
       )}
 
-      {/* Return info section — no profit shown here, the sale was reversed */}
+      {/* Immutable return disposition: original deal remains in history and
+          the reversal belongs to this return date. */}
       {['IN_STOCK', 'RETURNED'].includes(device.status) && latestReturn && (
         <div className="border border-zinc-200 rounded overflow-hidden">
           <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
@@ -1086,6 +1103,36 @@ export default function QurilmaDetailPage() {
               </div>
             )}
             <div className="flex gap-4 text-sm">
+              <span className="text-zinc-500 w-32">Olingan jami</span>
+              <span className="text-zinc-900 font-medium">
+                {formatUserFacingMoney({
+                  amount: latestReturn.contractReceiptsAtReturn,
+                  amountCurrency: latestReturn.contractCurrency,
+                  displayCurrency: latestReturn.contractCurrency,
+                })}
+              </span>
+            </div>
+            <div className="flex gap-4 text-sm">
+              <span className="text-zinc-500 w-32">Saqlab qolindi</span>
+              <span className="text-zinc-900 font-medium">
+                {formatUserFacingMoney({
+                  amount: latestReturn.contractRetainedAmount,
+                  amountCurrency: latestReturn.contractCurrency,
+                  displayCurrency: latestReturn.contractCurrency,
+                })}
+              </span>
+            </div>
+            <div className="flex gap-4 text-sm">
+              <span className="text-zinc-500 w-32">Bekor qilingan qarz</span>
+              <span className="text-zinc-900 font-medium">
+                {formatUserFacingMoney({
+                  amount: latestReturn.contractCancelledDebt,
+                  amountCurrency: latestReturn.contractCurrency,
+                  displayCurrency: latestReturn.contractCurrency,
+                })}
+              </span>
+            </div>
+            <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">Sana</span>
               <span className="text-zinc-900 font-medium">{uzDate(latestReturn.createdAt)}</span>
             </div>
@@ -1099,25 +1146,7 @@ export default function QurilmaDetailPage() {
         </div>
       )}
 
-      {/* Action / lifecycle logs */}
-      <div className="border border-zinc-200 rounded overflow-hidden">
-        <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">Amallar tarixi</div>
-        {logs.length ? (
-          <ul className="divide-y divide-zinc-100">
-            {logs.map((l) => (
-              <li key={l.id} className="px-4 py-3 flex items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <div className="text-sm text-zinc-900">{deviceActionLabel(l.action)}</div>
-                  {l.note && <div className="text-xs text-zinc-500 mt-0.5">{l.note}</div>}
-                </div>
-                <div className="text-xs text-zinc-400 whitespace-nowrap flex-shrink-0">{uzDateTime(l.createdAt)}</div>
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <div className="px-4 py-6 text-sm text-zinc-500">Amallar tarixi yo&apos;q</div>
-        )}
-      </div>
+      <DeviceActionHistory logs={logs} />
 
       {/* Edit dialog is available only while the device is sellable or awaiting legacy restock. */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
@@ -1127,25 +1156,21 @@ export default function QurilmaDetailPage() {
           </DialogHeader>
           <div className="max-h-[65vh] space-y-4 overflow-y-auto px-5 py-4">
             {editError && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{editError}</div>}
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-zinc-700">
-                Model <span className="text-red-500">*</span>
-              </label>
+            <Field label="Model" required>
               <Input
                 value={editForm.model}
                 onChange={(e) => setEditForm((f) => ({ ...f, model: e.target.value }))}
                 className="h-10 rounded-lg border-zinc-200 text-sm"
               />
-            </div>
+            </Field>
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-zinc-700">Rang</label>
+              <Field label="Rang">
                 <Input
                   value={editForm.color}
                   onChange={(e) => setEditForm((f) => ({ ...f, color: e.target.value }))}
                   className="h-10 rounded-lg border-zinc-200 text-sm"
                 />
-              </div>
+              </Field>
               <StorageInput
                 id="edit-device-storage"
                 amount={editForm.storage}
@@ -1153,8 +1178,7 @@ export default function QurilmaDetailPage() {
                 onAmountChange={(value) => setEditForm((form) => ({ ...form, storage: value }))}
                 onUnitChange={(value) => setEditForm((form) => ({ ...form, storageUnit: value }))}
               />
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-zinc-700">Batareya (%)</label>
+              <Field label="Batareya (%)">
                 <Input
                   type="number"
                   min="0"
@@ -1168,23 +1192,22 @@ export default function QurilmaDetailPage() {
                   }
                   className="h-10 rounded-lg border-zinc-200 text-sm"
                 />
-              </div>
-              <div className="space-y-1.5">
-                <label className="block text-xs font-medium text-zinc-700">
-                  Kelish narxi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
-                </label>
+              </Field>
+              <Field label={`Kelish narxi (${currencyLabel(currency.currency)})`} required>
                 <MoneyInput
                   currency={currency.currency}
                   value={editForm.purchasePrice}
                   onChange={(v) => { setPurchasePriceDirty(true); setEditForm((f) => ({ ...f, purchasePrice: v })) }}
                   className="h-10 rounded-lg border-zinc-200 text-sm"
                 />
-              </div>
+              </Field>
             </div>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-zinc-700">
-                Asosiy IMEI <span className="text-red-500">*</span>
-              </label>
+            <Field
+              label="Asosiy IMEI"
+              required
+              help="15 ta raqam"
+              error={editForm.imei && !/^\d{15}$/.test(editForm.imei) ? 'IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
+            >
               <Input
                 value={editForm.imei}
                 onChange={(e) => setEditForm((f) => ({ ...f, imei: e.target.value }))}
@@ -1192,35 +1215,36 @@ export default function QurilmaDetailPage() {
                 maxLength={15}
                 className="h-10 rounded-lg border-zinc-200 text-sm font-mono"
               />
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-zinc-700">Ikkinchi IMEI</label>
+            </Field>
+            <Field
+              label="Ikkinchi IMEI"
+              help="Ixtiyoriy, 15 ta raqam"
+              error={editForm.secondaryImei && !/^\d{15}$/.test(editForm.secondaryImei) ? 'Ikkinchi IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
+            >
               <Input value={editForm.secondaryImei} onChange={(e) => setEditForm((f) => ({ ...f, secondaryImei: e.target.value }))} inputMode="numeric" maxLength={15} className="h-10 rounded-lg border-zinc-200 text-sm font-mono" />
-            </div>
+            </Field>
             <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-zinc-700">Holati</label>
+              <label htmlFor="edit-device-condition" className="block text-xs font-medium text-zinc-700">Holati</label>
               <Select value={editForm.conditionCode} onValueChange={(value) => value && setEditForm((form) => ({ ...form, conditionCode: value as 'NEW' | 'USED' }))}>
-                <SelectTrigger className="h-10"><SelectValue placeholder="Tanlang" /></SelectTrigger>
+                <SelectTrigger id="edit-device-condition" className="h-10 w-full"><SelectValue placeholder="Tanlang" /></SelectTrigger>
                 <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-zinc-700">Yetkazib beruvchi tel</label>
+            <Field label="Yetkazib beruvchi tel">
               <PhoneInput
                 value={editForm.supplierPhone}
                 onChange={(supplierPhone) => setEditForm((f) => ({ ...f, supplierPhone }))}
                 className="h-10 rounded-lg border-zinc-200 text-sm"
               />
-            </div>
-            <div className="space-y-1.5">
-              <label className="block text-xs font-medium text-zinc-700">Izoh</label>
+            </Field>
+            <Field label="Izoh">
               <Textarea
                 value={editForm.note}
                 onChange={(e) => setEditForm((f) => ({ ...f, note: e.target.value }))}
                 placeholder="Ixtiyoriy izoh"
                 className="min-h-[70px] rounded-lg border-zinc-200 text-sm"
               />
-            </div>
+            </Field>
           </div>
           <DialogFooter className="gap-2 border-t border-zinc-100 px-5 py-4">
             <Button variant="outline" onClick={() => setEditOpen(false)} className="rounded-lg border-zinc-200 text-zinc-700">
@@ -1248,17 +1272,14 @@ export default function QurilmaDetailPage() {
               <span className="font-medium">{device.model}</span> qurilmasini o'chirishdan oldin sababini kiriting.
             </p>
             {deleteError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{deleteError}</div>}
-            <div>
-              <label className="text-xs font-medium text-zinc-700 block mb-1.5">
-                Sabab <span className="text-red-500">*</span>
-              </label>
+            <Field label="Sabab" required>
               <Textarea
                 value={deleteNote}
                 onChange={(e) => setDeleteNote(e.target.value)}
                 placeholder="Masalan: Qurilma buzilgan, yo'qolgan..."
                 className="text-sm border-zinc-200 rounded min-h-[80px]"
               />
-            </div>
+            </Field>
           </div>
           <DialogFooter className="gap-2">
             <Button
@@ -1294,26 +1315,23 @@ export default function QurilmaDetailPage() {
           <div className="space-y-3 py-2">
             {saleEditError && <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{saleEditError}</div>}
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-zinc-700">Mijoz</label>
+              <Field label="Mijoz">
                 <Input
                   value={saleEditCustomerName}
                   onChange={(e) => setSaleEditCustomerName(e.target.value)}
                   className="h-9 rounded border-zinc-200 text-sm"
                 />
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-zinc-700">Telefon</label>
+              </Field>
+              <Field label="Telefon">
                 <PhoneInput
                   value={saleEditCustomerPhone}
                   onChange={setSaleEditCustomerPhone}
                   className="h-9 rounded border-zinc-200 text-sm"
                 />
-              </div>
+              </Field>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-zinc-700">To'lov usuli</label>
+              <Field label="To'lov usuli">
                 <select
                   value={saleEditPaymentMethod}
                   onChange={(e) => setSaleEditPaymentMethod(e.target.value)}
@@ -1324,19 +1342,18 @@ export default function QurilmaDetailPage() {
                   <option value="TRANSFER">Bank</option>
                   <option value="OTHER">Boshqa</option>
                 </select>
-              </div>
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-zinc-700">Qarz muddati</label>
+              </Field>
+              <Field label="Qarz muddati">
                 <DateInput
-                  aria-label="Qarz muddati"
                   value={saleEditDueDate}
                   onValueChange={setSaleEditDueDate}
                   className="h-9 rounded border-zinc-200 text-sm"
                 />
-              </div>
+              </Field>
             </div>
-            <label className="flex items-center gap-2 rounded border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
+            <label htmlFor="sale-edit-reminder" className="flex items-center gap-2 rounded border border-zinc-200 bg-zinc-50 p-3 text-sm text-zinc-700">
               <input
+                id="sale-edit-reminder"
                 type="checkbox"
                 checked={saleEditReminderEnabled}
                 onChange={(e) => setSaleEditReminderEnabled(e.target.checked)}
@@ -1370,8 +1387,9 @@ export default function QurilmaDetailPage() {
           <div className="space-y-3 py-2">
             {salePayError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{salePayError}</div>}
 
-            <label className="flex items-center gap-2 text-xs font-medium text-zinc-700">
+            <label htmlFor="sale-split-payment" className="flex items-center gap-2 text-xs font-medium text-zinc-700">
               <input
+                id="sale-split-payment"
                 type="checkbox"
                 checked={saleSplitPayment}
                 onChange={(e) => {
@@ -1390,17 +1408,15 @@ export default function QurilmaDetailPage() {
 
             {!saleSplitPayment ? (
               <>
-                <div>
-                  <label className="text-xs font-medium text-zinc-700 block mb-1.5">Miqdor ({currencyLabel(currency.currency)})</label>
+                <Field label={`Miqdor (${currencyLabel(currency.currency)})`} required>
                   <MoneyInput
                     currency={currency.currency}
                     value={salePayAmount}
                     onChange={setSalePayAmount}
                     className="h-9 text-sm border-zinc-200 rounded"
                   />
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-zinc-700 block mb-1.5">To'lov usuli</label>
+                </Field>
+                <Field label="To'lov usuli" required>
                   <select
                     value={salePayMethod}
                     onChange={(e) => setSalePayMethod(e.target.value)}
@@ -1412,7 +1428,7 @@ export default function QurilmaDetailPage() {
                     <option value="TRANSFER">Bank</option>
                     <option value="OTHER">Boshqa</option>
                   </select>
-                </div>
+                </Field>
               </>
             ) : (
               // Split payment: each method has its OWN "To'lov usuli N" block
@@ -1420,10 +1436,12 @@ export default function QurilmaDetailPage() {
               // total field re-purposed as "first part". The total below is
               // ALWAYS the sum of the two parts and is never itself editable.
               <div className="space-y-3 rounded-lg border border-zinc-200 bg-zinc-50 p-3">
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 mb-1">To&apos;lov usuli 1</label>
+                <fieldset>
+                  <legend className="block text-xs font-medium text-zinc-700 mb-1">To&apos;lov usuli 1</legend>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <label htmlFor="sale-split-method-1" className="sr-only">Birinchi to&apos;lov usuli</label>
                     <select
+                      id="sale-split-method-1"
                       value={salePayMethod}
                       onChange={(e) => setSalePayMethod(e.target.value)}
                       className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded"
@@ -1434,7 +1452,9 @@ export default function QurilmaDetailPage() {
                       <option value="TRANSFER">Bank</option>
                       <option value="OTHER">Boshqa</option>
                     </select>
+                    <label htmlFor="sale-split-amount-1" className="sr-only">Birinchi to&apos;lov miqdori</label>
                     <MoneyInput
+                      id="sale-split-amount-1"
                       currency={currency.currency}
                       value={saleSplitAmount1Input}
                       onChange={(v) => {
@@ -1450,10 +1470,10 @@ export default function QurilmaDetailPage() {
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
                   </div>
-                </div>
-                <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="block text-xs font-medium text-zinc-700">To&apos;lov usuli 2</label>
+                </fieldset>
+                <fieldset>
+                  <legend className="block text-xs font-medium text-zinc-700">To&apos;lov usuli 2</legend>
+                  <div className="mb-1 flex items-center justify-end">
                     {saleSuggestedAmountNumber != null && (
                       <button
                         type="button"
@@ -1472,7 +1492,9 @@ export default function QurilmaDetailPage() {
                     )}
                   </div>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    <label htmlFor="sale-split-method-2" className="sr-only">Ikkinchi to&apos;lov usuli</label>
                     <select
+                      id="sale-split-method-2"
                       value={saleSplitMethod2}
                       onChange={(e) => setSaleSplitMethod2(e.target.value)}
                       className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded"
@@ -1483,7 +1505,9 @@ export default function QurilmaDetailPage() {
                       <option value="TRANSFER">Bank</option>
                       <option value="OTHER">Boshqa</option>
                     </select>
+                    <label htmlFor="sale-split-amount-2" className="sr-only">Ikkinchi to&apos;lov miqdori</label>
                     <MoneyInput
+                      id="sale-split-amount-2"
                       currency={currency.currency}
                       value={saleSplitAmount2Input}
                       onChange={(v) => {
@@ -1493,7 +1517,7 @@ export default function QurilmaDetailPage() {
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
                   </div>
-                </div>
+                </fieldset>
                 {saleSplitMethod2 && salePayMethod && saleSplitMethod2 === salePayMethod && (
                   <p className="text-xs text-red-600">Ikkala usul bir xil bo&apos;lmasligi kerak.</p>
                 )}
@@ -1519,17 +1543,14 @@ export default function QurilmaDetailPage() {
               </div>
             )}
 
-            <div>
-              <label className="text-xs font-medium text-zinc-700 block mb-1.5">
-                Izoh <span className="text-red-500">*</span>
-              </label>
+            <Field label="Izoh" required>
               <Textarea
                 value={salePayNote}
                 onChange={(e) => setSalePayNote(e.target.value)}
                 placeholder="Masalan: mijoz qolgan qarzni to'ladi"
                 className="text-sm border-zinc-200 rounded min-h-[70px]"
               />
-            </div>
+            </Field>
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setSalePaymentOpen(false)} className="border-zinc-200 text-zinc-700 rounded">
@@ -1553,7 +1574,8 @@ export default function QurilmaDetailPage() {
           </DialogHeader>
           <div className="space-y-3 py-2">
             <p className="text-sm text-zinc-600">
-              Bu amal bog'langan sotuv yoki nasiyani bekor qiladi va qurilmani omborga qaytaradi.
+              Bu amal qurilmani omborga qaytaradi. Asl shartnoma va barcha to'lovlar o'zgarmas tarix sifatida saqlanadi;
+              qaytarilgan pul va bekor qilingan qarz alohida qayd etiladi.
             </p>
             {returnError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{returnError}</div>}
             <div>
@@ -1569,11 +1591,11 @@ export default function QurilmaDetailPage() {
             </div>
             <div>
               <label htmlFor="return-refund-amount" className="text-xs font-medium text-zinc-700 block mb-1.5">
-                Qaytarilgan summa ({currencyLabel(currency.currency)})
+                Qaytarilgan summa ({currencyLabel(returnContractCurrency)})
               </label>
               <MoneyInput
                 id="return-refund-amount"
-                currency={currency.currency}
+                currency={returnContractCurrency}
                 value={returnRefundAmount}
                 onChange={setReturnRefundAmount}
                 placeholder="0"

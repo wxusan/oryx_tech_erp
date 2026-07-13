@@ -55,8 +55,7 @@ describe('nasiya payment modal: Izoh is optional in the UI', () => {
   const source = read('src/components/shop/nasiya-payment-modal.tsx')
 
   it('does not show a required star on Izoh for a regular payment', () => {
-    expect(source).toContain('Izoh {carryOver && <span className="text-red-500">*</span>}')
-    expect(source).not.toContain('Izoh <span className="text-red-500">*</span>')
+    expect(source).toContain('<Field label="Izoh" required={carryOver}>')
   })
 
   it('canSubmit for a regular payment does not require a note length', () => {
@@ -87,12 +86,12 @@ describe('empty note does not break Telegram, logs, or payment history', () => {
   })
 
   it('the nasiya detail page renders the payment-history note only when present', () => {
-    const detail = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
+    const detail = read('src/components/shop/nasiya-history-sections.tsx')
     expect(detail).toContain("payment.note ?? '—'")
   })
 
   it('the Amallar tarixi note line is conditionally rendered, never a broken empty line', () => {
-    const detail = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
-    expect(detail).toContain('{l.note && <div className="text-xs text-zinc-500 mt-0.5">{l.note}</div>}')
+    const detail = read('src/components/shop/nasiya-history-sections.tsx')
+    expect(detail).toContain('{log.note && <div className="mt-0.5 text-xs text-zinc-500">{log.note}</div>}')
   })
 })

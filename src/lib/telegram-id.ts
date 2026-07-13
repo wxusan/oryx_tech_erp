@@ -60,9 +60,28 @@ export async function isTelegramIdTaken(
   telegramId: string,
   current?: { type: 'SUPER_ADMIN' | 'SHOP_ADMIN'; id: string },
 ) {
-  const owner = await findTelegramOwner(telegramId)
-  if (!owner) return false
-  return owner.type !== current?.type || owner.user.id !== current.id
+  // Reserve an ID for every non-deleted actor, including an inactive shop
+  // admin. This mirrors the database's live-identity constraint and prevents
+  // an inactive account from becoming ambiguous when it is reactivated.
+  const [superAdmin, shopAdmin] = await Promise.all([
+    prisma.superAdmin.findFirst({
+      where: {
+        telegramId,
+        deletedAt: null,
+        ...(current?.type === 'SUPER_ADMIN' ? { id: { not: current.id } } : {}),
+      },
+      select: { id: true },
+    }),
+    prisma.shopAdmin.findFirst({
+      where: {
+        telegramId,
+        deletedAt: null,
+        ...(current?.type === 'SHOP_ADMIN' ? { id: { not: current.id } } : {}),
+      },
+      select: { id: true },
+    }),
+  ])
+  return Boolean(superAdmin || shopAdmin)
 }
 
 export type TelegramOwner = NonNullable<Awaited<ReturnType<typeof findTelegramOwner>>>

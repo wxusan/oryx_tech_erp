@@ -50,7 +50,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     const { shopId } = resolved
 
     const existing = await prisma.sale.findFirst({
-      where: { id: saleId, shopId, deletedAt: null },
+      where: { id: saleId, shopId, deletedAt: null, returnedAt: null },
       select: {
         id: true,
         shopId: true,

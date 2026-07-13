@@ -17,8 +17,9 @@ import {
 } from '@/components/ui/table'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { ShopStatusBadge } from '@/components/admin/shop-status-badge'
+import type { ShopStatus } from '@/lib/domain-types'
 
-type ShopStatus = 'ACTIVE' | 'SUSPENDED' | 'DELETED'
 type FilterTab = 'barchasi' | ShopStatus
 type PaymentView = 'all' | 'overdue'
 
@@ -38,28 +39,6 @@ const tabs: { key: FilterTab; label: string }[] = [
   { key: 'SUSPENDED', label: "To'xtatilgan" },
   { key: 'DELETED', label: "O'chirilgan" },
 ]
-
-function StatusBadge({ status }: { status: ShopStatus }) {
-  if (status === 'ACTIVE') {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-900 text-white">
-        Faol
-      </span>
-    )
-  }
-  if (status === 'SUSPENDED') {
-    return (
-      <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-500">
-        To&apos;xtatilgan
-      </span>
-    )
-  }
-  return (
-    <span className="inline-flex items-center px-2 py-0.5 text-xs font-medium bg-zinc-100 text-zinc-400">
-      O&apos;chirilgan
-    </span>
-  )
-}
 
 function dueDateSortValue(value: string) {
   if (!value) return Number.POSITIVE_INFINITY
@@ -210,7 +189,7 @@ export default function ShopsPage() {
                     <TableCell className="text-sm text-zinc-500 font-mono">{formatUzPhoneDisplay(shop.ownerPhone)}</TableCell>
                     <TableCell className="text-sm text-zinc-500">{shop.shopNumber}</TableCell>
                     <TableCell>
-                      <StatusBadge status={shop.status} />
+                      <ShopStatusBadge status={shop.status} />
                     </TableCell>
                     <TableCell className={overdue ? 'text-sm font-medium text-red-700' : 'text-sm text-zinc-500'}>
                       {formatDate(shop.subscriptionDue)}

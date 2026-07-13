@@ -5,9 +5,13 @@ import { badRequest, created, ok, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
 import { logger } from '@/lib/logger'
+import { MIN_USD_UZS_RATE, MAX_USD_UZS_RATE } from '@/lib/server/currency'
 
 const manualRateSchema = z.object({
-  rate: z.number().positive("USD kursi 0 dan katta bo'lishi kerak"),
+  rate: z.number().finite().min(MIN_USD_UZS_RATE, `USD kursi kamida ${MIN_USD_UZS_RATE} bo'lishi kerak`).max(
+    MAX_USD_UZS_RATE,
+    `USD kursi ${MAX_USD_UZS_RATE} dan oshmasligi kerak`,
+  ),
   note: z.string().trim().max(500, 'Izoh 500 belgidan oshmasligi kerak').optional(),
 })
 
