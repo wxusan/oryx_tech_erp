@@ -114,6 +114,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         where: { id },
         data: updateData,
       })
+      if (statusChanged) {
+        await tx.shopAdmin.updateMany({
+          where: { shopId: id, deletedAt: null },
+          data: { sessionVersion: { increment: 1 } },
+        })
+        await tx.authSession.updateMany({
+          where: { actorType: 'SHOP_ADMIN', shopId: id, revokedAt: null },
+          data: { revokedAt: new Date() },
+        })
+      }
       await tx.log.create({
         data: {
           shopId: id,
@@ -179,6 +189,14 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
           deletedBy: session.user.id,
           deleteNote,
         },
+      })
+      await tx.shopAdmin.updateMany({
+        where: { shopId: id, deletedAt: null },
+        data: { sessionVersion: { increment: 1 } },
+      })
+      await tx.authSession.updateMany({
+        where: { actorType: 'SHOP_ADMIN', shopId: id, revokedAt: null },
+        data: { revokedAt: new Date() },
       })
 
       await tx.log.create({

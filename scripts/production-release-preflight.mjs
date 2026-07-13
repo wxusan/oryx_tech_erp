@@ -9,6 +9,10 @@ const RELEASE_MIGRATIONS = [
   '202607130004_reminder_generation_watermark',
   '202607130005_telegram_identity_integrity',
   '202607130006_request_audit_context',
+  '202607130007_erp2_access_packages',
+  '202607130008_nasiya_resolution_deferral',
+  '202607130009_erp2_session_rbac_hardening',
+  '202607130010_customer_crm_passport',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))
@@ -191,6 +195,101 @@ const countChecks = [
   },
 ]
 
+const erp2Checks = [
+  {
+    name: 'duplicate_package_effective_dates',
+    blocking: true,
+    requiredTables: ['ShopPackageVersion'],
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM (
+        SELECT "shopId", "effectiveOn"
+        FROM "ShopPackageVersion"
+        GROUP BY "shopId", "effectiveOn"
+        HAVING COUNT(*) > 1
+      ) duplicates
+    `,
+  },
+  {
+    name: 'permission_grantor_cross_tenant_violations',
+    blocking: true,
+    requiredTables: ['ShopMemberPermission', 'ShopAdmin'],
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "ShopMemberPermission" permission
+      LEFT JOIN "ShopAdmin" grantor
+        ON grantor."id" = permission."grantedById"
+       AND grantor."shopId" = permission."shopId"
+      WHERE grantor."id" IS NULL
+    `,
+  },
+  {
+    name: 'incomplete_package_snapshots',
+    blocking: true,
+    requiredTables: ['ShopPackageVersion', 'ShopPackageFeature', 'FeatureDefinition'],
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "ShopPackageVersion" package
+      WHERE (
+        SELECT COUNT(*) FROM "ShopPackageFeature" feature_line
+        WHERE feature_line."packageVersionId" = package."id"
+      ) <> (SELECT COUNT(*) FROM "FeatureDefinition" WHERE "isActive" = TRUE)
+    `,
+  },
+  {
+    name: 'unresolved_shop_ownership',
+    blocking: false,
+    requiredTables: ['Shop'],
+    sql: `SELECT COUNT(*)::integer AS count FROM "Shop" WHERE "deletedAt" IS NULL AND "ownershipStatus" <> 'RESOLVED'`,
+  },
+  {
+    name: 'legacy_full_access_members',
+    blocking: false,
+    requiredTables: ['ShopAdmin'],
+    sql: `SELECT COUNT(*)::integer AS count FROM "ShopAdmin" WHERE "deletedAt" IS NULL AND "legacyFullAccess" = TRUE`,
+  },
+  {
+    name: 'package_pricing_review_required',
+    blocking: false,
+    requiredTables: ['ShopPackageVersion'],
+    sql: `SELECT COUNT(*)::integer AS count FROM "ShopPackageVersion" WHERE "pricingNeedsReview" = TRUE`,
+  },
+]
+
+const postMigrationChecks = [
+  {
+    name: 'shop_sessions_without_package_binding',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "AuthSession"
+      WHERE "actorType" = 'SHOP_ADMIN' AND "revokedAt" IS NULL AND "packageVersionId" IS NULL
+    `,
+  },
+  {
+    name: 'pending_notifications_without_intended_recipient',
+    blocking: false,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "Notification"
+      WHERE status IN ('PENDING', 'FAILED', 'PROCESSING') AND "recipientShopAdminId" IS NULL
+    `,
+  },
+  {
+    name: 'pending_notification_recipient_identity_mismatch',
+    blocking: false,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "Notification" notification
+      JOIN "ShopAdmin" recipient
+        ON recipient.id = notification."recipientShopAdminId"
+       AND recipient."shopId" = notification."shopId"
+      WHERE notification.status IN ('PENDING', 'FAILED', 'PROCESSING')
+        AND recipient."telegramId" IS DISTINCT FROM notification."telegramId"
+    `,
+  },
+]
+
 function logSummary(summary) {
   // Count-only output is safe to retain in deployment logs. Never add entity
   // identifiers, Telegram IDs, customer data, or connection details here.
@@ -215,9 +314,28 @@ try {
     [RELEASE_MIGRATIONS],
   )
 
+  const tableResult = await client.query(`
+    SELECT table_name
+    FROM information_schema.tables
+    WHERE table_schema = current_schema()
+  `)
+  const availableTables = new Set(tableResult.rows.map((row) => row.table_name))
+  const appliedMigrationSet = new Set(migrationResult.rows.map((row) => row.migration_name))
+
   const checks = []
 
-  for (const check of countChecks) {
+  const applicableErp2Checks = erp2Checks.filter((check) =>
+    appliedMigrationSet.has('202607130007_erp2_access_packages') &&
+    check.requiredTables.every((table) => availableTables.has(table)),
+  )
+  const applicableChecks = [
+    ...countChecks,
+    ...applicableErp2Checks,
+    ...(phase === 'post' && appliedMigrationSet.has('202607130009_erp2_session_rbac_hardening')
+      ? postMigrationChecks
+      : []),
+  ]
+  for (const check of applicableChecks) {
     const result = await client.query(check.sql)
     checks.push({
       name: check.name,
@@ -248,7 +366,7 @@ try {
   logSummary(summary)
 
   if (blockingIssueCount > 0) {
-    throw new Error('Production release blocked by ambiguous live Telegram ownership')
+    throw new Error('Production release blocked by one or more integrity diagnostics')
   }
 
   if (phase === 'post' && appliedMigrations.length !== RELEASE_MIGRATIONS.length) {

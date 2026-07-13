@@ -1,102 +1,89 @@
-import { describe, it, expect } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
-function read(rel: string): string {
-  return readFileSync(resolve(process.cwd(), rel), 'utf8')
+function read(relativePath: string) {
+  return readFileSync(resolve(process.cwd(), relativePath), 'utf8')
 }
 
-/**
- * Item 10 — persistent portal banner for overdue nasiya/sale payments.
- * Guard tests: the summary endpoint is shop-scoped and money-correct
- * (contract-currency aware, matching every other overdue calculation in
- * this codebase), and the banner itself is wired into the shop layout so
- * it's visible on every page, not just the dashboard.
- */
-describe('GET /api/stats/due-overdue: shop-scoped, contract-currency-aware overdue summary', () => {
-  const route = read('src/app/api/stats/due-overdue/route.ts')
+describe('due-today/overdue authoritative contract', () => {
+  const summaryRoute = read('src/app/api/stats/due-overdue/route.ts')
+  const listRoute = read('src/app/api/receivables/route.ts')
+  const auth = read('src/lib/api-auth.ts')
   const queries = read('src/lib/server/shop-stats-queries.ts')
+  const syncRoute = read('src/app/api/sync/route.ts')
 
-  it('resolves the shop via the standard session guard, never trusts a client-supplied shopId', () => {
-    expect(route).toContain("const guarded = await requireShopPermission('PAYMENT_RECEIVE')")
-    expect(route).toContain('resolveActiveShopId(guarded.session, null)')
+  it('requires live view permission/module access, not payment-receive permission', () => {
+    expect(summaryRoute).toContain('requireReceivableView()')
+    expect(listRoute).toContain('requireReceivableView()')
+    expect(auth).toContain("principalHasFeature(guarded.principal, 'CASH_SALES')")
+    expect(auth).toContain("principalHasPermission(guarded.principal, 'INVENTORY_VIEW')")
+    expect(auth).toContain("principalHasFeature(guarded.principal, 'NASIYA')")
+    expect(auth).toContain("principalHasPermission(guarded.principal, 'NASIYA_VIEW')")
+    expect(summaryRoute).not.toContain('PAYMENT_RECEIVE')
+    expect(listRoute).not.toContain('PAYMENT_RECEIVE')
+    expect(syncRoute).toContain('if (canViewReceivables) domains.add(\'overdue\')')
   })
 
-  it('delegates to the set-based overdue helper instead of hydrating debt rows in the route', () => {
-    expect(route).toContain('getCurrentOverdueSummary({ shopId, todayStart: today })')
-    expect(route).not.toContain('prisma.nasiyaSchedule.findMany')
-    expect(route).not.toContain('prisma.sale.findMany')
-    expect(queries).toContain('WITH nasiya_deals AS')
-    expect(queries).toContain('UNION ALL')
+  it('uses disjoint Tashkent-midnight predicates and makes today overdue only tomorrow', () => {
+    expect(queries).toContain('coalesce(s."delayedUntil", s."dueDate") < ${input.todayStart} THEN \'OVERDUE\'::text')
+    expect(queries).toContain('>= ${input.todayStart}')
+    expect(queries).toContain('coalesce(s."delayedUntil", s."dueDate") < ${input.tomorrowStart} THEN \'DUE_TODAY\'::text')
   })
 
-  it('excludes cancelled nasiyas from the overdue count, same as every other overdue surface', () => {
-    expect(queries).toContain(`n."status" <> 'CANCELLED'`)
+  it('shares the exact receivable CTE between summary and destination list', () => {
+    expect(queries).toContain('function receivableDealsCte(')
+    expect(queries.split('${receivableDealsCte(input)}')).toHaveLength(3)
+    expect(summaryRoute).toContain('getReceivableCohortSummaries({')
+    expect(listRoute).toContain('getReceivableCohortPage({')
+    expect(queries).toContain("n.\"resolutionState\" = 'ACTIVE'")
   })
 
-  it('only returns a direct singleDeal link when there is exactly one overdue deal in total', () => {
-    expect(queries).toContain('CASE WHEN count(*) = 1 THEN min(deal_type) END AS single_type')
-    expect(queries).toContain('CASE WHEN count(*) = 1 THEN min(deal_id) END AS single_id')
-    expect(route).toContain('singleDeal: summary.singleDeal')
-  })
-
-  it('keeps native UZS/USD partitions in SQL and converts the aggregated USD partition exactly once', () => {
+  it('counts customers and deals separately and preserves native UZS/USD totals', () => {
+    expect(queries).toContain('count(*)::integer AS deal_count')
+    expect(queries).toContain('count(DISTINCT customer_id)::integer AS customer_count')
     expect(queries).toContain("sum(outstanding) FILTER (WHERE currency = 'UZS')")
     expect(queries).toContain("sum(outstanding) FILTER (WHERE currency = 'USD')")
-    expect(route).toContain("convertContractAmountToUzs(summary.overdueNativeUsd, 'USD', currency.usdUzsRate)")
-    expect(route).toContain('summary.overdueNativeUzs + (convertedUsd ?? 0)')
-    expect(route).toContain('overdueMoneyComplete: summary.overdueNativeUsd === 0 || convertedUsd !== null')
   })
 })
 
-describe('DueOverdueBanner: persistent, non-spammy, links to the right place', () => {
-  const component = read('src/components/shop/due-overdue-banner.tsx')
-
-  it('renders nothing when there is no overdue debt (no empty/false banner flash)', () => {
-    expect(component).toContain('if (!summary || summary.overdueDealCount === 0) return null')
-  })
-
-  it('has no dismiss button — "persistent until paid" per the ticket', () => {
-    expect(component).not.toContain('onDismiss')
-    expect(component).not.toContain('setDismissed')
-    expect(component).not.toContain("aria-label=\"Yopish\"")
-  })
-
-  it('is one summarized banner, not one per overdue deal (no .map over deals)', () => {
-    expect(component).not.toMatch(/summary\.(deals|items)\.map/)
-  })
-
-  it('links directly to the nasiya profile when there is exactly one overdue deal, otherwise to the filtered list', () => {
-    expect(component).toContain('`/shop/nasiyalar/${summary.singleDeal.id}`')
-    expect(component).toContain("'/shop/nasiyalar?status=OVERDUE'")
-  })
-
-  it('refreshes on money mutations/focus and uses a five-minute fallback instead of 60-second polling', () => {
-    expect(component).toContain('const FALLBACK_REFRESH_MS = 5 * 60_000')
-    expect(component).toContain("window.addEventListener(FINANCIAL_DATA_CHANGED_EVENT, load)")
-    expect(component).toContain("window.addEventListener('focus', refreshWhenVisible)")
-    expect(component).toContain('window.setInterval(refreshWhenVisible, FALLBACK_REFRESH_MS)')
-    expect(component).not.toContain('setInterval(load, 60_000)')
-  })
-
-  it('aborts stale requests and cleans up every persistent listener', () => {
-    expect(component).toContain('activeController?.abort()')
-    expect(component).toContain("window.removeEventListener(FINANCIAL_DATA_CHANGED_EVENT, load)")
-    expect(component).toContain("document.removeEventListener('visibilitychange', refreshWhenVisible)")
-  })
-})
-
-describe('shop layout: banner shown on every shop page, not just the dashboard', () => {
-  const layout = read('src/app/(shop)/layout.tsx')
+describe('global payment banners and exact destination UX', () => {
+  const banner = read('src/components/shop/due-overdue-banner.tsx')
   const shell = read('src/app/(shop)/shop-layout-client.tsx')
+  const page = read('src/app/(shop)/shop/tolovlar/receivables-client.tsx')
 
-  it('renders DueOverdueBanner once, outside the page-specific <main> content', () => {
-    expect(layout).toContain('<ShopLayoutClient')
-    expect(layout).toContain('{children}')
-    expect(shell).toContain('<DueOverdueBanner />')
-    const bannerIndex = shell.indexOf('<DueOverdueBanner />')
-    const mainIndex = shell.indexOf('<main')
+  it('renders overdue first and due-today second with exact filtered links', () => {
+    expect(banner.indexOf('summary.overdue.dealCount > 0')).toBeLessThan(banner.indexOf('summary.dueToday.dealCount > 0'))
+    expect(banner).toContain('href="/shop/tolovlar?cohort=OVERDUE"')
+    expect(banner).toContain('href="/shop/tolovlar?cohort=DUE_TODAY"')
+    expect(banner).toContain('summary.customerCount')
+    expect(banner).toContain('summary.dealCount')
+  })
+
+  it('uses the two-minute scoped React Query cache and mutation deltas without fallback polling', () => {
+    expect(banner).toContain("queryKeys.list(scope, 'overdue', { view: 'summary' })")
+    expect(banner).toContain('queryClient.invalidateQueries({ queryKey })')
+    expect(banner).toContain('FINANCIAL_DATA_CHANGED_EVENT')
+    expect(banner).not.toContain('setInterval')
+    expect(banner).not.toContain('router.refresh')
+  })
+
+  it('is visible for authorized viewers across every shop page and stays outside main scroll content', () => {
+    expect(shell).toContain('canSeeReceivables')
+    expect(shell).not.toContain("principalCan(principal, 'PAYMENT_RECEIVE') && <DueOverdueBanner")
+    expect(shell).toContain('<DueOverdueBanner initialData={initialDueSummary} />')
+    const bannerIndex = shell.indexOf('<DueOverdueBanner')
     expect(bannerIndex).toBeGreaterThan(-1)
-    expect(bannerIndex).toBeLessThan(mainIndex)
+    expect(bannerIndex).toBeLessThan(shell.indexOf('<main'))
+    expect(shell).toContain('sticky top-0 z-40')
+    expect(banner).toContain('sticky top-14 z-30')
+  })
+
+  it('provides desktop table, mobile cards, pagination and real Sale/Nasiya detail links', () => {
+    expect(page).toContain('hidden overflow-hidden')
+    expect(page).toContain('md:hidden')
+    expect(page).toContain("item.dealType === 'nasiya'")
+    expect(page).toContain('`/shop/qurilmalar/${item.deviceId}`')
+    expect(page).toContain('data.total > data.take')
   })
 })

@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Image from 'next/image'
 import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { commitNavigationMutation } from '@/lib/client-events'
@@ -17,6 +18,7 @@ import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { uzDate } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
+import { NasiyaDeferModal } from '@/components/shop/nasiya-defer-modal'
 import { TrustBadge } from '@/components/shop/trust-badge'
 import { ArrowLeft, Pencil } from 'lucide-react'
 import type { NasiyaPaymentDisplayRecord } from '@/lib/payment-history-display'
@@ -26,8 +28,27 @@ import {
   type NasiyaScheduleRow as NasiyaSchedule,
 } from '@/components/shop/nasiya-history-sections'
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
+import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 
 type NasiyaPayment = NasiyaPaymentDisplayRecord
+type ResolutionState = 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
+type ResolutionAction = 'ARCHIVE' | 'WRITE_OFF' | 'REOPEN'
+
+interface ResolutionEvent {
+  id: string
+  eventType: ResolutionAction
+  previousState: ResolutionState
+  newState: ResolutionState
+  contractCurrency: 'UZS' | 'USD'
+  nativeRemainingAmount: number
+  frozenUzsAmount: number
+  frozenUsdUzsRate: number
+  reason: string
+  actorId: string
+  actorType: string
+  reversesEventId: string | null
+  createdAt: string
+}
 
 interface Nasiya {
   id: string
@@ -50,6 +71,9 @@ interface Nasiya {
   contractRemainingAmount: number
   contractPaidAmount: number
   status: string
+  resolutionState: ResolutionState
+  resolutionUpdatedAt: string | null
+  resolutionEvents: ResolutionEvent[]
   displayStatus?: 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
   reminderEnabled: boolean
   note?: string | null
@@ -62,7 +86,7 @@ interface Nasiya {
   remainingAtImport?: number | null
   importNote?: string | null
   device: { model: string }
-  customer: { name: string; phone: string; passportPhotoUrl?: string | null }
+  customer: { id: string; name: string; phone: string; hasPassportPhoto: boolean }
   schedules: NasiyaSchedule[]
   payments: NasiyaPayment[]
   paymentScore: {
@@ -97,6 +121,12 @@ const scoreCardStyles: Record<'green' | 'yellow' | 'red' | 'gray', string> = {
   gray: 'bg-zinc-100 text-zinc-500',
 }
 
+const historyConfidenceLabels: Record<string, string> = {
+  LOW: 'Past',
+  MEDIUM: "O'rtacha",
+  HIGH: 'Yuqori',
+}
+
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
   if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
   return Number(n).toLocaleString('ru-RU')
@@ -121,6 +151,8 @@ function AuthorizedNasiyaDetailPage() {
   const { can } = useShopAccess()
   const canManageNasiya = can('NASIYA_MANAGE')
   const canReceivePayment = can('PAYMENT_RECEIVE')
+  const canResolveNasiya = can('WRITEOFF_MANAGE')
+  const resolutionCommand = useLogicalCommandIdempotency()
   const params = useParams()
   const id = params.id as string
   const { currency } = useShopCurrency()
@@ -134,6 +166,11 @@ function AuthorizedNasiyaDetailPage() {
   const [logs, setLogs] = useState<NasiyaLog[]>([])
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
+  const [deferModalOpen, setDeferModalOpen] = useState(false)
+  const [resolutionAction, setResolutionAction] = useState<ResolutionAction | null>(null)
+  const [resolutionReason, setResolutionReason] = useState('')
+  const [resolutionError, setResolutionError] = useState('')
+  const [resolutionSubmitting, setResolutionSubmitting] = useState(false)
 
   const [editOpen, setEditOpen] = useState(false)
   const [editCustomerName, setEditCustomerName] = useState('')
@@ -163,14 +200,14 @@ function AuthorizedNasiyaDetailPage() {
     fetchNasiya()
   }, [fetchNasiya])
 
-  // Fetch a signed URL for the customer's passport photo (stored as a storage key).
-  const passportKey = nasiya?.customer?.passportPhotoUrl ?? null
+  // Fetch through the tenant-scoped customer endpoint; the private storage
+  // key never enters browser state, URLs, logs, or query caches.
+  const passportCustomerId = nasiya?.customer?.id ?? null
+  const hasPassportPhoto = nasiya?.customer?.hasPassportPhoto ?? false
   useEffect(() => {
-    // When there's no passport key the render guards on `passportKey && passportUrl`,
-    // so no state reset is needed here (avoids a synchronous setState in the effect).
-    if (!passportKey) return
+    if (!passportCustomerId || !hasPassportPhoto) return
     let cancelled = false
-    fetch(`/api/uploads/passport?key=${encodeURIComponent(passportKey)}`)
+    fetch(`/api/customers/${encodeURIComponent(passportCustomerId)}/passport/image`)
       .then((r) => r.json())
       .then((json) => {
         if (!cancelled && json.success && json.data?.url) setPassportUrl(json.data.url)
@@ -181,7 +218,7 @@ function AuthorizedNasiyaDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [passportKey])
+  }, [hasPassportPhoto, passportCustomerId])
 
   // Fetch recent action logs for this nasiya (reminder toggles, payments, etc.).
   const nasiyaShopId = nasiya?.shopId
@@ -278,6 +315,49 @@ function AuthorizedNasiyaDetailPage() {
     }
   }
 
+  function openResolution(action: ResolutionAction) {
+    setResolutionAction(action)
+    setResolutionReason('')
+    setResolutionError('')
+  }
+
+  async function handleResolution() {
+    if (!nasiya || !resolutionAction || resolutionSubmitting || resolutionReason.trim().length < 5) return
+    const payload = { action: resolutionAction, reason: resolutionReason.trim() }
+    setResolutionSubmitting(true)
+    setResolutionError('')
+    try {
+      const response = await fetch(`/api/nasiya/${nasiya.id}/resolution`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': resolutionCommand.keyFor(payload),
+        },
+        body: JSON.stringify(payload),
+      })
+      const json = await response.json()
+      if (!response.ok || !json.success) {
+        resolutionCommand.rejected(response.status)
+        setResolutionError(json.error || "Holatni o'zgartirishda xatolik")
+        return
+      }
+      resolutionCommand.committed()
+      const kind = resolutionAction === 'ARCHIVE'
+        ? 'nasiya.archived'
+        : resolutionAction === 'WRITE_OFF'
+          ? 'nasiya.writtenOff'
+          : 'nasiya.reopened'
+      await commitNavigationMutation({ kind, nasiyaId: nasiya.id })
+      setResolutionAction(null)
+      setLoading(true)
+      fetchNasiya()
+    } catch {
+      setResolutionError("Holatni o'zgartirishda xatolik")
+    } finally {
+      setResolutionSubmitting(false)
+    }
+  }
+
   if (loading) {
     return <div className="p-6 text-sm text-zinc-400">Yuklanmoqda...</div>
   }
@@ -309,6 +389,7 @@ function AuthorizedNasiyaDetailPage() {
   // didn't include it yet.
   const displayStatus = nasiya.displayStatus ?? (nasiya.status as 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED')
   const isCompleted = displayStatus === 'COMPLETED'
+  const isOperationallyActive = nasiya.resolutionState === 'ACTIVE'
   const statusBadgeStyles: Record<string, string> = {
     ACTIVE: 'bg-zinc-100 text-zinc-700',
     OVERDUE: 'bg-red-100 text-red-700',
@@ -336,6 +417,15 @@ function AuthorizedNasiyaDetailPage() {
             <span className={`inline-block px-2.5 py-1 rounded text-xs font-medium ${statusBadgeStyles[displayStatus]}`}>
               {statusBadgeLabels[displayStatus]}
             </span>
+            {nasiya.resolutionState !== 'ACTIVE' && (
+              <span className={`inline-block rounded px-2.5 py-1 text-xs font-medium ${
+                nasiya.resolutionState === 'WRITTEN_OFF'
+                  ? 'bg-red-100 text-red-800'
+                  : 'bg-blue-100 text-blue-800'
+              }`}>
+                {nasiya.resolutionState === 'WRITTEN_OFF' ? 'Hisobdan chiqarilgan' : 'Arxivlangan'}
+              </span>
+            )}
             {nasiya.customerTrust && <TrustBadge trust={nasiya.customerTrust} />}
           </div>
           <p className="text-sm text-zinc-500 mt-0.5">
@@ -352,13 +442,48 @@ function AuthorizedNasiyaDetailPage() {
               Tahrirlash
             </Button>
           )}
-          {canReceivePayment && !isCompleted && displayStatus !== 'CANCELLED' && (
+          {canManageNasiya && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (
+            <Button variant="outline" onClick={() => setDeferModalOpen(true)} className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded">
+              Muddatni uzaytirish
+            </Button>
+          )}
+          {canReceivePayment && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (
             <Button onClick={() => setPaymentModalOpen(true)} className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">
               To'lov qabul qilish
             </Button>
           )}
+          {canResolveNasiya && displayStatus !== 'CANCELLED' && (
+            <>
+              {nasiya.resolutionState === 'ACTIVE' && (
+                <Button variant="outline" onClick={() => openResolution('ARCHIVE')} className="h-9 px-3 text-sm border-zinc-200 rounded">
+                  Arxivlash
+                </Button>
+              )}
+              {nasiya.resolutionState !== 'WRITTEN_OFF' && nasiya.contractRemainingAmount > 0 && (
+                <Button variant="destructive" onClick={() => openResolution('WRITE_OFF')} className="h-9 px-3 text-sm rounded">
+                  Hisobdan chiqarish
+                </Button>
+              )}
+              {nasiya.resolutionState !== 'ACTIVE' && (
+                <Button variant="outline" onClick={() => openResolution('REOPEN')} className="h-9 px-3 text-sm border-zinc-200 rounded">
+                  Qayta ochish
+                </Button>
+              )}
+            </>
+          )}
         </div>
       </div>
+
+      {nasiya.resolutionState === 'ARCHIVED' && (
+        <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
+          Bu nasiya ish navbatidan arxivlangan. Moliyaviy qoldiq o'zgarmagan; qayta ochilmaguncha to'lov va muddat uzaytirish yopiq.
+        </div>
+      )}
+      {nasiya.resolutionState === 'WRITTEN_OFF' && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          Bu qarz hisobdan chiqarilgan. Tarix va qoldiq dalillari saqlangan, lekin kelajakdagi undirish, muddati o'tgan hisob va eslatmalar to'xtatilgan.
+        </div>
+      )}
 
       {isCompleted && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
@@ -486,7 +611,7 @@ function AuthorizedNasiyaDetailPage() {
             <div>Vaqtida: {nasiya.paymentScore.factors.earlyPaymentCount + nasiya.paymentScore.factors.onTimePaymentCount}</div>
             <div>Kechikkan: {nasiya.paymentScore.factors.latePaymentCount}</div>
             <div>Muddati o'tgan: {nasiya.paymentScore.factors.overdueScheduleCount}</div>
-            <div>Ishonch: {nasiya.paymentScore.factors.historyConfidence}</div>
+            <div>Ishonch: {historyConfidenceLabels[nasiya.paymentScore.factors.historyConfidence] ?? "Noma'lum"}</div>
           </div>
         </CardContent>
       </Card>
@@ -495,9 +620,13 @@ function AuthorizedNasiyaDetailPage() {
       <div className="border border-zinc-200 rounded p-4 flex items-center justify-between gap-4">
         <div>
           <div className="text-sm font-semibold text-zinc-900">To'lov eslatmasi</div>
-          <div className="text-xs text-zinc-500 mt-0.5">{nasiya.reminderEnabled ? 'Eslatma yoqilgan' : "Eslatma o'chirilgan"}</div>
+          <div className="text-xs text-zinc-500 mt-0.5">
+            {!isOperationallyActive
+              ? "Arxiv/hisobdan chiqarish holatida eslatmalar yuborilmaydi"
+              : nasiya.reminderEnabled ? 'Eslatma yoqilgan' : "Eslatma o'chirilgan"}
+          </div>
         </div>
-        {canManageNasiya && (
+        {canManageNasiya && isOperationallyActive && (
           <Button
             onClick={handleToggleReminder}
             disabled={reminderSubmitting}
@@ -513,14 +642,48 @@ function AuthorizedNasiyaDetailPage() {
         )}
       </div>
 
+      {nasiya.resolutionEvents.length > 0 && (
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardTitle>Undirish holati tarixi</CardTitle>
+            <CardDescription>O'zgarmas arxiv, hisobdan chiqarish va qayta ochish dalillari</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {nasiya.resolutionEvents.map((event) => (
+              <div key={event.id} className="rounded-lg border border-zinc-200 p-3 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="font-medium text-zinc-900">
+                    {event.eventType === 'WRITE_OFF'
+                      ? 'Hisobdan chiqarildi'
+                      : event.eventType === 'ARCHIVE'
+                        ? 'Arxivlandi'
+                        : 'Qayta ochildi'}
+                  </span>
+                  <span className="text-xs text-zinc-500">{uzDate(event.createdAt)}</span>
+                </div>
+                <div className="mt-1 text-xs text-zinc-500">
+                  {event.previousState} → {event.newState} · {event.nativeRemainingAmount.toLocaleString('ru-RU')} {event.contractCurrency}
+                  {' · '}muzlatilgan UZS: {event.frozenUzsAmount.toLocaleString('ru-RU')}
+                </div>
+                <p className="mt-2 whitespace-pre-wrap text-zinc-700">{event.reason}</p>
+                {event.reversesEventId && (
+                  <p className="mt-1 text-xs text-zinc-400">Qoplovchi hodisa: {event.reversesEventId}</p>
+                )}
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Passport photo */}
       <div className="border border-zinc-200 rounded overflow-hidden">
         <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">Pasport rasmi</div>
         <div className="p-4">
-          {passportKey && passportUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={passportUrl} alt="Pasport rasmi" className="max-h-80 w-auto rounded border border-zinc-200" />
-          ) : passportKey && !passportUrl ? (
+          {hasPassportPhoto && passportUrl ? (
+            <div className="relative aspect-[4/3] max-h-80 w-full overflow-hidden rounded border border-zinc-200 bg-zinc-50">
+              <Image src={passportUrl} alt="Pasport rasmi" fill sizes="(max-width: 640px) 100vw, 720px" unoptimized className="object-contain" />
+            </div>
+          ) : hasPassportPhoto && !passportUrl ? (
             <div className="text-sm text-zinc-400">Yuklanmoqda...</div>
           ) : (
             <div className="text-sm text-zinc-400">Pasport rasmi yuklanmagan</div>
@@ -538,7 +701,7 @@ function AuthorizedNasiyaDetailPage() {
       />
 
       {/* Payment modal — shared component, also used on the nasiyalar list */}
-      {canReceivePayment && (
+      {canReceivePayment && isOperationallyActive && (
         <NasiyaPaymentModal
           nasiyaId={nasiya.id}
           open={paymentModalOpen}
@@ -551,6 +714,76 @@ function AuthorizedNasiyaDetailPage() {
           }}
         />
       )}
+
+      {canManageNasiya && isOperationallyActive && (
+        <NasiyaDeferModal
+          nasiyaId={nasiya.id}
+          open={deferModalOpen}
+          onOpenChange={setDeferModalOpen}
+          customerName={nasiya.customer.name}
+          deviceName={nasiya.device.model}
+          onSuccess={() => {
+            setLoading(true)
+            fetchNasiya()
+          }}
+        />
+      )}
+
+      <Dialog open={resolutionAction !== null} onOpenChange={(open) => { if (!open) setResolutionAction(null) }}>
+        <DialogContent className="w-[calc(100vw-2rem)] max-w-md rounded-xl sm:w-full">
+          <DialogHeader>
+            <DialogTitle>
+              {resolutionAction === 'WRITE_OFF'
+                ? 'Qarzni hisobdan chiqarish'
+                : resolutionAction === 'ARCHIVE'
+                  ? 'Nasiyani arxivlash'
+                  : 'Nasiyani qayta ochish'}
+            </DialogTitle>
+            <DialogDescription>
+              {resolutionAction === 'WRITE_OFF'
+                ? `Qoldiq ${dfmt(nasiya.contractRemainingAmount)}. Bu amal moliyaviy tarixni o'chirmaydi, lekin kelajakdagi undirish va eslatmalarni to'xtatadi.`
+                : resolutionAction === 'ARCHIVE'
+                  ? "Moliyaviy qoldiq o'zgarmaydi; nasiya oddiy ish navbatidan olinadi."
+                  : "Oldingi hodisa o'chirilmaydi. Alohida qoplovchi qayta ochish hodisasi yoziladi."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            {resolutionError && (
+              <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                {resolutionError}
+              </div>
+            )}
+            <div>
+              <label htmlFor="nasiya-resolution-reason" className="mb-1.5 block text-xs font-medium text-zinc-700">
+                Sabab <span className="text-red-500">*</span>
+              </label>
+              <Textarea
+                id="nasiya-resolution-reason"
+                value={resolutionReason}
+                onChange={(event) => setResolutionReason(event.target.value)}
+                placeholder="Kamida 5 ta belgi bilan aniq sabab yozing"
+                className="min-h-24 rounded-lg border-zinc-200"
+              />
+            </div>
+          </div>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setResolutionAction(null)}>Bekor qilish</Button>
+            <Button
+              variant={resolutionAction === 'WRITE_OFF' ? 'destructive' : 'default'}
+              disabled={resolutionSubmitting || resolutionReason.trim().length < 5}
+              onClick={handleResolution}
+            >
+              {resolutionSubmitting
+                ? 'Saqlanmoqda...'
+                : resolutionAction === 'WRITE_OFF'
+                  ? 'Hisobdan chiqarishni tasdiqlash'
+                  : resolutionAction === 'ARCHIVE'
+                    ? 'Arxivlash'
+                    : 'Qayta ochish'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Edit (safe fields) Dialog */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>

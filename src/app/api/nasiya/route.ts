@@ -18,6 +18,7 @@ import { logger } from '@/lib/logger'
 import { getShopNasiyalarList, type NasiyaStatusFilter } from '@/lib/server/shop-lists'
 
 const nasiyaStatuses = ['ACTIVE', 'COMPLETED', 'OVERDUE', 'CANCELLED'] as const
+const resolutionFilters = ['ARCHIVED', 'WRITTEN_OFF'] as const
 
 export async function GET(req: NextRequest) {
   try {
@@ -32,17 +33,24 @@ export async function GET(req: NextRequest) {
     const { shopId } = resolved
 
     const statusParam = searchParams.get('status') ?? undefined
-    if (statusParam && !nasiyaStatuses.includes(statusParam as (typeof nasiyaStatuses)[number])) {
+    if (
+      statusParam &&
+      !nasiyaStatuses.includes(statusParam as (typeof nasiyaStatuses)[number]) &&
+      !resolutionFilters.includes(statusParam as (typeof resolutionFilters)[number])
+    ) {
       return badRequest("Nasiya statusi noto'g'ri")
     }
-    const status = statusParam as NasiyaStatusFilter | undefined
+    const resolutionState = resolutionFilters.includes(statusParam as (typeof resolutionFilters)[number])
+      ? statusParam as (typeof resolutionFilters)[number]
+      : undefined
+    const status = resolutionState ? undefined : statusParam as NasiyaStatusFilter | undefined
     const search = searchParams.get('search')?.trim()
     const requestedTake = Number(searchParams.get('take') ?? 25)
     const requestedSkip = Number(searchParams.get('skip') ?? 0)
     const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 100)) : 25
     const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
 
-    const { items, total } = await getShopNasiyalarList(shopId, { search, status, skip, take })
+    const { items, total } = await getShopNasiyalarList(shopId, { search, status, resolutionState, skip, take })
 
     return ok({ items, total, skip, take }, "Nasiyalar ro'yxati")
   } catch (err) {

@@ -15,7 +15,7 @@ async function resetBusinessData() {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "ReminderGenerationState", "AuthSession", "ChangeEvent", "OpsEvent", "Log", "Notification", "DeviceReturn",
-      "NasiyaDeferral", "NasiyaPayment", "NasiyaSchedule", "Nasiya",
+      "NasiyaResolutionEvent", "NasiyaDeferral", "NasiyaPayment", "NasiyaSchedule", "Nasiya",
       "SupplierPayable", "SalePayment", "Sale", "Customer", "Device",
       "Supplier", "ShopAdmin", "ShopPayment", "CurrencyRate", "Shop", "SuperAdmin"
     RESTART IDENTITY CASCADE
@@ -44,6 +44,65 @@ async function seedShop(suffix: string) {
   return { owner, shop }
 }
 
+async function seedInvariantNasiya(
+  actor: Awaited<ReturnType<typeof seedShop>>,
+  suffix: string,
+) {
+  const customer = await prisma.customer.create({
+    data: {
+      shopId: actor.shop.id,
+      name: `Invariant customer ${suffix}`,
+      phone: `+99894${suffix.padStart(7, '0').slice(-7)}`,
+      normalizedPhone: `99894${suffix.padStart(7, '0').slice(-7)}`,
+    },
+  })
+  const device = await prisma.device.create({
+    data: {
+      shopId: actor.shop.id,
+      model: `Invariant phone ${suffix}`,
+      purchasePrice: 500,
+      imei: `INVARIANT-${suffix}`,
+      addedBy: actor.owner.id,
+      status: 'SOLD_NASIYA',
+    },
+  })
+  const nasiya = await prisma.nasiya.create({
+    data: {
+      shopId: actor.shop.id,
+      deviceId: device.id,
+      customerId: customer.id,
+      totalAmount: 1_000,
+      downPayment: 0,
+      baseRemainingAmount: 1_000,
+      finalNasiyaAmount: 1_000,
+      remainingAmount: 1_000,
+      months: 1,
+      monthlyPayment: 1_000,
+      startDate: new Date('2026-07-01T00:00:00.000Z'),
+      contractCurrency: 'UZS',
+      contractTotalAmount: 1_000,
+      contractBaseRemainingAmount: 1_000,
+      contractFinalAmount: 1_000,
+      contractMonthlyPayment: 1_000,
+      contractRemainingAmount: 1_000,
+      createdBy: actor.owner.id,
+    },
+  })
+  const schedule = await prisma.nasiyaSchedule.create({
+    data: {
+      shopId: actor.shop.id,
+      nasiyaId: nasiya.id,
+      monthNumber: 1,
+      dueDate: new Date('2026-08-01T00:00:00.000Z'),
+      expectedAmount: 1_000,
+      contractCurrency: 'UZS',
+      contractExpectedAmount: 1_000,
+      contractRemainingAmount: 1_000,
+    },
+  })
+  return { nasiya, schedule }
+}
+
 function session(input: { id: string; role: 'SHOP_ADMIN' | 'SUPER_ADMIN'; shopId: string | null }): Session {
   return {
     user: {
@@ -53,6 +112,8 @@ function session(input: { id: string; role: 'SHOP_ADMIN' | 'SUPER_ADMIN'; shopId
       shopId: input.shopId,
       sessionVersion: 1,
       sessionId: 'integration-session',
+      sessionPolicy: input.role === 'SUPER_ADMIN' ? 'IDLE_10_MINUTES' : 'REMEMBERED_30_DAYS',
+      packageVersionId: null,
     },
     expires: '2099-01-01T00:00:00.000Z',
   }
@@ -322,6 +383,122 @@ describe('migration-managed active-only uniqueness', () => {
     expect(Number(returned.refundInputAmount)).toBe(500)
     expect(Number(returned.refundExchangeRateAtCreation)).toBe(12_500)
     expect(Number(returned.refundAmount)).toBe(6_250_000)
+  })
+})
+
+describe('ERP 2.0 package, grantor, and recipient constraints', () => {
+  it('rejects duplicate package business dates, incomplete snapshots, and post-publication feature appends', async () => {
+    const { owner, shop } = await seedShop('package_hardening')
+    const featureCodes = [
+      'INVENTORY', 'CASH_SALES', 'NASIYA', 'OLIB_SOTDIM', 'CUSTOMER_CRM',
+      'TELEGRAM', 'REMINDERS', 'REPORTS', 'IMPORTS', 'EXPORTS', 'STAFF_ACCESS',
+    ]
+    const packageVersion = await prisma.shopPackageVersion.create({
+      data: {
+        shopId: shop.id,
+        effectiveOn: new Date('2026-07-13T00:00:00.000Z'),
+        basePrice: 0,
+        currency: 'UZS',
+        discountAmount: 0,
+        pricingNeedsReview: false,
+        note: 'Complete package constraint evidence',
+        createdById: owner.id,
+        features: {
+          create: featureCodes.map((featureCode) => ({ featureCode, enabled: true, recurringPrice: 0 })),
+        },
+      },
+    })
+
+    await expect(prisma.shopPackageVersion.create({
+      data: {
+        shopId: shop.id,
+        effectiveOn: new Date('2026-07-13T00:00:00.000Z'),
+        basePrice: 0,
+        currency: 'UZS',
+        discountAmount: 0,
+        pricingNeedsReview: false,
+        note: 'Duplicate package date evidence',
+        createdById: owner.id,
+        features: {
+          create: featureCodes.map((featureCode) => ({ featureCode, enabled: true, recurringPrice: 0 })),
+        },
+      },
+    })).rejects.toMatchObject({ code: 'P2002' })
+
+    await expect(prisma.shopPackageVersion.create({
+      data: {
+        shopId: shop.id,
+        effectiveOn: new Date('2026-07-14T00:00:00.000Z'),
+        basePrice: 0,
+        currency: 'UZS',
+        discountAmount: 0,
+        pricingNeedsReview: false,
+        note: 'Incomplete package evidence',
+        createdById: owner.id,
+      },
+    })).rejects.toThrow(/exactly one line for every active feature/i)
+
+    const futureFeatureCode = `AUDIT_FUTURE_${shop.id}`
+    await prisma.featureDefinition.create({
+      data: {
+        code: futureFeatureCode,
+        nameUz: 'Audit future feature',
+        billable: false,
+        isActive: false,
+      },
+    })
+    await expect(prisma.shopPackageFeature.create({
+      data: {
+        packageVersionId: packageVersion.id,
+        featureCode: futureFeatureCode,
+        enabled: false,
+        recurringPrice: 0,
+      },
+    })).rejects.toThrow(/published package snapshots are immutable/i)
+  })
+
+  it('enforces same-tenant permission grantors and intended notification recipients', async () => {
+    const first = await seedShop('tenant_grant_first')
+    const second = await seedShop('tenant_grant_second')
+    const firstMember = await prisma.shopAdmin.create({
+      data: {
+        shopId: first.shop.id,
+        name: 'First tenant member',
+        phone: '+998901212121',
+        login: 'first_tenant_member',
+        passwordHash: 'integration-only',
+      },
+    })
+    const secondMember = await prisma.shopAdmin.create({
+      data: {
+        shopId: second.shop.id,
+        name: 'Second tenant member',
+        phone: '+998901313131',
+        login: 'second_tenant_member',
+        telegramId: '777000111',
+        passwordHash: 'integration-only',
+      },
+    })
+
+    await expect(prisma.shopMemberPermission.create({
+      data: {
+        shopId: first.shop.id,
+        shopAdminId: firstMember.id,
+        permissionCode: 'INVENTORY_VIEW',
+        grantedById: secondMember.id,
+      },
+    })).rejects.toMatchObject({ code: 'P2003' })
+
+    await expect(prisma.notification.create({
+      data: {
+        shopId: first.shop.id,
+        recipientShopAdminId: secondMember.id,
+        type: 'TENANT_RECIPIENT_AUDIT',
+        message: 'Cross-tenant recipient must fail',
+        telegramId: '777000111',
+        scheduledAt: new Date(),
+      },
+    })).rejects.toMatchObject({ code: 'P2003' })
   })
 })
 
@@ -645,6 +822,97 @@ describe('transactional incremental change events', () => {
     expect(await prisma.changeEvent.findFirst({
       where: { scopeType: 'SHOP', scopeId: shop.id, entityType: 'Nasiya', entityId: nasiya.id },
     })).toMatchObject({ operation: 'updated', mutationKind: 'nasiya.overdue' })
+  })
+})
+
+describe('immutable nasiya deferral and resolution evidence', () => {
+  it('rejects event mutation/deletion and cross-tenant or cross-contract references', async () => {
+    const first = await seedShop('resolution_evidence_a')
+    const second = await seedShop('resolution_evidence_b')
+    const firstContract = await seedInvariantNasiya(first, 'resolution_evidence_a')
+    const secondContract = await seedInvariantNasiya(second, 'resolution_evidence_b')
+
+    const deferral = await prisma.nasiyaDeferral.create({
+      data: {
+        shopId: first.shop.id,
+        nasiyaId: firstContract.nasiya.id,
+        nasiyaScheduleId: firstContract.schedule.id,
+        originalDueDate: new Date('2026-08-01T00:00:00.000Z'),
+        newDueDate: new Date('2026-09-01T00:00:00.000Z'),
+        delayedUntil: new Date('2026-09-01T00:00:00.000Z'),
+        note: 'Immutable deferral evidence',
+        idempotencyKey: 'invariant-deferral',
+        createdBy: first.owner.id,
+        createdByType: 'SUPER_ADMIN',
+      },
+    })
+    await expect(prisma.nasiyaDeferral.update({
+      where: { id: deferral.id },
+      data: { note: 'Attempted rewrite' },
+    })).rejects.toThrow(/immutable nasiya command events/i)
+    await expect(prisma.nasiyaDeferral.delete({ where: { id: deferral.id } }))
+      .rejects.toThrow(/immutable nasiya command events/i)
+
+    const writeOff = await prisma.nasiyaResolutionEvent.create({
+      data: {
+        shopId: first.shop.id,
+        nasiyaId: firstContract.nasiya.id,
+        eventType: 'WRITE_OFF',
+        previousState: 'ACTIVE',
+        newState: 'WRITTEN_OFF',
+        contractCurrency: 'UZS',
+        nativeRemainingAmount: 1_000,
+        frozenUzsAmount: 1_000,
+        frozenUsdUzsRate: 1,
+        reason: 'Immutable write-off evidence',
+        actorId: first.owner.id,
+        actorType: 'SUPER_ADMIN',
+        idempotencyKey: 'invariant-writeoff',
+      },
+    })
+    await expect(prisma.nasiyaResolutionEvent.update({
+      where: { id: writeOff.id },
+      data: { reason: 'Attempted rewrite' },
+    })).rejects.toThrow(/immutable nasiya command events/i)
+    await expect(prisma.nasiyaResolutionEvent.delete({ where: { id: writeOff.id } }))
+      .rejects.toThrow(/immutable nasiya command events/i)
+
+    await expect(prisma.nasiyaResolutionEvent.create({
+      data: {
+        shopId: second.shop.id,
+        nasiyaId: firstContract.nasiya.id,
+        eventType: 'ARCHIVE',
+        previousState: 'ACTIVE',
+        newState: 'ARCHIVED',
+        contractCurrency: 'UZS',
+        nativeRemainingAmount: 1_000,
+        frozenUzsAmount: 1_000,
+        frozenUsdUzsRate: 1,
+        reason: 'Cross-tenant reference',
+        actorId: second.owner.id,
+        actorType: 'SUPER_ADMIN',
+        idempotencyKey: 'invariant-cross-tenant',
+      },
+    })).rejects.toMatchObject({ code: 'P2003' })
+
+    await expect(prisma.nasiyaResolutionEvent.create({
+      data: {
+        shopId: second.shop.id,
+        nasiyaId: secondContract.nasiya.id,
+        eventType: 'REOPEN',
+        previousState: 'WRITTEN_OFF',
+        newState: 'ACTIVE',
+        contractCurrency: 'UZS',
+        nativeRemainingAmount: 1_000,
+        frozenUzsAmount: 1_000,
+        frozenUsdUzsRate: 1,
+        reason: 'Cross-contract reversal reference',
+        actorId: second.owner.id,
+        actorType: 'SUPER_ADMIN',
+        idempotencyKey: 'invariant-cross-contract-reversal',
+        reversesEventId: writeOff.id,
+      },
+    })).rejects.toMatchObject({ code: 'P2003' })
   })
 })
 

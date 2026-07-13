@@ -51,6 +51,18 @@ enum NasiyaStatus {
   CANCELLED
 }
 
+enum NasiyaResolutionState {
+  ACTIVE
+  ARCHIVED
+  WRITTEN_OFF
+}
+
+enum NasiyaResolutionEventType {
+  ARCHIVE
+  WRITE_OFF
+  REOPEN
+}
+
 enum NasiyaScheduleStatus {
   PENDING
   PAID
@@ -71,6 +83,11 @@ enum NotificationStatus {
 enum ActorType {
   SUPER_ADMIN
   SHOP_ADMIN
+}
+
+enum AuthSessionPolicy {
+  IDLE_10_MINUTES
+  REMEMBERED_30_DAYS
 }
 
 enum OpsLevel {
@@ -269,7 +286,9 @@ model ShopAdmin {
   // Relations
   shop        Shop                   @relation("ShopMembers", fields: [shopId], references: [id])
   ownedShop   Shop?                  @relation("ShopOwnerAdmin")
-  permissions ShopMemberPermission[]
+  permissions        ShopMemberPermission[] @relation("PermissionMember")
+  permissionsGranted ShopMemberPermission[] @relation("PermissionGrantedBy")
+  notifications      Notification[]         @relation("NotificationRecipient")
 
   @@unique([login])
   @@unique([id, shopId])
@@ -333,8 +352,10 @@ model ShopPackageVersion {
   createdBy SuperAdmin           @relation("PackageVersionCreatedBy", fields: [createdById], references: [id])
   features  ShopPackageFeature[]
   payments  ShopPayment[]
+  sessions  AuthSession[]
 
   @@unique([id, shopId])
+  @@unique([shopId, effectiveOn])
   @@index([shopId, effectiveOn(sort: Desc), createdAt(sort: Desc)])
 }
 
@@ -361,7 +382,8 @@ model ShopMemberPermission {
   grantedById    String
 
   shop       Shop                 @relation(fields: [shopId], references: [id])
-  member     ShopAdmin            @relation(fields: [shopAdminId, shopId], references: [id, shopId])
+  member     ShopAdmin            @relation("PermissionMember", fields: [shopAdminId, shopId], references: [id, shopId])
+  grantedBy  ShopAdmin            @relation("PermissionGrantedBy", fields: [grantedById, shopId], references: [id, shopId])
   permission PermissionDefinition @relation(fields: [permissionCode], references: [code])
 
   @@unique([shopAdminId, permissionCode])
@@ -494,6 +516,13 @@ model Customer {
   // Additive, optional; existing customers default to an empty array.
   additionalPhones              String[]  @default([])
   passportPhotoUrl              String?
+  // The full identifier is application-encrypted (AES-256-GCM). Exact search
+  // uses a secret-scoped normalized HMAC; only the last four characters may
+  // be returned by normal customer/profile DTOs. See customer-passport.ts.
+  passportIdentifierCiphertext  String?
+  passportIdentifierHash        String?
+  passportIdentifierLast4       String?
+  passportIdentifierKeyVersion  Int?
   note                          String?
   // Item 12 — optional admin override for the computed nasiya trust rating
   // (src/lib/nasiya-customer-trust.ts). One of TrustTier ('NEW' | 'LOW' |
@@ -521,6 +550,7 @@ model Customer {
   // `migrate deploy` only.
   @@index([shopId])
   @@index([shopId, normalizedPhone])
+  @@index([shopId, passportIdentifierHash])
 }
 
 // ---------------------------------------------------------------------------
@@ -720,28 +750,33 @@ model SupplierPayable {
 // ---------------------------------------------------------------------------
 
 model Nasiya {
-  id                             String        @id @default(cuid())
+  id                             String                @id @default(cuid())
   shopId                         String
   deviceId                       String
   customerId                     String
   // Original agreed device sale price before down payment and nasiya interest.
-  totalAmount                    Decimal       @db.Decimal(12, 2)
-  downPayment                    Decimal       @db.Decimal(12, 2)
+  totalAmount                    Decimal               @db.Decimal(12, 2)
+  downPayment                    Decimal               @db.Decimal(12, 2)
   // Debt before interest: totalAmount - downPayment.
-  baseRemainingAmount            Decimal       @default(0) @db.Decimal(12, 2)
-  interestPercent                Decimal       @default(0) @db.Decimal(6, 2)
-  interestAmount                 Decimal       @default(0) @db.Decimal(12, 2)
-  finalNasiyaAmount              Decimal       @default(0) @db.Decimal(12, 2)
-  remainingAmount                Decimal       @db.Decimal(12, 2)
+  baseRemainingAmount            Decimal               @default(0) @db.Decimal(12, 2)
+  interestPercent                Decimal               @default(0) @db.Decimal(6, 2)
+  interestAmount                 Decimal               @default(0) @db.Decimal(12, 2)
+  finalNasiyaAmount              Decimal               @default(0) @db.Decimal(12, 2)
+  remainingAmount                Decimal               @db.Decimal(12, 2)
   months                         Int
-  monthlyPayment                 Decimal       @db.Decimal(12, 2)
+  monthlyPayment                 Decimal               @db.Decimal(12, 2)
   startDate                      DateTime
-  status                         NasiyaStatus  @default(ACTIVE)
-  reminderEnabled                Boolean       @default(true)
+  status                         NasiyaStatus          @default(ACTIVE)
+  // Operational collection state is intentionally separate from the
+  // financial contract status above. Archiving or writing off a receivable
+  // never rewrites schedules, payments, or native remaining balances.
+  resolutionState                NasiyaResolutionState @default(ACTIVE)
+  resolutionUpdatedAt            DateTime?
+  reminderEnabled                Boolean               @default(true)
   // "Ertaroq eslatilsinmi?" — an extra reminder N days before each schedule's
   // due date, in addition to the existing due-day reminder. Both respect
   // reminderEnabled; earlyReminderDays is only meaningful when the flag is set.
-  earlyReminderEnabled           Boolean       @default(false)
+  earlyReminderEnabled           Boolean               @default(false)
   earlyReminderDays              Int?
   note                           String?
   // Informational only — the shop's selected display currency + USD/UZS rate
@@ -751,7 +786,7 @@ model Nasiya {
   // even after the shop later switches preferredCurrency. Null for older
   // rows — see docs/currency-accounting-model.md.
   creationCurrency               CurrencyCode?
-  creationExchangeRate           Decimal?      @db.Decimal(12, 4)
+  creationExchangeRate           Decimal?              @db.Decimal(12, 4)
   // --- Native contract-currency ledger (source of truth for debt math) -------
   // The legacy UZS fields above (totalAmount, finalNasiyaAmount, remainingAmount,
   // monthlyPayment, etc.) remain exactly as before — a compatibility snapshot
@@ -761,19 +796,19 @@ model Nasiya {
   // completion) uses these contract* fields instead. contractCurrency is
   // decided once at creation and is immutable forever — see
   // docs/currency-accounting-model.md.
-  contractCurrency               CurrencyCode  @default(UZS)
-  contractExchangeRateAtCreation Decimal?      @db.Decimal(12, 4)
-  contractTotalAmount            Decimal       @default(0) @db.Decimal(12, 2)
-  contractDownPayment            Decimal       @default(0) @db.Decimal(12, 2)
-  contractBaseRemainingAmount    Decimal       @default(0) @db.Decimal(12, 2)
-  contractInterestAmount         Decimal       @default(0) @db.Decimal(12, 2)
-  contractFinalAmount            Decimal       @default(0) @db.Decimal(12, 2)
-  contractMonthlyPayment         Decimal       @default(0) @db.Decimal(12, 2)
-  contractRemainingAmount        Decimal       @default(0) @db.Decimal(12, 2)
-  contractPaidAmount             Decimal       @default(0) @db.Decimal(12, 2)
-  createdAt                      DateTime      @default(now())
+  contractCurrency               CurrencyCode          @default(UZS)
+  contractExchangeRateAtCreation Decimal?              @db.Decimal(12, 4)
+  contractTotalAmount            Decimal               @default(0) @db.Decimal(12, 2)
+  contractDownPayment            Decimal               @default(0) @db.Decimal(12, 2)
+  contractBaseRemainingAmount    Decimal               @default(0) @db.Decimal(12, 2)
+  contractInterestAmount         Decimal               @default(0) @db.Decimal(12, 2)
+  contractFinalAmount            Decimal               @default(0) @db.Decimal(12, 2)
+  contractMonthlyPayment         Decimal               @default(0) @db.Decimal(12, 2)
+  contractRemainingAmount        Decimal               @default(0) @db.Decimal(12, 2)
+  contractPaidAmount             Decimal               @default(0) @db.Decimal(12, 2)
+  createdAt                      DateTime              @default(now())
   createdBy                      String
-  updatedAt                      DateTime      @updatedAt
+  updatedAt                      DateTime              @updatedAt
   // See Sale.returnedAt. CANCELLED remains the operational terminal status;
   // these fields distinguish a physical return from other cancellations.
   returnedAt                     DateTime?
@@ -817,6 +852,7 @@ model Nasiya {
   @@index([deviceId])
   @@index([customerId])
   @@index([shopId, isImported])
+  @@index([shopId, resolutionState, status])
 }
 
 // ---------------------------------------------------------------------------
@@ -871,20 +907,60 @@ model NasiyaSchedule {
 // ---------------------------------------------------------------------------
 
 model NasiyaDeferral {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
   shopId           String
   nasiyaId         String
   nasiyaScheduleId String
+  // The exact effective due date before and after this append-only command.
+  // delayedUntil remains as the compatibility value read by schedule queries.
+  originalDueDate  DateTime
+  newDueDate       DateTime
   delayedUntil     DateTime
   note             String?
   idempotencyKey   String
   createdBy        String
-  createdAt        DateTime @default(now())
+  createdByType    ActorType
+  createdAt        DateTime  @default(now())
 
   @@unique([shopId, idempotencyKey])
   @@index([nasiyaId])
   @@index([nasiyaScheduleId])
   @@index([shopId])
+}
+
+// ---------------------------------------------------------------------------
+// NasiyaResolutionEvent — immutable archive/write-off/reopen evidence.
+//
+// The Nasiya row stores only the current operational state. Every transition
+// is appended here with the native debt snapshot and its frozen UZS context.
+// A REOPEN row points at the event it compensates; history is never edited.
+// Tenant composite FKs and immutable triggers live in the SQL migration.
+// ---------------------------------------------------------------------------
+
+model NasiyaResolutionEvent {
+  id                    String                    @id @default(cuid())
+  shopId                String
+  nasiyaId              String
+  eventType             NasiyaResolutionEventType
+  previousState         NasiyaResolutionState
+  newState              NasiyaResolutionState
+  contractCurrency      CurrencyCode
+  nativeRemainingAmount Decimal                   @db.Decimal(14, 2)
+  frozenUzsAmount       Decimal                   @db.Decimal(14, 2)
+  frozenUsdUzsRate      Decimal                   @db.Decimal(14, 4)
+  reason                String
+  actorId               String
+  actorType             ActorType
+  idempotencyKey        String
+  reversesEventId       String?
+  createdAt             DateTime                  @default(now())
+
+  @@unique([id, shopId, nasiyaId])
+  @@unique([shopId, idempotencyKey])
+  @@unique([shopId, reversesEventId])
+  @@index([shopId, nasiyaId, createdAt])
+  @@index([shopId, eventType, createdAt])
+  @@index([shopId, newState, createdAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -1034,6 +1110,7 @@ model Notification {
   type               String
   message            String
   telegramId         String
+  recipientShopAdminId String?
   status             NotificationStatus @default(PENDING)
   scheduledAt        DateTime
   sentAt             DateTime?
@@ -1053,9 +1130,11 @@ model Notification {
   createdAt          DateTime           @default(now())
 
   // Relations
-  shop Shop @relation(fields: [shopId], references: [id])
+  shop      Shop       @relation(fields: [shopId], references: [id])
+  recipient ShopAdmin? @relation("NotificationRecipient", fields: [recipientShopAdminId, shopId], references: [id, shopId])
 
   @@index([shopId])
+  @@index([recipientShopAdminId, shopId])
   @@index([status])
   @@index([scheduledAt])
   @@index([nextAttemptAt])
@@ -1181,13 +1260,20 @@ model AuthSession {
   actorId        String
   actorType      ActorType
   shopId         String?
+  packageVersionId String?
   sessionVersion Int
+  policy         AuthSessionPolicy @default(IDLE_10_MINUTES)
   lastSeenAt     DateTime  @default(now())
+  lastUserActivityAt DateTime @default(now())
   expiresAt      DateTime
   revokedAt      DateTime?
   createdAt      DateTime  @default(now())
 
+  packageVersion ShopPackageVersion? @relation(fields: [packageVersionId, shopId], references: [id, shopId])
+
   @@index([actorType, actorId, revokedAt])
   @@index([expiresAt])
   @@index([revokedAt, lastSeenAt])
+  @@index([revokedAt, lastUserActivityAt])
+  @@index([packageVersionId, shopId])
 }

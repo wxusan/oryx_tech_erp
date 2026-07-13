@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server'
 import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/node'
-import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-auth'
+import type { ShopFeatureCode } from '@/lib/access-control'
 import { csvRows } from '@/lib/csv'
 import { formatMoneyByCurrency, formatUserFacingMoney } from '@/lib/currency'
 import { displayImei } from '@/lib/device-display'
@@ -10,6 +11,9 @@ import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { deviceConditionLabel, formatDeviceStorage } from '@/lib/device-specs'
 import { logger } from '@/lib/logger'
+import { isMonthKey, resolveReportRange, type ReportRangePreset } from '@/lib/report-range'
+import { getShopRangeReport, getShopReportDataMonths, type ShopRangeReport } from '@/lib/server/shop-report-range'
+import { tashkentMonthRange } from '@/lib/timezone'
 
 type RouteContext = { params: Promise<{ entity: string }> }
 type ExportCell = string | number | boolean | Date | null | undefined
@@ -126,6 +130,59 @@ function exportResponse(entity: string, format: ExportFormat, data: ExportData) 
   return csvResponse(entity, csvRows(data.headers, data.rows))
 }
 
+function reportExportData(report: ShopRangeReport): ExportData {
+  const row = (month: ShopRangeReport['months'][number], label: string): ExportCell[] => [
+    label,
+    month.cashCollected.uzs,
+    month.cashCollected.usd,
+    month.cashCollected.complete,
+    month.accrualRevenue.uzs,
+    month.accrualRevenue.usd,
+    month.nasiyaInterest.uzs,
+    month.nasiyaInterest.usd,
+    month.expectedReceivables.uzs,
+    month.expectedReceivables.usd,
+    month.refunds.uzs,
+    month.refunds.usd,
+    month.writeOffs.uzs,
+    month.writeOffs.usd,
+    month.writeOffs.frozenUzs,
+    month.grossProfitUzs,
+    month.interestProfitUzs,
+    month.returnCount,
+    month.writeOffCount,
+    month.reopenCount,
+  ]
+  return {
+    headers: [
+      'month',
+      'cashCollectedUzs',
+      'cashCollectedUsd',
+      'cashCollectedComplete',
+      'accrualRevenueUzs',
+      'accrualRevenueUsd',
+      'nasiyaInterestUzs',
+      'nasiyaInterestUsd',
+      'expectedReceivablesUzs',
+      'expectedReceivablesUsd',
+      'refundsUzs',
+      'refundsUsd',
+      'writeOffsUzs',
+      'writeOffsUsd',
+      'writeOffsFrozenUzs',
+      'grossProfitUzs',
+      'interestProfitUzs',
+      'returnCount',
+      'writeOffCount',
+      'reopenCount',
+    ],
+    rows: [
+      ...report.months.map((month) => row(month, month.monthKey)),
+      row({ ...report.totals, monthKey: 'TOTAL' }, 'TOTAL'),
+    ],
+  }
+}
+
 async function exportData(entity: string, shopId: string, role: string): Promise<ExportData | null> {
   const currency = await getShopCurrencyContext(shopId)
   if (entity === 'devices') {
@@ -138,6 +195,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         skip,
         take,
         select: {
+          id: true,
           model: true,
           imei: true,
           imeis: { where: { deletedAt: null }, select: { slot: true, value: true } },
@@ -312,6 +370,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         skip,
         take,
         select: {
+          id: true,
           totalAmount: true,
           downPayment: true,
           baseRemainingAmount: true,
@@ -321,6 +380,8 @@ async function exportData(entity: string, shopId: string, role: string): Promise
           remainingAmount: true,
           months: true,
           status: true,
+          resolutionState: true,
+          resolutionUpdatedAt: true,
           contractCurrency: true,
           contractExchangeRateAtCreation: true,
           contractTotalAmount: true,
@@ -356,6 +417,25 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         },
       }),
     )
+    const resolutionEvents = await prisma.nasiyaResolutionEvent.findMany({
+      where: { shopId, nasiyaId: { in: nasiyalar.map((n) => n.id) } },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      select: {
+        nasiyaId: true,
+        eventType: true,
+        nativeRemainingAmount: true,
+        contractCurrency: true,
+        frozenUzsAmount: true,
+        frozenUsdUzsRate: true,
+        reason: true,
+        reversesEventId: true,
+        createdAt: true,
+      },
+    })
+    const latestResolutionByNasiya = new Map<string, (typeof resolutionEvents)[number]>()
+    for (const event of resolutionEvents) {
+      if (!latestResolutionByNasiya.has(event.nasiyaId)) latestResolutionByNasiya.set(event.nasiyaId, event)
+    }
     // Export the live contract-derived status so the sheet agrees with the
     // list/detail even when legacy UZS mirrors drift after an FX movement.
     const exportNow = new Date()
@@ -391,6 +471,16 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'remainingAmountCurrentShopDisplay',
         'months',
         'status',
+        'resolutionState',
+        'resolutionUpdatedAt',
+        'latestResolutionEvent',
+        'latestResolutionReason',
+        'latestResolutionNativeAmount',
+        'latestResolutionCurrency',
+        'latestResolutionFrozenUzs',
+        'latestResolutionFrozenUsdUzsRate',
+        'latestResolutionReversesEventId',
+        'latestResolutionCreatedAt',
         'returnedAt',
         'createdAt',
         'isImported',
@@ -401,7 +491,9 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'importedAt',
         'originalSaleDate',
       ],
-      rows: nasiyalar.map((n) => [
+      rows: nasiyalar.map((n) => {
+        const resolution = latestResolutionByNasiya.get(n.id)
+        return [
         n.customer.name,
         n.customer.phone,
         n.device.model,
@@ -451,6 +543,16 @@ async function exportData(entity: string, shopId: string, role: string): Promise
             exportNow,
           ).displayStatus,
         ),
+        n.resolutionState,
+        n.resolutionUpdatedAt,
+        resolution?.eventType ?? '',
+        resolution?.reason ?? '',
+        resolution?.nativeRemainingAmount.toString() ?? '',
+        resolution?.contractCurrency ?? '',
+        resolution?.frozenUzsAmount.toString() ?? '',
+        resolution?.frozenUsdUzsRate.toString() ?? '',
+        resolution?.reversesEventId ?? '',
+        resolution?.createdAt ?? '',
         n.returnedAt,
         n.createdAt,
         n.isImported,
@@ -460,7 +562,8 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         n.remainingAtImport?.toString() ?? '',
         n.importedAt,
         n.originalSaleDate,
-      ]),
+        ]
+      }),
     }
   }
 
@@ -605,10 +708,25 @@ async function exportData(entity: string, shopId: string, role: string): Promise
 
 export async function GET(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('EXPORT_DATA')
+    const { entity } = await ctx.params
+    const entityFeature: Partial<Record<string, ShopFeatureCode>> = {
+      devices: 'INVENTORY',
+      customers: 'CUSTOMER_CRM',
+      sales: 'CASH_SALES',
+      nasiya: 'NASIYA',
+      returns: 'INVENTORY',
+      report: 'REPORTS',
+    }
+    const feature = entityFeature[entity]
+    const guarded = feature
+      ? await requireShopPermissionAndFeature('EXPORT_DATA', feature)
+      : await requireShopPermission('EXPORT_DATA')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
-    const { entity } = await ctx.params
+    if (entity === 'report') {
+      const reportGuard = await requireShopPermissionAndFeature('REPORT_VIEW', 'REPORTS')
+      if (!reportGuard.ok) return reportGuard.response
+    }
 
     const format = normalizeFormat(req.nextUrl.searchParams.get('format'))
     if (!format) return new Response('Unsupported export format', { status: 400 })
@@ -616,6 +734,44 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, req.nextUrl.searchParams.get('shopId'))
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+
+    if (entity === 'report') {
+      const params = req.nextUrl.searchParams
+      const presetValue = params.get('preset')?.trim() || 'single'
+      const presets = new Set<ReportRangePreset>(['single', 'trailing3', 'trailing6', 'trailing12', 'custom'])
+      if (!presets.has(presetValue as ReportRangePreset)) return new Response("Hisobot turi noto'g'ri", { status: 400 })
+      const month = params.get('month')?.trim() || null
+      const startMonth = params.get('startMonth')?.trim() || null
+      const endMonth = params.get('endMonth')?.trim() || null
+      if ((month && !isMonthKey(month)) || (startMonth && !isMonthKey(startMonth)) || (endMonth && !isMonthKey(endMonth))) {
+        return new Response("Hisobot oy oralig'i noto'g'ri", { status: 400 })
+      }
+      const adminId = params.get('admin')?.trim() || null
+      if (adminId && !await prisma.shopAdmin.count({ where: { id: adminId, shopId, deletedAt: null } })) {
+        return new Response("Tanlangan admin bu do'konga tegishli emas", { status: 400 })
+      }
+      const availableMonths = await getShopReportDataMonths(shopId)
+      if (presetValue === 'single' && month && !availableMonths.includes(month)) {
+        return new Response("Tanlangan oyda hisobot ma'lumoti yo'q", { status: 400 })
+      }
+      if (!availableMonths.length && presetValue === 'single' && !month) {
+        return new Response("Eksport uchun hisobot ma'lumoti yo'q", { status: 404 })
+      }
+      let range
+      try {
+        range = resolveReportRange({
+          preset: presetValue,
+          month,
+          startMonth,
+          endMonth,
+          defaultEndMonth: availableMonths[0] ?? tashkentMonthRange().monthKey,
+        })
+      } catch (error) {
+        return new Response(error instanceof Error ? error.message : "Hisobot oralig'i noto'g'ri", { status: 400 })
+      }
+      const report = await getShopRangeReport({ shopId, range, adminId })
+      return exportResponse(`report-${range.startMonth}-${range.endMonth}`, format, reportExportData(report))
+    }
 
     const data = await exportData(entity, shopId, session.user.role)
     if (!data) return new Response('Unknown export entity', { status: 404 })

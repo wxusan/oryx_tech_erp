@@ -20,8 +20,8 @@ describe('disposable PostgreSQL migration foundation', () => {
       ORDER BY migration_name
     `
 
-    expect(rows).toHaveLength(37)
-    expect(rows.at(-1)?.migration_name).toBe('202607130007_erp2_access_packages')
+    expect(rows).toHaveLength(40)
+    expect(rows.at(-1)?.migration_name).toBe('202607130010_customer_crm_passport')
   })
 
   it('installs nullable request correlation fields without storing historic network data', async () => {

@@ -281,7 +281,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       const shopAdmins = await tx.shopAdmin.findMany({
         where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
-        select: { telegramId: true },
+        select: { id: true, telegramId: true },
       })
       if (shopAdmins.length > 0) {
         const message = deviceReturnedMessage({
@@ -299,6 +299,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             type: 'RETURN',
             message,
             telegramId: admin.telegramId!,
+            recipientShopAdminId: admin.id,
             scheduledAt: now,
             relatedId: returnRecord.id,
             relatedType: 'DeviceReturn',

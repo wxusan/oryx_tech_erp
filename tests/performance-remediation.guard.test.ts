@@ -32,10 +32,10 @@ describe('bounded inventory picker', () => {
 describe('persistent-shell request reduction', () => {
   const banner = read('src/components/shop/due-overdue-banner.tsx')
 
-  it('uses event/focus refresh with a five-minute polling safety net', () => {
-    expect(banner).toContain('const FALLBACK_REFRESH_MS = 5 * 60_000')
+  it('uses scoped two-minute React Query data plus mutation deltas without shell polling', () => {
+    expect(banner).toContain("queryKeys.list(scope, 'overdue', { view: 'summary' })")
     expect(banner).toContain('FINANCIAL_DATA_CHANGED_EVENT')
-    expect(banner).not.toContain('setInterval(load, 60_000)')
+    expect(banner).not.toContain('setInterval')
   })
 
 })

@@ -13,6 +13,7 @@ export function transitionNasiyaToOverdue(input: {
     dedupeKey: string
     message: string
     telegramId: string
+    recipientShopAdminId: string
     scheduledAt: Date
   }>
 }) {
@@ -35,6 +36,7 @@ export function transitionNasiyaToOverdue(input: {
           shopId: input.shopId,
           deletedAt: null,
           status: { in: ['ACTIVE', 'OVERDUE'] },
+          resolutionState: 'ACTIVE',
         },
       },
       data: { status: 'OVERDUE' },
@@ -59,6 +61,7 @@ export function transitionNasiyaToOverdue(input: {
             shopId: input.shopId,
             deletedAt: null,
             status: { in: ['ACTIVE', 'OVERDUE'] },
+            resolutionState: 'ACTIVE',
           },
         },
         select: { id: true },
@@ -80,7 +83,7 @@ export function transitionNasiyaToOverdue(input: {
       })
     }
     const nasiyaUpdate = await tx.nasiya.updateMany({
-      where: { id: input.nasiyaId, shopId: input.shopId, status: 'ACTIVE', deletedAt: null },
+      where: { id: input.nasiyaId, shopId: input.shopId, status: 'ACTIVE', resolutionState: 'ACTIVE', deletedAt: null },
       data: { status: 'OVERDUE' },
     })
     const changed = scheduleUpdate.count > 0 || nasiyaUpdate.count > 0

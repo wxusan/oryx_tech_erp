@@ -83,6 +83,8 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         contractRemainingAmount: true,
         contractPaidAmount: true,
         status: true,
+        resolutionState: true,
+        resolutionUpdatedAt: true,
         reminderEnabled: true,
         note: true,
         isImported: true,
@@ -148,6 +150,26 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     if (!nasiya) return notFound('Nasiya topilmadi')
 
+    const resolutionEvents = await prisma.nasiyaResolutionEvent.findMany({
+      where: { shopId: nasiya.shopId, nasiyaId: nasiya.id },
+      orderBy: { createdAt: 'desc' },
+      select: {
+        id: true,
+        eventType: true,
+        previousState: true,
+        newState: true,
+        contractCurrency: true,
+        nativeRemainingAmount: true,
+        frozenUzsAmount: true,
+        frozenUsdUzsRate: true,
+        reason: true,
+        actorId: true,
+        actorType: true,
+        reversesEventId: true,
+        createdAt: true,
+      },
+    })
+
     const scheduleInputs = nasiya.schedules.map((s) => ({
       status: s.status,
       dueDate: s.dueDate,
@@ -195,6 +217,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       where: { customerId: nasiya.customer.id, shopId: nasiya.shopId, deletedAt: null },
       select: {
         status: true,
+        resolutionState: true,
         contractCurrency: true,
         schedules: {
           select: {
@@ -210,6 +233,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     })
     const customerTrustInputs: CustomerNasiyaInput[] = customerNasiyas.map((n) => ({
       status: n.status,
+      resolutionState: n.resolutionState,
       contractCurrency: n.contractCurrency,
       schedules: n.schedules.map((s) => ({
         status: s.status,
@@ -222,15 +246,23 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     }))
     const trustOverride = isValidTrustTier(nasiya.customer.trustOverride) ? nasiya.customer.trustOverride : null
     const customerTrust = computeCustomerTrustRating(customerTrustInputs, new Date(), trustOverride)
+    const { passportPhotoUrl, ...customer } = nasiya.customer
 
     return ok(
       {
         ...nasiya,
+        customer: { ...customer, hasPassportPhoto: Boolean(passportPhotoUrl) },
         displayStatus: derived.displayStatus,
         isOverdue: derived.isOverdue,
         overdueAmount: derived.overdueAmount,
         paymentScore,
         customerTrust,
+        resolutionEvents: resolutionEvents.map((event) => ({
+          ...event,
+          nativeRemainingAmount: Number(event.nativeRemainingAmount),
+          frozenUzsAmount: Number(event.frozenUzsAmount),
+          frozenUsdUzsRate: Number(event.frozenUsdUzsRate),
+        })),
       },
       "Nasiya ma'lumotlari",
     )

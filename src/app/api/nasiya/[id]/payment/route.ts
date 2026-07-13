@@ -10,7 +10,7 @@
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
 import { calculateRemaining } from '@/lib/nasiya-utils'
 import { convertPaymentToContractCurrency, contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'
@@ -87,7 +87,7 @@ function matchesExistingPaymentPayload(
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('PAYMENT_RECEIVE')
+    const guarded = await requireShopPermissionAndFeature('PAYMENT_RECEIVE', 'NASIYA')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -100,9 +100,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       return badRequest(firstError)
     }
 
-    const { nasiyaScheduleId, amount, paymentMethod, paymentBreakdown, date, delayedUntil, note, deferredToNext } = parsed.data
+    const { nasiyaScheduleId, amount, paymentMethod, paymentBreakdown, date, note } = parsed.data
     const idempotencyKey = req.headers.get('idempotency-key')?.trim()
-    if ((amount > 0 || deferredToNext) && !idempotencyKey) {
+    if (!idempotencyKey) {
       return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
     }
 
@@ -127,14 +127,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const auditNote = note?.trim()
     let amountInput: Awaited<ReturnType<typeof moneyInputToUzs>>
     try {
-      amountInput =
-        amount > 0
-          ? await moneyInputToUzs(amount, parsed.data.inputCurrency)
-          : {
-              amountUzs: 0,
-              inputCurrency: parsed.data.inputCurrency ?? 'UZS',
-              exchangeRateUsed: null,
-            }
+      amountInput = await moneyInputToUzs(amount, parsed.data.inputCurrency)
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
@@ -147,22 +140,24 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // still loads the authoritative nasiya row for everything else.
     let contractCurrency: 'UZS' | 'USD' = 'UZS'
     let contractRate: number | null = amountInput.exchangeRateUsed
-    let appliedAmountInContractCurrency = 0
-    if (amountUzs > 0) {
-      const contractLookup = await prisma.nasiya.findFirst({
-        where: { id: nasiyaId, shopId },
-        select: { contractCurrency: true },
-      })
-      contractCurrency = contractLookup?.contractCurrency ?? 'UZS'
-      if (amountInput.inputCurrency !== contractCurrency && contractRate == null) {
-        try {
-          contractRate = await getUsdUzsRate()
-        } catch (err) {
-          return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
-        }
+    const contractLookup = await prisma.nasiya.findFirst({
+      where: { id: nasiyaId, shopId, resolutionState: 'ACTIVE' },
+      select: { contractCurrency: true },
+    })
+    contractCurrency = contractLookup?.contractCurrency ?? 'UZS'
+    if (amountInput.inputCurrency !== contractCurrency && contractRate == null) {
+      try {
+        contractRate = await getUsdUzsRate()
+      } catch (err) {
+        return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
       }
-      appliedAmountInContractCurrency = convertPaymentToContractCurrency(amount, amountInput.inputCurrency, contractCurrency, contractRate)
     }
+    const appliedAmountInContractCurrency = convertPaymentToContractCurrency(
+      amount,
+      amountInput.inputCurrency,
+      contractCurrency,
+      contractRate,
+    )
 
     const runPaymentTransaction = () =>
       prisma.$transaction(
@@ -174,6 +169,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               shopId,
               deletedAt: null,
               status: { not: 'CANCELLED' },
+              resolutionState: 'ACTIVE',
             },
             include: {
               schedules: true,
@@ -186,34 +182,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           })
           if (!nasiya) throw { status: 404, message: 'Nasiya topilmadi' }
 
-          if (deferredToNext && idempotencyKey) {
-            const existingDeferral = await tx.nasiyaDeferral.findUnique({
-              where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
-            })
-            if (existingDeferral) {
-              if (
-                existingDeferral.nasiyaId !== nasiyaId
-                || existingDeferral.nasiyaScheduleId !== nasiyaScheduleId
-                || !sameInstant(existingDeferral.delayedUntil, delayedUntil)
-                || !sameOptionalText(existingDeferral.note, auditNote)
-              ) {
-                throw {
-                  status: 409,
-                  message: "Idempotency-Key boshqa yoki o'zgartirilgan nasiya kechiktirish amali uchun ishlatilgan",
-                }
-              }
-              return {
-                nasiyaId,
-                nasiyaScheduleId: existingDeferral.nasiyaScheduleId,
-                amount: 0,
-                remaining: Number(nasiya.remainingAmount),
-                allocations: [],
-                duplicate: true,
-              }
-            }
-          }
-
-          if (amountUzs > 0 && idempotencyKey) {
+          if (idempotencyKey) {
             const existingPayment = await tx.nasiyaPayment.findUnique({
               where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
             })
@@ -270,15 +239,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             where: { id: nasiyaScheduleId, nasiyaId, shopId },
           })
           if (!selectedSchedule) throw { status: 404, message: "To'lov jadvali topilmadi" }
-          if (deferredToNext) {
-            const currentDue = selectedSchedule.delayedUntil ?? selectedSchedule.dueDate
-            if (!delayedUntil || delayedUntil <= currentDue) {
-              throw {
-                status: 400,
-                message: "Yangi to'lov sanasi hozirgi muddatdan keyin bo'lishi kerak",
-              }
-            }
-          }
 
           // Eligibility is contract-ledger-based, not a stored schedule label:
           // a legacy-derived PAID label must not prevent settling native debt.
@@ -314,45 +274,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             contractAmount: number
           }[] = []
 
-          if (deferredToNext) {
-            const updatedSchedule = await tx.nasiyaSchedule.updateMany({
-              where: {
-                id: nasiyaScheduleId,
-                nasiyaId,
-                shopId,
-                paidAmount: selectedSchedule.paidAmount,
-              },
-              data: {
-                status: 'DEFERRED',
-                delayedUntil,
-                deferredToNext: true,
-                note: auditNote,
-              },
-            })
-            if (updatedSchedule.count !== 1) {
-              throw {
-                status: 409,
-                message: "To'lov bir vaqtda yangilangan, qayta urinib ko'ring",
-              }
+          if (selectedOutstanding <= 0) {
+            throw {
+              status: 409,
+              message: "Tanlangan oy to'lovi allaqachon yopilgan",
             }
-            await tx.nasiyaDeferral.create({
-              data: {
-                shopId,
-                nasiyaId,
-                nasiyaScheduleId,
-                delayedUntil: delayedUntil!,
-                note: auditNote,
-                idempotencyKey: idempotencyKey!,
-                createdBy: session.user.id,
-              },
-            })
-          } else {
-            if (selectedOutstanding <= 0) {
-              throw {
-                status: 409,
-                message: "Tanlangan oy to'lovi allaqachon yopilgan",
-              }
-            }
+          }
             // Item 4 fix: compared in CONTRACT currency, not a legacy-UZS sum —
             // a legacy sum frozen at each schedule's creation rate can drift
             // from the real remaining contract debt after enough exchange-rate
@@ -450,8 +377,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 paymentExchangeRate: contractRate,
               },
             })
-          }
-
           // Recalculate nasiya totals
           const allSchedules = await tx.nasiyaSchedule.findMany({
             where: { nasiyaId },
@@ -500,9 +425,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             },
           })
 
-          // Notify all active shop admins with a verified telegramId
-          if (amountUzs > 0) {
-            const shopAdmins = await tx.shopAdmin.findMany({
+          // Notify all active shop admins with a verified telegramId.
+          const shopAdmins = await tx.shopAdmin.findMany({
               where: {
                 shopId,
                 deletedAt: null,
@@ -511,7 +435,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 telegramVerifiedAt: { not: null },
               },
             })
-            const paymentMessage = nasiyaPaymentMessage({
+          const paymentMessage = nasiyaPaymentMessage({
               shopName: nasiya.shop.name,
               customerName: nasiya.customer.name,
               customerPhone: nasiya.customer.phone,
@@ -532,7 +456,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 amount: a.contractAmount,
               })),
             })
-            const completedMessage = justCompleted
+          const completedMessage = justCompleted
               ? nasiyaCompletedMessage({
                   shopName: nasiya.shop.name,
                   customerName: nasiya.customer.name,
@@ -544,31 +468,32 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                   currency,
                 })
               : null
-            for (const admin of shopAdmins) {
-              await tx.notification.create({
+          for (const admin of shopAdmins) {
+            await tx.notification.create({
                 data: {
                   shopId,
                   type: 'PAYMENT_RECEIVED',
                   message: paymentMessage,
                   telegramId: admin.telegramId!,
+                  recipientShopAdminId: admin.id,
                   scheduledAt: new Date(),
                   relatedId: allocations.length === 1 ? allocations[0].scheduleId : nasiyaId,
                   relatedType: allocations.length === 1 ? 'NasiyaSchedule' : 'Nasiya',
                 },
               })
-              if (completedMessage) {
-                await tx.notification.create({
+            if (completedMessage) {
+              await tx.notification.create({
                   data: {
                     shopId,
                     type: 'NASIYA_COMPLETED',
                     message: completedMessage,
                     telegramId: admin.telegramId!,
+                    recipientShopAdminId: admin.id,
                     scheduledAt: new Date(),
                     relatedId: nasiyaId,
                     relatedType: 'Nasiya',
                   },
                 })
-              }
             }
           }
 
@@ -577,30 +502,20 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               shopId,
               actorId: session.user.id,
               actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
-              // Deferring a schedule ("Mijoz bu oy to'lamadi, muddatni uzaytirish")
-              // is not a payment — a distinct action keeps Amallar tarixi from
-              // mislabeling it as "To'lov qabul qilindi".
-              action: deferredToNext ? 'NASIYA_DEFER' : 'PAYMENT',
+              action: 'PAYMENT',
               targetType: 'NasiyaSchedule',
               targetId: nasiyaScheduleId,
-              newValue: deferredToNext
-                ? {
-                    oldDueDate: (selectedSchedule.delayedUntil ?? selectedSchedule.dueDate).toISOString(),
-                    newDueDate: delayedUntil!.toISOString(),
-                    auditReason: auditNote,
-                  }
-                : {
-                    amount: amountUzs,
-                    inputAmount: amount,
-                    paymentMethod: effectivePaymentMethod,
-                    paymentBreakdown,
-                    deferredToNext,
-                    allocations,
-                    auditReason: auditNote,
-                    contractCurrency,
-                    appliedAmountInContractCurrency,
-                    ...moneyInputMeta(amountInput),
-                  },
+              newValue: {
+                amount: amountUzs,
+                inputAmount: amount,
+                paymentMethod: effectivePaymentMethod,
+                paymentBreakdown,
+                allocations,
+                auditReason: auditNote,
+                contractCurrency,
+                appliedAmountInContractCurrency,
+                ...moneyInputMeta(amountInput),
+              },
               note: auditNote,
             },
           })

@@ -105,6 +105,7 @@ export default function NewShopPage() {
     if (!formValid) {
       const message = "Do'kon va kirish profili maydonlarini tekshiring"
       setFormError(message)
+      requestAnimationFrame(() => document.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus())
       throw new Error(message)
     }
 
@@ -171,7 +172,7 @@ export default function NewShopPage() {
 
       <div className="space-y-5">
         {formError && (
-          <div className="p-3 border border-red-200 bg-red-50 text-sm text-red-600">
+          <div role="alert" className="p-3 border border-red-200 bg-red-50 text-sm text-red-600">
             {formError}
           </div>
         )}
@@ -182,7 +183,7 @@ export default function NewShopPage() {
             <h2 className="text-sm font-semibold text-zinc-900">Do&apos;kon ma&apos;lumotlari</h2>
           </div>
           <div className="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <Field label="Do'kon nomi" required error={err(shopName) ? "Bu maydon to'ldirilishi shart" : undefined}>
+            <Field controlId="new-shop-name" label="Do'kon nomi" required error={err(shopName) ? "Bu maydon to'ldirilishi shart" : undefined}>
               <Input
                 placeholder="Masalan: Malika Electronics"
                 value={shopName}
@@ -193,7 +194,7 @@ export default function NewShopPage() {
                 ].join(' ')}
               />
             </Field>
-            <Field label="Egasining ismi" required error={err(ownerName) ? "Bu maydon to'ldirilishi shart" : undefined}>
+            <Field controlId="new-shop-owner-name" label="Egasining ismi" required error={err(ownerName) ? "Bu maydon to'ldirilishi shart" : undefined}>
               <Input
                 placeholder="To'liq ism"
                 value={ownerName}
@@ -204,7 +205,7 @@ export default function NewShopPage() {
                 ].join(' ')}
               />
             </Field>
-            <Field label="Tel raqami" required error={submitted && !isValidPhone(ownerPhone) ? "Telefon raqami noto'g'ri" : undefined}>
+            <Field controlId="new-shop-owner-phone" label="Tel raqami" required error={submitted && !isValidPhone(ownerPhone) ? "Telefon raqami noto'g'ri" : undefined}>
               <PhoneInput
                 value={ownerPhone}
                 onChange={setOwnerPhone}
@@ -214,7 +215,7 @@ export default function NewShopPage() {
                 ].join(' ')}
               />
             </Field>
-            <Field label="Do'kon raqami" required error={err(shopNumber) ? "Bu maydon to'ldirilishi shart" : undefined}>
+            <Field controlId="new-shop-number" label="Do'kon raqami" required error={err(shopNumber) ? "Bu maydon to'ldirilishi shart" : undefined}>
               <Input
                 placeholder="Masalan: 42"
                 value={shopNumber}
@@ -282,7 +283,7 @@ export default function NewShopPage() {
                   </button>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <Field label="Ism" required error={err(admin.name) ? "Bu maydon to'ldirilishi shart" : undefined}>
+                  <Field controlId={`new-shop-admin-${admin.id}-name`} label="Ism" required error={err(admin.name) ? "Bu maydon to'ldirilishi shart" : undefined}>
                     <Input
                       placeholder="To'liq ism"
                       value={admin.name}
@@ -293,7 +294,7 @@ export default function NewShopPage() {
                       ].join(' ')}
                     />
                   </Field>
-                  <Field label="Tel" required error={submitted && !isValidPhone(admin.phone) ? "Telefon raqami noto'g'ri" : undefined}>
+                  <Field controlId={`new-shop-admin-${admin.id}-phone`} label="Tel" required error={submitted && !isValidPhone(admin.phone) ? "Telefon raqami noto'g'ri" : undefined}>
                     <PhoneInput
                       value={admin.phone}
                       onChange={(phone) => updateAdmin(admin.id, 'phone', phone)}
@@ -312,7 +313,7 @@ export default function NewShopPage() {
                       className="h-8 text-sm rounded-none border-zinc-200"
                     />
                   </Field>
-                  <Field label="Login" required error={err(admin.login) ? "Bu maydon to'ldirilishi shart" : undefined}>
+                  <Field controlId={`new-shop-admin-${admin.id}-login`} label="Login" required error={err(admin.login) ? "Bu maydon to'ldirilishi shart" : undefined}>
                     <Input
                       placeholder="login"
                       value={admin.login}
@@ -323,7 +324,7 @@ export default function NewShopPage() {
                       ].join(' ')}
                     />
                   </Field>
-                  <Field label="Parol" required error={submitted && admin.password.length < 10 ? "Parol kamida 10 ta belgidan iborat bo'lishi kerak" : undefined} className="sm:col-span-2">
+                  <Field controlId={`new-shop-admin-${admin.id}-password`} label="Parol" required error={submitted && admin.password.length < 10 ? "Parol kamida 10 ta belgidan iborat bo'lishi kerak" : undefined} className="sm:col-span-2">
                     <Input
                       type="password"
                       placeholder="Kamida 10 ta belgi"

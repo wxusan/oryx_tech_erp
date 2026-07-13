@@ -1,16 +1,22 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Boxes, CalendarClock, CircleDollarSign, RotateCcw, TrendingUp } from 'lucide-react'
+import { AlertTriangle, Boxes, CalendarClock, CircleDollarSign, Download, FileX2, RotateCcw, TrendingUp } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
+import { buttonVariants } from '@/components/ui/button'
 import type { ChartConfig } from '@/components/ui/chart'
 import type { getShopStats } from '@/lib/server/shop-stats'
+import type { ShopRangeReport } from '@/lib/server/shop-report-range'
+import type { ReportRangePreset } from '@/lib/report-range'
 import { formatMoneyByCurrency, formatPartitionedMoney, type CurrencyContext } from '@/lib/currency'
 import HisobotChartsLoader from './hisobot-charts-loader'
 import HisobotFilters from './hisobot-filters'
+import ShopRangeReportPanel from './shop-range-report-panel'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { useShopAccess } from '@/components/shop/shop-access-context'
+import { cn } from '@/lib/utils'
 
 type ShopStats = Awaited<ReturnType<typeof getShopStats>>
 type ShopAdminOption = { id: string; name: string }
@@ -37,6 +43,10 @@ export default function HisobotClient({
   currency,
   shopAdmins,
   monthOptions,
+  initialRangeReport,
+  preset,
+  startMonth,
+  endMonth,
   monthKey,
   adminId,
 }: {
@@ -44,10 +54,15 @@ export default function HisobotClient({
   currency: CurrencyContext
   shopAdmins: ShopAdminOption[]
   monthOptions: MonthOption[]
+  initialRangeReport: ShopRangeReport | null
+  preset: ReportRangePreset
+  startMonth: string
+  endMonth: string
   monthKey: string | null
   adminId: string | null
 }) {
   const scope = useAuthenticatedQueryScope()
+  const { can } = useShopAccess()
   const statsQuery = useQuery({
     queryKey: queryKeys.list(scope, 'reports', { view: 'hisobot', monthKey, adminId }),
     queryFn: async ({ signal }) => {
@@ -60,9 +75,51 @@ export default function HisobotClient({
       return json.data
     },
     initialData: initialStats,
+    enabled: preset === 'single',
+  })
+  const rangeQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'reports', {
+      view: 'hisobot-range',
+      preset,
+      month: monthKey,
+      startMonth,
+      endMonth,
+      adminId,
+    }),
+    queryFn: async ({ signal }) => {
+      const params = new URLSearchParams({ preset })
+      if (monthKey) params.set('month', monthKey)
+      if (preset === 'custom') params.set('startMonth', startMonth)
+      if (preset !== 'single') params.set('endMonth', endMonth)
+      if (adminId) params.set('admin', adminId)
+      const response = await fetch(`/api/reports/shop?${params.toString()}`, { signal, cache: 'no-store' })
+      const json = await response.json() as {
+        success: boolean
+        data?: { availableMonths: string[]; report: ShopRangeReport | null }
+        error?: string
+      }
+      if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Hisobot yuklanmadi')
+      return json.data
+    },
+    initialData: {
+      availableMonths: monthOptions.map((option) => option.value),
+      report: initialRangeReport,
+    },
   })
   const stats = statsQuery.data
-  const monthLabel = uzMonthLabelFromKey(stats.monthKey)
+  const rangeReport = rangeQuery.data.report
+  const liveMonthOptions = rangeQuery.data.availableMonths.map((month) => ({
+    value: month,
+    label: uzMonthLabelFromKey(month),
+  }))
+  const singleExportHref = (format: 'csv' | 'xlsx') => {
+    const params = new URLSearchParams({ preset: 'single', month: startMonth, format })
+    if (adminId) params.set('admin', adminId)
+    return `/api/export/report?${params.toString()}`
+  }
+  const monthLabel = preset === 'single'
+    ? uzMonthLabelFromKey(stats.monthKey)
+    : `${uzMonthLabelFromKey(startMonth)} — ${uzMonthLabelFromKey(endMonth)}`
   const collected = stats.grossCashInThisMonth ?? stats.cashCollectedThisMonth ?? stats.cashReceivedThisMonth
   const netCash = stats.netCashFlowThisMonth ?? stats.netCashAfterReturnsThisMonth
   const expected = stats.expectedThisMonth
@@ -84,6 +141,12 @@ export default function HisobotClient({
   const overdueText = formatPartitionedMoney({
     amountUzs: stats.overdueMoneyUzs,
     amountUsd: stats.overdueMoneyUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+  const writeOffText = formatPartitionedMoney({
+    amountUzs: stats.writeOffsThisMonthNativeUzs,
+    amountUsd: stats.writeOffsThisMonthNativeUsd,
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
@@ -144,24 +207,55 @@ export default function HisobotClient({
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
           <HisobotFilters
-            monthOptions={monthOptions}
-            selectedMonth={stats.monthKey}
+            monthOptions={liveMonthOptions}
+            preset={preset}
+            selectedMonth={monthKey}
+            startMonth={startMonth}
+            endMonth={endMonth}
             admins={shopAdmins}
-            selectedAdmin={stats.filteredByAdmin}
+            selectedAdmin={adminId}
           />
           <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500">
             Pul tushumi va ochiq majburiyatlar alohida hisoblanadi
           </div>
+          {preset === 'single' && rangeReport && can('EXPORT_DATA') && (
+            <div className="flex gap-2">
+              <a href={singleExportHref('csv')} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-9')}>
+                <Download data-icon="inline-start" /> CSV
+              </a>
+              <a href={singleExportHref('xlsx')} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-9')}>
+                <Download data-icon="inline-start" /> Excel
+              </a>
+            </div>
+          )}
         </div>
       </div>
 
-      {stats.filteredByAdmin && (
+      {adminId && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
           Admin filtri faqat u amalga oshirgan sotuv/nasiya/to'lov/qaytarish va faoliyat jurnaliga taalluqli. Ombordagi tannarx, joriy faol
           nasiyalar, kutilayotgan va kechikkan qarzdorlik — bularni bitta adminga bog'lab bo'lmaydi, shuning uchun ular barcha adminlar
           bo'yicha ko'rsatiladi.
         </div>
       )}
+
+      {rangeQuery.isError && (
+        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {rangeQuery.error instanceof Error ? rangeQuery.error.message : 'Hisobot yuklanmadi'}
+        </div>
+      )}
+
+      {!rangeQuery.isError && !rangeReport && (
+        <div className="rounded-lg border border-dashed border-zinc-300 bg-white px-6 py-12 text-center">
+          <h2 className="text-base font-semibold text-zinc-900">Hali hisobot ma'lumoti yo'q</h2>
+          <p className="mt-2 text-sm text-zinc-500">Birinchi sotuv, to'lov, nasiya yoki qaytarish yozilgach oy avtomatik paydo bo'ladi.</p>
+        </div>
+      )}
+
+      {preset !== 'single' && rangeReport ? (
+        <ShopRangeReportPanel report={rangeReport} currency={currency} canExport={can('EXPORT_DATA')} />
+      ) : rangeReport ? (
+        <>
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         <Card className="rounded-lg">
@@ -177,6 +271,21 @@ export default function HisobotClient({
             <div className="text-2xl font-bold text-zinc-900">{fmt(collected, currency)}</div>
             <p className="mt-3 text-xs text-zinc-500">
               Shu oy haqiqatda qabul qilingan barcha to'lovlar; ochiq majburiyatlar bilan foizga aylantirilmaydi.
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg border-orange-200 bg-orange-50/40">
+          <CardHeader>
+            <CardDescription className="text-orange-800">Hisobdan chiqarilgan qarz</CardDescription>
+            <CardAction>
+              <FileX2 className="size-4 text-orange-700" />
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-orange-900">{writeOffText}</div>
+            <p className="mt-3 text-xs text-orange-800/70">
+              Bu oy {stats.writeOffCountThisMonth} ta hisobdan chiqarish, {stats.writeOffReopenCountThisMonth} ta qayta ochish · hodisa paytidagi UZS: {fmt(stats.writeOffsThisMonthFrozenUzs, currency)}
             </p>
           </CardContent>
         </Card>
@@ -272,6 +381,7 @@ export default function HisobotClient({
               ["Yig'ilgan", fmtBase(collected, currency)],
               ['Kutilayotgan', expectedText],
               ['Kechikkan', overdueText],
+              ['Hisobdan chiqarilgan', writeOffText],
               ['Nasiya foizi', fmt(interestProfit, currency)],
               ['Qaytarish reversali', fmt(reversedRevenue, currency)],
               ['Qaytgan tannarx', fmt(recoveredInventoryCost, currency)],
@@ -286,6 +396,8 @@ export default function HisobotClient({
           </CardContent>
         </Card>
       </div>
+        </>
+      ) : null}
     </div>
   )
 }

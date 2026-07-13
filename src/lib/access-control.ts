@@ -63,6 +63,7 @@ export const SHOP_PERMISSION_CODES = [
   'PAYMENT_RECEIVE',
   'CUSTOMER_VIEW',
   'CUSTOMER_MANAGE',
+  'CUSTOMER_PII_REVEAL',
   'RETURN_MANAGE',
   'WRITEOFF_MANAGE',
   'REPORT_VIEW',
@@ -97,8 +98,11 @@ export const SHOP_PERMISSION_CATALOG: readonly ShopPermissionCatalogItem[] = [
   { code: 'PAYMENT_RECEIVE', label: "To'lov qabul qilish", featureCode: null, ownerOnly: false },
   { code: 'CUSTOMER_VIEW', label: "Mijozlarni ko'rish", featureCode: 'CUSTOMER_CRM', ownerOnly: false },
   { code: 'CUSTOMER_MANAGE', label: 'Mijozlarni boshqarish', featureCode: 'CUSTOMER_CRM', ownerOnly: false },
+  { code: 'CUSTOMER_PII_REVEAL', label: "Pasport raqamini to'liq ko'rish", featureCode: 'CUSTOMER_CRM', ownerOnly: true },
   { code: 'RETURN_MANAGE', label: 'Qaytarishni boshqarish', featureCode: 'INVENTORY', ownerOnly: true },
-  { code: 'WRITEOFF_MANAGE', label: 'Qarzni yopish va arxivlash', featureCode: 'NASIYA', ownerOnly: true },
+  // Never inherited through legacyFullAccess (see principalCan), but an owner
+  // may deliberately grant it to a specific staff member.
+  { code: 'WRITEOFF_MANAGE', label: 'Qarzni yopish va arxivlash', featureCode: 'NASIYA', ownerOnly: false },
   { code: 'REPORT_VIEW', label: "Hisobotlarni ko'rish", featureCode: 'REPORTS', ownerOnly: true },
   { code: 'EXPORT_DATA', label: 'Eksport qilish', featureCode: 'EXPORTS', ownerOnly: true },
   { code: 'IMPORT_DATA', label: 'Import qilish', featureCode: 'IMPORTS', ownerOnly: true },
@@ -216,7 +220,11 @@ export function principalCan(principal: ShopPrincipalAccess, permission: ShopPer
   if (!definition) return false
   if (definition.featureCode && !principal.enabledFeatures.has(definition.featureCode)) return false
   if (principal.memberKind === 'SHOP_OWNER') return true
-  if (definition.ownerOnly) return false
+  // Migrated unresolved shops retain their pre-RBAC operational capability
+  // until an owner explicitly saves a permission set. Keep this compatibility
+  // before the new owner-only split, while never inheriting newly introduced
+  // member-management or debt-write-off powers.
   if (principal.legacyFullAccess) return permission !== 'MEMBER_MANAGE' && permission !== 'WRITEOFF_MANAGE'
+  if (definition.ownerOnly) return false
   return principal.grantedPermissions.has(permission)
 }

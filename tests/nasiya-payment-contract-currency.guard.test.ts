@@ -37,11 +37,9 @@ describe('nasiya payment route allocates in native contract currency alongside t
   })
 
   it('updates contractPaidAmount/contractRemainingAmount on every allocated schedule row', () => {
-    // Two updateMany calls exist (deferredToNext branch, then the payment
-    // allocation branch) — the second is the one that must carry contract fields.
+    // Deferral is a separate command; the payment route has one allocation write.
     const firstIdx = route.indexOf('await tx.nasiyaSchedule.updateMany')
-    const secondIdx = route.indexOf('await tx.nasiyaSchedule.updateMany', firstIdx + 1)
-    const block = route.slice(secondIdx, secondIdx + 700)
+    const block = route.slice(firstIdx, firstIdx + 700)
     expect(block).toContain('contractPaidAmount: scheduleUpdate.newContractPaidAmount')
     expect(block).toContain('contractRemainingAmount: scheduleUpdate.newContractRemainingAmount')
   })

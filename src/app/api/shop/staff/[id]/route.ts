@@ -108,7 +108,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       const shop = await tx.shop.findUnique({ where: { id: shopId }, select: { ownerAdminId: true } })
       const target = await tx.shopAdmin.findFirst({
         where: { id, shopId, deletedAt: null },
-        select: { id: true, isActive: true, name: true },
+        select: {
+          id: true,
+          isActive: true,
+          name: true,
+          legacyFullAccess: true,
+          permissions: { select: { permissionCode: true } },
+        },
       })
       if (!target) throw Object.assign(new Error('STAFF_NOT_FOUND'), { code: 'STAFF_NOT_FOUND' })
       if (shop?.ownerAdminId === id) throw Object.assign(new Error('OWNER_TARGET'), { code: 'OWNER_TARGET' })
@@ -117,7 +123,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       if (!activePackage || !enabledFeatureSet(activePackage).has('STAFF_ACCESS')) {
         throw Object.assign(new Error('STAFF_ACCESS_DISABLED'), { code: 'STAFF_ACCESS_DISABLED' })
       }
-      const sessionAffectingChange = parsed.data.isActive !== undefined || passwordHash !== undefined
+      const sessionAffectingChange = parsed.data.isActive !== undefined ||
+        passwordHash !== undefined || parsed.data.permissionCodes !== undefined
 
       await tx.shopAdmin.update({
         where: { id },
@@ -129,6 +136,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           passwordHash,
           passwordChangedAt: passwordHash ? new Date() : undefined,
           permissionVersion: parsed.data.permissionCodes ? { increment: 1 } : undefined,
+          legacyFullAccess: parsed.data.permissionCodes ? false : undefined,
           sessionVersion: sessionAffectingChange ? { increment: 1 } : undefined,
         },
       })
@@ -162,11 +170,17 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           action: 'STAFF_UPDATE',
           targetType: 'ShopAdmin',
           targetId: id,
-          oldValue: { name: target.name, isActive: target.isActive },
+          oldValue: {
+            name: target.name,
+            isActive: target.isActive,
+            legacyFullAccess: target.legacyFullAccess,
+            permissionCodes: target.permissions.map((item) => item.permissionCode),
+          },
           newValue: {
             name: parsed.data.name,
             isActive: parsed.data.isActive,
             permissionCodes: parsed.data.permissionCodes,
+            legacyFullAccess: parsed.data.permissionCodes ? false : target.legacyFullAccess,
             telegramNotificationsEnabled: parsed.data.telegramNotificationsEnabled,
             passwordReset: Boolean(passwordHash),
           },

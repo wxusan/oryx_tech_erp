@@ -42,6 +42,7 @@ import { DeviceConditionBadge } from '@/components/shop/device-condition-badge'
 import { DeviceActionHistory, type DeviceActionLog as DeviceLog } from '@/components/shop/device-action-history'
 import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
+import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
 
 interface Supplier {
   name: string
@@ -100,6 +101,7 @@ interface NasiyaSchedule {
 interface Nasiya {
   id: string
   status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
+  resolutionState: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
   totalAmount: number
   interestPercent: number
   interestAmount: number
@@ -256,6 +258,11 @@ function AuthorizedQurilmaDetailPage() {
   const [editError, setEditError] = useState('')
   const [editSaving, setEditSaving] = useState(false)
   const [purchasePriceDirty, setPurchasePriceDirty] = useState(false)
+  const editImageSelection = useImageSelection({
+    mode: 'multiple',
+    uploadEndpoint: '/api/uploads/device',
+    maxFiles: 10,
+  })
 
   const fetchDevice = useCallback(() => {
     if (!id) return
@@ -314,6 +321,11 @@ function AuthorizedQurilmaDetailPage() {
     })
     setEditError('')
     setPurchasePriceDirty(false)
+    editImageSelection.resetSavedImages(device.imageUrls.map((imageUrl, index) => ({
+      key: imageUrl,
+      previewUrl: getDeviceImageSrc(imageUrl),
+      filename: `${device.model} — saqlangan rasm ${index + 1}`,
+    })))
     setEditOpen(true)
   }
 
@@ -344,6 +356,7 @@ function AuthorizedQurilmaDetailPage() {
     setEditSaving(true)
     setEditError('')
     try {
+      const imageUrls = await editImageSelection.uploadAll()
       const res = await fetch(`/api/devices/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -357,6 +370,7 @@ function AuthorizedQurilmaDetailPage() {
           imei: editForm.imei.trim(),
           secondaryImei: editForm.secondaryImei.trim(),
           supplierPhone: editForm.supplierPhone.trim(),
+          imageUrls,
           note: editForm.note.trim() || undefined,
         }),
       })
@@ -434,7 +448,7 @@ function AuthorizedQurilmaDetailPage() {
   const saleHasEffectiveAmount = saleSplitPayment ? saleSplitTotal > 0 : salePayAmount.trim().length > 0
 
   async function handleSalePayment() {
-    if (!latestSale || !saleHasEffectiveAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading || !saleSplitValid)
+    if (!latestSale || !saleHasEffectiveAmount || !salePayMethod || salePayLoading || !saleSplitValid)
       return
     setSalePayLoading(true)
     setSalePayError('')
@@ -534,14 +548,22 @@ function AuthorizedQurilmaDetailPage() {
   async function handleReturnDevice() {
     const refundAmount = Number(returnRefundAmount || 0)
     const returnCurrency = device?.sales?.[0]?.contractCurrency ?? device?.nasiya?.[0]?.contractCurrency ?? currency.currency
-    if (
-      returnNote.trim().length < 5 ||
-      Number.isNaN(refundAmount) ||
-      refundAmount < 0 ||
-      (refundAmount > 0 && !returnRefundMethod) ||
-      returning
-    )
+    if (returnNote.trim().length < 5) {
+      setReturnError("Qaytarish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
+      requestAnimationFrame(() => document.getElementById('return-note')?.focus())
       return
+    }
+    if (Number.isNaN(refundAmount) || refundAmount < 0) {
+      setReturnError("Qaytarilgan summa manfiy bo'lishi mumkin emas")
+      requestAnimationFrame(() => document.getElementById('return-refund-amount')?.focus())
+      return
+    }
+    if (refundAmount > 0 && !returnRefundMethod) {
+      setReturnError('Pul qaytarilganda qaytarish usulini tanlang')
+      requestAnimationFrame(() => document.getElementById('return-refund-method')?.focus())
+      return
+    }
+    if (returning) return
     setReturning(true)
     setReturnError('')
     try {
@@ -578,7 +600,12 @@ function AuthorizedQurilmaDetailPage() {
   }
 
   async function handleRestockDevice() {
-    if (restockNote.trim().length < 5 || restocking) return
+    if (restockNote.trim().length < 5) {
+      setRestockError("Sabab kamida 5 ta belgidan iborat bo'lishi kerak")
+      requestAnimationFrame(() => document.getElementById('restock-note')?.focus())
+      return
+    }
+    if (restocking) return
     setRestocking(true)
     setRestockError('')
     try {
@@ -1057,7 +1084,7 @@ function AuthorizedQurilmaDetailPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 mt-2">
-              {canReceivePayment && (latestNasiya.status === 'ACTIVE' || latestNasiya.status === 'OVERDUE') && (
+              {canReceivePayment && latestNasiya.resolutionState === 'ACTIVE' && (latestNasiya.status === 'ACTIVE' || latestNasiya.status === 'OVERDUE') && (
                 <Button
                   onClick={() => setNasiyaPaymentOpen(true)}
                   className="text-sm font-semibold bg-zinc-900 text-white hover:bg-zinc-800 rounded shadow-sm"
@@ -1257,6 +1284,13 @@ function AuthorizedQurilmaDetailPage() {
                 className="h-10 rounded-lg border-zinc-200 text-sm"
               />
             </Field>
+            <ImageSelectionField
+              inputId="edit-device-images"
+              label="Qurilma rasmlari"
+              mode="multiple"
+              selection={editImageSelection}
+              disabled={editSaving}
+            />
             <Field label="Izoh">
               <Textarea
                 value={editForm.note}
@@ -1271,7 +1305,7 @@ function AuthorizedQurilmaDetailPage() {
               Bekor qilish
             </Button>
             <Button
-              disabled={editSaving}
+              disabled={editSaving || editImageSelection.hasBlockingErrors}
               onClick={handleEditSave}
               className="rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
             >
@@ -1563,7 +1597,7 @@ function AuthorizedQurilmaDetailPage() {
               </div>
             )}
 
-            <Field label="Izoh" required>
+            <Field label="Izoh" help="Ixtiyoriy">
               <Textarea
                 value={salePayNote}
                 onChange={(e) => setSalePayNote(e.target.value)}
@@ -1577,7 +1611,7 @@ function AuthorizedQurilmaDetailPage() {
               Bekor qilish
             </Button>
             <Button
-              disabled={!saleHasEffectiveAmount || !salePayMethod || salePayNote.trim().length < 5 || salePayLoading || !saleSplitValid}
+              disabled={!saleHasEffectiveAmount || !salePayMethod || salePayLoading || !saleSplitValid}
               onClick={handleSalePayment}
               className="bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
             >
@@ -1598,17 +1632,14 @@ function AuthorizedQurilmaDetailPage() {
               qaytarilgan pul va bekor qilingan qarz alohida qayd etiladi.
             </p>
             {returnError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{returnError}</div>}
-            <div>
-              <label htmlFor="return-note" className="text-xs font-medium text-zinc-700 block mb-1.5">
-                Sabab
-              </label>
+            <Field label="Sabab" required help="Kamida 5 ta belgi">
               <Textarea
                 id="return-note"
                 value={returnNote}
                 onChange={(e) => setReturnNote(e.target.value)}
                 className="text-sm border-zinc-200 rounded min-h-[80px]"
               />
-            </div>
+            </Field>
             <div>
               <label htmlFor="return-refund-amount" className="text-xs font-medium text-zinc-700 block mb-1.5">
                 Qaytarilgan summa ({currencyLabel(returnContractCurrency)})
@@ -1622,10 +1653,7 @@ function AuthorizedQurilmaDetailPage() {
                 className="h-9 text-sm border-zinc-200 rounded"
               />
             </div>
-            <div>
-              <label htmlFor="return-refund-method" className="text-xs font-medium text-zinc-700 block mb-1.5">
-                Qaytarish usuli {Number(returnRefundAmount || 0) > 0 && <span className="text-red-500">*</span>}
-              </label>
+            <Field label="Qaytarish usuli" required={Number(returnRefundAmount || 0) > 0}>
               <select
                 id="return-refund-method"
                 value={returnRefundMethod}
@@ -1639,19 +1667,14 @@ function AuthorizedQurilmaDetailPage() {
                 <option value="TRANSFER">Bank o'tkazmasi</option>
                 <option value="OTHER">Boshqa</option>
               </select>
-            </div>
+            </Field>
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setReturnModalOpen(false)} className="border-zinc-200 text-zinc-700 rounded">
               Bekor qilish
             </Button>
             <Button
-              disabled={
-                returnNote.trim().length < 5 ||
-                Number(returnRefundAmount || 0) < 0 ||
-                (Number(returnRefundAmount || 0) > 0 && !returnRefundMethod) ||
-                returning
-              }
+              disabled={returning}
               onClick={handleReturnDevice}
               className="bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-40"
             >
@@ -1671,10 +1694,7 @@ function AuthorizedQurilmaDetailPage() {
               Bu amal qaytarilgan qurilmani omborga qaytaradi va uni yana sotuvga tayyor holatga o&apos;tkazadi.
             </p>
             {restockError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{restockError}</div>}
-            <div>
-              <label htmlFor="restock-note" className="text-xs font-medium text-zinc-700 block mb-1.5">
-                Sabab <span className="text-red-500">*</span>
-              </label>
+            <Field label="Sabab" required help="Kamida 5 ta belgi">
               <Textarea
                 id="restock-note"
                 value={restockNote}
@@ -1682,7 +1702,7 @@ function AuthorizedQurilmaDetailPage() {
                 placeholder="Masalan: qurilma tekshirildi, soz holatda, qayta sotuvga qo'yildi"
                 className="text-sm border-zinc-200 rounded min-h-[80px]"
               />
-            </div>
+            </Field>
           </div>
           <DialogFooter className="gap-2">
             <Button
@@ -1697,7 +1717,7 @@ function AuthorizedQurilmaDetailPage() {
               Bekor qilish
             </Button>
             <Button
-              disabled={restockNote.trim().length < 5 || restocking}
+              disabled={restocking}
               onClick={handleRestockDevice}
               className="bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
             >

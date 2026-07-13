@@ -430,6 +430,7 @@ async function seedShop(superAdminId, index, shop) {
       type: notification.type,
       message: notification.message,
       telegramId: shop.telegramId || 'demo-telegram',
+      recipientShopAdminId: adminId,
       status: notification.status,
       scheduledAt: dateFromNow(notification.scheduledDays),
       sentAt: notification.status === 'SENT' ? dateFromNow(notification.scheduledDays) : null,

@@ -1,16 +1,26 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from '@testing-library/react'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { DeviceImagePicker } from '@/components/shop/device-image-picker'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
 import { NasiyaSchedulePreview } from '@/components/shop/nasiya-schedule-preview'
 import { ShopStatusBadge } from '@/components/admin/shop-status-badge'
 
 afterEach(cleanup)
 
+beforeEach(() => {
+  Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:accessibility-preview') })
+  Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() })
+})
+
+function ImageSelectionHarness() {
+  const selection = useImageSelection({ mode: 'multiple', uploadEndpoint: '/api/uploads/device' })
+  return <ImageSelectionField inputId="images" label="Rasmlar" mode="multiple" selection={selection} />
+}
+
 describe('extracted accessible presentation components', () => {
   it('associates the image picker label and help text with its file input', () => {
-    render(<DeviceImagePicker inputId="images" previews={[]} onChange={vi.fn()} onRemove={vi.fn()} />)
+    render(<ImageSelectionHarness />)
     const input = screen.getByLabelText('Rasm tanlash')
     expect(input.getAttribute('type')).toBe('file')
     expect(input.getAttribute('aria-describedby')).toBe('images-help')

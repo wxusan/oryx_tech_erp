@@ -13,6 +13,13 @@ describe('Serializable transaction retry classification', () => {
     })).toBe(true)
   })
 
+  it('recognizes Prisma pg-adapter serialization failures exposed only in text', () => {
+    expect(isRetryableTransactionError({
+      code: 'P2010',
+      meta: { driverAdapterError: { message: 'could not serialize access due to concurrent update (SQLSTATE 40001)' } },
+    })).toBe(true)
+  })
+
   it('does not retry validation, uniqueness, or unknown failures', () => {
     expect(isRetryableTransactionError({ code: 'P2002' })).toBe(false)
     expect(isRetryableTransactionError({ cause: { code: '23505' } })).toBe(false)

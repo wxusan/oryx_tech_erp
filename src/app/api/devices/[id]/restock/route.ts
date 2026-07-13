@@ -89,7 +89,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       // double-click that 409s never reaches here) and flushed after response.
       const shopAdmins = await tx.shopAdmin.findMany({
         where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
-        select: { telegramId: true },
+        select: { id: true, telegramId: true },
       })
       if (shopAdmins.length > 0) {
         const message = deviceRestockedMessage({
@@ -105,6 +105,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               type: 'RESTOCK',
               message,
               telegramId: admin.telegramId!,
+              recipientShopAdminId: admin.id,
               scheduledAt: new Date(),
               relatedId: deviceId,
               relatedType: 'Device',

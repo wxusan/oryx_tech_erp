@@ -17,6 +17,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Label } from '@/components/ui/label'
+import { Field } from '@/components/ui/field'
 import type { ApiResponse } from '@/types'
 
 interface EnvCheck {
@@ -162,6 +163,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
 
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
       setPasswordError('Yangi parol va tasdiq bir xil emas')
+      requestAnimationFrame(() => document.getElementById('admin-confirm-password')?.focus())
       return
     }
 
@@ -196,6 +198,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
     setNameSuccess('')
     if (name.trim().length < 2) {
       setNameError("Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      requestAnimationFrame(() => document.getElementById('admin-name')?.focus())
       return
     }
     setNameLoading(true)
@@ -259,6 +262,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
     const rate = Number(manualRate)
     if (!Number.isFinite(rate) || rate <= 0) {
       setRateError("USD kursi 0 dan katta bo'lishi kerak")
+      requestAnimationFrame(() => document.getElementById('manual-usd-rate')?.focus())
       return
     }
 
@@ -327,7 +331,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
                 <>
                   <form onSubmit={handleNameSubmit} className="space-y-3">
                     {nameError && (
-                      <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                      <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
                         {nameError}
                       </div>
                     )}
@@ -338,17 +342,14 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
                       </div>
                     )}
                     <div className="flex items-end gap-2">
-                      <div className="flex-1">
-                        <Label htmlFor="admin-name" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                          Ism
-                        </Label>
+                      <Field label="Ism" required controlId="admin-name" className="flex-1">
                         <Input
                           id="admin-name"
                           value={name}
                           onChange={(event) => setName(event.target.value)}
                           className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                         />
-                      </div>
+                      </Field>
                       <Button
                         type="submit"
                         disabled={nameLoading}
@@ -408,7 +409,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
             <CardContent>
               <form onSubmit={handleRateSubmit} className="max-w-xl space-y-4">
                 {rateError && (
-                  <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                  <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
                     {rateError}
                   </div>
                 )}
@@ -426,10 +427,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
                 </div>
 
                 <div className="flex items-end gap-2">
-                  <div className="flex-1">
-                    <Label htmlFor="manual-usd-rate" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                      1 USD uchun UZS
-                    </Label>
+                  <Field label="1 USD uchun UZS" required controlId="manual-usd-rate" className="flex-1">
                     <MoneyInput
                       id="manual-usd-rate"
                       value={manualRate}
@@ -437,7 +435,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
                       placeholder="12500"
                       className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                     />
-                  </div>
+                  </Field>
                   <Button
                     type="submit"
                     disabled={rateSaving || rateLoading}
@@ -462,7 +460,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
             <CardContent>
               <form onSubmit={handleTelegramSubmit} className="max-w-xl space-y-4">
                 {telegramError && (
-                  <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                  <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
                     {telegramError}
                   </div>
                 )}
@@ -584,10 +582,7 @@ function PasswordField({
   onChange: (value: string) => void
 }) {
   return (
-    <div>
-      <Label htmlFor={id} className="mb-1.5 block text-xs font-medium text-zinc-700">
-        {label}
-      </Label>
+    <Field label={label} required controlId={id}>
       <Input
         id={id}
         type="password"
@@ -597,6 +592,6 @@ function PasswordField({
         required
         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
       />
-    </div>
+    </Field>
   )
 }

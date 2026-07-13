@@ -40,9 +40,35 @@ const telegramIdInputSchema = z
   .optional()
   .or(z.literal(''))
 
-const deviceImageKeySchema = z
+const opaquePrivateReferencePattern = /^v1\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/
+
+function isPrivateUploadInput(value: string, kind: 'device' | 'passport') {
+  if (opaquePrivateReferencePattern.test(value)) return true
+
+  const storageDirectory = kind === 'device' ? 'devices' : 'passports'
+  if (new RegExp(`^shops/[^/]+/${storageDirectory}/[^/]+$`).test(value)) return true
+
+  if (!value.startsWith(`/api/uploads/${kind}?`)) return false
+  try {
+    const url = new URL(value, 'http://oryx.invalid')
+    const reference = url.searchParams.get('reference')
+    return url.origin === 'http://oryx.invalid' &&
+      url.pathname === `/api/uploads/${kind}` &&
+      url.searchParams.size === 1 &&
+      Boolean(reference && opaquePrivateReferencePattern.test(reference))
+  } catch {
+    return false
+  }
+}
+
+const privateUploadInputSchema = (kind: 'device' | 'passport', tooLongMessage: string) => z
   .string()
-  .regex(/^shops\/[^/]+\/devices\/[^/]+$/, 'Faqat Oryx private storage rasmi qabul qilinadi')
+  .trim()
+  .min(1)
+  .max(2_048, tooLongMessage)
+  .refine((value) => isPrivateUploadInput(value, kind), 'Rasm havolasi yaroqsiz')
+
+const deviceImageKeySchema = privateUploadInputSchema('device', 'Rasm havolasi juda uzun')
 
 const paymentMethodSchema = z.enum(['CASH', 'TRANSFER', 'CARD', 'OTHER'], {
   error: "To'lov usuli noto'g'ri",
@@ -76,14 +102,7 @@ const earlyReminderDaysSchema = z
   .max(60, "Ko'pi bilan 60 kun bo'lishi mumkin")
   .optional()
 
-const privateFileKeySchema = z
-  .string()
-  .trim()
-  .min(1)
-  .regex(/^shops\/[^/]+\/passports\/[^/]+$/, "Pasport rasmi private storage kaliti noto'g'ri")
-  .refine((value) => !/^https?:\/\//i.test(value), {
-    message: "Pasport rasmi public URL bo'lmasligi kerak",
-  })
+const privateFileKeySchema = privateUploadInputSchema('passport', 'Pasport rasmi havolasi juda uzun')
 
 // ---------------------------------------------------------------------------
 // createShopSchema
@@ -124,16 +143,24 @@ export const createShopSchema = z.object({
     .min(1, "Kamida bitta admin qo'shilishi shart")
     .max(20, "Ko'pi bilan 20 ta admin qo'shish mumkin"),
 }).superRefine((value, context) => {
-  if (value.accessMode === 'OWNER_ONLY' && value.admins.length !== 1) {
+  const accessMode = value.accessMode ?? (value.admins.length > 1 ? 'OWNER_AND_STAFF' : 'OWNER_ONLY')
+  if (accessMode === 'OWNER_ONLY' && value.admins.length !== 1) {
     context.addIssue({
       code: 'custom',
       path: ['admins'],
       message: "Faqat do'kon egasi rejimida aynan bitta kirish profili bo'lishi kerak",
     })
   }
-  if (value.accessMode && value.package) {
+  if (accessMode === 'OWNER_AND_STAFF' && value.admins.length < 2) {
+    context.addIssue({
+      code: 'custom',
+      path: ['admins'],
+      message: "Egasi va xodimlar rejimida kamida ikkita kirish profili bo'lishi kerak",
+    })
+  }
+  if (value.package) {
     const staffEnabled = value.package.features.find((item) => item.featureCode === 'STAFF_ACCESS')?.enabled
-    const expected = value.accessMode === 'OWNER_AND_STAFF'
+    const expected = accessMode === 'OWNER_AND_STAFF'
     if (staffEnabled !== expected) {
       context.addIssue({
         code: 'custom',
@@ -155,7 +182,11 @@ export const addDeviceSchema = z.object({
     .string({ error: "Model kiritilishi shart" })
     .min(1, "Model bo'sh bo'lmasligi kerak")
     .max(120, "Model 120 ta belgidan oshmasligi kerak"),
-  color: z.string().max(50, "Rang 50 ta belgidan oshmasligi kerak").optional(),
+  color: z
+    .string({ error: "Rang kiritilishi shart" })
+    .trim()
+    .min(1, "Rang kiritilishi shart")
+    .max(50, "Rang 50 ta belgidan oshmasligi kerak"),
   storageAmount: z.number().positive("Xotira hajmi 0 dan katta bo'lishi kerak"),
   storageUnit: z.enum(['GB', 'TB']),
   conditionCode: z.enum(['NEW', 'USED'], { error: "Qurilma holati tanlanishi shart" }),
@@ -192,11 +223,14 @@ export type AddDeviceInput = z.infer<typeof addDeviceSchema>
 export const createSaleSchema = z
   .object({
     deviceId: z.string({ error: "Qurilma ID kiritilishi shart" }).min(1),
+    customerMode: z.enum(['EXISTING', 'NEW']).optional().default('NEW'),
+    customerId: z.string().min(1).optional(),
     customerName: z
-      .string({ error: "Xaridor ismi kiritilishi shart" })
+      .string()
       .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
-      .max(100, "Ism 100 ta belgidan oshmasligi kerak"),
-    customerPhone: phoneSchema,
+      .max(100, "Ism 100 ta belgidan oshmasligi kerak")
+      .optional(),
+    customerPhone: phoneSchema.optional(),
     salePrice: z
       .number({ error: "Sotish narxi kiritilishi shart" })
       .positive("Narx musbat son bo'lishi kerak"),
@@ -209,6 +243,14 @@ export const createSaleSchema = z
     earlyReminderDays: earlyReminderDaysSchema,
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
     inputCurrency: currencyCodeSchema.optional(),
+  })
+  .refine((data) => data.customerMode !== 'EXISTING' || Boolean(data.customerId), {
+    message: 'Mavjud mijoz tanlanishi shart',
+    path: ['customerId'],
+  })
+  .refine((data) => data.customerMode !== 'NEW' || Boolean(data.customerName && data.customerPhone), {
+    message: "Yangi mijozning ismi va telefoni kiritilishi shart",
+    path: ['customerName'],
   })
   .refine(
     (data) => {
@@ -280,12 +322,15 @@ export type AddSalePaymentInput = z.infer<typeof addSalePaymentSchema>
 export const createNasiyaSchema = z
   .object({
     deviceId: z.string({ error: "Qurilma ID kiritilishi shart" }).min(1),
+    customerMode: z.enum(['EXISTING', 'NEW']).optional().default('NEW'),
+    customerId: z.string().min(1).optional(),
     customerName: z
-      .string({ error: "Xaridor ismi kiritilishi shart" })
+      .string()
       .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
-      .max(100, "Ism 100 ta belgidan oshmasligi kerak"),
-    customerPhone: phoneSchema,
-    passportPhotoUrl: privateFileKeySchema,
+      .max(100, "Ism 100 ta belgidan oshmasligi kerak")
+      .optional(),
+    customerPhone: phoneSchema.optional(),
+    passportPhotoUrl: privateFileKeySchema.optional(),
     totalAmount: z
       .number({ error: "Umumiy summa kiritilishi shart" })
       .positive("Summa musbat son bo'lishi kerak"),
@@ -318,6 +363,18 @@ export const createNasiyaSchema = z
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
     inputCurrency: currencyCodeSchema.optional(),
   })
+  .refine((data) => data.customerMode !== 'EXISTING' || Boolean(data.customerId), {
+    message: 'Mavjud mijoz tanlanishi shart',
+    path: ['customerId'],
+  })
+  .refine((data) => data.customerMode !== 'NEW' || Boolean(data.customerName && data.customerPhone), {
+    message: "Yangi mijozning ismi va telefoni kiritilishi shart",
+    path: ['customerName'],
+  })
+  .refine((data) => data.customerMode !== 'NEW' || Boolean(data.passportPhotoUrl), {
+    message: 'Yangi nasiya mijozining pasport rasmi kiritilishi shart',
+    path: ['passportPhotoUrl'],
+  })
   .refine((data) => data.downPayment <= data.totalAmount, {
     message: "Boshlang'ich to'lov umumiy summadan oshmasligi kerak",
     path: ['downPayment'],
@@ -348,6 +405,7 @@ export const importNasiyaSchema = z
       .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
       .max(100, "Ism 100 ta belgidan oshmasligi kerak"),
     customerPhone: phoneSchema,
+    passportPhotoUrl: privateFileKeySchema.optional(),
     deviceModel: z.string({ error: "Qurilma nomi kiritilishi shart" }).min(1, "Qurilma nomi kiritilishi shart").max(120),
     imei: z.string().trim().refine((value) => !value || isValidImei(value), "IMEI 15 ta raqamdan iborat bo'lishi kerak").optional(),
     secondaryImei: z.string().trim().refine((value) => !value || isValidImei(value), "Ikkinchi IMEI 15 ta raqamdan iborat bo'lishi kerak").optional(),
@@ -405,37 +463,41 @@ export const addNasiyaPaymentSchema = z
       .min(1),
     amount: z
       .number({ error: "To'lov summasi kiritilishi shart" })
-      .min(0, "Summa manfiy bo'lmasligi kerak"),
-    paymentMethod: paymentMethodSchema.optional(),
+      .positive("To'lov summasi musbat son bo'lishi kerak"),
+    paymentMethod: paymentMethodSchema,
     paymentBreakdown: paymentBreakdownSchema,
     date: z.coerce.date({ error: "To'lov sanasi kiritilishi shart" }),
-    delayedUntil: z.coerce.date().optional(),
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
-    deferredToNext: z.boolean().optional().default(false),
     inputCurrency: currencyCodeSchema.optional(),
-  })
-  .refine((data) => data.deferredToNext || data.amount > 0, {
-    message: "To'lov summasi musbat son bo'lishi kerak",
-    path: ['amount'],
-  })
-  .refine((data) => data.deferredToNext || data.paymentMethod !== undefined, {
-    message: "To'lov usuli kiritilishi shart",
-    path: ['paymentMethod'],
-  })
-  .refine((data) => !data.deferredToNext || (data.note?.trim().length ?? 0) >= 5, {
-    message: "Kechiktirish sababi kamida 5 ta belgidan iborat bo'lishi kerak",
-    path: ['note'],
-  })
-  .refine((data) => !data.deferredToNext || data.delayedUntil !== undefined, {
-    message: "Yangi to'lov sanasi kiritilishi shart",
-    path: ['delayedUntil'],
-  })
-  .refine((data) => !data.deferredToNext || data.amount === 0, {
-    message: "Muddat uzaytirilganda to'lov summasi 0 bo'lishi kerak",
-    path: ['amount'],
   })
 
 export type AddNasiyaPaymentInput = z.infer<typeof addNasiyaPaymentSchema>
+
+// Deferral is deliberately a separate command from payment. It has no amount,
+// payment method, or payment breakdown and therefore cannot accidentally write
+// money through the payment endpoint.
+export const deferNasiyaScheduleSchema = z.object({
+  nasiyaScheduleId: z.string({ error: "Jadval ID kiritilishi shart" }).min(1),
+  newDueDate: z.coerce.date({ error: "Yangi to'lov sanasi kiritilishi shart" }),
+  reason: z
+    .string({ error: "Kechiktirish sababi kiritilishi shart" })
+    .trim()
+    .min(5, "Kechiktirish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
+    .max(1000, "Kechiktirish sababi 1000 ta belgidan oshmasligi kerak"),
+})
+
+export type DeferNasiyaScheduleInput = z.infer<typeof deferNasiyaScheduleSchema>
+
+export const resolveNasiyaSchema = z.object({
+  action: z.enum(['ARCHIVE', 'WRITE_OFF', 'REOPEN']),
+  reason: z
+    .string({ error: "Sabab kiritilishi shart" })
+    .trim()
+    .min(5, "Sabab kamida 5 ta belgidan iborat bo'lishi kerak")
+    .max(1000, "Sabab 1000 ta belgidan oshmasligi kerak"),
+})
+
+export type ResolveNasiyaInput = z.infer<typeof resolveNasiyaSchema>
 
 // ---------------------------------------------------------------------------
 // addShopPaymentSchema
@@ -496,11 +558,14 @@ export const createOlibSotdimSchema = z
     earlyReminderDays: earlyReminderDaysSchema,
 
     // Section 3 — customer ("kimga sotildi")
+    customerMode: z.enum(['EXISTING', 'NEW']).optional().default('NEW'),
+    customerId: z.string().min(1).optional(),
     customerName: z
-      .string({ error: "Xaridor ismi kiritilishi shart" })
+      .string()
       .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
-      .max(100, "Ism 100 ta belgidan oshmasligi kerak"),
-    customerPhone: phoneSchema,
+      .max(100, "Ism 100 ta belgidan oshmasligi kerak")
+      .optional(),
+    customerPhone: phoneSchema.optional(),
 
     // Section 4 — sale to the customer (mirrors createSaleSchema)
     salePrice: z
@@ -513,6 +578,14 @@ export const createOlibSotdimSchema = z
     customerReminderEnabled: z.boolean().optional().default(false),
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
     inputCurrency: currencyCodeSchema.optional(),
+  })
+  .refine((data) => data.customerMode !== 'EXISTING' || Boolean(data.customerId), {
+    message: 'Mavjud mijoz tanlanishi shart',
+    path: ['customerId'],
+  })
+  .refine((data) => data.customerMode !== 'NEW' || Boolean(data.customerName && data.customerPhone), {
+    message: "Yangi mijozning ismi va telefoni kiritilishi shart",
+    path: ['customerName'],
   })
   .refine((data) => !data.secondaryImei || data.secondaryImei.replace(/[\s-]/g, '') !== data.imei.replace(/[\s-]/g, ''), {
     message: "Asosiy va ikkinchi IMEI bir xil bo'lishi mumkin emas",

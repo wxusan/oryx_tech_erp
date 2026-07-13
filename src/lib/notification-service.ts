@@ -29,6 +29,7 @@ function nextAttemptDelayMs(attemptCount: number, retryAfterSeconds?: number): n
 
 interface QueueNotificationParams {
   shopId: string
+  recipientShopAdminId: string
   type: string
   message: string
   telegramId: string
@@ -45,6 +46,7 @@ export async function queueNotification(params: QueueNotificationParams, options
     const notification = await prisma.notification.create({
       data: {
         shopId: params.shopId,
+        recipientShopAdminId: params.recipientShopAdminId,
         type: params.type,
         message: params.message,
         telegramId: params.telegramId,
@@ -131,8 +133,12 @@ function telegramEligibilitySelect() {
 
 type TelegramEligibleAdmin = Prisma.ShopAdminGetPayload<{ select: ReturnType<typeof telegramEligibilitySelect> }>
 
+function enabledFeaturesForAdmin(admin: TelegramEligibleAdmin) {
+  return new Set(admin.shop.packageVersions[0]?.features.filter((feature) => feature.enabled).map((feature) => feature.featureCode) ?? [])
+}
+
 function telegramAdminIsEligible(admin: TelegramEligibleAdmin) {
-  const enabled = new Set(admin.shop.packageVersions[0]?.features.filter((feature) => feature.enabled).map((feature) => feature.featureCode) ?? [])
+  const enabled = enabledFeaturesForAdmin(admin)
   if (!admin.shop.telegramNotificationsEnabled || !enabled.has('TELEGRAM')) return false
   return admin.id === admin.shop.ownerAdminId || enabled.has('STAFF_ACCESS')
 }
@@ -145,9 +151,11 @@ function telegramAdminIsEligible(admin: TelegramEligibleAdmin) {
  * cancelled when that debt is no longer active.
  */
 async function preDeliveryCancellationReason(notification: PendingNotification): Promise<string | null> {
+  if (!notification.recipientShopAdminId) return 'legacy_recipient_unbound'
   const recipient = await prisma.shopAdmin.findFirst({
     where: {
       shopId: notification.shopId,
+      id: notification.recipientShopAdminId,
       telegramId: notification.telegramId,
       telegramVerifiedAt: { not: null },
       telegramNotificationsEnabled: true,
@@ -159,6 +167,10 @@ async function preDeliveryCancellationReason(notification: PendingNotification):
   })
   if (!recipient) return 'recipient_revoked_or_unverified'
   if (!telegramAdminIsEligible(recipient)) return 'recipient_not_entitled_or_notifications_disabled'
+  if (
+    (NASIYA_REMINDER_TYPES.has(notification.type) || SALE_REMINDER_TYPES.has(notification.type) || SUPPLIER_REMINDER_TYPES.has(notification.type)) &&
+    !enabledFeaturesForAdmin(recipient).has('REMINDERS')
+  ) return 'reminders_not_entitled'
 
   if (NASIYA_REMINDER_TYPES.has(notification.type)) {
     if (notification.relatedType !== 'NasiyaSchedule' || !notification.relatedId) {
@@ -180,6 +192,7 @@ async function preDeliveryCancellationReason(notification: PendingNotification):
           nasiya: {
             select: {
               status: true,
+              resolutionState: true,
               reminderEnabled: true,
               remainingAmount: true,
               contractRemainingAmount: true,
@@ -209,6 +222,7 @@ async function preDeliveryCancellationReason(notification: PendingNotification):
     const active = schedule
       && ['PENDING', 'PARTIAL', 'DEFERRED', 'OVERDUE'].includes(schedule.status)
       && ['ACTIVE', 'OVERDUE'].includes(schedule.nasiya.status)
+      && schedule.nasiya.resolutionState === 'ACTIVE'
       && schedule.nasiya.reminderEnabled
       && !schedule.nasiya.returnedAt
       && !schedule.nasiya.deletedAt
@@ -534,7 +548,15 @@ export async function notifyShopAdmins(shopId: string, message: string, type: st
       logger.info('no verified telegram admins for shop', { event: 'notification.no_recipients', shopId, status: type })
       return
     }
-    const queued = await Promise.all(targets.map((admin) => queueNotification({ shopId, type, message, telegramId: admin.telegramId, relatedId, relatedType }, { processImmediately: false })))
+    const queued = await Promise.all(targets.map((admin) => queueNotification({
+      shopId,
+      recipientShopAdminId: admin.id,
+      type,
+      message,
+      telegramId: admin.telegramId,
+      relatedId,
+      relatedType,
+    }, { processImmediately: false })))
     const delivery = await processPendingNotifications()
     const broadcastOk = queued.every(Boolean) && delivery.ok
     logger.info('queued notification for shop admins', { event: 'notification.broadcast', shopId, status: broadcastOk ? 'ok' : 'partial', notificationType: type, attempt: targets.length, queued: queued.filter(Boolean).length, delivery })

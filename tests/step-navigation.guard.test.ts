@@ -38,7 +38,9 @@ describe('cash sale: back navigation and phone validation', () => {
   const src = read(SOTUV)
 
   it('validates phone format on submit and shows it inline (not only server-side)', () => {
-    expect(src).toContain('if (!isValidPhone(customerPhone)) {')
+    // Existing customers have already passed canonical server-side identity
+    // validation. Only the explicit create-new path owns editable phone input.
+    expect(src).toMatch(/if \(customerMode === 'NEW' && !isValidPhone\(customerPhone\)\) \{/)
     expect(src).toContain('setPhoneError(PHONE_ERROR)')
     expect(src).toContain('phoneRef.current?.focus()')
     // Inline error element under the phone input.

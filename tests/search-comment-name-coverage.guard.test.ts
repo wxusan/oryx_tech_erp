@@ -16,14 +16,23 @@ function read(rel: string): string {
  * in this repo).
  */
 describe('server-side search covers note/comment fields', () => {
-  it('GET /api/customers searches the customer note field', () => {
-    const source = read('src/app/api/customers/route.ts')
-    expect(source).toMatch(/\{\s*note:\s*\{\s*contains:\s*search/)
+  it('POST /api/customers/search searches the customer note field', () => {
+    const route = read('src/app/api/customers/search/route.ts')
+    const query = read('src/lib/server/customer-list.ts')
+    const helper = read('src/lib/server/customer-search.ts')
+    expect(route).toContain('getCustomerList({')
+    expect(query).toContain('customerSearchWhere(input.shopId, input.search, { includeNote: true })')
+    expect(helper).toMatch(/options\.includeNote\s*\?\s*\[\{\s*note:\s*\{\s*contains:\s*search/)
+    expect(helper).toContain('shopId,')
+    expect(helper).toContain('deletedAt: null')
   })
 
   it('GET /api/devices searches the device note field', () => {
     const source = read('src/lib/server/shop-lists.ts')
     expect(source).toMatch(/\{\s*note:\s*\{\s*contains:\s*search/)
+    expect(source).toMatch(/supplier:\s*\{\s*name:\s*\{\s*contains:\s*search/)
+    const route = read('src/app/api/devices/route.ts')
+    expect(route).toContain("buildShopDevicesWhere(shopId, { search, status: 'IN_STOCK' })")
   })
 
   it('GET /api/nasiya searches the nasiya note field', () => {
@@ -56,9 +65,15 @@ describe('server-side search covers customer name (item 14)', () => {
 })
 
 describe('server-side search matches additional customer phones (item 4)', () => {
-  it('GET /api/customers matches additionalPhones', () => {
-    const source = read('src/app/api/customers/route.ts')
-    expect(source).toContain("additionalPhones: { has: searchDigits }")
+  it('POST /api/customers/search matches additionalPhones', () => {
+    const route = read('src/app/api/customers/search/route.ts')
+    const query = read('src/lib/server/customer-list.ts')
+    const helper = read('src/lib/server/customer-search.ts')
+    expect(route).toContain('getCustomerList({')
+    expect(query).toContain('customerSearchWhere(input.shopId, input.search, { includeNote: true })')
+    expect(helper).toContain('additionalPhones: { has: digits }')
+    expect(helper).toContain('shopId,')
+    expect(helper).toContain('deletedAt: null')
   })
 
   it('GET /api/devices matches additionalPhones on the sale/nasiya customer', () => {

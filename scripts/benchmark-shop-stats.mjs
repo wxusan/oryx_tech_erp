@@ -73,6 +73,13 @@ const obligationCount = boundedInteger(
 )
 const iterations = boundedInteger(process.env.PERF_ITERATIONS, DEFAULT_ITERATIONS, 1, 20)
 const maxMedianMs = boundedInteger(process.env.PERF_MAX_MEDIAN_MS, 2_000, 1, 60_000)
+const seedStatementTimeoutMs = boundedInteger(
+  process.env.PERF_SEED_STATEMENT_TIMEOUT_MS,
+  300_000,
+  120_000,
+  600_000,
+)
+const skipFixtureConstraints = process.env.PERF_SKIP_FIXTURE_CONSTRAINTS === 'yes'
 const saleCount = Math.floor(obligationCount / 2)
 const nasiyaCount = obligationCount - saleCount
 
@@ -362,7 +369,10 @@ let rolledBack = false
 try {
   await client.connect()
   const version = await client.query('SELECT version() AS version')
-  await client.query("SET statement_timeout = '120s'")
+  // The 100k relational fixture can spend more than two minutes in FK checks
+  // on developer hardware. This setting is scoped to the disposable benchmark
+  // connection only and is reduced again before measuring application reads.
+  await client.query(`SET statement_timeout = '${seedStatementTimeoutMs}ms'`)
   await client.query("SET lock_timeout = '5s'")
   await client.query('BEGIN')
 
@@ -381,6 +391,15 @@ try {
     INSERT INTO "Customer" ("id", "shopId", "name", "phone", "normalizedPhone", "createdAt")
     VALUES ($1, $2, 'Performance customer', '+998909999999', '998909999999', $3)
   `, [customerId, shopId, benchmarkNow])
+
+  // PostgreSQL performs every row-level FK check during the set-based fixture
+  // inserts. On 100k rows that setup work can dominate the actual read
+  // benchmark. A deliberately explicit, superuser-only local switch may skip
+  // those checks for this deterministic disposable fixture; measured queries
+  // always run again with normal trigger behavior restored.
+  if (skipFixtureConstraints) {
+    await client.query("SET LOCAL session_replication_role = 'replica'")
+  }
 
   const seedStartedAt = performance.now()
   await client.query(`
@@ -491,8 +510,12 @@ try {
     FROM generate_series(1, $4) AS g
   `, [shopId, todayStart, monthStart, nasiyaCount])
 
+  if (skipFixtureConstraints) {
+    await client.query("SET LOCAL session_replication_role = 'origin'")
+  }
   await client.query('ANALYZE "Device", "Sale", "Nasiya", "NasiyaSchedule"')
   const seedMs = performance.now() - seedStartedAt
+  await client.query("SET statement_timeout = '120s'")
 
   const counts = await client.query(`
     SELECT
@@ -568,6 +591,7 @@ try {
       schedules: nasiyaCount,
       seedMs: Number(seedMs.toFixed(3)),
       transactionPolicy: 'rollback-on-exit',
+      fixtureConstraints: skipFixtureConstraints ? 'explicitly-skipped-for-disposable-seed' : 'enforced',
     },
     policy: {
       iterations,

@@ -9,6 +9,8 @@ import { normalizePhone, normalizeAdditionalPhones } from '@/lib/phone'
 import { phoneSchema } from '@/lib/validations'
 import { logger } from '@/lib/logger'
 import { computeCustomerTrustRating, isValidTrustTier, type CustomerNasiyaInput } from '@/lib/nasiya-customer-trust'
+import { isValidPassportIdentifier, passportIdentifierStorage } from '@/lib/customer-passport'
+import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -20,6 +22,8 @@ const updateCustomerSchema = z.object({
   reason: z.string().optional(),
   shopId: z.string().optional(),
   trustOverride: z.enum(['NEW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH']).nullable().optional(),
+  passportIdentifier: z.string().trim().max(64).refine(isValidPassportIdentifier, "Pasport seriya/raqami noto'g'ri").nullable().optional(),
+  passportPhotoUrl: z.string().max(500).nullable().optional(),
 })
 
 export async function GET(_req: NextRequest, ctx: RouteContext) {
@@ -41,6 +45,8 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         phone: true,
         phoneNormalizationNeedsReview: true,
         additionalPhones: true,
+        passportIdentifierLast4: true,
+        passportPhotoUrl: true,
         note: true,
         createdAt: true,
         trustOverride: true,
@@ -48,6 +54,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
           where: { deletedAt: null },
           select: {
             status: true,
+            resolutionState: true,
             contractCurrency: true,
             schedules: {
               select: {
@@ -67,6 +74,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     const nasiyaInputs: CustomerNasiyaInput[] = customer.nasiya.map((n) => ({
       status: n.status,
+      resolutionState: n.resolutionState,
       contractCurrency: n.contractCurrency,
       schedules: n.schedules.map((s) => ({
         status: s.status,
@@ -82,7 +90,14 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     const { nasiya, ...customerFields } = customer
     void nasiya
-    return ok({ ...customerFields, trust }, "Mijoz ma'lumotlari")
+    return ok({
+      ...customerFields,
+      passportMasked: customerFields.passportIdentifierLast4 ? `••••${customerFields.passportIdentifierLast4}` : null,
+      hasPassportPhoto: Boolean(customerFields.passportPhotoUrl),
+      passportIdentifierLast4: undefined,
+      passportPhotoUrl: undefined,
+      trust,
+    }, "Mijoz ma'lumotlari")
   } catch (err) {
     logger.error('[GET /api/customers/[id]]', { event: 'api.route_error', error: err })
     return serverError()
@@ -110,6 +125,19 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       where: { id, shopId: resolved.shopId, deletedAt: null },
     })
     if (!existing) return notFound('Mijoz topilmadi')
+    const passportPhotoKey = parsed.data.passportPhotoUrl === undefined
+      ? undefined
+      : parsed.data.passportPhotoUrl === null
+        ? null
+        : resolvePrivateUploadReference({
+            value: parsed.data.passportPhotoUrl,
+            shopId: resolved.shopId,
+            kind: 'passport',
+            allowLegacyRawKey: true,
+          })
+    if (parsed.data.passportPhotoUrl && !passportPhotoKey) {
+      return badRequest("Pasport rasmi boshqa do'konga tegishli yoki havola muddati tugagan")
+    }
 
     const identityChanged =
       (parsed.data.name !== undefined && parsed.data.name !== existing.name) ||
@@ -127,6 +155,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     }
 
     const nextPrimaryPhone = parsed.data.phone !== undefined ? parsed.data.phone : existing.phone
+    const passportUpdate = parsed.data.passportIdentifier === undefined
+      ? {}
+      : parsed.data.passportIdentifier === null
+        ? {
+            passportIdentifierCiphertext: null,
+            passportIdentifierHash: null,
+            passportIdentifierLast4: null,
+            passportIdentifierKeyVersion: null,
+          }
+        : passportIdentifierStorage(parsed.data.passportIdentifier)
     const customerUpdate = {
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
       ...(parsed.data.phone !== undefined
@@ -139,6 +177,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       // Item 12 — optional admin override of the computed trust tier; empty
       // string from a "no override" select option is normalized to null.
       ...(parsed.data.trustOverride !== undefined ? { trustOverride: parsed.data.trustOverride } : {}),
+      ...(passportPhotoKey !== undefined ? { passportPhotoUrl: passportPhotoKey } : {}),
+      ...passportUpdate,
     }
 
     const customer = await prisma.$transaction(async (tx) => {
@@ -152,6 +192,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
           phone: true,
           phoneNormalizationNeedsReview: true,
           additionalPhones: true,
+          passportIdentifierLast4: true,
+          passportPhotoUrl: true,
           trustOverride: true,
           note: true,
           createdAt: true,
@@ -167,13 +209,27 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
           targetId: id,
           oldValue: { name: existing.name, phone: existing.phone, note: existing.note },
           newValue: {
-            ...customerUpdate,
+            ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+            ...(parsed.data.phone !== undefined ? { phone: parsed.data.phone } : {}),
+            ...(parsed.data.additionalPhones !== undefined ? { additionalPhoneCount: updated.additionalPhones.length } : {}),
+            ...(parsed.data.note !== undefined ? { note: parsed.data.note } : {}),
+            ...(parsed.data.trustOverride !== undefined ? { trustOverride: parsed.data.trustOverride } : {}),
+            ...(parsed.data.passportIdentifier !== undefined
+              ? { passportIdentifierChanged: true, passportMasked: updated.passportIdentifierLast4 ? `••••${updated.passportIdentifierLast4}` : null }
+              : {}),
+            ...(parsed.data.passportPhotoUrl !== undefined ? { hasPassportPhoto: Boolean(updated.passportPhotoUrl) } : {}),
             ...(identityChangeReason ? { identityChangeReason } : {}),
           },
           note: identityChangeReason,
         },
       })
-      return updated
+      return {
+        ...updated,
+        passportMasked: updated.passportIdentifierLast4 ? `••••${updated.passportIdentifierLast4}` : null,
+        hasPassportPhoto: Boolean(updated.passportPhotoUrl),
+        passportIdentifierLast4: undefined,
+        passportPhotoUrl: undefined,
+      }
     })
 
     invalidateShopCustomerMutation(resolved.shopId)
@@ -181,7 +237,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     return ok(customer, 'Mijoz yangilandi')
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      return conflict('Bu telefon raqam bilan faol mijoz allaqachon mavjud')
+      return conflict('Bu telefon yoki pasport bilan faol mijoz allaqachon mavjud')
     }
     logger.error('[PATCH /api/customers/[id]]', { event: 'api.route_error', error: err })
     return serverError()

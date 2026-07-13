@@ -196,6 +196,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
         select: packageVersionSelect,
       })
       const lockedStaffEnabled = staffEnabled(lockedCurrent)
+      const lockedEnabledFeatures = new Set<string>(
+        lockedCurrent?.features.filter((feature) => feature.enabled).map((feature) => feature.featureCode) ?? [],
+      )
+      const nextEnabledFeatures = new Set<string>(
+        parsed.data.features.filter((feature) => feature.enabled).map((feature) => feature.featureCode),
+      )
+      const entitlementsChanged = lockedEnabledFeatures.size !== nextEnabledFeatures.size ||
+        [...lockedEnabledFeatures].some((feature) => !nextEnabledFeatures.has(feature))
       const lockedStaffChanged = lockedCurrent !== null && lockedStaffEnabled !== nextStaffEnabled
       if (lockedStaffChanged && parsed.data.effectiveOn !== today) {
         throw Object.assign(new Error('STAFF_DATE_INVALID'), { code: 'STAFF_DATE_INVALID' })
@@ -233,6 +241,12 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
       if (parsed.data.effectiveOn === today) {
         await tx.shop.update({ where: { id }, data: { authorizationVersion: { increment: 1 } } })
+        if (entitlementsChanged) {
+          await tx.authSession.updateMany({
+            where: { actorType: 'SHOP_ADMIN', shopId: id, revokedAt: null },
+            data: { revokedAt: new Date() },
+          })
+        }
       }
 
       if (lockedStaffChanged && !nextStaffEnabled) {

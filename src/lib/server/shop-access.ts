@@ -1,4 +1,4 @@
-import type { Prisma } from '@/generated/prisma/client'
+import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import {
   calculateRecurringPackagePrice,
@@ -130,4 +130,27 @@ export function principalHasFeature(principal: ShopPrincipal, feature: ShopFeatu
 
 export function principalHasPermission(principal: ShopPrincipal, permission: ShopPermissionCode) {
   return principalCan(principal, permission)
+}
+
+/** One set-based query for cron/domain jobs that need the currently active package entitlement. */
+export async function activeShopIdsForFeature(feature: ShopFeatureCode, now = new Date()) {
+  const businessDayValue = businessDate(tashkentTodayInputValue(now))
+  const rows = await prisma.$queryRaw<Array<{ shopId: string }>>(Prisma.sql`
+    SELECT shop."id" AS "shopId"
+    FROM "Shop" shop
+    JOIN LATERAL (
+      SELECT package."id"
+      FROM "ShopPackageVersion" package
+      WHERE package."shopId" = shop."id"
+        AND package."effectiveOn" <= ${businessDayValue}
+      ORDER BY package."effectiveOn" DESC, package."createdAt" DESC
+      LIMIT 1
+    ) active_package ON TRUE
+    JOIN "ShopPackageFeature" feature_line
+      ON feature_line."packageVersionId" = active_package."id"
+     AND feature_line."featureCode" = ${feature}
+     AND feature_line."enabled" = TRUE
+    WHERE shop."status" = 'ACTIVE' AND shop."deletedAt" IS NULL
+  `)
+  return new Set(rows.map((row) => row.shopId))
 }

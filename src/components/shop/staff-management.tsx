@@ -67,6 +67,7 @@ export function StaffManagement() {
   const [form, setForm] = useState<StaffForm>(emptyForm)
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
+  const [submitted, setSubmitted] = useState(false)
   const staffQuery = useQuery({
     queryKey: [...queryKeys.domain(scope, 'access'), 'staff'],
     queryFn: async ({ signal }) => {
@@ -92,6 +93,7 @@ export function StaffManagement() {
     setEditing(null)
     setForm(emptyForm)
     setFormError('')
+    setSubmitted(false)
     setDialogOpen(true)
   }
 
@@ -109,6 +111,7 @@ export function StaffManagement() {
       note: '',
     })
     setFormError('')
+    setSubmitted(false)
     setDialogOpen(true)
   }
 
@@ -121,8 +124,14 @@ export function StaffManagement() {
     }))
   }
 
-  async function save() {
-    if (!valid) return
+  async function save(event?: React.FormEvent<HTMLFormElement>) {
+    event?.preventDefault()
+    setSubmitted(true)
+    if (!valid) {
+      setFormError("Majburiy maydonlarni tekshiring")
+      requestAnimationFrame(() => document.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus())
+      return
+    }
     setSaving(true)
     setFormError('')
     try {
@@ -215,12 +224,13 @@ export function StaffManagement() {
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
           <DialogHeader><DialogTitle>{editing ? 'Xodimni boshqarish' : "Yangi xodim qo'shish"}</DialogTitle></DialogHeader>
-          {formError && <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{formError}</div>}
+          <form onSubmit={(event) => void save(event)} className="space-y-4" noValidate>
+          {formError && <div role="alert" className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{formError}</div>}
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Ism" required><Input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></Field>
-            <Field label="Telefon" required><PhoneInput value={form.phone} onChange={(phone) => setForm((current) => ({ ...current, phone }))} /></Field>
-            <Field label="Login" required={!editing}><Input disabled={Boolean(editing)} value={form.login} onChange={(event) => setForm((current) => ({ ...current, login: event.target.value }))} /></Field>
-            <Field label={editing ? 'Yangi parol (ixtiyoriy)' : 'Parol'} required={!editing}><Input type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="Kamida 10 ta belgi" /></Field>
+            <Field controlId="staff-name" label="Ism" required error={submitted && form.name.trim().length < 2 ? "Ism kamida 2 ta belgidan iborat bo'lishi kerak" : undefined}><Input value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></Field>
+            <Field controlId="staff-phone" label="Telefon" required error={submitted && !isValidPhone(form.phone) ? "Telefon raqami noto'g'ri" : undefined}><PhoneInput value={form.phone} onChange={(phone) => setForm((current) => ({ ...current, phone }))} /></Field>
+            <Field controlId="staff-login" label="Login" required={!editing} error={submitted && !editing && form.login.trim().length < 3 ? "Login kamida 3 ta belgidan iborat bo'lishi kerak" : undefined}><Input disabled={Boolean(editing)} value={form.login} onChange={(event) => setForm((current) => ({ ...current, login: event.target.value }))} /></Field>
+            <Field controlId="staff-password" label={editing ? 'Yangi parol (ixtiyoriy)' : 'Parol'} required={!editing} error={submitted && ((!editing && form.password.length < 10) || (Boolean(editing) && Boolean(form.password) && form.password.length < 10)) ? "Parol kamida 10 ta belgidan iborat bo'lishi kerak" : undefined}><Input type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="Kamida 10 ta belgi" /></Field>
             {!editing && <Field label="Telegram ID"><Input inputMode="numeric" value={form.telegramId} onChange={(event) => setForm((current) => ({ ...current, telegramId: event.target.value.replace(/\D/g, '') }))} /></Field>}
           </div>
 
@@ -246,15 +256,16 @@ export function StaffManagement() {
                 <span className="font-medium">Xodim faol</span>
                 <input id="staff-account-active" type="checkbox" checked={form.isActive} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} />
               </label>
-              <Field label="O'zgarish sababi" required><Input value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} placeholder="Kamida 5 ta belgi" /></Field>
+              <Field controlId="staff-change-note" label="O'zgarish sababi" required error={submitted && form.note.trim().length < 5 ? "Sabab kamida 5 ta belgidan iborat bo'lishi kerak" : undefined}><Input value={form.note} onChange={(event) => setForm((current) => ({ ...current, note: event.target.value }))} placeholder="Kamida 5 ta belgi" /></Field>
             </>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setDialogOpen(false)}>Bekor qilish</Button>
-            <Button disabled={!valid || saving} onClick={() => void save()} className="bg-zinc-900 text-white hover:bg-zinc-800">
+            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Bekor qilish</Button>
+            <Button type="submit" disabled={saving} className="bg-zinc-900 text-white hover:bg-zinc-800">
               {saving && <Loader2 className="size-4 animate-spin" />} Saqlash
             </Button>
           </DialogFooter>
+          </form>
         </DialogContent>
       </Dialog>
     </div>

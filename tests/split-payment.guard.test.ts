@@ -189,7 +189,7 @@ describe('nasiya payment modal: split-payment UI has two independent amount fiel
   })
 
   it('the single "Miqdor" field is only used in non-split mode — split mode never re-purposes it as the total', () => {
-    expect(source).toContain('{!carryOver && !splitPayment && (')
+    expect(source).toContain('{!splitPayment && (')
   })
 
   it('both parts require their own method and a positive amount, and the two methods must differ', () => {
@@ -213,7 +213,7 @@ describe('nasiya payment modal: split-payment UI has two independent amount fiel
   })
 
   it('the submitted total in split mode is the split total, and single-mode amount entry is untouched', () => {
-    expect(source).toContain('amount: carryOver ? 0 : splitPayment ? splitTotal : Number(payAmount)')
+    expect(source).toContain('amount: splitPayment ? splitTotal : Number(payAmount)')
   })
 
   it('displays a calculated (read-only) "Jami to\'lov" total, never an editable total field in split mode', () => {
@@ -285,7 +285,7 @@ describe('sale payment modal: split-payment UI has two independent amount fields
 describe('single (non-split) payment mode is unaffected by the split-mode fix', () => {
   it('nasiya modal: single mode still submits the plain "Miqdor" field with no paymentBreakdown', () => {
     const source = read('src/components/shop/nasiya-payment-modal.tsx')
-    expect(source.replace(/\s+/g, ' ')).toContain('paymentBreakdown: !carryOver && splitPayment')
+    expect(source.replace(/\s+/g, ' ')).toContain('paymentBreakdown: splitPayment')
     // Single-mode canSubmit path still requires the plain amount field.
     expect(source).toContain('const hasEffectiveAmount = splitPayment ? splitTotal > 0 : payAmount.trim().length > 0')
   })

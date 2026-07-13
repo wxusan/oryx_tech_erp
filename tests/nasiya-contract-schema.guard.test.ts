@@ -19,7 +19,7 @@ describe('Nasiya contract-currency schema is additive, no renames/drops', () => 
   })
 
   it('Nasiya has the new contract* fields, contractCurrency NOT NULL with a UZS default', () => {
-    expect(nasiyaBlock).toContain('contractCurrency               CurrencyCode  @default(UZS)')
+    expect(nasiyaBlock).toMatch(/contractCurrency\s+CurrencyCode\s+@default\(UZS\)/)
     for (const field of ['contractExchangeRateAtCreation', 'contractTotalAmount', 'contractDownPayment', 'contractBaseRemainingAmount', 'contractInterestAmount', 'contractFinalAmount', 'contractMonthlyPayment', 'contractRemainingAmount', 'contractPaidAmount']) {
       expect(nasiyaBlock).toContain(field)
     }

@@ -39,6 +39,7 @@ export const TRUST_TIER_COLORS: Record<TrustTier, TrustColor> = {
 
 export interface CustomerNasiyaInput {
   status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
+  resolutionState?: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
   contractCurrency: CurrencyCode
   schedules: NasiyaScoreScheduleInput[]
 }
@@ -78,7 +79,9 @@ export function computeCustomerTrustRating(
 ): CustomerTrustRating {
   const totalNasiyaCount = nasiyas.length
   const completedNasiyaCount = nasiyas.filter((n) => n.status === 'COMPLETED').length
-  const activeNasiyaCount = nasiyas.filter((n) => n.status === 'ACTIVE' || n.status === 'OVERDUE').length
+  const activeNasiyaCount = nasiyas.filter(
+    (n) => n.resolutionState !== 'WRITTEN_OFF' && (n.status === 'ACTIVE' || n.status === 'OVERDUE'),
+  ).length
   const cancelledNasiyaCount = nasiyas.filter((n) => n.status === 'CANCELLED').length
 
   let paidInstallmentCount = 0
@@ -91,7 +94,12 @@ export function computeCustomerTrustRating(
     // A cancelled deal's schedule rows carry no meaningful payment-timing
     // signal (the deal was voided, not paid off or defaulted on).
     if (nasiya.status === 'CANCELLED') continue
-    const score = computeNasiyaPaymentScore({ schedules: nasiya.schedules }, now, undefined, nasiya.contractCurrency)
+    // A write-off stops future collection/overdue pressure, but already-paid
+    // installment timing remains valid historical trust evidence.
+    const scoreSchedules = nasiya.resolutionState === 'WRITTEN_OFF'
+      ? nasiya.schedules.filter((schedule) => schedule.status === 'PAID')
+      : nasiya.schedules
+    const score = computeNasiyaPaymentScore({ schedules: scoreSchedules }, now, undefined, nasiya.contractCurrency)
     paidInstallmentCount += score.factors.paidInstallmentCount
     onTimeCount += score.factors.earlyPaymentCount + score.factors.onTimePaymentCount
     lateInstallmentCount += score.factors.latePaymentCount

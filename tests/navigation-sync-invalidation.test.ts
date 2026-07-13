@@ -65,4 +65,25 @@ describe('incremental navigation domain invalidation', () => {
     expect(queryClient.getQueryState(overdueKey)?.isInvalidated).toBe(true)
     expect(queryClient.getQueryState(settingsKey)?.isInvalidated).toBe(false)
   })
+
+  it('invalidates customer list, picker, and profile caches through one customers domain', async () => {
+    const listKey = queryKeys.list(scope, 'customers', { surface: 'list', requestRevision: 1, page: 1 })
+    const pickerKey = queryKeys.list(scope, 'customers', { surface: 'picker', requestRevision: 2 })
+    const profileKey = queryKeys.list(scope, 'customers', { surface: 'profile', customerId: 'customer-a' })
+    const reportsKey = queryKeys.domain(scope, 'reports')
+    for (const key of [listKey, pickerKey, profileKey, reportsKey]) queryClient.setQueryData(key, { cached: true })
+
+    await invalidateNavigationQueryDomains(queryClient, scope, ['customers'])
+
+    expect(queryClient.getQueryState(listKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(pickerKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(profileKey)?.isInvalidated).toBe(true)
+    expect(queryClient.getQueryState(reportsKey)?.isInvalidated).toBe(false)
+  })
+
+  it('invalidates customer metrics after returns and Olib-sotdim customer sales', () => {
+    expect(navigationImpactForMutation({ kind: 'return.created' }).domains).toContain('customers')
+    expect(navigationImpactForMutation({ kind: 'olibSotdim.created' }).domains).toContain('customers')
+    expect(navigationImpactForMutation({ kind: 'olibSotdim.paymentRecorded' }).domains).not.toContain('customers')
+  })
 })

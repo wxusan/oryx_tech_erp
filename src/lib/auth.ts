@@ -37,6 +37,8 @@ const AUTH_MAX_FAILURES = 5
 const AUTH_IP_MAX_FAILURES = 20
 const SESSION_MAX_AGE_SECONDS = 30 * 24 * 60 * 60
 const SESSION_UPDATE_AGE_SECONDS = 15 * 60
+const IDLE_SESSION_POLICY = 'IDLE_10_MINUTES' as const
+const REMEMBERED_SESSION_POLICY = 'REMEMBERED_30_DAYS' as const
 const SUBSCRIPTION_GRACE_MS = 3 * 24 * 60 * 60 * 1000
 
 const IDENTIFIER_THROTTLE: LoginFailureOptions = {
@@ -102,17 +104,20 @@ async function createServerSession(input: {
       actorId: input.actorId,
       actorType: input.actorType,
       shopId: input.shopId,
+      packageVersionId: null,
       sessionVersion: input.sessionVersion,
+      policy: IDLE_SESSION_POLICY,
       expiresAt: new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000),
     },
   })
-  return id
+  return { sessionId: id, sessionPolicy: IDLE_SESSION_POLICY, packageVersionId: null }
 }
 
 async function createGuardedShopSession(input: {
   actorId: string
   shopId: string
   sessionVersion: number
+  rememberMe: boolean
 }) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
     try {
@@ -140,17 +145,20 @@ async function createGuardedShopSession(input: {
         if (memberKind === 'SHOP_STAFF' && !enabledFeatureSet(packageVersion).has('STAFF_ACCESS')) return null
 
         const id = randomUUID()
+        const sessionPolicy = input.rememberMe ? REMEMBERED_SESSION_POLICY : IDLE_SESSION_POLICY
         await tx.authSession.create({
           data: {
             id,
             actorId: live.id,
             actorType: 'SHOP_ADMIN',
             shopId: input.shopId,
+            packageVersionId: packageVersion.id,
             sessionVersion: live.sessionVersion,
+            policy: sessionPolicy,
             expiresAt: new Date(Date.now() + SESSION_MAX_AGE_SECONDS * 1000),
           },
         })
-        return id
+        return { sessionId: id, sessionPolicy, packageVersionId: packageVersion.id }
       }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
     } catch (error) {
       if (!isRetryableTransactionError(error) || attempt === 2) throw error
@@ -172,6 +180,8 @@ declare module 'next-auth' {
       shopId: string | null
       sessionVersion: number
       sessionId: string
+      sessionPolicy: 'IDLE_10_MINUTES' | 'REMEMBERED_30_DAYS'
+      packageVersionId: string | null
     }
   }
 
@@ -182,6 +192,8 @@ declare module 'next-auth' {
     shopId: string | null
     sessionVersion: number
     sessionId: string
+    sessionPolicy: 'IDLE_10_MINUTES' | 'REMEMBERED_30_DAYS'
+    packageVersionId: string | null
   }
 }
 
@@ -193,6 +205,8 @@ declare module '@auth/core/jwt' {
     name: string
     sessionVersion: number
     sessionId: string
+    sessionPolicy: 'IDLE_10_MINUTES' | 'REMEMBERED_30_DAYS'
+    packageVersionId: string | null
   }
 }
 
@@ -298,7 +312,7 @@ export const authConfig: NextAuthConfig = {
           return null
         }
         await clearLoginFailuresDistributed(throttleKeys.identifierKey)
-        const sessionId = await createServerSession({
+        const serverSession = await createServerSession({
           actorId: admin.id,
           actorType: 'SUPER_ADMIN',
           shopId: null,
@@ -317,7 +331,7 @@ export const authConfig: NextAuthConfig = {
           role: 'SUPER_ADMIN' as UserRole,
           shopId: null,
           sessionVersion: admin.sessionVersion,
-          sessionId,
+          ...serverSession,
         }
       },
     }),
@@ -329,11 +343,13 @@ export const authConfig: NextAuthConfig = {
       credentials: {
         login: { label: 'Login', type: 'text' },
         password: { label: 'Parol', type: 'password' },
+        rememberMe: { label: 'Meni eslab qol', type: 'checkbox' },
       },
       async authorize(credentials, request) {
         await initializeRequestAuditContext(request.headers)
         const login = credentials?.login
         const password = credentials?.password
+        const rememberMe = credentials?.rememberMe === true || credentials?.rememberMe === 'true' || credentials?.rememberMe === 'on'
 
         if (typeof login !== 'string' || typeof password !== 'string') {
           return null
@@ -363,12 +379,13 @@ export const authConfig: NextAuthConfig = {
           return null
         }
         await clearLoginFailuresDistributed(throttleKeys.identifierKey)
-        const sessionId = await createGuardedShopSession({
+        const serverSession = await createGuardedShopSession({
           actorId: admin.id,
           shopId: admin.shopId,
           sessionVersion: admin.sessionVersion,
+          rememberMe,
         })
-        if (!sessionId) {
+        if (!serverSession) {
           logger.warn('Authentication invalidated during session creation', {
             event: 'auth.login_invalidated',
             shopId: admin.shopId,
@@ -391,7 +408,7 @@ export const authConfig: NextAuthConfig = {
           role: 'SHOP_ADMIN' as UserRole,
           shopId: admin.shopId,
           sessionVersion: admin.sessionVersion,
-          sessionId,
+          ...serverSession,
         }
       },
     }),
@@ -417,6 +434,8 @@ export const authConfig: NextAuthConfig = {
         token.name = user.name
         token.sessionVersion = user.sessionVersion
         token.sessionId = user.sessionId
+        token.sessionPolicy = user.sessionPolicy
+        token.packageVersionId = user.packageVersionId
       }
       return token
     },
@@ -432,6 +451,8 @@ export const authConfig: NextAuthConfig = {
         shopId: token.shopId,
         sessionVersion: token.sessionVersion,
         sessionId: token.sessionId,
+        sessionPolicy: token.sessionPolicy,
+        packageVersionId: token.packageVersionId,
       }
       return session
     },

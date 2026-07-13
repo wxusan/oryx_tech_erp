@@ -19,9 +19,6 @@ type GuardResult =
 
 const SUBSCRIPTION_GRACE_MS = 3 * 24 * 60 * 60 * 1000
 const ADMIN_IDLE_TIMEOUT_MS = 10 * 60 * 1000
-const ADMIN_ACTIVITY_WRITE_INTERVAL_MS = 60 * 1000
-const SHOP_ACTIVITY_WRITE_INTERVAL_MS = 15 * 60 * 1000
-const SESSION_ROLLING_LIFETIME_MS = 30 * 24 * 60 * 60 * 1000
 
 function subscriptionCutoff() {
   return new Date(Date.now() - SUBSCRIPTION_GRACE_MS)
@@ -42,17 +39,21 @@ async function requireApiSessionUncached(): Promise<GuardResult> {
       actorId: true,
       actorType: true,
       shopId: true,
+      packageVersionId: true,
       sessionVersion: true,
+      policy: true,
       lastSeenAt: true,
+      lastUserActivityAt: true,
       expiresAt: true,
       revokedAt: true,
     },
   })
-  const idleExpired = session.user.role === 'SUPER_ADMIN' &&
-    Boolean(liveSession && liveSession.lastSeenAt.getTime() <= now.getTime() - ADMIN_IDLE_TIMEOUT_MS)
+  const idleExpired = liveSession?.policy === 'IDLE_10_MINUTES' &&
+    liveSession.lastUserActivityAt.getTime() <= now.getTime() - ADMIN_IDLE_TIMEOUT_MS
   const invalidSession = !liveSession || liveSession.revokedAt !== null || liveSession.expiresAt <= now || idleExpired ||
     liveSession.actorId !== session.user.id || liveSession.actorType !== session.user.role ||
-    liveSession.shopId !== session.user.shopId || liveSession.sessionVersion !== session.user.sessionVersion
+    liveSession.shopId !== session.user.shopId || liveSession.sessionVersion !== session.user.sessionVersion ||
+    liveSession.policy !== session.user.sessionPolicy || liveSession.packageVersionId !== session.user.packageVersionId
 
   if (invalidSession) {
     if (liveSession && liveSession.revokedAt === null) {
@@ -63,7 +64,7 @@ async function requireApiSessionUncached(): Promise<GuardResult> {
     }
     return {
       ok: false,
-      response: unauthorized(idleExpired ? "Bosh admin sessiyasi 10 daqiqa harakatsizlikdan so'ng yakunlandi" : 'Sessiya bekor qilingan'),
+      response: unauthorized(idleExpired ? "Sessiya 10 daqiqa harakatsizlikdan so'ng yakunlandi" : 'Sessiya bekor qilingan'),
     }
   }
 
@@ -104,6 +105,13 @@ async function requireApiSessionUncached(): Promise<GuardResult> {
     if (!activePackage) {
       return { ok: false, response: forbidden("Do'kon paketi sozlanmagan") }
     }
+    if (liveSession.packageVersionId !== activePackage.id) {
+      await prisma.authSession.updateMany({
+        where: { id: session.user.sessionId, revokedAt: null },
+        data: { revokedAt: now },
+      })
+      return { ok: false, response: forbidden("Do'kon paketi o'zgargan. Qayta kiring") }
+    }
 
     shopPrincipal = buildShopPrincipal({
       actorId: session.user.id,
@@ -134,23 +142,6 @@ async function requireApiSessionUncached(): Promise<GuardResult> {
     if (!activeSuperAdmin || activeSuperAdmin.sessionVersion !== session.user.sessionVersion) {
       return { ok: false, response: forbidden("Bosh admin ruxsati bekor qilingan") }
     }
-  }
-
-  const writeInterval = session.user.role === 'SUPER_ADMIN'
-    ? ADMIN_ACTIVITY_WRITE_INTERVAL_MS
-    : SHOP_ACTIVITY_WRITE_INTERVAL_MS
-  if (liveSession.lastSeenAt.getTime() <= now.getTime() - writeInterval) {
-    await prisma.authSession.updateMany({
-      where: {
-        id: session.user.sessionId,
-        revokedAt: null,
-        lastSeenAt: liveSession.lastSeenAt,
-      },
-      data: {
-        lastSeenAt: now,
-        expiresAt: new Date(now.getTime() + SESSION_ROLLING_LIFETIME_MS),
-      },
-    })
   }
 
   return { ok: true, session, shopId: session.user.shopId ?? undefined, principal: shopPrincipal }
@@ -191,6 +182,73 @@ export async function requireShopPermission(permission: ShopPermissionCode): Pro
     return { ok: false, response: forbidden("Bu amal uchun ruxsat berilmagan") }
   }
   return guarded
+}
+
+/**
+ * Authorize a narrow shared foundation used by more than one operational
+ * module (for example the limited customer picker). The caller still owns the
+ * exact tenant-scoped DTO and must not return broader module data.
+ */
+export async function requireShopAnyPermission(permissions: readonly ShopPermissionCode[]): Promise<GuardResult> {
+  const guarded = await requireApiSession()
+  if (!guarded.ok) return guarded
+  if (guarded.session.user.role === 'SUPER_ADMIN') return guarded
+  if (!guarded.principal || !permissions.some((permission) => principalHasPermission(guarded.principal!, permission))) {
+    return { ok: false, response: forbidden("Bu amal uchun ruxsat berilmagan") }
+  }
+  return guarded
+}
+
+export async function requireShopPermissionAndFeature(
+  permission: ShopPermissionCode,
+  feature: ShopFeatureCode,
+): Promise<GuardResult> {
+  const guarded = await requireShopPermission(permission)
+  if (!guarded.ok || guarded.session.user.role === 'SUPER_ADMIN') return guarded
+  if (!guarded.principal || !principalHasFeature(guarded.principal, feature)) {
+    return { ok: false, response: forbidden("Bu modul do'kon paketida yoqilmagan") }
+  }
+  return guarded
+}
+
+export async function requireShopPermissionAndAnyFeature(
+  permission: ShopPermissionCode,
+  features: readonly ShopFeatureCode[],
+): Promise<GuardResult> {
+  const guarded = await requireShopPermission(permission)
+  if (!guarded.ok || guarded.session.user.role === 'SUPER_ADMIN') return guarded
+  if (!guarded.principal || !features.some((feature) => principalHasFeature(guarded.principal!, feature))) {
+    return { ok: false, response: forbidden("Kerakli modul do'kon paketida yoqilmagan") }
+  }
+  return guarded
+}
+
+/**
+ * Read-only mixed receivable surfaces span Sale and Nasiya, so no single
+ * permission/feature pair represents them. A member sees only the cohorts
+ * whose underlying module and view permission are both live; receiving money
+ * is intentionally not required merely to view a due warning.
+ */
+export async function requireReceivableView(): Promise<
+  | (Extract<GuardResult, { ok: true }> & { includeCashSales: boolean; includeNasiya: boolean })
+  | Extract<GuardResult, { ok: false }>
+> {
+  const guarded = await requireApiSession()
+  if (!guarded.ok) return guarded
+  const includeCashSales = guarded.session.user.role === 'SUPER_ADMIN' || Boolean(
+    guarded.principal &&
+    principalHasFeature(guarded.principal, 'CASH_SALES') &&
+    principalHasPermission(guarded.principal, 'INVENTORY_VIEW'),
+  )
+  const includeNasiya = guarded.session.user.role === 'SUPER_ADMIN' || Boolean(
+    guarded.principal &&
+    principalHasFeature(guarded.principal, 'NASIYA') &&
+    principalHasPermission(guarded.principal, 'NASIYA_VIEW'),
+  )
+  if (!includeCashSales && !includeNasiya) {
+    return { ok: false, response: forbidden("Qarzdorlikni ko'rish uchun ruxsat berilmagan") }
+  }
+  return { ...guarded, includeCashSales, includeNasiya }
 }
 
 export async function requireCurrentShopFeature(feature: ShopFeatureCode): Promise<GuardResult> {

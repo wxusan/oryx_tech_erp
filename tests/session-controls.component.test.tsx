@@ -52,7 +52,7 @@ describe('SessionControls behavior', () => {
     vi.advanceTimersByTime(9 * 60 * 1000)
     const crossTabActivity = Date.now()
     window.dispatchEvent(new StorageEvent('storage', {
-      key: 'oryx:admin-last-activity',
+      key: 'oryx:last-user-activity',
       newValue: String(crossTabActivity),
     }))
     vi.advanceTimersByTime(9 * 60 * 1000)
@@ -62,7 +62,7 @@ describe('SessionControls behavior', () => {
   })
 
   it('does not immediately expire a fresh login because of a stale prior-session timestamp', () => {
-    window.localStorage.setItem('oryx:admin-last-activity', String(Date.now() - 60 * 60 * 1000))
+    window.localStorage.setItem('oryx:last-user-activity', String(Date.now() - 60 * 60 * 1000))
     render(<SessionControls callbackUrl="/admin/login" idleTimeoutMs={10 * 60 * 1000} />)
     expect(signOutMock).not.toHaveBeenCalled()
     vi.advanceTimersByTime(10 * 60 * 1000)

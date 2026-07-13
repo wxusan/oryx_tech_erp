@@ -64,6 +64,7 @@ type TestNotification = {
   type: string
   message: string
   telegramId: string
+  recipientShopAdminId: string | null
   status: 'PENDING' | 'PROCESSING' | 'SENT' | 'FAILED' | 'CANCELLED'
   scheduledAt: Date
   sentAt: Date | null
@@ -91,6 +92,7 @@ function makeNotification(imageCount: number, message = 'Qurilma sotildi'): Test
     type: 'SALE',
     message,
     telegramId: '123456789',
+    recipientShopAdminId: 'admin-1',
     status: 'PENDING',
     scheduledAt: now,
     sentAt: null,
@@ -140,6 +142,7 @@ beforeEach(() => {
       telegramNotificationsEnabled: true,
       packageVersions: [{ features: [
         { featureCode: 'TELEGRAM', enabled: true },
+        { featureCode: 'REMINDERS', enabled: true },
         { featureCode: 'STAFF_ACCESS', enabled: true },
       ] }],
     },
@@ -383,6 +386,72 @@ describe('Telegram notification delivery', () => {
     const result = await processPendingNotifications()
 
     expect(result).toMatchObject({ ok: false, sent: 0, cancelled: 1 })
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
+    expect(notification.lastError).toContain('debt_resolved_or_changed')
+  })
+
+  it.each(['ARCHIVED', 'WRITTEN_OFF'] as const)(
+    'cancels a queued Nasiya reminder after the contract becomes %s',
+    async (resolutionState) => {
+      notification = {
+        ...makeNotification(0),
+        type: 'OVERDUE',
+        relatedType: 'NasiyaSchedule',
+        relatedId: 'schedule-1',
+      }
+      mocks.nasiyaScheduleFindFirst.mockResolvedValueOnce({
+        status: 'OVERDUE',
+        expectedAmount: 1_000,
+        paidAmount: 0,
+        contractRemainingAmount: 1_000,
+        payments: [],
+        nasiya: {
+          status: 'OVERDUE',
+          resolutionState,
+          reminderEnabled: true,
+          remainingAmount: 1_000,
+          contractRemainingAmount: 1_000,
+          returnedAt: null,
+          deletedAt: null,
+        },
+      })
+
+      const result = await processPendingNotifications()
+
+      expect(result).toMatchObject({ sent: 0, cancelled: 1 })
+      expect(mocks.sendMessage).not.toHaveBeenCalled()
+      expect(notification.lastError).toContain('debt_resolved_or_changed')
+    },
+  )
+
+  it('cancels a queued Nasiya reminder after a newer deferral changes the effective due date', async () => {
+    notification = {
+      ...makeNotification(0),
+      type: 'OVERDUE',
+      relatedType: 'NasiyaSchedule',
+      relatedId: 'schedule-1',
+    }
+    mocks.nasiyaScheduleFindFirst.mockResolvedValueOnce({
+      status: 'DEFERRED',
+      expectedAmount: 1_000,
+      paidAmount: 0,
+      contractRemainingAmount: 1_000,
+      payments: [],
+      nasiya: {
+        status: 'ACTIVE',
+        resolutionState: 'ACTIVE',
+        reminderEnabled: true,
+        remainingAmount: 1_000,
+        contractRemainingAmount: 1_000,
+        returnedAt: null,
+        deletedAt: null,
+      },
+    })
+    mocks.nasiyaDeferralFindFirst.mockResolvedValueOnce({ id: 'newer-deferral' })
+
+    const result = await processPendingNotifications()
+
+    expect(result).toMatchObject({ sent: 0, cancelled: 1 })
     expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(notification.lastError).toContain('debt_resolved_or_changed')
   })

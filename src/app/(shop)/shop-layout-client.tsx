@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, ScrollText, Settings, UserCog } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
-import { DueOverdueBanner } from '@/components/shop/due-overdue-banner'
+import { DueOverdueBanner, type DueOverdueSummary } from '@/components/shop/due-overdue-banner'
 import {
   principalCan,
   type ShopFeatureCode,
@@ -45,6 +45,8 @@ export function ShopLayoutClient({
   enabledFeatures,
   grantedPermissions,
   legacyFullAccess,
+  sessionPolicy,
+  initialDueSummary,
 }: {
   children: React.ReactNode
   shopName: string
@@ -53,6 +55,8 @@ export function ShopLayoutClient({
   enabledFeatures: ShopFeatureCode[]
   grantedPermissions: ShopPermissionCode[]
   legacyFullAccess: boolean
+  sessionPolicy: 'IDLE_10_MINUTES' | 'REMEMBERED_30_DAYS'
+  initialDueSummary: DueOverdueSummary | null
 }) {
   const pathname = usePathname()
   const principal = {
@@ -65,6 +69,9 @@ export function ShopLayoutClient({
     (!link.permission || principalCan(principal, link.permission)) &&
     (!link.anyPermissions.length || link.anyPermissions.some((permission) => principalCan(principal, permission))),
   )
+  const canSeeReceivables = (
+    enabledFeatures.includes('CASH_SALES') && principalCan(principal, 'INVENTORY_VIEW')
+  ) || principalCan(principal, 'NASIYA_VIEW')
 
   return (
     <ShopAccessProvider
@@ -115,7 +122,7 @@ export function ShopLayoutClient({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
-        <header className="flex h-14 flex-shrink-0 items-center justify-end gap-2 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur sm:justify-between sm:px-6">
+        <header className="sticky top-0 z-40 flex h-14 flex-shrink-0 items-center justify-end gap-2 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur sm:justify-between sm:px-6">
           <span className="hidden text-sm font-medium text-zinc-900 sm:inline">Do&apos;kon portali</span>
           <div className="flex min-w-0 items-center gap-2">
             <div className="min-w-0 text-right">
@@ -125,11 +132,14 @@ export function ShopLayoutClient({
             <div className="w-8 h-8 rounded-full bg-zinc-900 text-white text-xs flex items-center justify-center font-medium shadow-sm">
               {initials(adminName)}
             </div>
-            <SessionControls callbackUrl="/shop/login" idleTimeoutMs={null} />
+            <SessionControls
+              callbackUrl="/shop/login"
+              idleTimeoutMs={sessionPolicy === 'IDLE_10_MINUTES' ? 10 * 60 * 1000 : null}
+            />
           </div>
         </header>
 
-        {principalCan(principal, 'PAYMENT_RECEIVE') && <DueOverdueBanner />}
+        {canSeeReceivables && <DueOverdueBanner initialData={initialDueSummary} />}
 
         <main className="min-w-0 flex-1 overflow-auto bg-zinc-50">{children}</main>
       </div>

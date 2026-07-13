@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { badRequest, forbidden, ok, payloadTooLarge, serverError, tooManyRequests } from '@/lib/api-helpers'
-import { requireShopPermission } from '@/lib/api-auth'
+import { requireShopAnyPermission, requireShopPermission } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
 import { validatePrivateUploadImage } from '@/lib/server/image-validation'
 import { getSupabaseAdminClient, PRIVATE_STORAGE_BUCKET } from '@/lib/supabase-admin'
@@ -18,6 +18,11 @@ import {
   isRequestBodyTooLarge,
   readLimitedFormDataBody,
 } from '@/lib/server/request-limits'
+import {
+  createPrivateUploadReference,
+  privateUploadPreviewUrl,
+  readPrivateUploadReference,
+} from '@/lib/server/private-upload-reference'
 
 export const runtime = 'nodejs'
 
@@ -35,7 +40,7 @@ function isAuthorizedForKey(role: string, sessionShopId: string | null | undefin
 }
 
 export async function POST(request: Request) {
-  const guarded = await requireShopPermission('NASIYA_CREATE')
+  const guarded = await requireShopAnyPermission(['NASIYA_CREATE', 'CUSTOMER_MANAGE', 'IMPORT_DATA'])
   if (!guarded.ok) return guarded.response
 
   try {
@@ -82,7 +87,11 @@ export async function POST(request: Request) {
 
     if (error) throw error
 
-    return ok({ key })
+    const reference = createPrivateUploadReference({ key, shopId, kind: 'passport' })
+    return ok({
+      reference,
+      url: new URL(privateUploadPreviewUrl('passport', reference), request.url).toString(),
+    })
   } catch (error) {
     if (isRequestBodyTooLarge(error)) return payloadTooLarge('Rasm yuklash so\'rovi 5 MB chegaradan oshdi')
     if (isInvalidRequestBody(error)) return badRequest("Rasm yuklash so'rovi noto'g'ri")
@@ -97,13 +106,16 @@ export async function GET(request: Request) {
 
   try {
     const { searchParams } = new URL(request.url)
-    const key = searchParams.get('key')
-    if (!key) return badRequest('Fayl kaliti kiritilishi shart')
-    if (!/^shops\/[^/]+\/passports\/[^/]+$/.test(key)) {
-      return badRequest('Fayl kaliti noto\'g\'ri')
-    }
+    const reference = searchParams.get('reference')
+    if (!reference) return badRequest('Rasm havolasi kiritilishi shart')
+    const payload = readPrivateUploadReference({ reference, kind: 'passport' })
+    if (!payload) return badRequest("Rasm havolasi noto'g'ri yoki muddati tugagan")
+    const key = payload.key
 
-    if (!isAuthorizedForKey(guarded.session.user.role, guarded.session.user.shopId, key)) {
+    if (
+      !isAuthorizedForKey(guarded.session.user.role, guarded.session.user.shopId, key) ||
+      (guarded.session.user.role !== 'SUPER_ADMIN' && payload.shopId !== guarded.session.user.shopId)
+    ) {
       return forbidden()
     }
 

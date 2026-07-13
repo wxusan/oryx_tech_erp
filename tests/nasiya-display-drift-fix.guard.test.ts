@@ -74,7 +74,7 @@ describe('nasiya payment modal: no double-conversion drift for USD contracts', (
   })
 
   it('validation math (exceedsRemaining) is untouched — still the UZS legacy comparison, which stays accurate via the dual-ledger lockstep', () => {
-    expect(modal).toContain('const exceedsRemaining = !carryOver && payAmountUzs > nasiyaRemainingAmount')
+    expect(modal).toContain('const exceedsRemaining = payAmountUzs > nasiyaRemainingAmount')
   })
 })
 

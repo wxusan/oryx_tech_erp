@@ -124,6 +124,23 @@ hardening. It used the same 36-migration schema and five timed iterations:
 Run 5 again returned `50,020` overdue deals, used the effective-due index,
 hydrated exactly five schedules, and rolled back all 100,000 obligations.
 
+Run 6 repeated the benchmark on the final Oryx ERP 2.0 tree after all 40
+migrations, with normal fixture constraints enforced. Both fixtures used five
+timed iterations after warm-up:
+
+| Path | 50,000 median / P95 | 100,000 median / P95 | Wire rows |
+|---|---:|---:|---:|
+| `getShopAccrualAggregate` | 25.139 / 26.153 ms | 41.995 / 42.365 ms | 1 |
+| `getShopObligationAggregate` | 34.048 / 34.484 ms | 114.116 / 115.885 ms | 1 |
+| `getCurrentOverdueSummary` | 27.592 / 27.886 ms | 73.429 / 74.292 ms | 1 |
+| `getUpcomingScheduleIds` | 3.950 / 4.131 ms | 9.417 / 9.596 ms | 5 |
+| bounded upcoming hydration | 0.472 / 0.624 ms | 0.541 / 0.857 ms | 5 |
+
+Run 6 returned the expected `25,018` and `50,020` overdue deal counts,
+used the effective-due and Sale open-due indexes for the shared banner path,
+and rolled both deterministic fixtures back. The results are still far below
+the 2,000 ms guard and do not justify a general Redis page or financial cache.
+
 ## Before versus this evidence
 
 The adversarial audit recorded the previous hydration-heavy query shapes at

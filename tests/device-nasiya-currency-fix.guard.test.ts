@@ -25,9 +25,10 @@ describe('GET /api/devices/[id] selects the nasiya contract-currency fields', ()
   it('selects contractCurrency, contractTotalAmount, contractInterestAmount, contractFinalAmount, contractRemainingAmount, contractExchangeRateAtCreation, and status', () => {
     const source = read('src/app/api/devices/[id]/route.ts')
     const nasiyaSelectStart = source.indexOf('nasiya: {')
-    const nasiyaSelectBlock = source.slice(nasiyaSelectStart, nasiyaSelectStart + 900)
+    const nasiyaSelectBlock = source.slice(nasiyaSelectStart, nasiyaSelectStart + 1_200)
     for (const field of [
       'status: true',
+      'resolutionState: true',
       'contractCurrency: true',
       'contractTotalAmount: true',
       'contractInterestAmount: true',

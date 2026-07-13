@@ -3,6 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
 import {
   getCurrentOverdueSummary,
+  getNasiyaWriteOffAggregate,
   getShopAccrualAggregate,
   getShopObligationAggregate,
   getUpcomingScheduleIds,
@@ -18,7 +19,7 @@ beforeEach(async () => {
   await prisma.$executeRawUnsafe(`
     TRUNCATE TABLE
       "ReminderGenerationState", "AuthSession", "ChangeEvent", "OpsEvent", "Log", "Notification", "ReturnRefundAllocation", "DeviceReturn",
-      "NasiyaDeferral", "NasiyaPayment", "NasiyaSchedule", "Nasiya",
+      "NasiyaResolutionEvent", "NasiyaDeferral", "NasiyaPayment", "NasiyaSchedule", "Nasiya",
       "SupplierPayable", "SalePayment", "Sale", "Customer", "DeviceImei", "Device",
       "Supplier", "ShopAdmin", "ShopPayment", "CurrencyRate", "Shop", "SuperAdmin"
     RESTART IDENTITY CASCADE
@@ -201,7 +202,7 @@ async function seedMixedCurrencyObligations() {
     },
   })
 
-  return { owner, shop, customer, debtSale, uzsSchedules, usdSchedule }
+  return { owner, shop, customer, debtSale, uzsNasiya, usdNasiya, uzsSchedules, usdSchedule }
 }
 
 describe('set-based shop statistics', () => {
@@ -247,6 +248,93 @@ describe('set-based shop statistics', () => {
       uzsSchedules[1].id,
       usdSchedule.id,
     ])
+  })
+
+  it('keeps archived balances in financial totals, removes archive/write-off from work queues, and reports write-off events separately', async () => {
+    const { owner, shop, customer } = await seedMixedCurrencyObligations()
+    const specialScheduleIds: string[] = []
+    const contracts: Array<{ id: string; state: 'ARCHIVED' | 'WRITTEN_OFF' }> = []
+    for (const state of ['ARCHIVED', 'WRITTEN_OFF'] as const) {
+      const device = await prisma.device.create({
+        data: {
+          shopId: shop.id,
+          model: `${state} phone`,
+          imei: `STATS-${state}`,
+          purchasePrice: 500,
+          status: 'SOLD_NASIYA',
+          addedBy: owner.id,
+        },
+      })
+      const nasiya = await prisma.nasiya.create({
+        data: {
+          shopId: shop.id,
+          deviceId: device.id,
+          customerId: customer.id,
+          totalAmount: 1_000,
+          downPayment: 0,
+          baseRemainingAmount: 1_000,
+          finalNasiyaAmount: 1_000,
+          remainingAmount: 1_000,
+          months: 1,
+          monthlyPayment: 1_000,
+          startDate: new Date('2026-07-01T00:00:00.000Z'),
+          status: 'OVERDUE',
+          resolutionState: state,
+          resolutionUpdatedAt: new Date('2026-07-10T00:00:00.000Z'),
+          contractTotalAmount: 1_000,
+          contractBaseRemainingAmount: 1_000,
+          contractFinalAmount: 1_000,
+          contractMonthlyPayment: 1_000,
+          contractRemainingAmount: 1_000,
+          createdBy: owner.id,
+        },
+      })
+      const schedule = await prisma.nasiyaSchedule.create({
+        data: {
+          shopId: shop.id,
+          nasiyaId: nasiya.id,
+          monthNumber: 1,
+          dueDate: new Date('2026-07-01T00:00:00.000Z'),
+          expectedAmount: 1_000,
+          contractExpectedAmount: 1_000,
+          contractRemainingAmount: 1_000,
+          status: 'OVERDUE',
+        },
+      })
+      specialScheduleIds.push(schedule.id)
+      contracts.push({ id: nasiya.id, state })
+    }
+    const writtenOff = contracts.find((contract) => contract.state === 'WRITTEN_OFF')!
+    await prisma.nasiyaResolutionEvent.create({
+      data: {
+        shopId: shop.id,
+        nasiyaId: writtenOff.id,
+        eventType: 'WRITE_OFF',
+        previousState: 'ACTIVE',
+        newState: 'WRITTEN_OFF',
+        contractCurrency: 'UZS',
+        nativeRemainingAmount: 1_000,
+        frozenUzsAmount: 1_000,
+        frozenUsdUzsRate: 1,
+        reason: 'Stats write-off evidence',
+        actorId: owner.id,
+        actorType: 'SUPER_ADMIN',
+        idempotencyKey: 'stats-writeoff-evidence',
+        createdAt: new Date('2026-07-10T00:00:00.000Z'),
+      },
+    })
+
+    const monthStart = new Date('2026-06-30T19:00:00.000Z')
+    const monthEnd = new Date('2026-07-31T19:00:00.000Z')
+    const todayStart = new Date('2026-07-12T19:00:00.000Z')
+    await expect(getShopObligationAggregate({ shopId: shop.id, monthStart, monthEnd, todayStart }))
+      .resolves.toMatchObject({ expectedUzs: 1_900, overdueUzs: 1_900, overdueCount: 5 })
+    const queue = await getUpcomingScheduleIds(shop.id, 20)
+    expect(queue).not.toEqual(expect.arrayContaining(specialScheduleIds))
+    await expect(getCurrentOverdueSummary({ shopId: shop.id, todayStart }))
+      .resolves.toMatchObject({ overdueNativeUzs: 900, overdueDealCount: 3 })
+    await expect(getNasiyaWriteOffAggregate({ shopId: shop.id, monthStart, monthEnd }))
+      .resolves.toEqual({ nativeUzs: 1_000, nativeUsd: 0, frozenUzs: 1_000, writeOffCount: 1, reopenCount: 0 })
   })
 
   it('excludes cancelled and returned Nasiya obligations from totals, overdue banners, and previews', async () => {

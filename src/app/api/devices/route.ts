@@ -17,8 +17,9 @@ import { logger } from '@/lib/logger'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { getShopDeviceListItemsByIds, getShopDevicesList, type DeviceStatusFilter } from '@/lib/server/shop-lists'
+import { buildShopDevicesWhere, getShopDeviceListItemsByIds, getShopDevicesList, type DeviceStatusFilter } from '@/lib/server/shop-lists'
 import { latestChangeCursorForShop } from '@/lib/server/change-events'
+import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 import type { ZodError } from 'zod'
 import { formatDeviceStorage, deviceConditionLabel, normalizeImei } from '@/lib/device-specs'
 
@@ -58,22 +59,10 @@ export async function GET(req: NextRequest) {
       const requestedSkip = Number(searchParams.get('skip') ?? 0)
       const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 50)) : 25
       const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
-      const pickerWhere = {
-        shopId,
-        deletedAt: null,
-        status: 'IN_STOCK' as const,
-        ...(search
-          ? {
-              OR: [
-                { imei: { contains: search, mode: 'insensitive' as const } },
-                { imeis: { some: { deletedAt: null, value: { contains: search, mode: 'insensitive' as const } } } },
-                { model: { contains: search, mode: 'insensitive' as const } },
-                { color: { contains: search, mode: 'insensitive' as const } },
-                { storage: { contains: search, mode: 'insensitive' as const } },
-              ],
-            }
-          : {}),
-      }
+      // The picker and full inventory list share one tenant-scoped predicate,
+      // so model/IMEI 1+2/storage/note/supplier search cannot drift. The
+      // picker adds the stricter IN_STOCK cohort and keeps its small DTO.
+      const pickerWhere = buildShopDevicesWhere(shopId, { search, status: 'IN_STOCK' })
 
       const [rows, total] = await Promise.all([
         prisma.device.findMany({
@@ -170,8 +159,14 @@ export async function POST(req: NextRequest) {
     )
     if (!resolved.ok) return resolved.response
     const resolvedShopId = resolved.shopId
-    if (imageUrls?.some((url) => !url.startsWith(`shops/${resolvedShopId}/devices/`))) {
-      return badRequest('Qurilma rasmi faqat shu do\'kon private storage papkasidan bo\'lishi kerak')
+    const imageKeys = imageUrls?.map((value) => resolvePrivateUploadReference({
+      value,
+      shopId: resolvedShopId,
+      kind: 'device',
+      allowLegacyRawKey: true,
+    })) ?? []
+    if (imageKeys.some((key) => !key)) {
+      return badRequest("Qurilma rasmi boshqa do'konga tegishli yoki havola muddati tugagan")
     }
     let purchaseInput: Awaited<ReturnType<typeof moneyInputToUzs>>
     try {
@@ -228,7 +223,7 @@ export async function POST(req: NextRequest) {
           imei,
           supplierId,
           supplierPhone,
-          imageUrls: imageUrls ?? [],
+          imageUrls: imageKeys as string[],
           addedBy: session.user.id,
           note,
           imeis: {
@@ -254,7 +249,7 @@ export async function POST(req: NextRequest) {
 
       const notificationAdmins = await tx.shopAdmin.findMany({
         where: { shopId: resolvedShopId, isActive: true, telegramId: { not: null }, telegramVerifiedAt: { not: null }, deletedAt: null },
-        select: { telegramId: true },
+        select: { id: true, telegramId: true },
       })
       if (notificationAdmins.length) {
         await tx.notification.createMany({
@@ -263,6 +258,7 @@ export async function POST(req: NextRequest) {
             type: 'DEVICE_CREATED',
             message: notificationMessage,
             telegramId: admin.telegramId,
+            recipientShopAdminId: admin.id,
             status: 'PENDING' as const,
             scheduledAt: new Date(),
             relatedId: createdDevice.id,

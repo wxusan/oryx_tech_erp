@@ -18,7 +18,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { createOlibSotdimSchema } from '@/lib/validations'
-import { ok, created, badRequest, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
+import { ok, created, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { olibSotdimCreatedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
@@ -26,11 +26,13 @@ import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
+import { CustomerSelectionError, resolveCustomerSelection } from '@/lib/server/customer-selection'
 import { createMoneyInputConverter, moneyInputMeta, type MoneyInputResult } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
 import { deviceConditionLabel, formatDeviceStorage, normalizeImei } from '@/lib/device-specs'
+import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 
 // ---------------------------------------------------------------------------
 // GET /api/olib-sotdim
@@ -169,8 +171,14 @@ export async function POST(req: NextRequest) {
 
     const currency = await getShopCurrencyContext(shopId)
 
-    if (d.imageUrls?.some((url) => !url.startsWith(`shops/${shopId}/devices/`))) {
-      return badRequest("Qurilma rasmi faqat shu do'kon private storage papkasidan bo'lishi kerak")
+    const imageKeys = d.imageUrls?.map((value) => resolvePrivateUploadReference({
+      value,
+      shopId,
+      kind: 'device',
+      allowLegacyRawKey: true,
+    })) ?? []
+    if (imageKeys.some((key) => !key)) {
+      return badRequest("Qurilma rasmi boshqa do'konga tegishli yoki havola muddati tugagan")
     }
 
     let purchaseInput: MoneyInputResult
@@ -210,7 +218,6 @@ export async function POST(req: NextRequest) {
     })
     if (existingImei) return conflict('Bu IMEI raqami allaqachon mavjud')
 
-    const normalizedCustomerPhone = normalizePhone(d.customerPhone)
     const supplierPaidNow = d.supplierPaidNow
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -234,7 +241,7 @@ export async function POST(req: NextRequest) {
           purchaseAmountUzsSnapshot: purchasePriceUzs,
           imei,
           supplierPhone: d.supplierPhone,
-          imageUrls: d.imageUrls ?? [],
+          imageUrls: imageKeys as string[],
           status: deviceStatus,
           addedBy: session.user.id,
           note: d.deviceNote,
@@ -248,24 +255,13 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      const existingCustomer = await tx.customer.findFirst({
-        where: {
-          shopId,
-          deletedAt: null,
-          OR: [
-            ...(normalizedCustomerPhone ? [{ normalizedPhone: normalizedCustomerPhone }] : []),
-            { phone: d.customerPhone },
-          ],
-        },
+      const customer = await resolveCustomerSelection(tx, {
+        shopId,
+        mode: d.customerMode,
+        customerId: d.customerId,
+        customerName: d.customerName,
+        customerPhone: d.customerPhone,
       })
-      const customer = existingCustomer
-        ? await tx.customer.update({
-            where: { id: existingCustomer.id },
-            data: { name: d.customerName, normalizedPhone: normalizedCustomerPhone },
-          })
-        : await tx.customer.create({
-            data: { shopId, name: d.customerName, phone: d.customerPhone, normalizedPhone: normalizedCustomerPhone },
-          })
 
       const sale = await tx.sale.create({
         data: {
@@ -352,8 +348,8 @@ export async function POST(req: NextRequest) {
         profit: contractSalePrice - contractPurchasePrice,
         contractCurrency,
         supplierPaidNow,
-        customerName: d.customerName,
-        customerPhone: d.customerPhone,
+        customerName: customer.name,
+        customerPhone: customer.phone,
         adminName: session.user.name,
         currency,
       })
@@ -364,6 +360,7 @@ export async function POST(req: NextRequest) {
             type: 'OLIB_SOTDIM_CREATED',
             message,
             telegramId: admin.telegramId!,
+            recipientShopAdminId: admin.id,
             scheduledAt: new Date(),
             relatedId: sale.id,
             relatedType: 'Sale',
@@ -387,7 +384,8 @@ export async function POST(req: NextRequest) {
             profit: salePriceUzs - purchasePriceUzs,
             supplierName: d.supplierName,
             supplierPaidNow,
-            customerName: d.customerName,
+            customerId: customer.id,
+            customerName: customer.name,
             deviceStatus,
             ...moneyInputMeta(purchaseInput),
           },
@@ -407,7 +405,17 @@ export async function POST(req: NextRequest) {
 
     return created(result, "Olib-sotdim muvaffaqiyatli saqlandi")
   } catch (err) {
+    if (err instanceof CustomerSelectionError) {
+      if (err.status === 404) return notFound(err.message)
+      if (err.status === 409) return conflict(err.message)
+      return badRequest(err.message)
+    }
     if (err && typeof err === 'object' && 'code' in err && (err as { code?: string }).code === 'P2002') {
+      const meta = (err as { meta?: { target?: unknown } }).meta
+      const target = Array.isArray(meta?.target) ? meta.target.join(',') : String(meta?.target ?? '')
+      if (target.includes('Customer') || target.includes('normalizedPhone') || target.includes('passportIdentifierHash')) {
+        return conflict('Bu telefon yoki pasport bilan faol mijoz mavjud. Uni qidiruvdan tanlang; mijozlar avtomatik birlashtirilmaydi.')
+      }
       return conflict("Bu IMEI raqami allaqachon mavjud")
     }
     logger.error('[POST /api/olib-sotdim]', { event: 'api.route_error', error: err })

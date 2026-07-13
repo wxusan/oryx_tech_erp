@@ -17,7 +17,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
   const callbackUrl = searchParams.get('callbackUrl') || fallbackUrl
   const safeCallbackUrl = callbackUrl.startsWith(allowedPrefix) ? callbackUrl : fallbackUrl
   const errorParam = searchParams.get('error')
-  const [form, setForm] = useState({ login: '', password: '' })
+  const [form, setForm] = useState({ login: '', password: '', rememberMe: false })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(
     errorParam === 'unauthorized' ? "Ruxsat yo'q. Iltimos, to'g'ri hisobdan kiring." : null,
@@ -46,7 +46,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
 
     function handlePageShow(event: PageTransitionEvent) {
       if (!event.persisted) return
-      setForm({ login: '', password: '' })
+      setForm({ login: '', password: '', rememberMe: false })
       setError(null)
       setLoading(false)
       void redirectIfSignedIn()
@@ -69,6 +69,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
     const result = await signIn(isAdmin ? 'superadmin' : 'shopadmin', {
       login: form.login,
       password: form.password,
+      ...(!isAdmin ? { rememberMe: form.rememberMe ? 'true' : 'false' } : {}),
       redirect: false,
     })
 
@@ -137,6 +138,19 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
                 className="h-9 rounded-none border-zinc-200 text-sm focus-visible:ring-zinc-900"
               />
             </div>
+
+            {!isAdmin && (
+              <label htmlFor="shop-remember-me" className="flex cursor-pointer items-center gap-2 text-xs text-zinc-700">
+                <input
+                  id="shop-remember-me"
+                  type="checkbox"
+                  checked={form.rememberMe}
+                  onChange={(event) => setForm({ ...form, rememberMe: event.target.checked })}
+                  className="size-4 rounded border-zinc-300 accent-zinc-900"
+                />
+                Meni eslab qol
+              </label>
+            )}
 
             <Button
               type="submit"

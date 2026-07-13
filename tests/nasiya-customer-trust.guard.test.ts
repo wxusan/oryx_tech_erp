@@ -6,6 +6,13 @@ function read(rel: string): string {
   return readFileSync(resolve(process.cwd(), rel), 'utf8')
 }
 
+function prismaModel(source: string, model: string): string {
+  const start = source.indexOf(`model ${model} {`)
+  if (start < 0) throw new Error(`Prisma model ${model} not found`)
+  const nextModel = source.indexOf('\nmodel ', start + 1)
+  return source.slice(start, nextModel < 0 ? source.length : nextModel)
+}
+
 /**
  * Item 12 — nasiya client trust/rating system. The pure computation
  * (computeCustomerTrustRating) is unit-tested directly in
@@ -17,7 +24,7 @@ function read(rel: string): string {
 describe('schema: optional admin override, never read by accounting logic', () => {
   it('Customer.trustOverride is additive (nullable string, no default enforced)', () => {
     const schema = read('prisma/schema.prisma')
-    const block = schema.slice(schema.indexOf('model Customer'), schema.indexOf('model Customer') + 1400)
+    const block = prismaModel(schema, 'Customer')
     expect(block).toMatch(/trustOverride\s+String\?/)
   })
 
@@ -27,8 +34,8 @@ describe('schema: optional admin override, never read by accounting logic', () =
   })
 })
 
-describe('GET /api/customers (list) includes a trust badge per customer', () => {
-  const source = read('src/app/api/customers/route.ts')
+describe('customer list query includes a trust badge per customer', () => {
+  const source = read('src/lib/server/customer-list.ts')
 
   it('computes the badge from a bounded one-row-per-customer aggregate and applies any override', () => {
     expect(source).toContain('getCustomerTrustFactorsForList')
@@ -94,15 +101,28 @@ describe('nasiya detail page shows the customer trust badge and its reasons', ()
   })
 })
 
-describe('nasiya creation form: existing-customer trust preview', () => {
+describe('nasiya creation form: explicit existing-customer trust preview', () => {
   const source = read('src/app/(shop)/shop/nasiyalar/new/page.tsx')
+  const combobox = read('src/components/shop/customer-combobox.tsx')
+  const picker = read('src/app/api/customers/picker/route.ts')
 
-  it('debounces a by-phone lookup as the phone is typed', () => {
-    expect(source).toContain('/api/customers/by-phone?phone=')
+  it('uses the shared combobox instead of silently matching a typed phone', () => {
+    expect(source).toContain('<CustomerCombobox')
+    expect(source).toContain("customerMode: customerMode === 'EXISTING' ? 'EXISTING' : 'NEW'")
+    expect(source).toContain('customerId: selectedCustomer?.id')
+    expect(source).not.toContain('/api/customers/by-phone?phone=')
   })
 
-  it('shows the badge only when an existing customer was found', () => {
-    expect(source).toContain('{existingCustomerTrust && (')
+  it('debounces tenant-scoped picker search and renders its trust summary', () => {
+    expect(combobox).toContain("'/api/customers/picker'")
+    expect(combobox).toContain('customerSearchRequest({ search: debouncedSearch }, signal)')
+    expect(read('src/lib/customer-search-transport.ts')).toContain("method: 'POST'")
+    expect(combobox).toContain('setDebouncedSearch(search.trim())')
+    expect(combobox).toContain('selected.trust?.label')
+    expect(combobox).toContain('customer.trust?.label')
+    expect(picker).toContain('resolveActiveShopId(guarded.session')
+    expect(picker).toContain('customerSearchWhere(resolved.shopId, parsed.data.search)')
+    expect(picker).toContain('trust: { tier: trust.tier, label: trust.label, color: trust.color }')
   })
 })
 

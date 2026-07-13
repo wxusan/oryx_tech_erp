@@ -21,6 +21,11 @@ import { phoneSchema } from '@/lib/validations'
 import { deviceConditionLabel, formatDeviceStorage, normalizeImei, resolveImeiPairUpdate } from '@/lib/device-specs'
 import { getShopDeviceListItemsByIds } from '@/lib/server/shop-lists'
 import { latestChangeCursorForShop } from '@/lib/server/change-events'
+import {
+  createPrivateUploadReference,
+  privateUploadPreviewUrl,
+  resolvePrivateUploadReference,
+} from '@/lib/server/private-upload-reference'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -42,6 +47,7 @@ const updateDeviceSchema = z.object({
   imei: z.string().trim().refine((value) => normalizeImei(value) !== null, 'IMEI 15 ta raqamdan iborat bo\'lishi kerak').optional(),
   secondaryImei: z.string().trim().refine((value) => !value || normalizeImei(value) !== null, 'Ikkinchi IMEI 15 ta raqamdan iborat bo\'lishi kerak').optional(),
   supplierPhone: phoneSchema.or(z.literal('')).optional(),
+  imageUrls: z.array(z.string().trim().min(1).max(500)).max(10).optional(),
   note: z.string().optional(),
   reason: z.string().optional(),
 }).refine((data) => (data.storageAmount === undefined) === (data.storageUnit === undefined), {
@@ -184,6 +190,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
           select: {
             id: true,
             status: true,
+            resolutionState: true,
             totalAmount: true,
             interestPercent: true,
             interestAmount: true,
@@ -221,7 +228,24 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 
     if (!device) return notFound("Qurilma topilmadi")
 
-    return ok(device, "Qurilma ma'lumotlari")
+    const imageUrls = device.imageUrls.flatMap((value) => {
+      const key = resolvePrivateUploadReference({
+        value,
+        shopId: device.shopId,
+        kind: 'device',
+        allowLegacyRawKey: true,
+      })
+      if (key) {
+        const reference = createPrivateUploadReference({ key, shopId: device.shopId, kind: 'device' })
+        return [privateUploadPreviewUrl('device', reference)]
+      }
+      // Preserve a genuinely external legacy image, but never echo a broken
+      // private reference or raw tenant key back into browser state.
+      if (!value.startsWith('shops/') && !value.includes('/api/uploads/device')) return [value]
+      return []
+    })
+
+    return ok({ ...device, imageUrls }, "Qurilma ma'lumotlari")
   } catch (err) {
     logger.error('[GET /api/devices/[id]]', { event: 'api.route_error', error: err })
     return serverError()
@@ -259,7 +283,22 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     if (!existing) return notFound("Qurilma topilmadi")
 
+    const resolvedImageUrls = parsed.data.imageUrls?.map((value) => {
+      const privateKey = resolvePrivateUploadReference({
+        value,
+        shopId: existing.shopId,
+        kind: 'device',
+        allowLegacyRawKey: true,
+      })
+      if (privateKey) return privateKey
+      return existing.imageUrls.includes(value) && !value.startsWith('shops/') ? value : null
+    })
+    if (resolvedImageUrls?.some((value) => !value)) {
+      return badRequest("Qurilma rasmi boshqa do'konga tegishli yoki havola muddati tugagan")
+    }
+
     const { reason, inputCurrency, secondaryImei: secondaryImeiInput, ...updateData } = parsed.data
+    if (resolvedImageUrls) updateData.imageUrls = resolvedImageUrls as string[]
     const identityChanged = updateData.imei !== undefined || secondaryImeiInput !== undefined
     const imeiUpdate = resolveImeiPairUpdate(
       {
@@ -318,6 +357,8 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     }
 
     const auditNote = reason?.trim() || updateData.note?.trim()
+    const { imageUrls: _privateImageKeys, ...auditedUpdateData } = updateData
+    void _privateImageKeys
     if (hasDeviceChanges && isFinanciallyLinked) {
       if (!auditNote) {
         return badRequest(
@@ -387,11 +428,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
             batteryHealth: existing.batteryHealth,
             purchasePrice: Number(existing.purchasePrice),
             imei: existing.imei,
+            imageCount: existing.imageUrls.length,
             supplierPhone: existing.supplierPhone,
             note: existing.note,
           },
           newValue: {
-            ...updateData,
+            ...auditedUpdateData,
+            ...(parsed.data.imageUrls !== undefined ? { imageCount: parsed.data.imageUrls.length } : {}),
             ...(purchaseMeta ? moneyInputMeta(purchaseMeta) : {}),
             ...(auditNote && isFinanciallyLinked ? { editReason: auditNote } : {}),
           },

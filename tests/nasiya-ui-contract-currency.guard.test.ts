@@ -60,6 +60,6 @@ describe('nasiya payment modal previews the applied amount without leaking a sec
   })
 
   it('does NOT change the existing UZS-based overpayment/exceeds-remaining validation (still correct via the dual-ledger lockstep)', () => {
-    expect(modal).toContain('const exceedsRemaining = !carryOver && payAmountUzs > nasiyaRemainingAmount')
+    expect(modal).toContain('const exceedsRemaining = payAmountUzs > nasiyaRemainingAmount')
   })
 })

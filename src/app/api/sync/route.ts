@@ -14,7 +14,8 @@ import {
   type IncrementalSyncResponse,
 } from '@/lib/sync-contract'
 import { prisma } from '@/lib/prisma'
-import { principalHasPermission } from '@/lib/server/shop-access'
+import { principalHasFeature, principalHasPermission } from '@/lib/server/shop-access'
+import type { ShopFeatureCode } from '@/lib/access-control'
 import type { NavigationDomain } from '@/lib/navigation-cache-policy'
 
 const PRIVATE_HEADERS = {
@@ -24,16 +25,38 @@ const PRIVATE_HEADERS = {
 
 function allowedDomainsForGuard(guarded: Awaited<ReturnType<typeof requireApiSession>>): NavigationDomain[] | undefined {
   if (!guarded.ok || guarded.session.user.role === 'SUPER_ADMIN' || !guarded.principal) return undefined
-  if (guarded.principal.memberKind === 'SHOP_OWNER') return undefined
   const domains = new Set<NavigationDomain>(['access', 'settings', 'currency'])
-  const allow = (permission: Parameters<typeof principalHasPermission>[1], values: NavigationDomain[]) => {
-    if (principalHasPermission(guarded.principal!, permission)) values.forEach((value) => domains.add(value))
+  const allow = (
+    permission: Parameters<typeof principalHasPermission>[1],
+    values: NavigationDomain[],
+    feature?: ShopFeatureCode,
+  ) => {
+    if (
+      principalHasPermission(guarded.principal!, permission) &&
+      (!feature || principalHasFeature(guarded.principal!, feature))
+    ) values.forEach((value) => domains.add(value))
   }
-  allow('INVENTORY_VIEW', ['devices', 'sales', 'returns'])
+  allow('INVENTORY_VIEW', ['devices', 'returns'])
+  allow('INVENTORY_VIEW', ['sales'], 'CASH_SALES')
   allow('CUSTOMER_VIEW', ['customers'])
   allow('NASIYA_VIEW', ['nasiyas'])
   allow('OLIB_VIEW', ['olibSotdim'])
-  allow('PAYMENT_RECEIVE', ['payments', 'overdue'])
+  const canViewReceivables = (
+    principalHasFeature(guarded.principal, 'CASH_SALES') &&
+    principalHasPermission(guarded.principal, 'INVENTORY_VIEW')
+  ) || (
+    principalHasFeature(guarded.principal, 'NASIYA') &&
+    principalHasPermission(guarded.principal, 'NASIYA_VIEW')
+  )
+  if (canViewReceivables) domains.add('overdue')
+  if (
+    principalHasPermission(guarded.principal, 'PAYMENT_RECEIVE') &&
+    (principalHasFeature(guarded.principal, 'CASH_SALES') ||
+      principalHasFeature(guarded.principal, 'NASIYA') ||
+      principalHasFeature(guarded.principal, 'OLIB_SOTDIM'))
+  ) {
+    domains.add('payments')
+  }
   allow('REPORT_VIEW', ['reports'])
   allow('LOG_VIEW', ['logs'])
   return [...domains]

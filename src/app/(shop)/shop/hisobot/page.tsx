@@ -1,12 +1,14 @@
 import { redirect } from 'next/navigation'
-import { requireCurrentShopPermission } from '@/lib/api-auth'
+import { requireCurrentShopFeature, requireCurrentShopPermission } from '@/lib/api-auth'
 import { getShopStats } from '@/lib/server/shop-stats'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { recentTashkentMonthKeys, tashkentMonthRangeFromKey } from '@/lib/timezone'
+import { tashkentMonthRange } from '@/lib/timezone'
 import { prisma } from '@/lib/prisma'
 import HisobotClient from './hisobot-client'
 import { latestChangeCursorForSession } from '@/lib/server/change-events'
 import { IncrementalSnapshotBoundary } from '@/components/incremental-snapshot-boundary'
+import { resolveReportRange, type ReportRangePreset } from '@/lib/report-range'
+import { getShopRangeReport, getShopReportDataMonths } from '@/lib/server/shop-report-range'
 
 const UZ_MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr']
 
@@ -16,19 +18,54 @@ function uzMonthLabelFromKey(monthKey: string) {
 }
 
 interface ShopReportPageProps {
-  searchParams?: Promise<{ month?: string | string[]; admin?: string | string[] }>
+  searchParams?: Promise<{
+    preset?: string | string[]
+    month?: string | string[]
+    startMonth?: string | string[]
+    endMonth?: string | string[]
+    admin?: string | string[]
+  }>
+}
+
+const REPORT_PRESETS = new Set<ReportRangePreset>(['single', 'trailing3', 'trailing6', 'trailing12', 'custom'])
+
+function first(value: string | string[] | undefined) {
+  return Array.isArray(value) ? value[0] : value
 }
 
 export default async function ShopReportPage({ searchParams }: ShopReportPageProps) {
-  const guarded = await requireCurrentShopPermission('REPORT_VIEW')
-  if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
+  const [guarded, featureGuard] = await Promise.all([
+    requireCurrentShopPermission('REPORT_VIEW'),
+    requireCurrentShopFeature('REPORTS'),
+  ])
+  if (!guarded.ok || !featureGuard.ok || !guarded.shopId) redirect('/shop/dashboard')
   const params = await searchParams
-  const monthParam = Array.isArray(params?.month) ? params.month[0] : params?.month
-  const adminParam = Array.isArray(params?.admin) ? params.admin[0] : params?.admin
-  const monthKey = monthParam ? tashkentMonthRangeFromKey(monthParam).monthKey : null
+  const requestedPreset = first(params?.preset)
+  const preset: ReportRangePreset = REPORT_PRESETS.has(requestedPreset as ReportRangePreset)
+    ? requestedPreset as ReportRangePreset
+    : 'single'
+  const monthParam = first(params?.month)
+  const startMonthParam = first(params?.startMonth)
+  const endMonthParam = first(params?.endMonth)
+  const adminParam = first(params?.admin)
   const adminId = adminParam?.trim() || null
+  const availableMonths = await getShopReportDataMonths(guarded.shopId)
+  const defaultEndMonth = availableMonths[0] ?? tashkentMonthRange().monthKey
+  let range
+  try {
+    range = resolveReportRange({
+      preset,
+      month: preset === 'single' && monthParam && availableMonths.includes(monthParam) ? monthParam : null,
+      startMonth: startMonthParam,
+      endMonth: endMonthParam,
+      defaultEndMonth,
+    })
+  } catch {
+    range = resolveReportRange({ preset: 'single', month: availableMonths[0] ?? null, defaultEndMonth })
+  }
+  const monthKey = range.endMonth
   const cursor = await latestChangeCursorForSession(guarded.session)
-  const [stats, currency, shopAdmins] = await Promise.all([
+  const [stats, currency, shopAdmins, rangeReport] = await Promise.all([
     getShopStats(guarded.session, guarded.shopId, { monthKey, adminId }),
     getShopCurrencyContext(guarded.shopId),
     prisma.shopAdmin.findMany({
@@ -36,8 +73,11 @@ export default async function ShopReportPage({ searchParams }: ShopReportPagePro
       orderBy: { name: 'asc' },
       select: { id: true, name: true },
     }),
+    availableMonths.length || preset !== 'single' || Boolean(monthParam)
+      ? getShopRangeReport({ shopId: guarded.shopId, range, adminId })
+      : Promise.resolve(null),
   ])
-  const monthOptions = recentTashkentMonthKeys(12).map((key) => ({ value: key, label: uzMonthLabelFromKey(key) }))
+  const monthOptions = availableMonths.map((key) => ({ value: key, label: uzMonthLabelFromKey(key) }))
   return (
     <>
     <IncrementalSnapshotBoundary cursor={cursor} />
@@ -46,7 +86,11 @@ export default async function ShopReportPage({ searchParams }: ShopReportPagePro
       currency={currency}
       shopAdmins={shopAdmins}
       monthOptions={monthOptions}
-      monthKey={monthKey}
+      initialRangeReport={rangeReport}
+      preset={range.preset}
+      startMonth={range.startMonth}
+      endMonth={range.endMonth}
+      monthKey={range.preset === 'single' ? range.startMonth : null}
       adminId={adminId}
     />
     </>

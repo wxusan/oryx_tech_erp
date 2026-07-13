@@ -9,6 +9,7 @@ import { getUsdUzsRate } from '@/lib/server/currency'
 import { computeShopStatsFromRows } from '@/lib/shop-stats-formulas'
 import {
   getShopAccrualAggregate,
+  getNasiyaWriteOffAggregate,
   getShopObligationAggregate,
   getUpcomingScheduleIds,
 } from '@/lib/server/shop-stats-queries'
@@ -83,6 +84,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     returnsThisMonth,
     recentActivity,
     upcomingScheduleIds,
+    writeOffAggregate,
   ] = await Promise.all([
     prisma.device.count({
       // Imported devices exist only to carry pre-Oryx debt — they were never
@@ -113,7 +115,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     }),
 
     prisma.nasiya.count({
-      where: { shopId, deletedAt: null, status: { in: ['ACTIVE', 'OVERDUE'] } },
+      where: { shopId, deletedAt: null, resolutionState: 'ACTIVE', status: { in: ['ACTIVE', 'OVERDUE'] } },
     }),
 
     getShopObligationAggregate({ shopId, monthStart, monthEnd, todayStart }),
@@ -167,6 +169,8 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     }),
 
     getUpcomingScheduleIds(shopId, 5),
+
+    getNasiyaWriteOffAggregate({ shopId, monthStart, monthEnd, adminId }),
   ])
 
   const upcomingRows = upcomingScheduleIds.length
@@ -229,6 +233,11 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
   // currently-outstanding schedules) that have no single admin to blame/credit.
   return {
     ...computed,
+    writeOffsThisMonthNativeUzs: writeOffAggregate.nativeUzs,
+    writeOffsThisMonthNativeUsd: writeOffAggregate.nativeUsd,
+    writeOffsThisMonthFrozenUzs: writeOffAggregate.frozenUzs,
+    writeOffCountThisMonth: writeOffAggregate.writeOffCount,
+    writeOffReopenCountThisMonth: writeOffAggregate.reopenCount,
     monthKey: tashkentMonthRangeFromKey(monthKey, now).monthKey,
     filteredByAdmin: adminId,
     nonAttributableFields: ['totalDevices', 'activeNasiyalar', 'inventoryPurchaseCost', 'expectedThisMonth', 'overdueMoney', 'upcomingPayments'] as const,

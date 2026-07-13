@@ -17,6 +17,7 @@ import {
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { Label } from '@/components/ui/label'
+import { Field } from '@/components/ui/field'
 import { Textarea } from '@/components/ui/textarea'
 import { uzDateTime } from '@/lib/dates'
 import { isValidPhone } from '@/lib/phone'
@@ -177,10 +178,12 @@ export default function ShopSettingsPage() {
 
     if (accountName.trim().length < 2) {
       setAccountError("Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      requestAnimationFrame(() => document.getElementById('account-name')?.focus())
       return
     }
     if (!isValidPhone(accountPhone)) {
       setAccountError("Telefon raqam noto'g'ri. Masalan: +998 90 123 45 67")
+      requestAnimationFrame(() => document.getElementById('account-phone')?.focus())
       return
     }
 
@@ -210,14 +213,17 @@ export default function ShopSettingsPage() {
 
     if (shopForm.name.trim().length < 2) {
       setShopError("Do'kon nomi kamida 2 ta harfdan iborat bo'lishi kerak")
+      requestAnimationFrame(() => document.getElementById('shop-name')?.focus())
       return
     }
     if (shopForm.ownerName.trim().length < 2) {
       setShopError("Egasi ismi kamida 2 ta harfdan iborat bo'lishi kerak")
+      requestAnimationFrame(() => document.getElementById('shop-owner')?.focus())
       return
     }
     if (!isValidPhone(shopForm.ownerPhone)) {
       setShopError("Telefon raqam noto'g'ri. Masalan: +998 90 123 45 67")
+      requestAnimationFrame(() => document.getElementById('shop-owner-phone')?.focus())
       return
     }
 
@@ -261,6 +267,7 @@ export default function ShopSettingsPage() {
 
     if (passwordForm.newPassword !== passwordForm.confirmPassword) {
       setPasswordError('Yangi parol va tasdiq bir xil emas')
+      requestAnimationFrame(() => document.getElementById('shop-confirm-password')?.focus())
       return
     }
 
@@ -360,7 +367,7 @@ export default function ShopSettingsPage() {
             <CardContent className="space-y-4">
               <form onSubmit={handleAccountSubmit} className="space-y-3">
                 {accountError && (
-                  <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                  <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
                     {accountError}
                   </div>
                 )}
@@ -371,28 +378,22 @@ export default function ShopSettingsPage() {
                   </div>
                 )}
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div>
-                    <Label htmlFor="account-name" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                      Ism
-                    </Label>
+                  <Field label="Ism" required controlId="account-name">
                     <Input
                       id="account-name"
                       value={accountName}
                       onChange={(event) => setAccountName(event.target.value)}
                       className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                     />
-                  </div>
-                  <div>
-                    <Label htmlFor="account-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                      Telefon
-                    </Label>
+                  </Field>
+                  <Field label="Telefon" required controlId="account-phone">
                     <PhoneInput
                       id="account-phone"
                       value={accountPhone}
                       onChange={setAccountPhone}
                       className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                     />
-                  </div>
+                  </Field>
                   <Info label="Login" value={profile.login} mono />
                   <Info label="Do'kon raqami" value={profile.shop.shopNumber} />
                 </div>
@@ -427,7 +428,7 @@ export default function ShopSettingsPage() {
               <CardContent>
                 <form onSubmit={handleShopSubmit} className="space-y-4">
                   {shopError && (
-                    <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
+                    <div role="alert" className="rounded border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">
                       {shopError}
                     </div>
                   )}
@@ -438,39 +439,30 @@ export default function ShopSettingsPage() {
                     </div>
                   )}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div>
-                      <Label htmlFor="shop-name" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                        Do'kon nomi
-                      </Label>
+                    <Field label="Do'kon nomi" required controlId="shop-name">
                       <Input
                         id="shop-name"
                         value={shopForm.name}
                         onChange={(e) => setShopForm((f) => ({ ...f, name: e.target.value }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                       />
-                    </div>
-                    <div>
-                      <Label htmlFor="shop-owner" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                        Egasi ismi
-                      </Label>
+                    </Field>
+                    <Field label="Egasi ismi" required controlId="shop-owner">
                       <Input
                         id="shop-owner"
                         value={shopForm.ownerName}
                         onChange={(e) => setShopForm((f) => ({ ...f, ownerName: e.target.value }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                       />
-                    </div>
-                    <div>
-                      <Label htmlFor="shop-owner-phone" className="mb-1.5 block text-xs font-medium text-zinc-700">
-                        Egasi telefoni
-                      </Label>
+                    </Field>
+                    <Field label="Egasi telefoni" required controlId="shop-owner-phone">
                       <PhoneInput
                         id="shop-owner-phone"
                         value={shopForm.ownerPhone}
                         onChange={(ownerPhone) => setShopForm((f) => ({ ...f, ownerPhone }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
                       />
-                    </div>
+                    </Field>
                     <div>
                       <Label htmlFor="shop-address" className="mb-1.5 block text-xs font-medium text-zinc-700">
                         Manzil

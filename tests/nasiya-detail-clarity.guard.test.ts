@@ -40,7 +40,7 @@ describe('nasiya detail: completed profile', () => {
   })
 
   it('hides the "To\'lov qabul qilish" button once completed/cancelled', () => {
-    expect(source).toContain("{canReceivePayment && !isCompleted && displayStatus !== 'CANCELLED' && (")
+    expect(source).toContain("{canReceivePayment && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (")
   })
 
   it('shows a clear completed banner text', () => {
@@ -53,5 +53,11 @@ describe('nasiya detail: completed profile', () => {
 
   it('retitles the payment score card as historical once completed, never as an active risk signal', () => {
     expect(source).toContain('"To\'lov tarixi bahosi"')
+  })
+
+  it('shows localized confidence labels instead of raw LOW/MEDIUM/HIGH codes', () => {
+    expect(source).toContain("LOW: 'Past'")
+    expect(source).toContain('historyConfidenceLabels[nasiya.paymentScore.factors.historyConfidence]')
+    expect(source).not.toContain('Ishonch: {nasiya.paymentScore.factors.historyConfidence}')
   })
 })
