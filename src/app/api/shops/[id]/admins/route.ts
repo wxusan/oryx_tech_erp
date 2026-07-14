@@ -1,5 +1,5 @@
 /**
- * POST   /api/shops/[id]/admins — add a new admin to a shop (super admin only)
+ * POST   /api/shops/[id]/admins — create the first owner for an unresolved shop (super admin only)
  * PATCH  /api/shops/[id]/admins — reset a shop admin password (super admin only)
  * DELETE /api/shops/[id]/admins — soft-delete a shop admin (super admin only)
  */
@@ -20,7 +20,6 @@ import {
   isRequestBodyTooLarge,
   readLimitedJsonBody,
 } from '@/lib/server/request-limits'
-import { enabledFeatureSet, getActiveShopPackage } from '@/lib/server/shop-access'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -40,7 +39,7 @@ async function runSerializable<T>(operation: () => Promise<T>) {
 // Schemas
 // ---------------------------------------------------------------------------
 
-const addAdminSchema = z.object({
+const createOwnerSchema = z.object({
   name: z
     .string({ error: "Admin ismi kiritilishi shart" })
     .min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak")
@@ -89,7 +88,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     const { id } = await ctx.params
     const body = await readLimitedJsonBody(req)
-    const parsed = addAdminSchema.safeParse(body)
+    const parsed = createOwnerSchema.safeParse(body)
 
     if (!parsed.success) {
       const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
@@ -98,12 +97,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     const shop = await prisma.shop.findFirst({
       where: { id, deletedAt: null },
-      select: { id: true, ownerAdminId: true },
+      select: { id: true, ownerAdminId: true, ownershipStatus: true },
     })
     if (!shop) return notFound("Do'kon topilmadi")
-    const activePackage = await getActiveShopPackage(id)
-    if (!activePackage || !enabledFeatureSet(activePackage).has('STAFF_ACCESS')) {
-      return conflict("Bu do'kon paketida xodimlar profili yoqilmagan")
+    if (shop.ownerAdminId || shop.ownershipStatus === 'RESOLVED') {
+      return conflict("Do'konda ega bor. Xodimlarni faqat do'kon egasi yaratadi")
     }
 
     const existingLogin = await prisma.shopAdmin.findFirst({
@@ -126,7 +124,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const passwordHash = await bcrypt.hash(parsed.data.password, 12)
 
     const admin = await runSerializable(() => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Shop" WHERE "id" = ${id} FOR UPDATE`)
+      const lockedShops = await tx.$queryRaw<Array<{ id: string; ownerAdminId: string | null; ownershipStatus: string }>>(
+        Prisma.sql`SELECT "id", "ownerAdminId", "ownershipStatus" FROM "Shop" WHERE "id" = ${id} AND "deletedAt" IS NULL FOR UPDATE`,
+      )
+      const lockedShop = lockedShops[0]
+      if (!lockedShop) throw Object.assign(new Error('SHOP_NOT_FOUND'), { code: 'SHOP_NOT_FOUND' })
+      if (lockedShop.ownerAdminId || lockedShop.ownershipStatus === 'RESOLVED') {
+        throw Object.assign(new Error('OWNER_ALREADY_RESOLVED'), { code: 'OWNER_ALREADY_RESOLVED' })
+      }
       if (telegramId) {
         await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`telegram:${telegramId}`}))`)
         const [superAdminOwner, shopAdminOwner] = await Promise.all([
@@ -136,10 +141,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         if (superAdminOwner || shopAdminOwner) {
           throw Object.assign(new Error('TELEGRAM_TAKEN'), { code: 'TELEGRAM_TAKEN' })
         }
-      }
-      const lockedPackage = await getActiveShopPackage(id, new Date(), tx)
-      if (!lockedPackage || !enabledFeatureSet(lockedPackage).has('STAFF_ACCESS')) {
-        throw Object.assign(new Error('STAFF_ACCESS_DISABLED'), { code: 'STAFF_ACCESS_DISABLED' })
       }
       const newAdmin = await tx.shopAdmin.create({
         data: {
@@ -153,12 +154,23 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       })
 
+      await tx.shop.update({
+        where: { id },
+        data: {
+          ownerAdminId: newAdmin.id,
+          ownershipStatus: 'RESOLVED',
+          ownershipResolvedAt: new Date(),
+          ownershipResolvedById: session.user.id,
+          authorizationVersion: { increment: 1 },
+        },
+      })
+
       await tx.log.create({
         data: {
           shopId: id,
           actorId: session.user.id,
           actorType: 'SUPER_ADMIN',
-          action: 'CREATE',
+          action: 'OWNER_CREATE',
           targetType: 'ShopAdmin',
           targetId: newAdmin.id,
           newValue: { name: parsed.data.name, phone: parsed.data.phone, login: parsed.data.login },
@@ -171,12 +183,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }))
 
-    return created(admin, "Admin muvaffaqiyatli qo'shildi")
+    return created(admin, "Do'kon egasi muvaffaqiyatli yaratildi")
   } catch (err) {
     if (isRequestBodyTooLarge(err)) return payloadTooLarge()
     if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
-    if (err && typeof err === 'object' && 'code' in err && err.code === 'STAFF_ACCESS_DISABLED') {
-      return conflict("Bu do'kon paketida xodimlar profili yoqilmagan")
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'SHOP_NOT_FOUND') {
+      return notFound("Do'kon topilmadi")
+    }
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'OWNER_ALREADY_RESOLVED') {
+      return conflict("Do'konda ega bor. Xodimlarni faqat do'kon egasi yaratadi")
     }
     if (err && typeof err === 'object' && 'code' in err && err.code === 'TELEGRAM_TAKEN') {
       return conflict('Bu Telegram ID allaqachon mavjud')
