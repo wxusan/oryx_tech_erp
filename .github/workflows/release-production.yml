@@ -6,6 +6,11 @@ on:
       confirm:
         description: Type RELEASE_PRODUCTION after preview and migration rehearsal approval
         required: true
+      repair_malika_owner:
+        description: Run the one-time guarded Malika Mobile Pro owner repair
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -24,6 +29,7 @@ jobs:
     env:
       VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+      MALIKA_OWNER_REPAIR_PASSWORD: ${{ secrets.MALIKA_OWNER_REPAIR_PASSWORD }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -47,7 +53,12 @@ jobs:
       - name: Build, migrate, and create an unaliased production deployment
         id: deploy
         run: |
-          deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions --meta releaseCommit="$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
+          if [[ "${{ inputs.repair_malika_owner }}" == "true" ]]; then
+            test -n "$MALIKA_OWNER_REPAIR_PASSWORD"
+            deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions --build-env ORYX_MALIKA_OWNER_REPAIR=1 --build-env "ORYX_MALIKA_OWNER_REPAIR_PASSWORD=$MALIKA_OWNER_REPAIR_PASSWORD" --meta "releaseCommit=$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
+          else
+            deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions --meta "releaseCommit=$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
+          fi
           echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
       - name: Inspect and smoke the exact production artifact
         id: verify

@@ -9,24 +9,24 @@ export function ShopAdminsTable({
   onAdd,
   onResetPassword,
   onDelete,
-  staffAccessEnabled,
+  canCreateOwner,
 }: {
   admins: AdminShopUser[]
   onAdd: () => void
   onResetPassword: (admin: AdminShopUser) => void
   onDelete: (admin: AdminShopUser) => void
-  staffAccessEnabled: boolean
+  canCreateOwner: boolean
 }) {
   return (
     <div className="mb-5 border border-zinc-200 bg-white">
       <div className="flex items-center justify-between border-b border-zinc-200 px-5 py-4">
-        <h2 className="text-sm font-semibold text-zinc-900">Adminlar</h2>
+        <h2 className="text-sm font-semibold text-zinc-900">Do&apos;kon profillari</h2>
         <button
           className="border border-zinc-200 px-2.5 py-1 text-xs text-zinc-500 transition-colors hover:bg-zinc-50 hover:text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50"
           onClick={onAdd}
-          disabled={!staffAccessEnabled}
-          title={staffAccessEnabled ? undefined : "Xodimlar profili paketda o'chirilgan"}
-        >+ Xodim qo&apos;shish</button>
+          disabled={!canCreateOwner}
+          title={canCreateOwner ? undefined : "Ega biriktirilgan: xodimlarni faqat do'kon egasi yaratadi"}
+        >+ Egani yaratish</button>
       </div>
       <Table>
         <TableHeader><TableRow className="border-zinc-200 bg-zinc-50">

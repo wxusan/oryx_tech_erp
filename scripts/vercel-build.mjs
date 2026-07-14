@@ -32,6 +32,7 @@ if (process.env.VERCEL_ENV === 'production') {
   run('npm', ['run', 'build'])
   run('node', ['scripts/production-release-preflight.mjs', '--phase=pre'])
   run('npm', ['run', 'prisma:migrate:deploy'])
+  run('node', ['scripts/repair-malika-owner.mjs'])
   run('node', ['scripts/production-release-preflight.mjs', '--phase=post'])
 } else {
   run('npm', ['run', 'build'])

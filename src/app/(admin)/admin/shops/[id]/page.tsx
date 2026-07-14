@@ -438,7 +438,7 @@ export default function ShopDetailPage() {
         resetAdmin()
         fetchShop()
       } else {
-        setAdminError(json.error ?? "Admin qo'shishda xatolik")
+        setAdminError(json.error ?? "Do'kon egasini yaratishda xatolik")
       }
     } catch {
       setAdminError('Xatolik yuz berdi')
@@ -679,7 +679,7 @@ export default function ShopDetailPage() {
         onAdd={() => setAddAdminModalOpen(true)}
         onResetPassword={openPasswordReset}
         onDelete={openDeleteAdmin}
-        staffAccessEnabled={staffAccessEnabled}
+        canCreateOwner={shop.ownershipStatus !== 'RESOLVED' && !isDeleted}
       />
       <ShopPaymentsTable payments={shop.payments} />
 
@@ -992,9 +992,12 @@ export default function ShopDetailPage() {
         <DialogContent className="max-w-md rounded-none">
           <DialogHeader>
             <DialogTitle className="text-base font-semibold text-zinc-900">
-              Xodim qo&apos;shish
+              Do&apos;kon egasini yaratish
             </DialogTitle>
           </DialogHeader>
+          <p className="text-sm text-zinc-500">
+            Ega do&apos;konning to&apos;liq boshqaruv vakolatini oladi. Xodimlarni keyin faqat shu ega yaratadi va boshqaradi.
+          </p>
           {adminError && (
             <p className="text-xs text-red-500 mt-1">{adminError}</p>
           )}
