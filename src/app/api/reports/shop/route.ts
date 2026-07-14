@@ -58,6 +58,9 @@ export async function GET(request: NextRequest) {
     } catch (error) {
       return badRequest(error instanceof Error ? error.message : 'Hisobot oralig\'i noto\'g\'ri')
     }
+    if (!range.monthKeys.every((monthKey) => availableMonths.includes(monthKey))) {
+      return badRequest("Tanlangan oraliq do'konning ERP ishlatilgan oylaridan tashqarida")
+    }
 
     const report = await getShopRangeReport({ shopId, range, adminId })
     return ok({ availableMonths, report })

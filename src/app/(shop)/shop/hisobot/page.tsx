@@ -63,6 +63,9 @@ export default async function ShopReportPage({ searchParams }: ShopReportPagePro
   } catch {
     range = resolveReportRange({ preset: 'single', month: availableMonths[0] ?? null, defaultEndMonth })
   }
+  if (!range.monthKeys.every((monthKey) => availableMonths.includes(monthKey))) {
+    range = resolveReportRange({ preset: 'single', month: availableMonths[0] ?? null, defaultEndMonth })
+  }
   const monthKey = range.endMonth
   const cursor = await latestChangeCursorForSession(guarded.session)
   const [stats, currency, shopAdmins, rangeReport] = await Promise.all([

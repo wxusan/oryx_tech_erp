@@ -3,10 +3,8 @@ import 'server-only'
 import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import type { ReportRange } from '@/lib/report-range'
-
-interface DataMonthRow {
-  month_key: string
-}
+import { shiftMonthKey } from '@/lib/report-range'
+import { tashkentMonthRange } from '@/lib/timezone'
 
 interface MonthlyReportRow {
   month_key: string
@@ -57,64 +55,27 @@ export interface ShopRangeReport {
 const number = (value: unknown) => Number(value ?? 0)
 
 /**
- * Months offered by single-month mode come from real reporting facts only.
- * A month is not invented merely because it is close to the current month.
+ * The report picker is an ERP-usage window, not a list of due dates. A future
+ * nasiya payment must never make a future month selectable. Once a shop is
+ * provisioned, every calendar month through the current Tashkent month is
+ * available, including quiet months with no transactions.
  */
-export async function getShopReportDataMonths(shopId: string): Promise<string[]> {
-  const rows = await prisma.$queryRaw<DataMonthRow[]>(Prisma.sql`
-    WITH facts AS (
-      SELECT s."createdAt" AS occurred_at
-      FROM "Sale" s
-      WHERE s."shopId" = ${shopId} AND s."deletedAt" IS NULL
-      UNION ALL
-      SELECT s."dueDate"
-      FROM "Sale" s
-      WHERE s."shopId" = ${shopId}
-        AND s."deletedAt" IS NULL
-        AND s."returnedAt" IS NULL
-        AND s."paidFully" = false
-        AND s."contractRemainingAmount" > 0
-        AND s."dueDate" IS NOT NULL
-      UNION ALL
-      SELECT n."createdAt"
-      FROM "Nasiya" n
-      WHERE n."shopId" = ${shopId} AND n."deletedAt" IS NULL AND n."isImported" = false
-      UNION ALL
-      SELECT coalesce(s."delayedUntil", s."dueDate")
-      FROM "NasiyaSchedule" s
-      JOIN "Nasiya" n ON n."id" = s."nasiyaId" AND n."shopId" = s."shopId"
-      WHERE s."shopId" = ${shopId}
-        AND s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
-        AND n."deletedAt" IS NULL
-        AND n."returnedAt" IS NULL
-        AND n."status" <> 'CANCELLED'
-        AND n."resolutionState" <> 'WRITTEN_OFF'
-        AND (
-          (n."contractCurrency" = 'USD' AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01)
-          OR (n."contractCurrency" = 'UZS' AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1)
-        )
-      UNION ALL
-      SELECT p."paidAt"
-      FROM "SalePayment" p
-      WHERE p."shopId" = ${shopId} AND p."deletedAt" IS NULL
-      UNION ALL
-      SELECT p."paidAt"
-      FROM "NasiyaPayment" p
-      WHERE p."shopId" = ${shopId} AND p."deletedAt" IS NULL
-      UNION ALL
-      SELECT r."createdAt"
-      FROM "DeviceReturn" r
-      WHERE r."shopId" = ${shopId}
-      UNION ALL
-      SELECT e."createdAt"
-      FROM "NasiyaResolutionEvent" e
-      WHERE e."shopId" = ${shopId}
-    )
-    SELECT DISTINCT to_char(occurred_at AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key
-    FROM facts
-    ORDER BY month_key DESC
-  `)
-  return rows.map((row) => row.month_key)
+export async function getShopReportDataMonths(shopId: string, now = new Date()): Promise<string[]> {
+  const shop = await prisma.shop.findUnique({
+    where: { id: shopId },
+    select: { createdAt: true },
+  })
+  if (!shop) return []
+
+  const startMonth = tashkentMonthRange(shop.createdAt).monthKey
+  const currentMonth = tashkentMonthRange(now).monthKey
+  if (startMonth > currentMonth) return []
+
+  const months: string[] = []
+  for (let month = currentMonth; month >= startMonth; month = shiftMonthKey(month, -1)) {
+    months.push(month)
+  }
+  return months
 }
 
 /**

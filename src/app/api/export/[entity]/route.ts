@@ -769,6 +769,9 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       } catch (error) {
         return new Response(error instanceof Error ? error.message : "Hisobot oralig'i noto'g'ri", { status: 400 })
       }
+      if (!range.monthKeys.every((monthKey) => availableMonths.includes(monthKey))) {
+        return new Response("Tanlangan oraliq do'konning ERP ishlatilgan oylaridan tashqarida", { status: 400 })
+      }
       const report = await getShopRangeReport({ shopId, range, adminId })
       return exportResponse(`report-${range.startMonth}-${range.endMonth}`, format, reportExportData(report))
     }

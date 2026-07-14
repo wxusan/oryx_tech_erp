@@ -24,7 +24,7 @@ afterAll(async () => {
   await prisma.$disconnect()
 })
 
-async function seedBase() {
+async function seedBase(createdAt = new Date('2026-02-01T00:00:00.000Z')) {
   const owner = await prisma.superAdmin.create({
     data: { name: 'Report owner', login: 'report-owner', passwordHash: 'integration-only' },
   })
@@ -37,6 +37,7 @@ async function seedBase() {
       address: 'Disposable database',
       subscriptionDue: new Date('2099-01-01T00:00:00.000Z'),
       createdById: owner.id,
+      createdAt,
     },
   })
   const customer = await prisma.customer.create({
@@ -64,7 +65,7 @@ async function seedBase() {
 }
 
 describe('dynamic shop range report', () => {
-  it('derives only real tenant fact months using exact Tashkent boundaries', async () => {
+  it('offers every ERP usage month from provisioning through the current Tashkent month', async () => {
     const { owner, shop, customer, device } = await seedBase()
     await device(100, 'IN_STOCK')
     const sold = await device(600, 'SOLD_CASH')
@@ -99,10 +100,11 @@ describe('dynamic shop range report', () => {
       },
     })
 
-    await expect(getShopReportDataMonths(shop.id)).resolves.toEqual(['2026-03', '2026-02'])
+    await expect(getShopReportDataMonths(shop.id, new Date('2026-07-14T12:00:00.000Z')))
+      .resolves.toEqual(['2026-07', '2026-06', '2026-05', '2026-04', '2026-03', '2026-02'])
   })
 
-  it('discovers due-only months from cash-sale debt and the effective delayed nasiya due date', async () => {
+  it('never exposes future nasiya or debt due dates as report months', async () => {
     const { owner, shop, customer, device } = await seedBase()
     const saleDevice = await device(600, 'SOLD_CASH')
     await prisma.sale.create({
@@ -162,7 +164,8 @@ describe('dynamic shop range report', () => {
       },
     })
 
-    await expect(getShopReportDataMonths(shop.id)).resolves.toEqual(['2026-06', '2026-05', '2026-02'])
+    await expect(getShopReportDataMonths(shop.id, new Date('2026-06-14T12:00:00.000Z')))
+      .resolves.toEqual(['2026-06', '2026-05', '2026-04', '2026-03', '2026-02'])
   })
 
   it.each(['sale', 'nasiya'] as const)(
