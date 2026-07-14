@@ -22,7 +22,7 @@ const customerImportSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    const guarded = await requireShopPermissionAndFeature('IMPORT_DATA', 'CUSTOMER_CRM')
+    const guarded = await requireShopPermissionAndFeature('IMPORT_CUSTOMERS', 'CUSTOMER_CRM')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

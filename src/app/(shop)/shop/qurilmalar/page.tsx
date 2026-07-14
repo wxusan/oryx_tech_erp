@@ -1,10 +1,12 @@
 import { redirect } from 'next/navigation'
-import { requireCurrentShopPermission } from '@/lib/api-auth'
+import { requireCurrentShopAnyPermission } from '@/lib/api-auth'
 import { getShopDevicesList } from '@/lib/server/shop-lists'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import QurilmalarClient from './qurilmalar-client'
 import { positivePage, scalarParam } from '@/lib/list-url-state'
 import { latestChangeCursorForSession } from '@/lib/server/change-events'
+import { principalHasPermission } from '@/lib/server/shop-access'
+import DeviceActionQueue from './device-action-queue'
 
 interface QurilmalarPageProps {
   searchParams?: Promise<{ tab?: string | string[]; focus?: string | string[]; status?: string | string[]; q?: string | string[]; page?: string | string[] }>
@@ -16,8 +18,11 @@ interface QurilmalarPageProps {
 const PER_PAGE = 25
 
 export default async function QurilmalarPage({ searchParams }: QurilmalarPageProps) {
-  const guarded = await requireCurrentShopPermission('INVENTORY_VIEW')
+  const guarded = await requireCurrentShopAnyPermission(['INVENTORY_VIEW', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK'])
   if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
+  if (!guarded.principal || !principalHasPermission(guarded.principal, 'INVENTORY_VIEW')) {
+    return <DeviceActionQueue />
+  }
 
   const params = await searchParams
   const tab = Array.isArray(params?.tab) ? params?.tab[0] : params?.tab

@@ -65,7 +65,7 @@ function matchesExistingSalePaymentPayload(
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermissionAndFeature('PAYMENT_RECEIVE', 'CASH_SALES')
+    const guarded = await requireShopPermissionAndFeature('SALE_PAYMENT_RECEIVE', 'CASH_SALES')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

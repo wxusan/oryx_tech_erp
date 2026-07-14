@@ -265,7 +265,7 @@ function AuthorizedNewNasiyaPage() {
       if (!res.ok || !json.success) {
         throw new Error(json.error || 'Nasiyani saqlashda xatolik')
       }
-      await navigateAfterMutation(router, `/shop/qurilmalar/${selectedDevice.id}`, {
+      await navigateAfterMutation(router, `/shop/nasiyalar/${json.data?.nasiyaId}`, {
         kind: 'nasiya.created',
         deviceId: selectedDevice.id,
         nasiyaId: json.data?.nasiyaId,
@@ -333,6 +333,7 @@ function AuthorizedNewNasiyaPage() {
       {step === 1 && (
         <div className="space-y-3">
           <InStockDevicePicker
+            purpose="nasiya"
             selectedDevice={selectedDevice}
             onSelect={selectDevice}
             onDeepLinkSelect={(device) => {

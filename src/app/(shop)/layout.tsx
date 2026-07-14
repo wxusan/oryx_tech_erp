@@ -15,11 +15,17 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
   const guarded = await requireApiSession()
   if (!guarded.ok || !guarded.shopId || !guarded.principal) redirect('/shop/login')
 
-  const canSeeFinancialOverview = guarded.principal.memberKind === 'SHOP_OWNER'
-  const includeCashSales = canSeeFinancialOverview && principalHasFeature(guarded.principal, 'CASH_SALES') &&
-    principalHasPermission(guarded.principal, 'INVENTORY_VIEW')
-  const includeNasiya = canSeeFinancialOverview && principalHasFeature(guarded.principal, 'NASIYA') &&
-    principalHasPermission(guarded.principal, 'NASIYA_VIEW')
+  const includeCashSales = principalHasFeature(guarded.principal, 'CASH_SALES') && (
+    principalHasPermission(guarded.principal, 'RECEIVABLES_VIEW') ||
+    principalHasPermission(guarded.principal, 'SALE_VIEW') ||
+    principalHasPermission(guarded.principal, 'SALE_PAYMENT_RECEIVE')
+  )
+  const includeNasiya = principalHasFeature(guarded.principal, 'NASIYA') && (
+    principalHasPermission(guarded.principal, 'RECEIVABLES_VIEW') ||
+    principalHasPermission(guarded.principal, 'NASIYA_VIEW') ||
+    principalHasPermission(guarded.principal, 'NASIYA_PAYMENT_RECEIVE') ||
+    principalHasPermission(guarded.principal, 'NASIYA_DEFER')
+  )
   const { start: todayStart, end: tomorrowStart, dayKey } = tashkentDayRange(new Date())
   const [syncCursor, currency, shop, dueCohorts] = await Promise.all([
     latestChangeCursorForSession(guarded.session),

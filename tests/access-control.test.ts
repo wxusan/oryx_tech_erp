@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import {
+  ACTIVE_SHOP_PERMISSION_CODES,
   SHOP_FEATURE_CODES,
   SHOP_PERMISSION_CATALOG,
   calculateRecurringPackagePrice,
+  permissionRequiredFeatures,
   principalCan,
   shopMemberKind,
   type PackageFeatureInput,
@@ -98,10 +100,11 @@ describe('owner and staff authorization', () => {
     expect(shopMemberKind({ memberId: 'staff', ownerAdminId: 'owner' })).toBe('SHOP_STAFF')
   })
 
-  it('gives owners package-bounded permissions and keeps owner-only actions away from staff', () => {
+  it('gives owners package-bounded permissions and keeps retired aliases out of live staff authorization', () => {
     expect(principalCan(principal({ memberKind: 'SHOP_OWNER' }), 'MEMBER_MANAGE')).toBe(true)
     expect(principalCan(principal({ grantedPermissions: new Set(['MEMBER_MANAGE']) }), 'MEMBER_MANAGE')).toBe(false)
-    expect(principalCan(principal({ grantedPermissions: new Set(['CASH_SALE_CREATE']) }), 'CASH_SALE_CREATE')).toBe(true)
+    expect(principalCan(principal({ grantedPermissions: new Set(['CASH_SALE_CREATE']) }), 'CASH_SALE_CREATE')).toBe(false)
+    expect(principalCan(principal({ grantedPermissions: new Set(['SALE_CREATE']) }), 'SALE_CREATE')).toBe(true)
   })
 
   it('never grants a permission when its feature is disabled', () => {
@@ -112,25 +115,27 @@ describe('owner and staff authorization', () => {
   })
 
   it('preserves legacy operational access without expanding it to new owner-only powers', () => {
-    expect(principalCan(principal({ legacyFullAccess: true }), 'CASH_SALE_CREATE')).toBe(true)
+    expect(principalCan(principal({ legacyFullAccess: true }), 'SALE_CREATE')).toBe(true)
     expect(principalCan(principal({ legacyFullAccess: true }), 'LOG_VIEW')).toBe(true)
     expect(principalCan(principal({ legacyFullAccess: true }), 'REPORT_VIEW')).toBe(false)
-    expect(principalCan(principal({ legacyFullAccess: true }), 'EXPORT_DATA')).toBe(false)
-    expect(principalCan(principal({ legacyFullAccess: true }), 'WRITEOFF_MANAGE')).toBe(false)
-    expect(principalCan(principal({ legacyFullAccess: true }), 'MEMBER_MANAGE')).toBe(false)
+    expect(principalCan(principal({ legacyFullAccess: true }), 'EXPORT_SALES')).toBe(false)
+    expect(principalCan(principal({ legacyFullAccess: true }), 'NASIYA_WRITE_OFF')).toBe(false)
+    expect(principalCan(principal({ legacyFullAccess: true }), 'STAFF_VIEW')).toBe(false)
   })
 
   it('enforces the complete typed permission matrix for staff', () => {
+    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(57)
+    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(57)
     for (const permission of SHOP_PERMISSION_CATALOG) {
       const granted = principal({ grantedPermissions: new Set([permission.code]) })
-      expect(principalCan(granted, permission.code), permission.code).toBe(!permission.ownerOnly)
+      expect(principalCan(granted, permission.code), permission.code).toBe(!permission.ownerOnly && !permission.retired)
 
-      if (permission.featureCode) {
+      for (const requiredFeature of permissionRequiredFeatures(permission.code)) {
         const withoutFeature = principal({
           grantedPermissions: new Set([permission.code]),
-          enabledFeatures: new Set(SHOP_FEATURE_CODES.filter((code) => code !== permission.featureCode)),
+          enabledFeatures: new Set(SHOP_FEATURE_CODES.filter((code) => code !== requiredFeature)),
         })
-        expect(principalCan(withoutFeature, permission.code), `${permission.code} feature gate`).toBe(false)
+        expect(principalCan(withoutFeature, permission.code), `${permission.code} ${requiredFeature} feature gate`).toBe(false)
       }
     }
   })

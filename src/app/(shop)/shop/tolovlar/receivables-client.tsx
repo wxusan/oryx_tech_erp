@@ -11,6 +11,7 @@ import { formatUserFacingMoney, type CurrencyContext } from '@/lib/currency'
 import { uzDate } from '@/lib/dates'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { useShopAccess } from '@/components/shop/shop-access-context'
 import type { ReceivableCohort } from '@/lib/server/shop-stats-queries'
 
 interface ReceivableItem {
@@ -51,6 +52,7 @@ function amountText(item: ReceivableItem, currency: CurrencyContext) {
 }
 
 export default function ReceivablesClient({ initialData }: { initialData: ReceivablePageData }) {
+  const { can } = useShopAccess()
   const scope = useAuthenticatedQueryScope()
   const query = useQuery({
     queryKey: queryKeys.list(scope, 'overdue', {
@@ -74,6 +76,30 @@ export default function ReceivablesClient({ initialData }: { initialData: Receiv
   })
   const data = query.data
   const isOverdue = data.cohort === 'OVERDUE'
+  const canOpenSaleDetails = [
+    'INVENTORY_VIEW',
+    'SALE_VIEW',
+    'SALE_CREATE',
+    'SALE_EDIT',
+    'SALE_PAYMENT_RECEIVE',
+    'SALE_REMINDER_MANAGE',
+    'SALE_RETURN_REFUND',
+  ].some((permission) => can(permission as Parameters<typeof can>[0]))
+  const canOpenNasiyaDetails = [
+    'NASIYA_VIEW',
+    'NASIYA_CREATE',
+    'NASIYA_EDIT',
+    'NASIYA_PAYMENT_RECEIVE',
+    'NASIYA_DEFER',
+    'NASIYA_REMINDER_MANAGE',
+    'NASIYA_CANCEL',
+    'NASIYA_ARCHIVE',
+    'NASIYA_WRITE_OFF',
+    'NASIYA_REOPEN',
+  ].some((permission) => can(permission as Parameters<typeof can>[0]))
+  const canOpenDetails = (item: ReceivableItem) => (
+    item.dealType === 'nasiya' ? canOpenNasiyaDetails : canOpenSaleDetails
+  )
 
   return (
     <div className="space-y-5 p-4 sm:p-6 lg:p-8">
@@ -129,12 +155,16 @@ export default function ReceivablesClient({ initialData }: { initialData: Receiv
               </thead>
               <tbody className="divide-y divide-zinc-100">
                 {data.items.map((item) => (
-                  <tr key={`${item.cohort}:${item.dealType}:${item.dealId}`} className="relative transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50">
+                  <tr key={`${item.cohort}:${item.dealType}:${item.dealId}`} className={canOpenDetails(item) ? 'relative transition-colors hover:bg-zinc-50 focus-within:bg-zinc-50' : undefined}>
                     <td className="px-4 py-3">
-                      <StretchedLink href={dealHref(item)} className="font-medium text-zinc-900">
-                        {item.customerName}
-                        <span className="sr-only"> — {item.dealType === 'nasiya' ? 'Nasiya' : 'Qarz'} tafsilotlarini ochish</span>
-                      </StretchedLink>
+                      {canOpenDetails(item) ? (
+                        <StretchedLink href={dealHref(item)} className="font-medium text-zinc-900">
+                          {item.customerName}
+                          <span className="sr-only"> — {item.dealType === 'nasiya' ? 'Nasiya' : 'Qarz'} tafsilotlarini ochish</span>
+                        </StretchedLink>
+                      ) : (
+                        <span className="font-medium text-zinc-900">{item.customerName}</span>
+                      )}
                       <div className="text-xs text-zinc-500">{item.customerPhone}</div>
                     </td>
                     <td className="px-4 py-3 text-zinc-700">
@@ -151,10 +181,12 @@ export default function ReceivablesClient({ initialData }: { initialData: Receiv
 
           <div className="grid gap-3 md:hidden">
             {data.items.map((item) => (
-              <Card key={`${item.cohort}:${item.dealType}:${item.dealId}`} className="relative rounded-lg transition-colors hover:bg-zinc-50 focus-within:ring-2 focus-within:ring-zinc-900">
-                <StretchedLink href={dealHref(item)} className="absolute inset-0 z-0">
-                  <span className="sr-only">{item.customerName} — {item.dealType === 'nasiya' ? 'Nasiya' : 'Qarz'} tafsilotlarini ochish</span>
-                </StretchedLink>
+              <Card key={`${item.cohort}:${item.dealType}:${item.dealId}`} className={canOpenDetails(item) ? 'relative rounded-lg transition-colors hover:bg-zinc-50 focus-within:ring-2 focus-within:ring-zinc-900' : 'rounded-lg'}>
+                {canOpenDetails(item) && (
+                  <StretchedLink href={dealHref(item)} className="absolute inset-0 z-0">
+                    <span className="sr-only">{item.customerName} — {item.dealType === 'nasiya' ? 'Nasiya' : 'Qarz'} tafsilotlarini ochish</span>
+                  </StretchedLink>
+                )}
                 <CardHeader className="pb-2">
                   <div className="flex items-start justify-between gap-3">
                     <CardTitle className="text-base">{item.customerName}</CardTitle>

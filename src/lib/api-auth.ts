@@ -169,6 +169,20 @@ export async function requireCurrentShopPermission(permission: ShopPermissionCod
   return guarded
 }
 
+export async function requireCurrentShopAnyPermission(
+  permissions: readonly ShopPermissionCode[],
+): Promise<GuardResult> {
+  const guarded = await requireApiSession()
+  if (!guarded.ok) return guarded
+  if (guarded.session.user.role !== 'SHOP_ADMIN' || !guarded.principal) {
+    return { ok: false, response: forbidden("Do'kon foydalanuvchisi ruxsati talab qilinadi") }
+  }
+  if (!permissions.some((permission) => principalHasPermission(guarded.principal!, permission))) {
+    return { ok: false, response: forbidden("Bu amal uchun ruxsat berilmagan") }
+  }
+  return guarded
+}
+
 /**
  * Guard shared operational routes. Super admins retain their existing audited
  * cross-shop access; shop members are checked against the live package and
@@ -223,33 +237,27 @@ export async function requireShopPermissionAndAnyFeature(
   return guarded
 }
 
-/**
- * Read-only mixed receivable surfaces contain tenant-wide count and money
- * aggregates across Sale and Nasiya.  They are therefore an owner/super-admin
- * financial overview, not a generic operational read permission.  Staff can
- * still receive an authorized payment from the individual device/Nasiya flow,
- * but must never fetch a due-summary, banner, or mixed queue by calling this
- * route directly.
- */
+/** A scoped work queue: each cohort is included only when the member can view
+ * receivables or perform an operation on that exact contract family. */
 export async function requireReceivableView(): Promise<
   | (Extract<GuardResult, { ok: true }> & { includeCashSales: boolean; includeNasiya: boolean })
   | Extract<GuardResult, { ok: false }>
 > {
   const guarded = await requireApiSession()
   if (!guarded.ok) return guarded
-  const isFinancialOwner = guarded.session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
-  if (!isFinancialOwner) {
-    return { ok: false, response: forbidden("To'lovlar xulosasi faqat do'kon egasi uchun") }
-  }
   const includeCashSales = guarded.session.user.role === 'SUPER_ADMIN' || Boolean(
     guarded.principal &&
     principalHasFeature(guarded.principal, 'CASH_SALES') &&
-    principalHasPermission(guarded.principal, 'INVENTORY_VIEW'),
+    ['RECEIVABLES_VIEW', 'SALE_VIEW', 'SALE_PAYMENT_RECEIVE'].some((permission) => (
+      principalHasPermission(guarded.principal!, permission as ShopPermissionCode)
+    )),
   )
   const includeNasiya = guarded.session.user.role === 'SUPER_ADMIN' || Boolean(
     guarded.principal &&
     principalHasFeature(guarded.principal, 'NASIYA') &&
-    principalHasPermission(guarded.principal, 'NASIYA_VIEW'),
+    ['RECEIVABLES_VIEW', 'NASIYA_VIEW', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER'].some((permission) => (
+      principalHasPermission(guarded.principal!, permission as ShopPermissionCode)
+    )),
   )
   if (!includeCashSales && !includeNasiya) {
     return { ok: false, response: forbidden("Qarzdorlikni ko'rish uchun ruxsat berilmagan") }

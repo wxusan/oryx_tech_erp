@@ -1,13 +1,14 @@
 import { NextRequest } from 'next/server'
 import { z, ZodError } from 'zod'
 import { Prisma } from '@/generated/prisma/client'
-import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
-import { badRequest, notFound, ok, serverError } from '@/lib/api-helpers'
+import { requireShopAnyPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-helpers'
 import { prisma } from '@/lib/prisma'
 import { normalizePhone } from '@/lib/phone'
 import { phoneSchema } from '@/lib/validations'
 import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { logger } from '@/lib/logger'
+import { principalHasPermission } from '@/lib/server/shop-access'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -28,7 +29,7 @@ const updateSaleSchema = z.object({
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('CASH_SALE_MANAGE')
+    const guarded = await requireShopAnyPermission(['SALE_EDIT', 'SALE_REMINDER_MANAGE'])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const { id: saleId } = await ctx.params
@@ -45,6 +46,16 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (!parsed.success) {
       const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
       return badRequest(firstError)
+    }
+    const hasOrdinaryEdit = parsed.data.customerName !== undefined || parsed.data.customerPhone !== undefined ||
+      parsed.data.note !== undefined || parsed.data.dueDate !== undefined ||
+      parsed.data.paymentMethod !== undefined || parsed.data.reason !== undefined
+    if (
+      session.user.role !== 'SUPER_ADMIN' &&
+      ((hasOrdinaryEdit && (!guarded.principal || !principalHasPermission(guarded.principal, 'SALE_EDIT'))) ||
+        (parsed.data.reminderEnabled !== undefined && (!guarded.principal || !principalHasPermission(guarded.principal, 'SALE_REMINDER_MANAGE'))))
+    ) {
+      return forbidden("So'rovdagi barcha sotuv o'zgarishlari uchun alohida ruxsat kerak")
     }
 
     const requestedShopId = body && typeof body === 'object' ? (body as { shopId?: string }).shopId : undefined

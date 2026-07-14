@@ -208,11 +208,11 @@ export default function NasiyalarClient({
   const scope = useAuthenticatedQueryScope()
   const { can, memberKind } = useShopAccess()
   const canCreate = can('NASIYA_CREATE')
-  const canImport = can('IMPORT_DATA')
-  const canViewResolutionHistory = memberKind === 'SHOP_OWNER'
-  const canExport = can('EXPORT_DATA')
-  const canReceivePayment = can('PAYMENT_RECEIVE')
-  const canManageNasiya = can('NASIYA_MANAGE')
+  const canImport = can('IMPORT_OLD_NASIYA')
+  const canViewResolutionHistory = memberKind === 'SHOP_OWNER' || can('NASIYA_ARCHIVE') || can('NASIYA_WRITE_OFF') || can('NASIYA_REOPEN')
+  const canExport = can('EXPORT_NASIYA')
+  const canReceivePayment = can('NASIYA_PAYMENT_RECEIVE')
+  const canDeferNasiya = can('NASIYA_DEFER')
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState(initialSearch)
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch)
@@ -358,7 +358,7 @@ export default function NasiyalarClient({
                 ? `${collectionCohortLabels[collectionWorkItem.cohort]}: ${uzDate(collectionWorkItem.effectiveDue)}`
                 : n.nextPaymentDate ? `Keyingi to'lov: ${uzDate(n.nextPaymentDate)}` : null
               const canPay = canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
-              const canDefer = canManageNasiya && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              const canDefer = canDeferNasiya && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
               return (
                 <div
                   key={n.id}
@@ -472,7 +472,7 @@ export default function NasiyalarClient({
                 ? `${collectionCohortLabels[collectionWorkItem.cohort]}: ${uzDate(collectionWorkItem.effectiveDue)}`
                 : n.nextPaymentDate ? `Keyingi to'lov: ${uzDate(n.nextPaymentDate)}` : '—'
               const canPay = canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
-              const canDefer = canManageNasiya && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              const canDefer = canDeferNasiya && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
               return (
                 <div
                   key={n.id}
@@ -592,7 +592,7 @@ export default function NasiyalarClient({
           onSuccess={handlePaymentSuccess}
         />
       )}
-      {canManageNasiya && (
+      {canDeferNasiya && (
         <NasiyaDeferModal
           nasiyaId={deferFor?.id ?? ''}
           open={deferFor !== null}

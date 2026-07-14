@@ -192,11 +192,12 @@ describe('ERP 2.0 field/search contract', () => {
     expect(range.parameters).toEqual(['month', 'preset', 'startMonth', 'endMonth', 'admin'])
 
     const legacyRoute = readFileSync(resolve(process.cwd(), legacy.source), 'utf8')
-    expect(legacyRoute).toContain("requireShopPermission('REPORT_VIEW')")
+    expect(legacyRoute).toContain("requireShopAnyPermission(['DASHBOARD_OPERATIONAL_VIEW', 'DASHBOARD_FINANCIAL_VIEW', 'REPORT_VIEW'])")
     expect(legacyRoute).toContain("resolveActiveShopId(session, searchParams.get('shopId'))")
     expect(legacyRoute).toContain("searchParams.get('month')")
     expect(legacyRoute).toContain("searchParams.get('admin')")
     expect(legacyRoute).toContain('getShopStats(session, shopId, { monthKey, adminId })')
+    expect(legacyRoute).toContain('getShopOperationalStats(session, shopId)')
 
     const rangeRoute = readFileSync(resolve(process.cwd(), range.source), 'utf8')
     expect(rangeRoute).toContain("requireShopPermissionAndFeature('REPORT_VIEW', 'REPORTS')")

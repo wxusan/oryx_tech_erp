@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { requireShopAnyPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { notFound, serverError } from '@/lib/api-helpers'
 import { logger } from '@/lib/logger'
 import { prisma } from '@/lib/prisma'
@@ -10,7 +10,7 @@ type RouteContext = { params: Promise<{ id: string }> }
 /** Resolve a customer-owned private image without exposing its storage key. */
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopAnyPermission(['CUSTOMER_VIEW', 'NASIYA_VIEW'])
+    const guarded = await requireShopPermission('CUSTOMER_PASSPORT_PHOTO_VIEW')
     if (!guarded.ok) return guarded.response
     const resolved = await resolveActiveShopId(guarded.session, null)
     if (!resolved.ok) return resolved.response

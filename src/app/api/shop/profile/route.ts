@@ -14,7 +14,8 @@ import { z, ZodError } from 'zod'
 import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-helpers'
-import { requireCurrentShopPermission } from '@/lib/api-auth'
+import { requireCurrentShopAnyPermission } from '@/lib/api-auth'
+import { principalHasPermission } from '@/lib/server/shop-access'
 import { invalidateShopProfileMutation } from '@/lib/server/cache-tags'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { logger } from '@/lib/logger'
@@ -48,7 +49,11 @@ const updateShopProfileSchema = z.object({
 
 export async function GET() {
   try {
-    const guarded = await requireCurrentShopPermission('SETTINGS_MANAGE')
+    const guarded = await requireCurrentShopAnyPermission([
+      'SHOP_PROFILE_EDIT',
+      'SHOP_CURRENCY_MANAGE',
+      'SHOP_TELEGRAM_MANAGE',
+    ])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -73,7 +78,11 @@ export async function GET() {
 
 export async function PATCH(req: NextRequest) {
   try {
-    const guarded = await requireCurrentShopPermission('SETTINGS_MANAGE')
+    const guarded = await requireCurrentShopAnyPermission([
+      'SHOP_PROFILE_EDIT',
+      'SHOP_CURRENCY_MANAGE',
+      'SHOP_TELEGRAM_MANAGE',
+    ])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -87,6 +96,18 @@ export async function PATCH(req: NextRequest) {
     if (!parsed.success) {
       const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
       return badRequest(firstError)
+    }
+    const hasProfileFields = parsed.data.name !== undefined || parsed.data.ownerName !== undefined ||
+      parsed.data.ownerPhone !== undefined || parsed.data.address !== undefined || parsed.data.note !== undefined
+    const requiredPermissions = [
+      [hasProfileFields, 'SHOP_PROFILE_EDIT'],
+      [parsed.data.preferredCurrency !== undefined, 'SHOP_CURRENCY_MANAGE'],
+      [parsed.data.telegramNotificationsEnabled !== undefined, 'SHOP_TELEGRAM_MANAGE'],
+    ] as const
+    for (const [included, permission] of requiredPermissions) {
+      if (included && (!guarded.principal || !principalHasPermission(guarded.principal, permission))) {
+        return forbidden("So'rovdagi barcha sozlamalar uchun alohida ruxsat kerak")
+      }
     }
     const updateData = {
       ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),

@@ -22,7 +22,7 @@ const reminderSchema = z.object({
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('NASIYA_MANAGE')
+    const guarded = await requireShopPermission('NASIYA_REMINDER_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

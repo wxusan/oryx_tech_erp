@@ -10,7 +10,7 @@ type RouteContext = { params: Promise<{ id: string }> }
 /** Every full identifier reveal is permission-gated, tenant-scoped and audited. */
 export async function POST(_req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('CUSTOMER_PII_REVEAL')
+    const guarded = await requireShopPermission('CUSTOMER_PASSPORT_REVEAL')
     if (!guarded.ok) return guarded.response
     const resolved = await resolveActiveShopId(guarded.session, null)
     if (!resolved.ok) return resolved.response

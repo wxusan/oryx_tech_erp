@@ -28,7 +28,7 @@ type RouteContext = { params: Promise<{ id: string }> }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('CASH_SALE_CREATE')
+    const guarded = await requireShopPermission('SALE_CREATE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

@@ -11,7 +11,7 @@ describe('bounded inventory picker', () => {
   const picker = read('src/components/shop/in-stock-device-picker.tsx')
 
   it('uses a minimal projection with a 50-row hard ceiling', () => {
-    const pickerBranch = route.slice(route.indexOf("searchParams.get('view') === 'picker'"), route.indexOf('// Item —'))
+    const pickerBranch = route.slice(route.indexOf('// Sale and nasiya forms'), route.indexOf('// The canonical response'))
     expect(pickerBranch).toContain('Math.min(Math.max(requestedTake, 1), 50)')
     expect(pickerBranch).toContain('purchasePrice: true')
     expect(pickerBranch).not.toContain('sales:')

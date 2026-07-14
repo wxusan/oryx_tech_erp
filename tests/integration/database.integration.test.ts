@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, it } from 'vitest'
+import { readdirSync } from 'node:fs'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
 
@@ -20,8 +21,12 @@ describe('disposable PostgreSQL migration foundation', () => {
       ORDER BY migration_name
     `
 
-    expect(rows).toHaveLength(40)
-    expect(rows.at(-1)?.migration_name).toBe('202607130010_customer_crm_passport')
+    const checkedInMigrations = readdirSync('prisma/migrations', { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort()
+
+    expect(rows.map(({ migration_name }) => migration_name)).toEqual(checkedInMigrations)
   })
 
   it('installs nullable request correlation fields without storing historic network data', async () => {

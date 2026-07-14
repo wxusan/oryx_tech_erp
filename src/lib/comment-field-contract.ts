@@ -19,6 +19,7 @@ export const HIGH_RISK_AUDIT_REASON_SURFACE_IDS = [
   'shop.staff.update',
   'device.delete',
   'device.return',
+  'device.return.queue',
   'device.restock',
   'nasiya.resolve',
 ] as const

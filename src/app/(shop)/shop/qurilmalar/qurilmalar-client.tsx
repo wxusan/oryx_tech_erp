@@ -227,8 +227,8 @@ export default function QurilmalarClient({
 }) {
   const scope = useAuthenticatedQueryScope()
   const { can, memberKind } = useShopAccess()
-  const canManageInventory = can('INVENTORY_MANAGE')
-  const canExport = can('EXPORT_DATA')
+  const canCreateDevice = can('DEVICE_CREATE')
+  const canExport = can('EXPORT_DEVICES')
   const showOwnerFinancials = memberKind === 'SHOP_OWNER'
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState(initialSearch)
@@ -318,7 +318,7 @@ export default function QurilmalarClient({
               Excel yuklab olish
             </Button>
           )}
-          {canManageInventory && (
+          {canCreateDevice && (
             <Button render={<Link href="/shop/qurilmalar/new" />} size="lg">
               + Yangi qurilma
             </Button>

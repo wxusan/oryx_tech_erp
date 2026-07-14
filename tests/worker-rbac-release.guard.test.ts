@@ -24,9 +24,11 @@ describe('worker log-access contract', () => {
     password: 'safe-password',
   }
 
-  it('defaults a new worker to log access, but keeps the typed grant separate from generic operational permissions', () => {
+  it('defaults every new worker capability and Telegram delivery to off', () => {
     const parsed = createShopStaffSchema.parse(validCreate)
-    expect(parsed.logsViewEnabled).toBe(true)
+    expect(parsed.logsViewEnabled).toBe(false)
+    expect(parsed.telegramNotificationsEnabled).toBe(false)
+    expect(parsed.permissionCodes).toEqual([])
     expect(parsed.permissionCodes).not.toContain(STAFF_LOGS_PERMISSION)
     expect(createShopStaffSchema.safeParse({ ...validCreate, permissionCodes: [STAFF_LOGS_PERMISSION] }).success).toBe(false)
   })
@@ -51,23 +53,28 @@ describe('worker log-access contract', () => {
 })
 
 describe('worker server boundary release guard', () => {
-  it('uses a role-aware server landing page and never renders the owner dashboard for staff', () => {
+  it('uses an exact-capability server landing page and never renders an unauthorized dashboard', () => {
     const landing = source('src/app/(shop)/shop/page.tsx')
     const dashboard = source('src/app/(shop)/shop/dashboard/page.tsx')
     const login = source('src/components/auth/role-login-form.tsx')
-    expect(landing).toContain("guarded.principal.memberKind === 'SHOP_STAFF'")
-    expect(landing).toContain("'/shop/yangi-operatsiya'")
-    expect(dashboard).toContain("if (guarded.principal.memberKind === 'SHOP_STAFF') redirect('/shop/yangi-operatsiya')")
+    expect(landing).toContain('const destinations: Array<{ href: string; permissions: ShopPermissionCode[] }>')
+    expect(landing).toContain("principalHasPermission(guarded.principal!, permission)")
+    expect(landing).toContain("destination?.href ?? '/shop/settings'")
+    expect(dashboard).toContain("principalHasPermission(guarded.principal, 'DASHBOARD_OPERATIONAL_VIEW')")
+    expect(dashboard).toContain("principalHasPermission(guarded.principal, 'DASHBOARD_FINANCIAL_VIEW')")
     expect(login).toContain("const fallbackUrl = mode === 'admin' ? '/admin' : '/shop'")
   })
 
-  it('does not bootstrap owner financial summaries or overdue sync data for workers', () => {
+  it('bootstraps only the exact dashboard and receivables domains a worker can use', () => {
     const layout = source('src/app/(shop)/layout.tsx')
     const navigation = source('src/app/(shop)/shop-layout-client.tsx')
     const sync = source('src/app/api/sync/route.ts')
-    expect(layout).toContain("const canSeeFinancialOverview = guarded.principal.memberKind === 'SHOP_OWNER'")
-    expect(navigation).toContain("const canSeeReceivables = memberKind === 'SHOP_OWNER'")
-    expect(sync).toContain("const canViewReceivables = guarded.principal.memberKind === 'SHOP_OWNER'")
+    expect(layout).toContain("principalHasPermission(guarded.principal, 'RECEIVABLES_VIEW')")
+    expect(layout).toContain("principalHasPermission(guarded.principal, 'SALE_PAYMENT_RECEIVE')")
+    expect(navigation).toContain("'RECEIVABLES_VIEW'")
+    expect(navigation).toContain("'NASIYA_DEFER'")
+    expect(sync).toContain("allow(['DASHBOARD_OPERATIONAL_VIEW', 'DASHBOARD_FINANCIAL_VIEW', 'REPORT_VIEW'], ['reports'], 'REPORTS')")
+    expect(sync).toContain("], ['overdue'])")
   })
 
   it('keeps worker settings personal-only and enforces Telegram authorization in the route handler', () => {
@@ -79,7 +86,7 @@ describe('worker server boundary release guard', () => {
     expect(api).toContain('if (isStaff) {\n        return forbidden("Xodim ism yoki telefonini o\'zgartira olmaydi')
     expect(page).toContain('const isStaff = memberKind === \'SHOP_STAFF\'')
     expect(page).toContain('{profile.telegramAllowed && <Card')
-    expect(page).toContain('{!isStaff && shop && (')
+    expect(page).toContain('{canManageShop && shop && (')
   })
 
   it('filters RESTOCK from every shop-log response while retaining the underlying audit event', () => {
@@ -163,14 +170,15 @@ describe('worker server boundary release guard', () => {
     expect(profileClient).toContain(".filter((candidate) => canSeeOwnerFinancials || candidate !== 'resolutions')")
   })
 
-  it('does not return Nasiya resolution amounts or resolved-Nasiya queues to staff', () => {
+  it('returns Nasiya resolution data only to owners or an exact resolution capability', () => {
     const nasiyaDetail = source('src/app/api/nasiya/[id]/route.ts')
     const nasiyaList = source('src/app/api/nasiya/route.ts')
     const nasiyaPage = source('src/app/(shop)/shop/nasiyalar/page.tsx')
     const nasiyaClient = source('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')
-    expect(nasiyaDetail).toContain('const includeOwnerResolutionData =')
-    expect(nasiyaDetail).toContain('...(includeOwnerResolutionData')
-    expect(nasiyaList).toContain('if (resolutionState && !includeOwnerResolutionData)')
+    expect(nasiyaDetail).toContain('const includeResolutionData =')
+    expect(nasiyaDetail).toContain("['NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN']")
+    expect(nasiyaDetail).toContain('...(includeResolutionData')
+    expect(nasiyaList).toContain('if (resolutionState && !includeResolutionData)')
     expect(nasiyaPage).toContain("!canViewResolutionHistory && (requestedFilter === 'ARCHIVED' || requestedFilter === 'WRITTEN_OFF')")
     expect(nasiyaClient).toContain("canViewResolutionHistory || (tab.value !== 'ARCHIVED' && tab.value !== 'WRITTEN_OFF')")
   })

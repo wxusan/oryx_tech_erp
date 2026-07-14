@@ -30,6 +30,7 @@ import {
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { useShopAccess } from '@/components/shop/shop-access-context'
+import { CustomerPassportPanel } from '@/components/shop/customer-passport-panel'
 import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
 import { customerSearchRequest } from '@/lib/customer-search-transport'
 
@@ -66,8 +67,15 @@ const PER_PAGE = 25
 export default function CustomersClient({ initialPage }: { initialPage: number }) {
   const scope = useAuthenticatedQueryScope()
   const { can } = useShopAccess()
-  const canManageCustomers = can('CUSTOMER_MANAGE')
-  const canExport = can('EXPORT_DATA')
+  const canViewCustomers = can('CUSTOMER_VIEW')
+  const canCreateCustomer = can('CUSTOMER_CREATE')
+  const canEditCustomer = can('CUSTOMER_EDIT')
+  const canManagePassport = can('CUSTOMER_PASSPORT_MANAGE')
+  const canOverrideTrust = can('CUSTOMER_TRUST_OVERRIDE')
+  const canViewPassport = can('CUSTOMER_PASSPORT_PHOTO_VIEW') || can('CUSTOMER_PASSPORT_REVEAL')
+  const canBrowseCustomers = canViewCustomers || canCreateCustomer || canEditCustomer || canManagePassport || canOverrideTrust || canViewPassport
+  const canEditAnyCustomerField = canEditCustomer || canManagePassport || canOverrideTrust
+  const canExport = can('EXPORT_CUSTOMERS')
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState('')
   const [committedSearch, setCommittedSearch] = useState('')
@@ -108,6 +116,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
       return json.data
     },
     placeholderData: keepPreviousData,
+    enabled: canBrowseCustomers,
   })
 
   function loadPage(pageNum: number) {
@@ -146,11 +155,15 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
     setSaveError('')
     // The list badge omits `reasons` to keep the list payload small — fetch
     // the full explanation once the dialog for this customer is open.
+    if (!canViewCustomers && !canOverrideTrust) return
     fetch(`/api/customers/${customer.id}`)
       .then((res) => res.json())
       .then((json) => {
-        if (json.success && json.data?.trust) {
-          setEditing((prev) => (prev && prev.id === customer.id ? { ...prev, trust: json.data.trust } : prev))
+        if (json.success && json.data) {
+          setEditing((prev) => (prev && prev.id === customer.id
+            ? { ...prev, trust: json.data.trust, trustOverride: json.data.trustOverride }
+            : prev))
+          setTrustOverride(json.data.trustOverride ?? '')
         }
       })
       .catch(() => {})
@@ -174,18 +187,20 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
     setSaving(true)
     setSaveError('')
     try {
-      const [passportPhotoUrl] = await passportSelection.uploadAll()
+      const [passportPhotoUrl] = canManagePassport ? await passportSelection.uploadAll() : []
+      const basicFields = !editing || canEditCustomer
+        ? { name, phone, additionalPhones, note }
+        : {}
       const res = await fetch(editing ? `/api/customers/${editing.id}` : '/api/customers', {
         method: editing ? 'PATCH' : 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name,
-          phone,
-          additionalPhones,
-          note,
-          trustOverride: trustOverride || null,
-          passportIdentifier: passportIdentifier.trim() || undefined,
-          passportPhotoUrl,
+          ...basicFields,
+          ...(canOverrideTrust ? { trustOverride: trustOverride || null } : {}),
+          ...(canManagePassport ? {
+            passportIdentifier: passportIdentifier.trim() || undefined,
+            passportPhotoUrl,
+          } : {}),
         }),
       })
       const json = await res.json()
@@ -210,7 +225,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
           <p className="text-sm text-zinc-500 mt-0.5">Savdo va nasiya mijozlari tarixi</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          {canManageCustomers && <Button type="button" size="lg" onClick={openCreate}>Yangi mijoz</Button>}
+          {canCreateCustomer && <Button type="button" size="lg" onClick={openCreate}>Yangi mijoz</Button>}
           {canExport && (
             <Button
               type="button"
@@ -265,13 +280,15 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
               customers.map((customer) => (
                 <tr key={customer.id} className="relative border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                   <td className="px-4 py-3 font-medium text-zinc-900">
-                    <StretchedLink
-                      href={`/shop/mijozlar/${customer.id}`}
-                      aria-label={`${customer.name} mijoz profilini ochish`}
-                      className="font-medium text-zinc-900 hover:underline"
-                    >
-                      {customer.name}
-                    </StretchedLink>
+                    {canViewCustomers ? (
+                      <StretchedLink
+                        href={`/shop/mijozlar/${customer.id}`}
+                        aria-label={`${customer.name} mijoz profilini ochish`}
+                        className="font-medium text-zinc-900 hover:underline"
+                      >
+                        {customer.name}
+                      </StretchedLink>
+                    ) : customer.name}
                   </td>
                   <td className="px-4 py-3 font-mono text-zinc-600">
                     <div>{formatUzPhoneDisplay(customer.phone)}</div>
@@ -286,7 +303,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
                   <td className="px-4 py-3 text-zinc-600">{customer._count?.nasiya ?? 0}</td>
                   <td className="px-4 py-3 text-zinc-500">{uzDate(customer.createdAt)}</td>
                   <td className="relative z-10 px-4 py-3 text-right">
-                    {canManageCustomers && (
+                    {canEditAnyCustomerField && (
                       <Button variant="outline" onClick={() => openEdit(customer)} className="h-8 rounded border-zinc-200 px-3 text-xs">
                         Tahrirlash
                       </Button>
@@ -308,12 +325,14 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
         ) : (
           customers.map((customer) => (
             <div key={customer.id} className="relative space-y-2 rounded border border-zinc-200 p-3">
-              <StretchedLink
-                href={`/shop/mijozlar/${customer.id}`}
-                aria-label={`${customer.name} mijoz profilini ochish`}
-              >
-                <span className="sr-only">{customer.name} mijoz profilini ochish</span>
-              </StretchedLink>
+              {canViewCustomers && (
+                <StretchedLink
+                  href={`/shop/mijozlar/${customer.id}`}
+                  aria-label={`${customer.name} mijoz profilini ochish`}
+                >
+                  <span className="sr-only">{customer.name} mijoz profilini ochish</span>
+                </StretchedLink>
+              )}
               <div className="pointer-events-none relative z-10 flex items-start justify-between gap-2">
                 <div>
                   <div className="font-medium text-zinc-900">{customer.name}</div>
@@ -331,7 +350,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
                 <span>{customer._count?.nasiya ?? 0} ta nasiya</span>
                 <span>{uzDate(customer.createdAt)}</span>
               </div>
-              {canManageCustomers && (
+              {canEditAnyCustomerField && (
                 <div className="relative z-10">
                   <Button
                     variant="outline"
@@ -388,11 +407,11 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
           <div className="space-y-3">
             <div>
               <label htmlFor="customer-name" className="block text-xs font-medium text-zinc-700 mb-1.5">Ism</label>
-              <Input id="customer-name" value={name} onChange={(e) => setName(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
+              <Input id="customer-name" disabled={Boolean(editing) && !canEditCustomer} value={name} onChange={(e) => setName(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
             </div>
             <div>
               <label htmlFor="customer-phone" className="block text-xs font-medium text-zinc-700 mb-1.5">Telefon</label>
-              <PhoneInput id="customer-phone" value={phone} onChange={setPhone} className="h-9 text-sm border-zinc-200 rounded" />
+              <PhoneInput id="customer-phone" disabled={Boolean(editing) && !canEditCustomer} value={phone} onChange={setPhone} className="h-9 text-sm border-zinc-200 rounded" />
             </div>
             <fieldset>
               <legend className="block text-xs font-medium text-zinc-700 mb-1.5">Qo&apos;shimcha raqamlar</legend>
@@ -400,6 +419,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
                 {additionalPhones.map((extra, i) => (
                   <div key={i} className="flex items-center gap-2">
                     <PhoneInput
+                      disabled={Boolean(editing) && !canEditCustomer}
                       aria-label={`Qo'shimcha telefon ${i + 1}`}
                       value={extra}
                       onChange={(value) => {
@@ -408,6 +428,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
                     <button
+                      disabled={Boolean(editing) && !canEditCustomer}
                       type="button"
                       aria-label="Raqamni o'chirish"
                       onClick={() => setAdditionalPhones((prev) => prev.filter((_, idx) => idx !== i))}
@@ -420,6 +441,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
                 <Button
                   type="button"
                   variant="outline"
+                  disabled={Boolean(editing) && !canEditCustomer}
                   onClick={() => setAdditionalPhones((prev) => [...prev, ''])}
                   className="h-8 rounded border-zinc-200 px-3 text-xs"
                 >
@@ -429,9 +451,9 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
             </fieldset>
             <div>
               <label htmlFor="customer-note" className="block text-xs font-medium text-zinc-700 mb-1.5">Izoh</label>
-              <Textarea id="customer-note" value={note} onChange={(e) => setNote(e.target.value)} className="text-sm border-zinc-200 rounded min-h-[80px]" />
+              <Textarea id="customer-note" disabled={Boolean(editing) && !canEditCustomer} value={note} onChange={(e) => setNote(e.target.value)} className="text-sm border-zinc-200 rounded min-h-[80px]" />
             </div>
-            <div>
+            {canManagePassport && <div>
               <label htmlFor="customer-passport-identifier" className="block text-xs font-medium text-zinc-700 mb-1.5">Pasport seriya/raqami</label>
               <Input
                 id="customer-passport-identifier"
@@ -443,8 +465,8 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
                 className="h-9 font-mono text-sm border-zinc-200 rounded"
               />
               <p className="mt-1 text-xs text-zinc-500">To‘liq raqam ro‘yxat yoki profil javobida qaytarilmaydi.</p>
-            </div>
-            <ImageSelectionField
+            </div>}
+            {canManagePassport && <ImageSelectionField
               inputId="customer-passport-image"
               label={editing?.hasPassportPhoto ? "Pasport rasmini almashtirish (ixtiyoriy)" : "Pasport rasmi (ixtiyoriy)"}
               mode="single"
@@ -453,8 +475,8 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
               help={editing?.hasPassportPhoto
                 ? "Yangi rasm tanlanmasa, mavjud private rasm saqlanib qoladi. JPG, PNG yoki WEBP, 5 MB gacha."
                 : "Private saqlanadi; Telegram qurilma rasmlariga qo‘shilmaydi. JPG, PNG yoki WEBP, 5 MB gacha."}
-            />
-            <div>
+            />}
+            {canOverrideTrust && <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label htmlFor="customer-trust" className="block text-xs font-medium text-zinc-700">Ishonch darajasi</label>
                 {editing?.trust && <TrustBadge trust={editing.trust} />}
@@ -479,16 +501,22 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
                   ))}
                 </TrustSelectContent>
               </TrustSelect>
-            </div>
+            </div>}
+            {editing && canViewPassport && (
+              <CustomerPassportPanel
+                customerId={editing.id}
+                passportMasked={editing.passportMasked ?? null}
+                hasPassportPhoto={Boolean(editing.hasPassportPhoto)}
+              />
+            )}
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => { setEditing(null); setCreating(false) }} className="border-zinc-200 rounded">Bekor qilish</Button>
             <Button
               disabled={
                 saving ||
-                passportSelection.hasBlockingErrors ||
-                name.trim().length < 2 ||
-                !isValidPhone(phone)
+                (canManagePassport && passportSelection.hasBlockingErrors) ||
+                ((!editing || canEditCustomer) && (name.trim().length < 2 || !isValidPhone(phone)))
               }
               onClick={saveCustomer}
               className="bg-zinc-900 text-white rounded"

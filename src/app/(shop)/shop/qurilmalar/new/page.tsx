@@ -39,12 +39,13 @@ interface FormData {
 
 export default function NewDevicePage() {
   const { can } = useShopAccess()
-  if (!can('INVENTORY_MANAGE')) return <ShopAccessDenied />
+  if (!can('DEVICE_CREATE')) return <ShopAccessDenied />
   return <AuthorizedNewDevicePage />
 }
 
 function AuthorizedNewDevicePage() {
   const router = useRouter()
+  const { can } = useShopAccess()
   const queryClient = useQueryClient()
   const queryScope = useAuthenticatedQueryScope()
   const { currency, currencyError } = useShopCurrency()
@@ -114,7 +115,7 @@ function AuthorizedNewDevicePage() {
       }
       if (res.ok && json.success) {
         if (json.data?.item) patchDeviceUpsert(queryClient, queryScope, json.data.item)
-        await navigateAfterMutation(router, '/shop/qurilmalar', {
+        await navigateAfterMutation(router, can('INVENTORY_VIEW') ? '/shop/qurilmalar' : '/shop/yangi-operatsiya', {
           kind: 'device.created',
           deviceId: json.data?.id,
         })

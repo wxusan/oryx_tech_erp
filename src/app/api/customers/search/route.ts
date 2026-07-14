@@ -1,8 +1,9 @@
 import { z, ZodError } from 'zod'
-import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopAnyPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { badRequest, ok, payloadTooLarge, serverError } from '@/lib/api-helpers'
 import { logger } from '@/lib/logger'
 import { getCustomerList } from '@/lib/server/customer-list'
+import { principalHasPermission } from '@/lib/server/shop-access'
 import {
   isInvalidRequestBody,
   isRequestBodyTooLarge,
@@ -22,7 +23,15 @@ const customerSearchSchema = z.object({
  */
 export async function POST(request: Request) {
   try {
-    const guarded = await requireShopPermission('CUSTOMER_VIEW')
+    const guarded = await requireShopAnyPermission([
+      'CUSTOMER_VIEW',
+      'CUSTOMER_CREATE',
+      'CUSTOMER_EDIT',
+      'CUSTOMER_PASSPORT_PHOTO_VIEW',
+      'CUSTOMER_PASSPORT_REVEAL',
+      'CUSTOMER_PASSPORT_MANAGE',
+      'CUSTOMER_TRUST_OVERRIDE',
+    ])
     if (!guarded.ok) return guarded.response
 
     const parsed = customerSearchSchema.safeParse(await readLimitedJsonBody(request))
@@ -38,7 +47,39 @@ export async function POST(request: Request) {
       skip: parsed.data.skip,
       take: parsed.data.take,
     })
-    const response = ok(data, 'Mijoz qidiruvi')
+    const canViewCustomers = guarded.session.user.role === 'SUPER_ADMIN' || Boolean(
+      guarded.principal && principalHasPermission(guarded.principal, 'CUSTOMER_VIEW'),
+    )
+    const canEditCustomer = guarded.session.user.role === 'SUPER_ADMIN' || Boolean(
+      guarded.principal && principalHasPermission(guarded.principal, 'CUSTOMER_EDIT'),
+    )
+    const canUsePassport = guarded.session.user.role === 'SUPER_ADMIN' || Boolean(
+      guarded.principal && [
+        'CUSTOMER_PASSPORT_PHOTO_VIEW',
+        'CUSTOMER_PASSPORT_REVEAL',
+        'CUSTOMER_PASSPORT_MANAGE',
+      ].some((permission) => principalHasPermission(
+        guarded.principal!,
+        permission as 'CUSTOMER_PASSPORT_PHOTO_VIEW' | 'CUSTOMER_PASSPORT_REVEAL' | 'CUSTOMER_PASSPORT_MANAGE',
+      )),
+    )
+    const canOverrideTrust = guarded.session.user.role === 'SUPER_ADMIN' || Boolean(
+      guarded.principal && principalHasPermission(guarded.principal, 'CUSTOMER_TRUST_OVERRIDE'),
+    )
+    const scopedData = canViewCustomers ? data : {
+      ...data,
+      items: data.items.map((item) => ({
+        id: item.id,
+        name: item.name,
+        phone: item.phone,
+        phoneNormalizationNeedsReview: item.phoneNormalizationNeedsReview,
+        createdAt: item.createdAt,
+        ...(canEditCustomer ? { additionalPhones: item.additionalPhones, note: item.note } : {}),
+        ...(canUsePassport ? { passportMasked: item.passportMasked, hasPassportPhoto: item.hasPassportPhoto } : {}),
+        ...(canOverrideTrust ? { trust: item.trust } : {}),
+      })),
+    }
+    const response = ok(scopedData, 'Mijoz qidiruvi')
     response.headers.set('Cache-Control', 'private, no-store')
     return response
   } catch (error) {

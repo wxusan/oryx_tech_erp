@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server'
 import { principalCan, type ShopPrincipalAccess } from '@/lib/access-control'
 
 const mocks = vi.hoisted(() => ({
-  requireCurrentShopPermission: vi.fn(),
+  requireCurrentShopAnyPermission: vi.fn(),
   shopFindFirst: vi.fn(),
   shopUpdate: vi.fn(),
   logCreate: vi.fn(),
@@ -15,7 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/api-auth', () => ({
   requireApiSession: vi.fn(),
-  requireCurrentShopPermission: mocks.requireCurrentShopPermission,
+  requireCurrentShopAnyPermission: mocks.requireCurrentShopAnyPermission,
 }))
 
 vi.mock('@/lib/prisma', () => ({
@@ -64,16 +64,20 @@ function patchRequest() {
 }
 
 describe('shop settings permission', () => {
-  const principal = (memberKind: ShopPrincipalAccess['memberKind']): ShopPrincipalAccess => ({
+  const principal = (
+    memberKind: ShopPrincipalAccess['memberKind'],
+    grantedPermissions: ShopPrincipalAccess['grantedPermissions'] = new Set(),
+  ): ShopPrincipalAccess => ({
     memberKind,
     legacyFullAccess: false,
     enabledFeatures: new Set(),
-    grantedPermissions: new Set(),
+    grantedPermissions,
   })
 
-  it('allows the owner and denies staff', () => {
-    expect(principalCan(principal('SHOP_OWNER'), 'SETTINGS_MANAGE')).toBe(true)
-    expect(principalCan(principal('SHOP_STAFF'), 'SETTINGS_MANAGE')).toBe(false)
+  it('allows the owner and a staff member with the exact field capability', () => {
+    expect(principalCan(principal('SHOP_OWNER'), 'SHOP_PROFILE_EDIT')).toBe(true)
+    expect(principalCan(principal('SHOP_STAFF'), 'SHOP_PROFILE_EDIT')).toBe(false)
+    expect(principalCan(principal('SHOP_STAFF', new Set(['SHOP_PROFILE_EDIT'])), 'SHOP_PROFILE_EDIT')).toBe(true)
   })
 })
 
@@ -94,21 +98,30 @@ describe('PATCH /api/shop/profile authorization', () => {
     mocks.getShopCurrencyContext.mockResolvedValue({ usdUzsRate: 12_500 })
   })
 
-  it('allows the owner through SETTINGS_MANAGE and writes the shop update', async () => {
-    mocks.requireCurrentShopPermission.mockResolvedValue({
+  it('allows an authorized member through the settings capability set and writes the shop update', async () => {
+    mocks.requireCurrentShopAnyPermission.mockResolvedValue({
       ok: true,
       session: {
         user: { id: 'owner-1', role: 'SHOP_ADMIN', shopId: 'shop-1' },
       },
       shopId: 'shop-1',
-      principal: { memberKind: 'SHOP_OWNER' },
+      principal: {
+        memberKind: 'SHOP_OWNER',
+        legacyFullAccess: false,
+        enabledFeatures: new Set(),
+        grantedPermissions: new Set(),
+      },
     })
     const { PATCH } = await import('@/app/api/shop/profile/route')
 
     const response = await PATCH(patchRequest())
 
     expect(response.status).toBe(200)
-    expect(mocks.requireCurrentShopPermission).toHaveBeenCalledWith('SETTINGS_MANAGE')
+    expect(mocks.requireCurrentShopAnyPermission).toHaveBeenCalledWith([
+      'SHOP_PROFILE_EDIT',
+      'SHOP_CURRENCY_MANAGE',
+      'SHOP_TELEGRAM_MANAGE',
+    ])
     expect(mocks.shopUpdate).toHaveBeenCalledWith({
       where: { id: 'shop-1' },
       data: { name: 'Updated shop' },
@@ -118,7 +131,7 @@ describe('PATCH /api/shop/profile authorization', () => {
   })
 
   it('denies staff before parsing or performing any database/cache write', async () => {
-    mocks.requireCurrentShopPermission.mockResolvedValue({
+    mocks.requireCurrentShopAnyPermission.mockResolvedValue({
       ok: false,
       response: Response.json(
         { success: false, error: "Bu amal uchun ruxsat berilmagan" },
@@ -132,7 +145,11 @@ describe('PATCH /api/shop/profile authorization', () => {
     const response = await PATCH(request)
 
     expect(response.status).toBe(403)
-    expect(mocks.requireCurrentShopPermission).toHaveBeenCalledWith('SETTINGS_MANAGE')
+    expect(mocks.requireCurrentShopAnyPermission).toHaveBeenCalledWith([
+      'SHOP_PROFILE_EDIT',
+      'SHOP_CURRENCY_MANAGE',
+      'SHOP_TELEGRAM_MANAGE',
+    ])
     expect(json).not.toHaveBeenCalled()
     expect(mocks.shopFindFirst).not.toHaveBeenCalled()
     expect(mocks.transaction).not.toHaveBeenCalled()

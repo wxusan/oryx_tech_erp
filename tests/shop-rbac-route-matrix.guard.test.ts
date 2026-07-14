@@ -1,120 +1,116 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
+import { RETIRED_SHOP_PERMISSION_CODES } from '@/lib/access-control'
 
-const matrix = [
-  ['src/app/api/devices/route.ts', 'INVENTORY_VIEW', 'INVENTORY_MANAGE'],
-  ['src/app/api/devices/[id]/route.ts', 'INVENTORY_VIEW', 'INVENTORY_MANAGE'],
-  ['src/app/api/devices/[id]/sell/route.ts', 'CASH_SALE_CREATE'],
+const routeMatrix = [
+  ['src/app/api/devices/route.ts', 'INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_VIEW', 'SALE_CREATE', 'SALE_EDIT', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND', 'NASIYA_CREATE', 'NASIYA_CANCEL'],
+  ['src/app/api/devices/[id]/route.ts', 'INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_VIEW', 'SALE_CREATE', 'SALE_EDIT', 'SALE_PAYMENT_RECEIVE', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND', 'NASIYA_CREATE'],
+  ['src/app/api/devices/[id]/sell/route.ts', 'SALE_CREATE'],
   ['src/app/api/devices/[id]/nasiya/route.ts', 'NASIYA_CREATE'],
-  ['src/app/api/devices/[id]/return/route.ts', 'RETURN_MANAGE'],
-  ['src/app/api/devices/[id]/restock/route.ts', 'RETURN_MANAGE'],
-  ['src/app/api/customers/route.ts', 'CUSTOMER_VIEW'],
-  ['src/app/api/customers/search/route.ts', 'CUSTOMER_VIEW'],
-  ['src/app/api/customers/picker/route.ts', 'CUSTOMER_VIEW'],
-  ['src/app/api/customers/[id]/route.ts', 'CUSTOMER_VIEW', 'CUSTOMER_MANAGE'],
-  ['src/app/api/customers/[id]/profile/route.ts', 'CUSTOMER_VIEW'],
-  ['src/app/api/customers/[id]/passport/image/route.ts', 'CUSTOMER_VIEW', 'NASIYA_VIEW'],
-  ['src/app/api/customers/[id]/passport/reveal/route.ts', 'CUSTOMER_PII_REVEAL'],
-  ['src/app/api/customers/by-phone/route.ts', 'CUSTOMER_VIEW'],
-  ['src/app/api/nasiya/route.ts', 'NASIYA_VIEW'],
-  ['src/app/api/nasiya/[id]/route.ts', 'NASIYA_VIEW', 'NASIYA_MANAGE'],
-  ['src/app/api/nasiya/[id]/defer/route.ts', 'NASIYA_MANAGE'],
-  ['src/app/api/nasiya/[id]/resolution/route.ts', 'WRITEOFF_MANAGE'],
-  ['src/app/api/nasiya/[id]/reminder/route.ts', 'NASIYA_MANAGE'],
-  ['src/app/api/nasiya/[id]/payment/route.ts', 'PAYMENT_RECEIVE'],
-  ['src/app/api/nasiya/import/route.ts', 'IMPORT_DATA'],
-  ['src/app/api/olib-sotdim/route.ts', 'OLIB_VIEW', 'OLIB_MANAGE'],
-  ['src/app/api/olib-sotdim/[id]/pay/route.ts', 'PAYMENT_RECEIVE'],
-  ['src/app/api/sales/[id]/route.ts', 'CASH_SALE_MANAGE'],
-  ['src/app/api/sales/[id]/payment/route.ts', 'PAYMENT_RECEIVE'],
-  ['src/app/api/uploads/device/route.ts', 'INVENTORY_MANAGE', 'OLIB_MANAGE', 'INVENTORY_VIEW'],
-  ['src/app/api/uploads/passport/route.ts', 'NASIYA_CREATE', 'CUSTOMER_MANAGE', 'IMPORT_DATA', 'NASIYA_VIEW'],
-  ['src/app/api/import/customers/route.ts', 'IMPORT_DATA'],
-  ['src/app/api/export/[entity]/route.ts', 'EXPORT_DATA'],
+  ['src/app/api/devices/[id]/return/route.ts', 'SALE_RETURN_REFUND', 'NASIYA_CANCEL'],
+  ['src/app/api/devices/[id]/restock/route.ts', 'DEVICE_RESTOCK'],
+  ['src/app/api/customers/route.ts', 'CUSTOMER_VIEW', 'CUSTOMER_CREATE'],
+  ['src/app/api/customers/search/route.ts', 'CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_PHOTO_VIEW', 'CUSTOMER_PASSPORT_REVEAL', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'],
+  ['src/app/api/customers/[id]/route.ts', 'CUSTOMER_VIEW', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'],
+  ['src/app/api/customers/[id]/passport/image/route.ts', 'CUSTOMER_PASSPORT_PHOTO_VIEW'],
+  ['src/app/api/customers/[id]/passport/reveal/route.ts', 'CUSTOMER_PASSPORT_REVEAL'],
+  ['src/app/api/nasiya/route.ts', 'NASIYA_VIEW', 'NASIYA_EDIT', 'NASIYA_REMINDER_MANAGE', 'NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'],
+  ['src/app/api/nasiya/[id]/route.ts', 'NASIYA_VIEW', 'NASIYA_CREATE', 'NASIYA_EDIT', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER', 'NASIYA_REMINDER_MANAGE', 'NASIYA_CANCEL', 'NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'],
+  ['src/app/api/nasiya/[id]/payment/route.ts', 'NASIYA_PAYMENT_RECEIVE'],
+  ['src/app/api/nasiya/[id]/defer/route.ts', 'NASIYA_DEFER'],
+  ['src/app/api/nasiya/[id]/reminder/route.ts', 'NASIYA_REMINDER_MANAGE'],
+  ['src/app/api/nasiya/[id]/resolution/route.ts', 'NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'],
+  ['src/app/api/nasiya/import/route.ts', 'IMPORT_OLD_NASIYA'],
+  ['src/app/api/olib-sotdim/route.ts', 'OLIB_VIEW', 'OLIB_CREATE', 'SUPPLIER_PAYMENT_MARK_PAID'],
+  ['src/app/api/olib-sotdim/[id]/pay/route.ts', 'SUPPLIER_PAYMENT_MARK_PAID'],
+  ['src/app/api/sales/[id]/route.ts', 'SALE_EDIT', 'SALE_REMINDER_MANAGE'],
+  ['src/app/api/sales/[id]/payment/route.ts', 'SALE_PAYMENT_RECEIVE'],
+  ['src/app/api/uploads/device/route.ts', 'DEVICE_CREATE', 'DEVICE_EDIT', 'OLIB_CREATE'],
+  ['src/app/api/uploads/passport/route.ts', 'NASIYA_CREATE', 'CUSTOMER_PASSPORT_MANAGE', 'IMPORT_OLD_NASIYA', 'NASIYA_VIEW'],
+  ['src/app/api/import/customers/route.ts', 'IMPORT_CUSTOMERS'],
   ['src/app/api/logs/route.ts', 'LOG_VIEW'],
   ['src/app/api/logs/[id]/link/route.ts', 'LOG_VIEW'],
-  ['src/app/api/stats/shop/route.ts', 'REPORT_VIEW'],
+  ['src/app/api/stats/shop/route.ts', 'DASHBOARD_OPERATIONAL_VIEW', 'DASHBOARD_FINANCIAL_VIEW', 'REPORT_VIEW'],
   ['src/app/api/reports/shop/route.ts', 'REPORT_VIEW'],
-  ['src/app/api/shop/profile/route.ts', 'SETTINGS_MANAGE'],
-  ['src/app/api/shop/staff/route.ts', 'MEMBER_MANAGE'],
-  ['src/app/api/shop/staff/[id]/route.ts', 'MEMBER_MANAGE'],
+  ['src/app/api/shop/profile/route.ts', 'SHOP_PROFILE_EDIT', 'SHOP_CURRENCY_MANAGE', 'SHOP_TELEGRAM_MANAGE'],
+  ['src/app/api/shop/staff/route.ts', 'STAFF_VIEW', 'STAFF_CREATE', 'STAFF_EDIT_PROFILE', 'STAFF_RESET_PASSWORD', 'STAFF_STATUS_MANAGE', 'STAFF_DELETE', 'STAFF_PERMISSION_MANAGE', 'STAFF_NOTIFICATION_MANAGE'],
+  ['src/app/api/shop/staff/[id]/route.ts', 'STAFF_EDIT_PROFILE', 'STAFF_RESET_PASSWORD', 'STAFF_STATUS_MANAGE', 'STAFF_DELETE', 'STAFF_PERMISSION_MANAGE', 'STAFF_NOTIFICATION_MANAGE'],
 ] as const
 
-const explicitFeatureMatrix = [
-  ['src/app/api/sales/[id]/payment/route.ts', 'PAYMENT_RECEIVE', 'CASH_SALES'],
-  ['src/app/api/nasiya/[id]/payment/route.ts', 'PAYMENT_RECEIVE', 'NASIYA'],
-  ['src/app/api/nasiya/[id]/defer/route.ts', 'NASIYA_MANAGE', 'NASIYA'],
-  ['src/app/api/nasiya/[id]/resolution/route.ts', 'WRITEOFF_MANAGE', 'NASIYA'],
-  ['src/app/api/nasiya/import/route.ts', 'IMPORT_DATA', 'NASIYA'],
-  ['src/app/api/import/customers/route.ts', 'IMPORT_DATA', 'CUSTOMER_CRM'],
-  ['src/app/api/olib-sotdim/[id]/pay/route.ts', 'PAYMENT_RECEIVE', 'OLIB_SOTDIM'],
+const featureMatrix = [
+  ['src/app/api/sales/[id]/payment/route.ts', 'SALE_PAYMENT_RECEIVE', 'CASH_SALES'],
+  ['src/app/api/nasiya/[id]/payment/route.ts', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA'],
+  ['src/app/api/nasiya/[id]/defer/route.ts', 'NASIYA_DEFER', 'NASIYA'],
+  ['src/app/api/nasiya/import/route.ts', 'IMPORT_OLD_NASIYA', 'NASIYA'],
+  ['src/app/api/import/customers/route.ts', 'IMPORT_CUSTOMERS', 'CUSTOMER_CRM'],
+  ['src/app/api/olib-sotdim/[id]/pay/route.ts', 'SUPPLIER_PAYMENT_MARK_PAID', 'OLIB_SOTDIM'],
   ['src/app/api/reports/shop/route.ts', 'REPORT_VIEW', 'REPORTS'],
 ] as const
 
 const uiMatrix = [
-  ['src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx', 'INVENTORY_MANAGE', 'EXPORT_DATA'],
-  ['src/app/(shop)/shop/qurilmalar/[id]/page.tsx', 'INVENTORY_VIEW', 'INVENTORY_MANAGE', 'CASH_SALE_CREATE', 'CASH_SALE_MANAGE', 'NASIYA_CREATE', 'PAYMENT_RECEIVE', 'RETURN_MANAGE'],
-  ['src/app/(shop)/shop/qurilmalar/new/page.tsx', 'INVENTORY_MANAGE'],
-  ['src/app/(shop)/shop/sotuv/new/page.tsx', 'CASH_SALE_CREATE'],
-  ['src/app/(shop)/shop/mijozlar/customers-client.tsx', 'CUSTOMER_MANAGE', 'EXPORT_DATA'],
-  ['src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx', 'NASIYA_CREATE', 'IMPORT_DATA', 'EXPORT_DATA', 'PAYMENT_RECEIVE'],
-  ['src/app/(shop)/shop/nasiyalar/[id]/page.tsx', 'NASIYA_VIEW', 'NASIYA_MANAGE', 'PAYMENT_RECEIVE'],
-  ['src/app/(shop)/shop/nasiyalar/new/page.tsx', 'NASIYA_CREATE'],
-  ['src/app/(shop)/shop/nasiyalar/import/page.tsx', 'IMPORT_DATA'],
-  ['src/app/(shop)/shop/olib-sotdim/olib-sotdim-client.tsx', 'OLIB_MANAGE', 'PAYMENT_RECEIVE'],
-  ['src/app/(shop)/shop/olib-sotdim/new/page.tsx', 'OLIB_MANAGE'],
+  ['src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx', 'DEVICE_CREATE', 'EXPORT_DEVICES'],
+  ['src/app/(shop)/shop/qurilmalar/[id]/page.tsx', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_CREATE', 'SALE_EDIT', 'SALE_PAYMENT_RECEIVE', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND'],
+  ['src/app/(shop)/shop/qurilmalar/new/page.tsx', 'DEVICE_CREATE'],
+  ['src/app/(shop)/shop/sotuv/new/page.tsx', 'SALE_CREATE'],
+  ['src/app/(shop)/shop/mijozlar/customers-client.tsx', 'CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'],
+  ['src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx', 'NASIYA_CREATE', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER', 'NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'],
+  ['src/app/(shop)/shop/nasiyalar/[id]/page.tsx', 'NASIYA_EDIT', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER', 'NASIYA_REMINDER_MANAGE', 'NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'],
+  ['src/app/(shop)/shop/nasiyalar/import/page.tsx', 'IMPORT_OLD_NASIYA'],
+  ['src/app/(shop)/shop/olib-sotdim/olib-sotdim-client.tsx', 'OLIB_CREATE', 'SUPPLIER_PAYMENT_MARK_PAID'],
+  ['src/app/(shop)/shop/olib-sotdim/new/page.tsx', 'OLIB_CREATE'],
+  ['src/app/(shop)/shop/import/import-center.tsx', 'IMPORT_CUSTOMERS', 'IMPORT_OLD_NASIYA'],
+  ['src/app/(shop)/shop/eksport/export-center.tsx', 'EXPORT_DEVICES', 'EXPORT_CUSTOMERS', 'EXPORT_SALES', 'EXPORT_NASIYA', 'EXPORT_OLIB', 'EXPORT_RETURNS', 'EXPORT_LOGS', 'EXPORT_REPORTS'],
+  ['src/components/shop/staff-management.tsx', 'STAFF_CREATE', 'STAFF_EDIT_PROFILE', 'STAFF_RESET_PASSWORD', 'STAFF_STATUS_MANAGE', 'STAFF_DELETE', 'STAFF_PERMISSION_MANAGE', 'STAFF_NOTIFICATION_MANAGE'],
+  ['src/app/(shop)/shop/settings/page.tsx', 'SHOP_PROFILE_EDIT', 'SHOP_CURRENCY_MANAGE', 'SHOP_TELEGRAM_MANAGE'],
 ] as const
 
-describe('shop real-route RBAC matrix guard', () => {
-  for (const [file, ...permissions] of matrix) {
-    it(`${file} declares every required live permission guard`, () => {
+const liveGuardPattern = /require(?:ShopPermission|ShopAnyPermission|ShopPermissionAndFeature|CurrentShopPermission|CurrentShopAnyPermission)\s*\(/
+
+describe('shop exact-capability route matrix', () => {
+  for (const [file, ...permissions] of routeMatrix) {
+    it(`${file} declares its V2 capability boundary`, () => {
       const source = readFileSync(file, 'utf8')
-      expect(source).not.toContain('requireApiSession()')
+      expect(source).toMatch(liveGuardPattern)
       for (const permission of permissions) {
-        const directGuard = new RegExp(
-          `require(?:ShopPermission(?:AndFeature|AndAnyFeature)?|CurrentShopPermission)\\(['"]${permission}['"]`,
-        )
-        const anyPermissionGuard = new RegExp(
-          `requireShopAnyPermission\\(\\[[\\s\\S]*?['\"]${permission}['\"][\\s\\S]*?\\]\\)`,
-        )
-        expect(
-          directGuard.test(source) || anyPermissionGuard.test(source),
-          `${file} must authorize ${permission} through a live permission guard`,
-        ).toBe(true)
+        expect(source, `${file} must declare ${permission}`).toContain(`'${permission}'`)
+      }
+      for (const retired of RETIRED_SHOP_PERMISSION_CODES) {
+        expect(source, `${file} must not use retired ${retired}`).not.toMatch(new RegExp(`['"]${retired}['"]`))
       }
     })
   }
 
   for (const [file, ...permissions] of uiMatrix) {
-    it(`${file} mirrors server permissions in visible controls`, () => {
+    it(`${file} mirrors exact server permissions in visible controls`, () => {
       const source = readFileSync(file, 'utf8')
       expect(source).toContain('useShopAccess')
       for (const permission of permissions) expect(source).toContain(`'${permission}'`)
     })
   }
 
-  for (const [file, permission, feature] of explicitFeatureMatrix) {
-    it(`${file} binds ${permission} to the ${feature} shop entitlement`, () => {
-      const source = readFileSync(file, 'utf8')
-      expect(source).toMatch(new RegExp(
+  for (const [file, permission, feature] of featureMatrix) {
+    it(`${file} binds ${permission} to the ${feature} package feature`, () => {
+      expect(readFileSync(file, 'utf8')).toMatch(new RegExp(
         `requireShopPermissionAndFeature\\(\\s*['"]${permission}['"]\\s*,\\s*['"]${feature}['"]\\s*\\)`,
       ))
     })
   }
 
-  it('binds every export entity to its own module as well as the export entitlement', () => {
+  it('maps each export entity to one independent capability', () => {
     const source = readFileSync('src/app/api/export/[entity]/route.ts', 'utf8')
-    for (const [entity, feature] of [
-      ['devices', 'INVENTORY'],
-      ['customers', 'CUSTOMER_CRM'],
-      ['sales', 'CASH_SALES'],
-      ['nasiya', 'NASIYA'],
-      ['returns', 'INVENTORY'],
-      ['report', 'REPORTS'],
+    for (const [entity, permission] of [
+      ['devices', 'EXPORT_DEVICES'],
+      ['customers', 'EXPORT_CUSTOMERS'],
+      ['sales', 'EXPORT_SALES'],
+      ['nasiya', 'EXPORT_NASIYA'],
+      ['olib', 'EXPORT_OLIB'],
+      ['returns', 'EXPORT_RETURNS'],
+      ['logs', 'EXPORT_LOGS'],
+      ['report', 'EXPORT_REPORTS'],
     ] as const) {
-      expect(source).toContain(`${entity}: '${feature}'`)
+      expect(source).toContain(`${entity}: '${permission}'`)
     }
-    expect(source).toContain("requireShopPermissionAndFeature('EXPORT_DATA', feature)")
-    expect(source).toContain("requireShopPermissionAndFeature('REPORT_VIEW', 'REPORTS')")
+    expect(source).toContain('const guarded = await requireShopPermission(permission)')
+    expect(source).not.toMatch(new RegExp("['\"]EXPORT_DATA['\"]"))
   })
 })

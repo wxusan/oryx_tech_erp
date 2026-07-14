@@ -3,14 +3,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('server-only', () => ({}))
 
 const mocks = vi.hoisted(() => ({
-  requireShopPermission: vi.fn(),
+  requireShopAnyPermission: vi.fn(),
   resolveActiveShopId: vi.fn(),
   getCustomerList: vi.fn(),
   loggerError: vi.fn(),
 }))
 
 vi.mock('@/lib/api-auth', () => ({
-  requireShopPermission: mocks.requireShopPermission,
+  requireShopAnyPermission: mocks.requireShopAnyPermission,
   resolveActiveShopId: mocks.resolveActiveShopId,
 }))
 vi.mock('@/lib/server/customer-list', () => ({ getCustomerList: mocks.getCustomerList }))
@@ -27,9 +27,15 @@ function request(body: unknown) {
 describe('POST /api/customers/search privacy boundary', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mocks.requireShopPermission.mockResolvedValue({
+    mocks.requireShopAnyPermission.mockResolvedValue({
       ok: true,
       session: { user: { id: 'owner-1', role: 'SHOP_ADMIN', shopId: 'shop-1' } },
+      principal: {
+        memberKind: 'SHOP_OWNER',
+        legacyFullAccess: false,
+        enabledFeatures: new Set(['CUSTOMER_CRM']),
+        grantedPermissions: new Set(),
+      },
     })
     mocks.resolveActiveShopId.mockResolvedValue({ ok: true, shopId: 'shop-1' })
     mocks.getCustomerList.mockResolvedValue({ items: [], total: 0, skip: 0, take: 25 })
@@ -43,7 +49,12 @@ describe('POST /api/customers/search privacy boundary', () => {
 
     expect(response.status).toBe(200)
     expect(response.headers.get('cache-control')).toBe('private, no-store')
-    expect(mocks.requireShopPermission).toHaveBeenCalledWith('CUSTOMER_VIEW')
+    expect(mocks.requireShopAnyPermission).toHaveBeenCalledWith(expect.arrayContaining([
+      'CUSTOMER_VIEW',
+      'CUSTOMER_EDIT',
+      'CUSTOMER_PASSPORT_REVEAL',
+      'CUSTOMER_TRUST_OVERRIDE',
+    ]))
     expect(mocks.getCustomerList).toHaveBeenCalledWith({
       shopId: 'shop-1',
       search: passport,

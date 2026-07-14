@@ -39,6 +39,7 @@ interface ApiResponse<T> {
 }
 
 interface Props {
+  purpose: 'sale' | 'nasiya'
   selectedDevice: InStockPickerDevice | null
   onSelect: (device: InStockPickerDevice) => void
   onDeepLinkSelect: (device: InStockPickerDevice) => void
@@ -66,7 +67,7 @@ function normalizeDevice(device: InStockPickerDevice): InStockPickerDevice {
   }
 }
 
-export function InStockDevicePicker({ selectedDevice, onSelect, onDeepLinkSelect, formatPrice }: Props) {
+export function InStockDevicePicker({ purpose, selectedDevice, onSelect, onDeepLinkSelect, formatPrice }: Props) {
   const { memberKind } = useShopAccess()
   const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const [query, setQuery] = useState('')
@@ -105,6 +106,7 @@ export function InStockDevicePicker({ selectedDevice, onSelect, onDeepLinkSelect
         const params = new URLSearchParams({
           status: 'IN_STOCK',
           view: 'picker',
+          purpose,
           paginated: '1',
           skip: '0',
           take: String(PAGE_SIZE),
@@ -129,7 +131,7 @@ export function InStockDevicePicker({ selectedDevice, onSelect, onDeepLinkSelect
 
     void loadFirstPage()
     return () => controller.abort()
-  }, [debouncedQuery])
+  }, [debouncedQuery, purpose])
 
   // Device detail pages can deep-link straight into a sale flow. Fetch that
   // single row with a minimal picker projection; do not depend on it being in
@@ -141,7 +143,7 @@ export function InStockDevicePicker({ selectedDevice, onSelect, onDeepLinkSelect
     const controller = new AbortController()
     void (async () => {
       try {
-        const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}?view=picker`, {
+        const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}?view=picker&purpose=${purpose}`, {
           signal: controller.signal,
         })
         const json = (await response.json()) as ApiResponse<InStockPickerDevice>
@@ -156,7 +158,7 @@ export function InStockDevicePicker({ selectedDevice, onSelect, onDeepLinkSelect
     })()
 
     return () => controller.abort()
-  }, [])
+  }, [purpose])
 
   async function loadMore() {
     if (loadingMore || devices.length >= total) return
@@ -169,6 +171,7 @@ export function InStockDevicePicker({ selectedDevice, onSelect, onDeepLinkSelect
       const params = new URLSearchParams({
         status: 'IN_STOCK',
         view: 'picker',
+        purpose,
         paginated: '1',
         skip: String(devices.length),
         take: String(PAGE_SIZE),

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { NextResponse } from 'next/server'
 import { badRequest, forbidden, ok, payloadTooLarge, serverError, tooManyRequests } from '@/lib/api-helpers'
-import { requireShopAnyPermission, requireShopPermission } from '@/lib/api-auth'
+import { requireShopAnyPermission } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
 import { validatePrivateUploadImage } from '@/lib/server/image-validation'
 import { getSupabaseAdminClient, PRIVATE_STORAGE_BUCKET } from '@/lib/supabase-admin'
@@ -40,7 +40,7 @@ function isAuthorizedForKey(role: string, sessionShopId: string | null | undefin
 }
 
 export async function POST(request: Request) {
-  const guarded = await requireShopAnyPermission(['INVENTORY_MANAGE', 'OLIB_MANAGE'])
+  const guarded = await requireShopAnyPermission(['DEVICE_CREATE', 'DEVICE_EDIT', 'OLIB_CREATE'])
   if (!guarded.ok) return guarded.response
 
   try {
@@ -101,7 +101,20 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const guarded = await requireShopPermission('INVENTORY_VIEW')
+  const guarded = await requireShopAnyPermission([
+    'INVENTORY_VIEW',
+    'DEVICE_CREATE',
+    'DEVICE_EDIT',
+    'DEVICE_DELETE',
+    'DEVICE_RESTOCK',
+    'SALE_VIEW',
+    'SALE_CREATE',
+    'SALE_EDIT',
+    'SALE_PAYMENT_RECEIVE',
+    'SALE_REMINDER_MANAGE',
+    'SALE_RETURN_REFUND',
+    'OLIB_CREATE',
+  ])
   if (!guarded.ok) return guarded.response
 
   try {

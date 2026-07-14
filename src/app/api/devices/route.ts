@@ -8,7 +8,7 @@
 
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
-import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopAnyPermission, requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { addDeviceSchema } from '@/lib/validations'
 import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -22,6 +22,8 @@ import { latestChangeCursorForShop } from '@/lib/server/change-events'
 import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 import type { ZodError } from 'zod'
 import { formatDeviceStorage, deviceConditionLabel, normalizeImei } from '@/lib/device-specs'
+import { displayImei } from '@/lib/device-display'
+import { principalHasPermission } from '@/lib/server/shop-access'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED', 'DELETED'] as const
 
@@ -31,13 +33,29 @@ const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RE
 
 export async function GET(req: NextRequest) {
   try {
-    const guarded = await requireShopPermission('INVENTORY_VIEW')
+    const { searchParams } = req.nextUrl
+    const isReturnPicker = searchParams.get('view') === 'return-picker'
+    const actionPickerPurpose = searchParams.get('view') === 'action-picker' ? searchParams.get('purpose') : null
+    const pickerPurpose = searchParams.get('view') === 'picker' ? searchParams.get('purpose') : null
+    if (searchParams.get('view') === 'picker' && pickerPurpose !== 'sale' && pickerPurpose !== 'nasiya') {
+      return badRequest("Qurilma tanlash maqsadi noto'g'ri")
+    }
+    if (searchParams.get('view') === 'action-picker' && actionPickerPurpose !== 'device' && actionPickerPurpose !== 'sale') {
+      return badRequest("Amal tanlash maqsadi noto'g'ri")
+    }
+    const guarded = isReturnPicker
+      ? await requireShopAnyPermission(['SALE_RETURN_REFUND', 'NASIYA_CANCEL'])
+      : actionPickerPurpose === 'device'
+        ? await requireShopAnyPermission(['DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK'])
+        : actionPickerPurpose === 'sale'
+          ? await requireShopAnyPermission(['SALE_VIEW', 'SALE_EDIT', 'SALE_REMINDER_MANAGE'])
+      : pickerPurpose
+        ? await requireShopPermission(pickerPurpose === 'sale' ? 'SALE_CREATE' : 'NASIYA_CREATE')
+        : await requireShopPermission('INVENTORY_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const includeOwnerFinancials =
       session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
-
-    const { searchParams } = req.nextUrl
 
     // Super admins can pass an explicit shopId; shop admins are scoped to their own shop.
     const resolved = await resolveActiveShopId(session, searchParams.get('shopId'))
@@ -52,6 +70,154 @@ export async function GET(req: NextRequest) {
     const conditionParam = searchParams.get('condition') ?? undefined
     if (conditionParam && conditionParam !== 'NEW' && conditionParam !== 'USED') return badRequest("Qurilma holati noto'g'ri")
     const search = searchParams.get('search') ?? undefined // IMEI / model / color / note / customer name/phone
+
+    if (actionPickerPurpose) {
+      const can = (permission: 'DEVICE_EDIT' | 'DEVICE_DELETE' | 'DEVICE_RESTOCK' | 'SALE_VIEW' | 'SALE_EDIT' | 'SALE_REMINDER_MANAGE') => (
+        session.user.role === 'SUPER_ADMIN' || Boolean(
+          guarded.principal && principalHasPermission(guarded.principal, permission),
+        )
+      )
+      const statuses = actionPickerPurpose === 'device'
+        ? [
+            ...(can('DEVICE_EDIT') || can('DEVICE_DELETE') ? ['IN_STOCK'] as const : []),
+            ...(can('DEVICE_RESTOCK') ? ['RETURNED'] as const : []),
+          ]
+        : (can('SALE_VIEW') || can('SALE_EDIT')
+            ? ['SOLD_CASH', 'SOLD_DEBT'] as const
+            : ['SOLD_DEBT'] as const)
+      const requestedTake = Number(searchParams.get('take') ?? 25)
+      const requestedSkip = Number(searchParams.get('skip') ?? 0)
+      const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 50)) : 25
+      const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
+      const where = {
+        ...buildShopDevicesWhere(shopId, { search }),
+        status: { in: [...statuses] },
+      }
+      const [rows, total] = await Promise.all([
+        prisma.device.findMany({
+          where,
+          orderBy: { updatedAt: 'desc' },
+          skip,
+          take,
+          select: {
+            id: true,
+            model: true,
+            color: true,
+            storage: true,
+            imei: true,
+            status: true,
+            createdAt: true,
+            ...(actionPickerPurpose === 'sale'
+              ? {
+                  sales: {
+                    where: { deletedAt: null, returnedAt: null },
+                    orderBy: { createdAt: 'desc' as const },
+                    take: 1,
+                    select: {
+                      id: true,
+                      dueDate: true,
+                      reminderEnabled: true,
+                      contractCurrency: true,
+                      contractSalePrice: true,
+                      contractRemainingAmount: true,
+                      paymentMethod: true,
+                      paidFully: true,
+                      createdAt: true,
+                      customer: { select: { name: true, phone: true } },
+                    },
+                  },
+                }
+              : {}),
+          },
+        }),
+        prisma.device.count({ where }),
+      ])
+      return ok({
+        items: rows.map((row) => ({
+          id: row.id,
+          model: row.model,
+          color: row.color,
+          storage: row.storage,
+          imei: displayImei(row.imei),
+          status: row.status,
+          createdAt: row.createdAt,
+          ...('sales' in row ? { sale: row.sales[0] ?? null } : {}),
+        })),
+        total,
+        skip,
+        take,
+      })
+    }
+
+    if (isReturnPicker) {
+      const canReturnSale = session.user.role === 'SUPER_ADMIN' || Boolean(
+        guarded.principal && principalHasPermission(guarded.principal, 'SALE_RETURN_REFUND'),
+      )
+      const canCancelNasiya = session.user.role === 'SUPER_ADMIN' || Boolean(
+        guarded.principal && principalHasPermission(guarded.principal, 'NASIYA_CANCEL'),
+      )
+      const eligibleStatuses = [
+        ...(canReturnSale ? ['SOLD_CASH', 'SOLD_DEBT'] as const : []),
+        ...(canCancelNasiya ? ['SOLD_NASIYA'] as const : []),
+      ]
+      const requestedTake = Number(searchParams.get('take') ?? 25)
+      const requestedSkip = Number(searchParams.get('skip') ?? 0)
+      const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 50)) : 25
+      const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
+      const where = {
+        ...buildShopDevicesWhere(shopId, { search }),
+        status: { in: [...eligibleStatuses] },
+      }
+      const [rows, total] = await Promise.all([
+        prisma.device.findMany({
+          where,
+          orderBy: { updatedAt: 'desc' },
+          skip,
+          take,
+          select: {
+            id: true,
+            model: true,
+            color: true,
+            storage: true,
+            imei: true,
+            status: true,
+            sales: {
+              where: { deletedAt: null, returnedAt: null },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { id: true, contractCurrency: true, customer: { select: { name: true, phone: true } } },
+            },
+            nasiya: {
+              where: { deletedAt: null, returnedAt: null, status: { not: 'CANCELLED' } },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+              select: { id: true, contractCurrency: true, customer: { select: { name: true, phone: true } } },
+            },
+          },
+        }),
+        prisma.device.count({ where }),
+      ])
+      return ok({
+        items: rows.map((row) => {
+          const contract = row.sales[0] ?? row.nasiya[0]
+          return {
+            id: row.id,
+            model: row.model,
+            color: row.color,
+            storage: row.storage,
+            imei: displayImei(row.imei),
+            status: row.status,
+            contractType: row.sales[0] ? 'SALE' as const : 'NASIYA' as const,
+            contractId: contract?.id ?? null,
+            contractCurrency: contract?.contractCurrency ?? 'UZS',
+            customer: contract?.customer ?? null,
+          }
+        }),
+        total,
+        skip,
+        take,
+      })
+    }
 
     // Sale and nasiya forms need only a tiny searchable stock projection.
     // Keeping this separate from the full device-list projection avoids joins
@@ -134,7 +300,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const guarded = await requireShopPermission('INVENTORY_MANAGE')
+    const guarded = await requireShopPermission('DEVICE_CREATE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const includeOwnerFinancials =

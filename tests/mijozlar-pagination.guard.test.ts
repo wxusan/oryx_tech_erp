@@ -20,7 +20,7 @@ describe('customer list query: real pagination envelope', () => {
   it('returns items/total/skip/take (same envelope shape /api/logs already established)', () => {
     expect(query).toContain('return { items, total, skip: input.skip, take: input.take }')
     expect(route).toContain('return ok(data, "Mijozlar ro\'yxati")')
-    expect(searchRoute).toContain("const response = ok(data, 'Mijoz qidiruvi')")
+    expect(searchRoute).toContain("const response = ok(scopedData, 'Mijoz qidiruvi')")
   })
 
   it('runs count() with the exact same where clause as findMany, in parallel', () => {

@@ -10,6 +10,7 @@ import {
 
 interface ShopAccessContextValue {
   memberKind: ShopMemberKind
+  enabledFeatures: ReadonlySet<ShopFeatureCode>
   can(permission: ShopPermissionCode): boolean
 }
 
@@ -37,6 +38,7 @@ export function ShopAccessProvider({
     }
     return {
       memberKind,
+      enabledFeatures: principal.enabledFeatures,
       can: (permission) => principalCan(principal, permission),
     }
   }, [enabledFeatures, grantedPermissions, legacyFullAccess, memberKind])

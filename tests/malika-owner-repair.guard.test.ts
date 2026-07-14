@@ -18,9 +18,10 @@ describe('shop ownership authority and guarded Malika repair', () => {
     expect(route).not.toContain('STAFF_ACCESS_DISABLED')
   })
 
-  it('keeps staff creation at the owner-only permission boundary', () => {
+  it('keeps staff creation behind its exact live capability', () => {
     const route = source('src/app/api/shop/staff/route.ts')
-    expect(route).toContain("requireCurrentShopPermission('MEMBER_MANAGE')")
+    expect(route).toContain("requireCurrentShopPermission('STAFF_CREATE')")
+    expect(route).not.toContain("requireCurrentShopPermission('MEMBER_MANAGE')")
   })
 
   it('makes the production owner repair inert unless a guarded release explicitly enables it', () => {

@@ -26,6 +26,7 @@ vi.mock('@/lib/api-auth', () => ({
   requireShopPermissionAndFeature: authMock.deny,
   requireShopPermissionAndAnyFeature: authMock.deny,
   requireCurrentShopPermission: authMock.deny,
+  requireCurrentShopAnyPermission: authMock.deny,
   requireCurrentShopFeature: authMock.deny,
   requireReceivableView: authMock.deny,
   resolveActiveShopId: authMock.guardBypass,
@@ -92,7 +93,7 @@ const routes: Array<{ path: string; load: () => Promise<RouteModule> }> = [
   { path: 'src/app/api/uploads/passport/route.ts', load: () => import('@/app/api/uploads/passport/route') },
 ]
 
-const guardPattern = /require(?:ApiSession|SuperAdmin|ShopPermission|ShopAnyPermission|ShopPermissionAndFeature|CurrentShopPermission|ReceivableView)\s*\(/
+const guardPattern = /require(?:ApiSession|SuperAdmin|ShopPermission|ShopAnyPermission|ShopPermissionAndFeature|ShopPermissionAndAnyFeature|CurrentShopPermission|CurrentShopAnyPermission|CurrentShopFeature|ReceivableView)\s*\(/
 
 function routeFiles(directory: string): string[] {
   return readdirSync(directory).flatMap((entry) => {

@@ -25,41 +25,84 @@ const PRIVATE_HEADERS = {
 
 function allowedDomainsForGuard(guarded: Awaited<ReturnType<typeof requireApiSession>>): NavigationDomain[] | undefined {
   if (!guarded.ok || guarded.session.user.role === 'SUPER_ADMIN' || !guarded.principal) return undefined
-  const domains = new Set<NavigationDomain>(['access', 'settings', 'currency'])
+  const domains = new Set<NavigationDomain>(['currency'])
+  const hasAnyPermission = (permissions: readonly Parameters<typeof principalHasPermission>[1][]) => (
+    permissions.some((permission) => principalHasPermission(guarded.principal!, permission))
+  )
   const allow = (
-    permission: Parameters<typeof principalHasPermission>[1],
+    permissions: readonly Parameters<typeof principalHasPermission>[1][],
     values: NavigationDomain[],
     feature?: ShopFeatureCode,
   ) => {
     if (
-      principalHasPermission(guarded.principal!, permission) &&
+      hasAnyPermission(permissions) &&
       (!feature || principalHasFeature(guarded.principal!, feature))
     ) values.forEach((value) => domains.add(value))
   }
-  allow('INVENTORY_VIEW', ['devices', 'returns'])
-  allow('INVENTORY_VIEW', ['sales'], 'CASH_SALES')
-  allow('CUSTOMER_VIEW', ['customers'])
-  allow('NASIYA_VIEW', ['nasiyas'])
-  allow('OLIB_VIEW', ['olibSotdim'])
-  const canViewReceivables = guarded.principal.memberKind === 'SHOP_OWNER' && ((
-    principalHasFeature(guarded.principal, 'CASH_SALES') &&
-    principalHasPermission(guarded.principal, 'INVENTORY_VIEW')
-  ) || (
-    principalHasFeature(guarded.principal, 'NASIYA') &&
-    principalHasPermission(guarded.principal, 'NASIYA_VIEW')
-  ))
-  if (canViewReceivables) domains.add('overdue')
-  if (
-    principalHasPermission(guarded.principal, 'PAYMENT_RECEIVE') &&
-    (principalHasFeature(guarded.principal, 'CASH_SALES') ||
-      principalHasFeature(guarded.principal, 'NASIYA') ||
-      principalHasFeature(guarded.principal, 'OLIB_SOTDIM'))
-  ) {
-    domains.add('payments')
-  }
-  allow('REPORT_VIEW', ['reports'])
-  allow('LOG_VIEW', ['logs'])
+  allow(['INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK'], ['devices'], 'INVENTORY')
+  allow([
+    'SALE_VIEW',
+    'SALE_CREATE',
+    'SALE_EDIT',
+    'SALE_PAYMENT_RECEIVE',
+    'SALE_REMINDER_MANAGE',
+    'SALE_RETURN_REFUND',
+  ], ['sales'], 'CASH_SALES')
+  allow([
+    'NASIYA_VIEW',
+    'NASIYA_CREATE',
+    'NASIYA_EDIT',
+    'NASIYA_PAYMENT_RECEIVE',
+    'NASIYA_DEFER',
+    'NASIYA_REMINDER_MANAGE',
+    'NASIYA_CANCEL',
+    'NASIYA_ARCHIVE',
+    'NASIYA_WRITE_OFF',
+    'NASIYA_REOPEN',
+  ], ['nasiyas'], 'NASIYA')
+  allow(['SALE_RETURN_REFUND', 'NASIYA_CANCEL', 'DEVICE_RESTOCK'], ['returns'])
+  allow([
+    'CUSTOMER_VIEW',
+    'CUSTOMER_CREATE',
+    'CUSTOMER_EDIT',
+    'CUSTOMER_PASSPORT_PHOTO_VIEW',
+    'CUSTOMER_PASSPORT_REVEAL',
+    'CUSTOMER_PASSPORT_MANAGE',
+    'CUSTOMER_TRUST_OVERRIDE',
+  ], ['customers'], 'CUSTOMER_CRM')
+  allow(['OLIB_VIEW', 'OLIB_CREATE', 'SUPPLIER_PAYMENT_MARK_PAID'], ['olibSotdim'], 'OLIB_SOTDIM')
+  allow([
+    'RECEIVABLES_VIEW',
+    'SALE_VIEW',
+    'SALE_PAYMENT_RECEIVE',
+    'NASIYA_VIEW',
+    'NASIYA_PAYMENT_RECEIVE',
+    'NASIYA_DEFER',
+  ], ['overdue'])
+  allow(['SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE', 'SUPPLIER_PAYMENT_MARK_PAID'], ['payments'])
+  allow(['DASHBOARD_OPERATIONAL_VIEW', 'DASHBOARD_FINANCIAL_VIEW', 'REPORT_VIEW'], ['reports'], 'REPORTS')
+  allow(['LOG_VIEW'], ['logs'])
+  allow([
+    'STAFF_VIEW',
+    'STAFF_CREATE',
+    'STAFF_EDIT_PROFILE',
+    'STAFF_RESET_PASSWORD',
+    'STAFF_STATUS_MANAGE',
+    'STAFF_DELETE',
+    'STAFF_PERMISSION_MANAGE',
+    'STAFF_NOTIFICATION_MANAGE',
+  ], ['access'], 'STAFF_ACCESS')
+  allow(['SHOP_PROFILE_EDIT', 'SHOP_CURRENCY_MANAGE', 'SHOP_TELEGRAM_MANAGE'], ['settings'])
   return [...domains]
+}
+
+function canReceiveDeviceUpserts(guarded: Awaited<ReturnType<typeof requireApiSession>>) {
+  if (!guarded.ok) return false
+  return guarded.session.user.role === 'SUPER_ADMIN' || Boolean(
+    guarded.principal &&
+    principalHasFeature(guarded.principal, 'INVENTORY') &&
+    principalHasPermission(guarded.principal, 'INVENTORY_VIEW'),
+  )
 }
 
 export async function GET(request: NextRequest) {
@@ -102,12 +145,19 @@ export async function GET(request: NextRequest) {
       limit,
     })
 
-    const directDeviceIds = batch.events
+    const includeDeviceUpserts = canReceiveDeviceUpserts(guarded)
+    const directDeviceIds = includeDeviceUpserts ? batch.events
       .filter((event) => event.entityType === 'Device' && event.operation !== 'deleted')
-      .map((event) => event.entityId)
-    const saleIds = batch.events.filter((event) => event.entityType === 'Sale').map((event) => event.entityId)
-    const nasiyaIds = batch.events.filter((event) => event.entityType === 'Nasiya').map((event) => event.entityId)
-    const payableIds = batch.events.filter((event) => event.entityType === 'SupplierPayable').map((event) => event.entityId)
+      .map((event) => event.entityId) : []
+    const saleIds = includeDeviceUpserts
+      ? batch.events.filter((event) => event.entityType === 'Sale').map((event) => event.entityId)
+      : []
+    const nasiyaIds = includeDeviceUpserts
+      ? batch.events.filter((event) => event.entityType === 'Nasiya').map((event) => event.entityId)
+      : []
+    const payableIds = includeDeviceUpserts
+      ? batch.events.filter((event) => event.entityType === 'SupplierPayable').map((event) => event.entityId)
+      : []
     const [sales, nasiyas, payables] = guarded.shopId
       ? await Promise.all([
           saleIds.length ? prisma.sale.findMany({

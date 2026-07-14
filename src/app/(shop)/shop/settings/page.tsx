@@ -88,7 +88,10 @@ export default function ShopSettingsPage() {
   const { setCurrency } = useShopCurrency()
   const { can, memberKind } = useShopAccess()
   const isStaff = memberKind === 'SHOP_STAFF'
-  const canManageShop = !isStaff && can('SETTINGS_MANAGE')
+  const canEditShopProfile = can('SHOP_PROFILE_EDIT')
+  const canManageCurrency = can('SHOP_CURRENCY_MANAGE')
+  const canManageShopTelegram = can('SHOP_TELEGRAM_MANAGE')
+  const canManageShop = canEditShopProfile || canManageCurrency || canManageShopTelegram
   const [profile, setProfile] = useState<ShopAdminProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -214,17 +217,17 @@ export default function ShopSettingsPage() {
     setShopError('')
     setShopSuccess('')
 
-    if (shopForm.name.trim().length < 2) {
+    if (canEditShopProfile && shopForm.name.trim().length < 2) {
       setShopError("Do'kon nomi kamida 2 ta harfdan iborat bo'lishi kerak")
       requestAnimationFrame(() => document.getElementById('shop-name')?.focus())
       return
     }
-    if (shopForm.ownerName.trim().length < 2) {
+    if (canEditShopProfile && shopForm.ownerName.trim().length < 2) {
       setShopError("Egasi ismi kamida 2 ta harfdan iborat bo'lishi kerak")
       requestAnimationFrame(() => document.getElementById('shop-owner')?.focus())
       return
     }
-    if (!isValidPhone(shopForm.ownerPhone)) {
+    if (canEditShopProfile && !isValidPhone(shopForm.ownerPhone)) {
       setShopError("Telefon raqam noto'g'ri. Masalan: +998 90 123 45 67")
       requestAnimationFrame(() => document.getElementById('shop-owner-phone')?.focus())
       return
@@ -236,13 +239,15 @@ export default function ShopSettingsPage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          name: shopForm.name.trim(),
-          ownerName: shopForm.ownerName.trim(),
-          ownerPhone: shopForm.ownerPhone.trim(),
-          address: shopForm.address.trim(),
-          note: shopForm.note.trim(),
-          preferredCurrency: shopForm.preferredCurrency,
-          telegramNotificationsEnabled: shopForm.telegramNotificationsEnabled,
+          ...(canEditShopProfile ? {
+            name: shopForm.name.trim(),
+            ownerName: shopForm.ownerName.trim(),
+            ownerPhone: shopForm.ownerPhone.trim(),
+            address: shopForm.address.trim(),
+            note: shopForm.note.trim(),
+          } : {}),
+          ...(canManageCurrency ? { preferredCurrency: shopForm.preferredCurrency } : {}),
+          ...(canManageShopTelegram ? { telegramNotificationsEnabled: shopForm.telegramNotificationsEnabled } : {}),
         }),
       })
       if (!response.ok) throw new Error(await readApiError(response))
@@ -429,7 +434,7 @@ export default function ShopSettingsPage() {
             </CardContent>
           </Card>
 
-          {!isStaff && shop && (
+          {canManageShop && shop && (
             <Card className="rounded-lg lg:col-span-2">
               <CardHeader className="border-b border-zinc-100">
                 <CardTitle>Do'kon ma'lumotlari</CardTitle>
@@ -457,6 +462,7 @@ export default function ShopSettingsPage() {
                     <Field label="Do'kon nomi" required controlId="shop-name">
                       <Input
                         id="shop-name"
+                        disabled={!canEditShopProfile}
                         value={shopForm.name}
                         onChange={(e) => setShopForm((f) => ({ ...f, name: e.target.value }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
@@ -465,6 +471,7 @@ export default function ShopSettingsPage() {
                     <Field label="Egasi ismi" required controlId="shop-owner">
                       <Input
                         id="shop-owner"
+                        disabled={!canEditShopProfile}
                         value={shopForm.ownerName}
                         onChange={(e) => setShopForm((f) => ({ ...f, ownerName: e.target.value }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
@@ -473,6 +480,7 @@ export default function ShopSettingsPage() {
                     <Field label="Egasi telefoni" required controlId="shop-owner-phone">
                       <PhoneInput
                         id="shop-owner-phone"
+                        disabled={!canEditShopProfile}
                         value={shopForm.ownerPhone}
                         onChange={(ownerPhone) => setShopForm((f) => ({ ...f, ownerPhone }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
@@ -484,6 +492,7 @@ export default function ShopSettingsPage() {
                       </Label>
                       <Input
                         id="shop-address"
+                        disabled={!canEditShopProfile}
                         value={shopForm.address}
                         onChange={(e) => setShopForm((f) => ({ ...f, address: e.target.value }))}
                         className="h-9 rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"
@@ -498,6 +507,7 @@ export default function ShopSettingsPage() {
                           <button
                             key={currency}
                             type="button"
+                            disabled={!canManageCurrency}
                             aria-pressed={shopForm.preferredCurrency === currency}
                             onClick={() => setShopForm((f) => ({ ...f, preferredCurrency: currency }))}
                             className={[
@@ -523,6 +533,7 @@ export default function ShopSettingsPage() {
                       <input
                         id="shop-telegram-notifications"
                         type="checkbox"
+                        disabled={!canManageShopTelegram}
                         checked={shopForm.telegramNotificationsEnabled}
                         onChange={(event) => setShopForm((form) => ({ ...form, telegramNotificationsEnabled: event.target.checked }))}
                       />
@@ -534,6 +545,7 @@ export default function ShopSettingsPage() {
                     </Label>
                     <Textarea
                       id="shop-note"
+                      disabled={!canEditShopProfile}
                       value={shopForm.note}
                       onChange={(e) => setShopForm((f) => ({ ...f, note: e.target.value }))}
                       className="min-h-[70px] rounded-md border-zinc-200 text-sm focus-visible:ring-zinc-900"

@@ -36,9 +36,9 @@ export async function POST(req: NextRequest) {
   try {
     const guarded = await requireShopAnyPermission([
       'CUSTOMER_VIEW',
-      'CASH_SALE_CREATE',
+      'SALE_CREATE',
       'NASIYA_CREATE',
-      'OLIB_MANAGE',
+      'OLIB_CREATE',
     ])
     if (!guarded.ok) return guarded.response
     const parsed = pickerSearchSchema.safeParse(await readLimitedJsonBody(req))

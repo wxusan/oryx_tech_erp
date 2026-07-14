@@ -1,9 +1,18 @@
 import { notFound } from 'next/navigation'
-import { requireCurrentShopPermission } from '@/lib/api-auth'
+import { requireCurrentShopAnyPermission } from '@/lib/api-auth'
 import { StaffManagement } from '@/components/shop/staff-management'
 
 export default async function StaffPage() {
-  const guarded = await requireCurrentShopPermission('MEMBER_MANAGE')
+  const guarded = await requireCurrentShopAnyPermission([
+    'STAFF_VIEW',
+    'STAFF_CREATE',
+    'STAFF_EDIT_PROFILE',
+    'STAFF_RESET_PASSWORD',
+    'STAFF_STATUS_MANAGE',
+    'STAFF_DELETE',
+    'STAFF_PERMISSION_MANAGE',
+    'STAFF_NOTIFICATION_MANAGE',
+  ])
   if (!guarded.ok) notFound()
 
   return <StaffManagement />

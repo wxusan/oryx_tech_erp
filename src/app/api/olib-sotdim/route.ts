@@ -16,7 +16,7 @@
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopAnyPermission, requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { createOlibSotdimSchema } from '@/lib/validations'
 import { ok, created, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
@@ -40,7 +40,7 @@ import { resolvePrivateUploadReference } from '@/lib/server/private-upload-refer
 
 export async function GET(req: NextRequest) {
   try {
-    const guarded = await requireShopPermission('OLIB_VIEW')
+    const guarded = await requireShopAnyPermission(['OLIB_VIEW', 'SUPPLIER_PAYMENT_MARK_PAID'])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const includeOwnerFinancials =
@@ -188,7 +188,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const guarded = await requireShopPermission('OLIB_MANAGE')
+    const guarded = await requireShopPermission('OLIB_CREATE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

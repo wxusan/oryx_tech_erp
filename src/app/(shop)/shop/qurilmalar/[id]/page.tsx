@@ -172,19 +172,59 @@ function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']
 
 export default function QurilmaDetailPage() {
   const { can } = useShopAccess()
-  if (!can('INVENTORY_VIEW')) return <ShopAccessDenied />
+  const canOpen = [
+    'INVENTORY_VIEW',
+    'DEVICE_CREATE',
+    'DEVICE_EDIT',
+    'DEVICE_DELETE',
+    'DEVICE_RESTOCK',
+    'SALE_VIEW',
+    'SALE_CREATE',
+    'SALE_EDIT',
+    'SALE_PAYMENT_RECEIVE',
+    'SALE_REMINDER_MANAGE',
+    'SALE_RETURN_REFUND',
+    'OLIB_CREATE',
+  ].some((permission) => can(permission as Parameters<typeof can>[0]))
+  if (!canOpen) return <ShopAccessDenied />
   return <AuthorizedQurilmaDetailPage />
 }
 
 function AuthorizedQurilmaDetailPage() {
   const { can, memberKind } = useShopAccess()
+  const canViewInventory = can('INVENTORY_VIEW')
   const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
-  const canManageInventory = can('INVENTORY_MANAGE')
-  const canCreateCashSale = can('CASH_SALE_CREATE')
-  const canManageCashSale = can('CASH_SALE_MANAGE')
+  const canEditDevice = can('DEVICE_EDIT')
+  const canDeleteDevice = can('DEVICE_DELETE')
+  const canRestockDevice = can('DEVICE_RESTOCK')
+  const canCreateCashSale = can('SALE_CREATE')
+  const canEditCashSale = can('SALE_EDIT')
+  const canManageSaleReminder = can('SALE_REMINDER_MANAGE')
   const canCreateNasiya = can('NASIYA_CREATE')
-  const canReceivePayment = can('PAYMENT_RECEIVE')
-  const canManageReturns = can('RETURN_MANAGE')
+  const canReceiveSalePayment = can('SALE_PAYMENT_RECEIVE')
+  const canReceiveNasiyaPayment = can('NASIYA_PAYMENT_RECEIVE')
+  const canReturnSale = can('SALE_RETURN_REFUND')
+  const canCancelNasiya = can('NASIYA_CANCEL')
+  const canViewLogs = can('LOG_VIEW')
+  const detailPurpose = canViewInventory
+    ? null
+    : (can('DEVICE_CREATE') || canEditDevice || canDeleteDevice || canRestockDevice)
+      ? 'device'
+      : 'sale'
+  const backHref = canViewInventory || detailPurpose === 'device'
+    ? '/shop/qurilmalar'
+    : (can('SALE_VIEW') || canEditCashSale || canManageSaleReminder)
+      ? '/shop/sotuvlar'
+      : canReceiveSalePayment
+        ? '/shop/tolovlar'
+        : '/shop/yangi-operatsiya'
+  const backLabel = backHref === '/shop/sotuvlar'
+    ? 'Sotuvlarga qaytish'
+    : backHref === '/shop/tolovlar'
+      ? "To'lovlarga qaytish"
+      : backHref === '/shop/yangi-operatsiya'
+        ? 'Operatsiyalarga qaytish'
+        : 'Qurilmalarga qaytish'
   const salePaymentCommand = useLogicalCommandIdempotency()
   const returnCommand = useLogicalCommandIdempotency()
   const params = useParams()
@@ -268,7 +308,8 @@ function AuthorizedQurilmaDetailPage() {
 
   const fetchDevice = useCallback(() => {
     if (!id) return
-    return fetch(`/api/devices/${id}`)
+    const query = detailPurpose ? `?purpose=${detailPurpose}` : ''
+    return fetch(`/api/devices/${id}${query}`)
       .then((r) => r.json())
       .then((json) => {
         if (json.success) setDevice(json.data)
@@ -276,7 +317,7 @@ function AuthorizedQurilmaDetailPage() {
       })
       .catch(() => setError('Xatolik yuz berdi'))
       .finally(() => setLoading(false))
-  }, [id])
+  }, [detailPurpose, id])
 
   useEffect(() => {
     fetchDevice()
@@ -284,7 +325,7 @@ function AuthorizedQurilmaDetailPage() {
 
   // Device lifecycle history (created -> sold -> returned -> restocked ...).
   useEffect(() => {
-    if (!id) return
+    if (!canViewLogs || !id) return
     let cancelled = false
     fetch(`/api/logs?search=${encodeURIComponent(id)}`)
       .then((r) => r.json())
@@ -299,7 +340,7 @@ function AuthorizedQurilmaDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [canViewLogs, id])
 
   function openEdit() {
     if (!device) return
@@ -529,12 +570,14 @@ function AuthorizedQurilmaDetailPage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customerName: saleEditCustomerName.trim(),
-          customerPhone: saleEditCustomerPhone.trim(),
-          paymentMethod: saleEditPaymentMethod,
-          dueDate: saleEditDueDate || null,
-          reminderEnabled: saleEditReminderEnabled,
-          note: saleEditNote.trim() || undefined,
+          ...(canEditCashSale ? {
+            customerName: saleEditCustomerName.trim(),
+            customerPhone: saleEditCustomerPhone.trim(),
+            paymentMethod: saleEditPaymentMethod,
+            dueDate: saleEditDueDate || null,
+            note: saleEditNote.trim() || undefined,
+          } : {}),
+          ...(canManageSaleReminder ? { reminderEnabled: saleEditReminderEnabled } : {}),
         }),
       })
       const json = await res.json()
@@ -740,9 +783,9 @@ function AuthorizedQurilmaDetailPage() {
   return (
     <div className="p-6 space-y-5 max-w-3xl">
       {/* Back */}
-      <Link href="/shop/qurilmalar" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
+      <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
         <ArrowLeft size={14} />
-        Qurilmalarga qaytish
+        {backLabel}
       </Link>
 
       {/* Top row */}
@@ -754,7 +797,7 @@ function AuthorizedQurilmaDetailPage() {
           </span>
         </div>
         <div className="flex items-center gap-2">
-          {canManageInventory && device.status === 'IN_STOCK' && (
+          {canEditDevice && device.status === 'IN_STOCK' && (
             <Button
               variant="outline"
               onClick={openEdit}
@@ -780,12 +823,12 @@ function AuthorizedQurilmaDetailPage() {
               )}
             </>
           )}
-          {canManageReturns && device.status === 'RETURNED' && (
+          {canRestockDevice && device.status === 'RETURNED' && (
             <Button onClick={() => setRestockModalOpen(true)} className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">
               Sotuvga qo&apos;yish
             </Button>
           )}
-          {canManageInventory && !['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(device.status) && (
+          {canDeleteDevice && device.status === 'IN_STOCK' && (
             <Button
               variant="outline"
               aria-label="Qurilmani o'chirish"
@@ -795,7 +838,8 @@ function AuthorizedQurilmaDetailPage() {
               <Trash2 size={15} />
             </Button>
           )}
-          {canManageReturns && ['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(device.status) && (
+          {((canReturnSale && ['SOLD_CASH', 'SOLD_DEBT'].includes(device.status)) ||
+            (canCancelNasiya && device.status === 'SOLD_NASIYA')) && (
             <Button
               variant="outline"
               onClick={() => setReturnModalOpen(true)}
@@ -872,7 +916,7 @@ function AuthorizedQurilmaDetailPage() {
         <div className="border border-zinc-200 rounded overflow-hidden">
           <div className="flex items-center justify-between gap-3 px-4 py-3 bg-zinc-50 border-b border-zinc-200">
             <span className="text-sm font-semibold text-zinc-900">Sotuv ma'lumotlari</span>
-            {canManageCashSale && (
+            {(canEditCashSale || canManageSaleReminder) && (
               <Button
                 type="button"
                 variant="outline"
@@ -938,7 +982,7 @@ function AuthorizedQurilmaDetailPage() {
               <span className="text-zinc-500 w-32">Sotilgan sana</span>
               <span className="text-zinc-900 font-medium">{uzDate(latestSale.createdAt)}</span>
             </div>
-            {canReceivePayment && saleHasDebt && (
+            {canReceiveSalePayment && saleHasDebt && (
               <Button
                 onClick={() => {
                   // Every open starts from a clean slate — never carries a
@@ -1097,7 +1141,7 @@ function AuthorizedQurilmaDetailPage() {
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2 mt-2">
-              {canReceivePayment && latestNasiya.resolutionState === 'ACTIVE' && (latestNasiya.status === 'ACTIVE' || latestNasiya.status === 'OVERDUE') && (
+              {canReceiveNasiyaPayment && latestNasiya.resolutionState === 'ACTIVE' && (latestNasiya.status === 'ACTIVE' || latestNasiya.status === 'OVERDUE') && (
                 <Button
                   onClick={() => setNasiyaPaymentOpen(true)}
                   className="text-sm font-semibold bg-zinc-900 text-white hover:bg-zinc-800 rounded shadow-sm"
@@ -1116,7 +1160,7 @@ function AuthorizedQurilmaDetailPage() {
         </div>
       )}
 
-      {canReceivePayment && latestNasiya && (
+      {canReceiveNasiyaPayment && latestNasiya && (
         <NasiyaPaymentModal
           nasiyaId={latestNasiya.id}
           open={nasiyaPaymentOpen}
@@ -1206,7 +1250,7 @@ function AuthorizedQurilmaDetailPage() {
         </div>
       )}
 
-      <DeviceActionHistory logs={logs} />
+      {canViewLogs && <DeviceActionHistory logs={logs} />}
 
       {/* Edit dialog is available only while the device is sellable or awaiting legacy restock. */}
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
@@ -1386,6 +1430,7 @@ function AuthorizedQurilmaDetailPage() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="Mijoz">
                 <Input
+                  disabled={!canEditCashSale}
                   value={saleEditCustomerName}
                   onChange={(e) => setSaleEditCustomerName(e.target.value)}
                   className="h-9 rounded border-zinc-200 text-sm"
@@ -1393,6 +1438,7 @@ function AuthorizedQurilmaDetailPage() {
               </Field>
               <Field label="Telefon">
                 <PhoneInput
+                  disabled={!canEditCashSale}
                   value={saleEditCustomerPhone}
                   onChange={setSaleEditCustomerPhone}
                   className="h-9 rounded border-zinc-200 text-sm"
@@ -1402,6 +1448,7 @@ function AuthorizedQurilmaDetailPage() {
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <Field label="To'lov usuli">
                 <select
+                  disabled={!canEditCashSale}
                   value={saleEditPaymentMethod}
                   onChange={(e) => setSaleEditPaymentMethod(e.target.value)}
                   className="h-9 w-full rounded border border-zinc-200 bg-white px-2 text-sm"
@@ -1414,6 +1461,7 @@ function AuthorizedQurilmaDetailPage() {
               </Field>
               <Field label="Qarz muddati">
                 <DateInput
+                  disabled={!canEditCashSale}
                   value={saleEditDueDate}
                   onValueChange={setSaleEditDueDate}
                   className="h-9 rounded border-zinc-200 text-sm"
@@ -1424,6 +1472,7 @@ function AuthorizedQurilmaDetailPage() {
               <input
                 id="sale-edit-reminder"
                 type="checkbox"
+                disabled={!canManageSaleReminder}
                 checked={saleEditReminderEnabled}
                 onChange={(e) => setSaleEditReminderEnabled(e.target.checked)}
                 className="h-4 w-4 rounded border-zinc-300"
@@ -1431,6 +1480,7 @@ function AuthorizedQurilmaDetailPage() {
               Eslatma yoqilgan
             </label>
             <Textarea
+              disabled={!canEditCashSale}
               value={saleEditNote}
               onChange={(e) => setSaleEditNote(e.target.value)}
               placeholder="Tahrirlash sababi yoki izoh..."

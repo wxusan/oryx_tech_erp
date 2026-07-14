@@ -88,8 +88,10 @@ describe('GET /api/nasiya/[id] includes customerTrust aggregated across ALL of t
     expect(block).toContain('shopId: nasiya.shopId')
   })
 
-  it('includes customerTrust in the response', () => {
-    expect(source).toContain('customerTrust,')
+  it('includes customerTrust only for principals allowed to view customer trust context', () => {
+    expect(source).toContain('const includeCustomerTrust =')
+    expect(source).toContain("principalHasPermission(guarded.principal, 'NASIYA_VIEW')")
+    expect(source).toContain('...(customerTrust ? { customerTrust } : {})')
   })
 })
 

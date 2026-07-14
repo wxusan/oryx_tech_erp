@@ -39,10 +39,11 @@ describe('private upload browser boundary', () => {
 
     expect(deviceApi).toContain("privateUploadPreviewUrl('device', reference)")
     expect(deviceClient).not.toContain('/api/uploads/device?key=')
-    expect(nasiyaApi).toContain('const { passportPhotoUrl, ...customer } = nasiya.customer')
+    expect(nasiyaApi).toContain('...(canViewPassportPhoto ? { passportPhotoUrl: true } : {})')
+    expect(nasiyaApi).toContain('...(canViewPassportPhoto ? { hasPassportPhoto: Boolean(passportPhotoUrl) } : {})')
+    expect(nasiyaApi).not.toContain('customer: nasiya.customer')
     expect(nasiyaClient).not.toContain('customer?.passportPhotoUrl')
     expect(nasiyaClient).not.toContain('/api/uploads/passport?key=')
     expect(nasiyaClient).toContain('/passport/image')
   })
 })
-

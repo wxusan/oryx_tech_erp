@@ -2,8 +2,8 @@ import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import {
   calculateRecurringPackagePrice,
+  expandShopPermissionCodes,
   isShopFeatureCode,
-  isShopPermissionCode,
   principalCan,
   shopMemberKind,
   type ShopFeatureCode,
@@ -119,7 +119,7 @@ export function buildShopPrincipal(input: {
     authorizationVersion: input.authorizationVersion,
     permissionVersion: input.permissionVersion,
     enabledFeatures: enabledFeatureSet(input.packageVersion),
-    grantedPermissions: new Set(input.permissionCodes.filter(isShopPermissionCode)),
+    grantedPermissions: expandShopPermissionCodes(input.permissionCodes),
     packageVersionId: input.packageVersion.id,
   }
 }
@@ -130,6 +130,52 @@ export function principalHasFeature(principal: ShopPrincipal, feature: ShopFeatu
 
 export function principalHasPermission(principal: ShopPrincipal, permission: ShopPermissionCode) {
   return principalCan(principal, permission)
+}
+
+/** Rebuild authorization after a shop row has been locked for a sensitive
+ * mutation, closing the gap between the request guard and transaction commit. */
+export async function getLiveShopPrincipalForMutation(
+  reader: Prisma.TransactionClient,
+  input: { shopId: string; actorId: string; now?: Date },
+): Promise<ShopPrincipal | null> {
+  const now = input.now ?? new Date()
+  const subscriptionCutoff = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000)
+  const [shop, member, packageVersion] = await Promise.all([
+    reader.shop.findFirst({
+      where: {
+        id: input.shopId,
+        status: 'ACTIVE',
+        deletedAt: null,
+        subscriptionDue: { gte: subscriptionCutoff },
+      },
+      select: { ownerAdminId: true, authorizationVersion: true },
+    }),
+    reader.shopAdmin.findFirst({
+      where: {
+        id: input.actorId,
+        shopId: input.shopId,
+        isActive: true,
+        deletedAt: null,
+      },
+      select: {
+        legacyFullAccess: true,
+        permissionVersion: true,
+        permissions: { select: { permissionCode: true } },
+      },
+    }),
+    getActiveShopPackage(input.shopId, now, reader),
+  ])
+  if (!shop || !member || !packageVersion) return null
+  return buildShopPrincipal({
+    actorId: input.actorId,
+    shopId: input.shopId,
+    ownerAdminId: shop.ownerAdminId,
+    legacyFullAccess: member.legacyFullAccess,
+    authorizationVersion: shop.authorizationVersion,
+    permissionVersion: member.permissionVersion,
+    permissionCodes: member.permissions.map((item) => item.permissionCode),
+    packageVersion,
+  })
 }
 
 /** One set-based query for cron/domain jobs that need the currently active package entitlement. */

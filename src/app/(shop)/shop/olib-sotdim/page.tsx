@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation'
-import { requireCurrentShopPermission } from '@/lib/api-auth'
+import { requireCurrentShopAnyPermission } from '@/lib/api-auth'
 import { positivePage, scalarParam } from '@/lib/list-url-state'
 import OlibSotdimClient from './olib-sotdim-client'
 
@@ -8,7 +8,7 @@ export default async function OlibSotdimPage({
 }: {
   searchParams?: Promise<{ q?: string | string[]; page?: string | string[] }>
 }) {
-  const guarded = await requireCurrentShopPermission('OLIB_VIEW')
+  const guarded = await requireCurrentShopAnyPermission(['OLIB_VIEW', 'SUPPLIER_PAYMENT_MARK_PAID'])
   if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
   const params = await searchParams
   return (

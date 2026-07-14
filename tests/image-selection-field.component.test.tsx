@@ -174,7 +174,7 @@ describe('image-input source inventory', () => {
     const rawFileInputs: string[] = []
     for (const file of files) {
       const source = await readFile(file, 'utf8')
-      if (/type=["']file["']/.test(source)) rawFileInputs.push(file)
+      if (/type=["']file["']/.test(source) && !/accept=["'][^"']*\.csv/.test(source)) rawFileInputs.push(file)
     }
     expect(rawFileInputs).toEqual([join(root, 'components/ui/image-selection-field.tsx')])
 

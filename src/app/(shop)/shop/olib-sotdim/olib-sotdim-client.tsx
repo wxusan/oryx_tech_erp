@@ -91,8 +91,8 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
   const { currency } = useShopCurrency()
   const scope = useAuthenticatedQueryScope()
   const { can, memberKind } = useShopAccess()
-  const canManage = can('OLIB_MANAGE')
-  const canReceivePayment = can('PAYMENT_RECEIVE')
+  const canCreate = can('OLIB_CREATE')
+  const canReceivePayment = can('SUPPLIER_PAYMENT_MARK_PAID')
   const canViewDevice = can('INVENTORY_VIEW')
   const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const [search, setSearch] = useState(initialSearch)
@@ -191,7 +191,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
           <h1 className="text-xl font-bold text-zinc-900">Olib-sotdim</h1>
           <p className="text-sm text-zinc-500 mt-0.5">Boshqa do&apos;kondan olib sotilgan qurilmalar va yetkazib beruvchi qarzlari</p>
         </div>
-        {canManage && (
+        {canCreate && (
           <Button
             render={<Link href="/shop/olib-sotdim/new" />}
             size="lg"

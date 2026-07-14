@@ -1,7 +1,7 @@
 'use client'
 
 import Link from 'next/link'
-import { Smartphone, ShoppingCart, CreditCard, HandCoins, Repeat } from 'lucide-react'
+import { Smartphone, ShoppingCart, CreditCard, HandCoins, Repeat, CalendarClock, Undo2 } from 'lucide-react'
 import { useShopAccess } from '@/components/shop/shop-access-context'
 import type { ShopPermissionCode } from '@/lib/access-control'
 
@@ -11,14 +11,14 @@ const operations = [
     icon: Smartphone,
     title: "Yangi qurilma qo'shish",
     description: "Yangi kelgan qurilmani omborga kiriting",
-    permission: 'INVENTORY_MANAGE',
+    permission: 'DEVICE_CREATE',
   },
   {
     href: '/shop/sotuv/new',
     icon: ShoppingCart,
     title: 'Naqd sotuv',
     description: "Mavjud qurilmani naqd pul evaziga soting",
-    permission: 'CASH_SALE_CREATE',
+    permission: 'SALE_CREATE',
   },
   {
     href: '/shop/nasiyalar/new',
@@ -28,18 +28,46 @@ const operations = [
     permission: 'NASIYA_CREATE',
   },
   {
-    href: '/shop/nasiyalar',
+    href: '/shop/tolovlar',
     icon: HandCoins,
     title: "To'lov qabul qilish",
     description: "Mijoz nasiyasini tanlab, oylik to'lovni kiriting",
-    permission: 'PAYMENT_RECEIVE',
+    permission: 'NASIYA_PAYMENT_RECEIVE',
+  },
+  {
+    href: '/shop/tolovlar',
+    icon: HandCoins,
+    title: "Qarz sotuv to'lovi",
+    description: "Qarz sotuv bo'yicha kelgan to'lovni kiriting",
+    permission: 'SALE_PAYMENT_RECEIVE',
+  },
+  {
+    href: '/shop/tolovlar',
+    icon: CalendarClock,
+    title: 'Nasiya muddatini uzaytirish',
+    description: "To'lov jadvalidagi bitta muddatni keyinga suring",
+    permission: 'NASIYA_DEFER',
+  },
+  {
+    href: '/shop/qaytarish',
+    icon: Undo2,
+    title: 'Sotuvni qaytarish',
+    description: 'Sotilgan qurilmani tanlab, qaytarish va refundni yozing',
+    permission: 'SALE_RETURN_REFUND',
+  },
+  {
+    href: '/shop/qaytarish',
+    icon: Undo2,
+    title: 'Nasiyani bekor qilish',
+    description: 'Nasiya qurilmasini qaytarib, shartnomani bekor qiling',
+    permission: 'NASIYA_CANCEL',
   },
   {
     href: '/shop/olib-sotdim/new',
     icon: Repeat,
     title: 'Olib-sotdim',
     description: "Omborda yo'q qurilmani boshqa do'kondan olib, mijozga sotish",
-    permission: 'OLIB_MANAGE',
+    permission: 'OLIB_CREATE',
   },
 ] satisfies Array<{
   href: string
@@ -63,7 +91,7 @@ export default function YangiOperatsiyaPage() {
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {visibleOperations.map(({ href, icon: Icon, title, description }) => (
-            <Link key={href} href={href} className="block group">
+            <Link key={`${href}:${title}`} href={href} className="block group">
               <div className="p-8 border border-zinc-200 rounded cursor-pointer hover:bg-zinc-900 hover:text-white transition-colors text-center group">
                 <div className="flex justify-center mb-4">
                   <Icon

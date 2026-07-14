@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server'
 import writeXlsxFile, { type Cell, type SheetData } from 'write-excel-file/node'
-import { requireShopPermission, requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-auth'
-import type { ShopFeatureCode } from '@/lib/access-control'
+import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
+import type { ShopPermissionCode } from '@/lib/access-control'
 import { csvRows } from '@/lib/csv'
 import { formatMoneyByCurrency, formatUserFacingMoney } from '@/lib/currency'
 import { displayImei } from '@/lib/device-display'
@@ -567,6 +567,89 @@ async function exportData(entity: string, shopId: string, role: string): Promise
     }
   }
 
+  if (entity === 'olib') {
+    const where = { shopId, deletedAt: null }
+    const total = await assertExportSize(entity, prisma.supplierPayable.count({ where }))
+    const payables = await fetchExportRows(total, (skip, take) =>
+      prisma.supplierPayable.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take,
+        select: {
+          supplierName: true,
+          supplierPhone: true,
+          supplierLocation: true,
+          supplierNote: true,
+          contractCurrency: true,
+          contractExchangeRateAtCreation: true,
+          contractAmount: true,
+          amount: true,
+          status: true,
+          dueDate: true,
+          paidAt: true,
+          paymentMethod: true,
+          note: true,
+          createdAt: true,
+          device: { select: { model: true, imei: true } },
+          sale: {
+            select: {
+              contractCurrency: true,
+              contractSalePrice: true,
+              customer: { select: { name: true, phone: true } },
+            },
+          },
+        },
+      }),
+    )
+    return {
+      headers: [
+        'supplierName',
+        'supplierPhone',
+        'supplierLocation',
+        'supplierNote',
+        'device',
+        'imei',
+        'customer',
+        'customerPhone',
+        'payableCurrency',
+        'payableExchangeRateAtCreation',
+        'payableAmount',
+        'payableAmountUzsSnapshot',
+        'saleCurrency',
+        'salePrice',
+        'status',
+        'dueDate',
+        'paidAt',
+        'paymentMethod',
+        'note',
+        'createdAt',
+      ],
+      rows: payables.map((item) => [
+        item.supplierName,
+        item.supplierPhone,
+        item.supplierLocation,
+        item.supplierNote,
+        item.device.model,
+        displayImei(item.device.imei),
+        item.sale.customer.name,
+        item.sale.customer.phone,
+        item.contractCurrency,
+        item.contractExchangeRateAtCreation?.toString() ?? '',
+        item.contractAmount.toString(),
+        item.amount.toString(),
+        item.sale.contractCurrency,
+        item.sale.contractSalePrice.toString(),
+        item.status,
+        item.dueDate,
+        item.paidAt,
+        paymentMethodLabel(item.paymentMethod),
+        item.note,
+        item.createdAt,
+      ]),
+    }
+  }
+
   if (entity === 'returns') {
     const where = { shopId }
     const total = await assertExportSize(entity, prisma.deviceReturn.count({ where }))
@@ -709,24 +792,21 @@ async function exportData(entity: string, shopId: string, role: string): Promise
 export async function GET(req: NextRequest, ctx: RouteContext) {
   try {
     const { entity } = await ctx.params
-    const entityFeature: Partial<Record<string, ShopFeatureCode>> = {
-      devices: 'INVENTORY',
-      customers: 'CUSTOMER_CRM',
-      sales: 'CASH_SALES',
-      nasiya: 'NASIYA',
-      returns: 'INVENTORY',
-      report: 'REPORTS',
+    const entityPermission: Record<string, ShopPermissionCode> = {
+      devices: 'EXPORT_DEVICES',
+      customers: 'EXPORT_CUSTOMERS',
+      sales: 'EXPORT_SALES',
+      nasiya: 'EXPORT_NASIYA',
+      olib: 'EXPORT_OLIB',
+      returns: 'EXPORT_RETURNS',
+      logs: 'EXPORT_LOGS',
+      report: 'EXPORT_REPORTS',
     }
-    const feature = entityFeature[entity]
-    const guarded = feature
-      ? await requireShopPermissionAndFeature('EXPORT_DATA', feature)
-      : await requireShopPermission('EXPORT_DATA')
+    const permission = entityPermission[entity]
+    if (!permission) return new Response('Unknown export entity', { status: 404 })
+    const guarded = await requireShopPermission(permission)
     if (!guarded.ok) return guarded.response
     const { session } = guarded
-    if (entity === 'report') {
-      const reportGuard = await requireShopPermissionAndFeature('REPORT_VIEW', 'REPORTS')
-      if (!reportGuard.ok) return reportGuard.response
-    }
 
     const format = normalizeFormat(req.nextUrl.searchParams.get('format'))
     if (!format) return new Response('Unsupported export format', { status: 400 })

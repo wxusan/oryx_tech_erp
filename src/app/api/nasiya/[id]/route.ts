@@ -13,8 +13,8 @@
 import { NextRequest } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
-import { requireShopPermission } from '@/lib/api-auth'
-import { ok, badRequest, notFound, serverError } from '@/lib/api-helpers'
+import { requireShopAnyPermission } from '@/lib/api-auth'
+import { ok, badRequest, forbidden, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { phoneSchema } from '@/lib/validations'
@@ -23,6 +23,7 @@ import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { computeCustomerTrustRating, isValidTrustTier, type CustomerNasiyaInput } from '@/lib/nasiya-customer-trust'
 import { logger } from '@/lib/logger'
+import { principalHasPermission } from '@/lib/server/shop-access'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -54,11 +55,51 @@ const updateNasiyaSchema = z.object({
 
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('NASIYA_VIEW')
+    const guarded = await requireShopAnyPermission([
+      'NASIYA_VIEW',
+      'NASIYA_CREATE',
+      'NASIYA_EDIT',
+      'NASIYA_PAYMENT_RECEIVE',
+      'NASIYA_DEFER',
+      'NASIYA_REMINDER_MANAGE',
+      'NASIYA_CANCEL',
+      'NASIYA_ARCHIVE',
+      'NASIYA_WRITE_OFF',
+      'NASIYA_REOPEN',
+    ])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
-    const includeOwnerResolutionData =
-      session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
+    const includeResolutionData = session.user.role === 'SUPER_ADMIN' ||
+      guarded.principal?.memberKind === 'SHOP_OWNER' || Boolean(
+        guarded.principal && ['NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'].some((permission) => (
+          principalHasPermission(guarded.principal!, permission as 'NASIYA_ARCHIVE' | 'NASIYA_WRITE_OFF' | 'NASIYA_REOPEN')
+        )),
+      )
+    const includeProfileData = session.user.role === 'SUPER_ADMIN' ||
+      guarded.principal?.memberKind === 'SHOP_OWNER' || Boolean(
+        guarded.principal && [
+          'NASIYA_VIEW',
+          'NASIYA_EDIT',
+          'NASIYA_REMINDER_MANAGE',
+          'NASIYA_ARCHIVE',
+          'NASIYA_WRITE_OFF',
+          'NASIYA_REOPEN',
+        ].some((permission) => principalHasPermission(
+          guarded.principal!,
+          permission as 'NASIYA_VIEW' | 'NASIYA_EDIT' | 'NASIYA_REMINDER_MANAGE' |
+            'NASIYA_ARCHIVE' | 'NASIYA_WRITE_OFF' | 'NASIYA_REOPEN',
+        )),
+      )
+    const includePaymentHistory = includeProfileData || session.user.role === 'SUPER_ADMIN' || Boolean(
+      guarded.principal && principalHasPermission(guarded.principal, 'NASIYA_PAYMENT_RECEIVE'),
+    )
+    const includeCustomerTrust = session.user.role === 'SUPER_ADMIN' ||
+      guarded.principal?.memberKind === 'SHOP_OWNER' || Boolean(
+        guarded.principal && principalHasPermission(guarded.principal, 'NASIYA_VIEW'),
+      )
+    const canViewPassportPhoto = session.user.role === 'SUPER_ADMIN' || Boolean(
+      guarded.principal && principalHasPermission(guarded.principal, 'CUSTOMER_PASSPORT_PHOTO_VIEW'),
+    )
 
     const { id: nasiyaId } = await ctx.params
 
@@ -92,26 +133,25 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         status: true,
         resolutionState: true,
         resolutionUpdatedAt: true,
-        reminderEnabled: true,
-        note: true,
-        isImported: true,
-        importSource: true,
-        importedAt: true,
-        originalSaleDate: true,
-        originalTotalAmount: true,
-        alreadyPaidBeforeImport: true,
-        remainingAtImport: true,
-        importNote: true,
+        ...(includeProfileData ? {
+          reminderEnabled: true,
+          note: true,
+          isImported: true,
+          importSource: true,
+          importedAt: true,
+          originalSaleDate: true,
+          originalTotalAmount: true,
+          alreadyPaidBeforeImport: true,
+          remainingAtImport: true,
+          importNote: true,
+        } : {}),
         customer: {
           select: {
             id: true,
             name: true,
             phone: true,
-            // Included so the nasiya profile page can render the passport photo.
-            // Access is already shop-scoped (this nasiya is fetched only for its
-            // owning shop) and the signed URL is separately per-shop authorized.
-            passportPhotoUrl: true,
-            trustOverride: true,
+            ...(canViewPassportPhoto ? { passportPhotoUrl: true } : {}),
+            ...(includeCustomerTrust ? { trustOverride: true } : {}),
           },
         },
         device: {
@@ -135,7 +175,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             contractPaidAmount: true,
           },
         },
-        payments: {
+        ...(includePaymentHistory ? { payments: {
           where: { deletedAt: null },
           orderBy: { paidAt: 'desc' },
           select: {
@@ -151,7 +191,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             paymentExchangeRate: true,
             appliedAmountInContractCurrency: true,
           },
-        },
+        } } : {}),
       },
     })
 
@@ -160,7 +200,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     // Resolution events contain write-off/archive amounts and immutable
     // financial/audit context. Staff may operate active Nasiyas but must not
     // receive this owner-only ledger payload even through a direct URL.
-    const resolutionEvents = includeOwnerResolutionData
+    const resolutionEvents = includeResolutionData
       ? await prisma.nasiyaResolutionEvent.findMany({
           where: { shopId: nasiya.shopId, nasiyaId: nasiya.id },
           orderBy: { createdAt: 'desc' },
@@ -206,43 +246,46 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     // hardcode UZS — see docs/nasiya-payment-scoring.md. The score itself
     // must read the deal's own contract-currency amounts (never the legacy
     // UZS snapshot) — see docs/currency-accounting-model.md.
-    const currency = await getShopCurrencyContext(nasiya.shopId)
-    const paymentScore = computeNasiyaPaymentScore(
-      {
-        schedules: nasiya.schedules.map((s) => ({
-          status: s.status,
-          dueDate: s.dueDate,
-          delayedUntil: s.delayedUntil,
-          expectedAmount: Number(s.contractExpectedAmount),
-          paidAmount: Number(s.contractPaidAmount),
-          paidAt: s.paidAt,
-        })),
-      },
-      new Date(),
-      currency,
-      nasiya.contractCurrency,
-    )
+    const paymentScore = includeProfileData
+      ? computeNasiyaPaymentScore(
+          {
+            schedules: nasiya.schedules.map((s) => ({
+              status: s.status,
+              dueDate: s.dueDate,
+              delayedUntil: s.delayedUntil,
+              expectedAmount: Number(s.contractExpectedAmount),
+              paidAmount: Number(s.contractPaidAmount),
+              paidAt: s.paidAt,
+            })),
+          },
+          new Date(),
+          await getShopCurrencyContext(nasiya.shopId),
+          nasiya.contractCurrency,
+        )
+      : null
 
     // Item 12 — customer trust rating, aggregated across ALL of this
     // customer's nasiyas in this shop (not just this one deal).
-    const customerNasiyas = await prisma.nasiya.findMany({
-      where: { customerId: nasiya.customer.id, shopId: nasiya.shopId, deletedAt: null },
-      select: {
-        status: true,
-        resolutionState: true,
-        contractCurrency: true,
-        schedules: {
+    const customerNasiyas = includeCustomerTrust
+      ? await prisma.nasiya.findMany({
+          where: { customerId: nasiya.customer.id, shopId: nasiya.shopId, deletedAt: null },
           select: {
             status: true,
-            dueDate: true,
-            delayedUntil: true,
-            contractExpectedAmount: true,
-            contractPaidAmount: true,
-            paidAt: true,
+            resolutionState: true,
+            contractCurrency: true,
+            schedules: {
+              select: {
+                status: true,
+                dueDate: true,
+                delayedUntil: true,
+                contractExpectedAmount: true,
+                contractPaidAmount: true,
+                paidAt: true,
+              },
+            },
           },
-        },
-      },
-    })
+        })
+      : []
     const customerTrustInputs: CustomerNasiyaInput[] = customerNasiyas.map((n) => ({
       status: n.status,
       resolutionState: n.resolutionState,
@@ -256,20 +299,29 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         paidAt: s.paidAt,
       })),
     }))
-    const trustOverride = isValidTrustTier(nasiya.customer.trustOverride) ? nasiya.customer.trustOverride : null
-    const customerTrust = computeCustomerTrustRating(customerTrustInputs, new Date(), trustOverride)
-    const { passportPhotoUrl, ...customer } = nasiya.customer
+    const trustOverrideValue = 'trustOverride' in nasiya.customer ? nasiya.customer.trustOverride : null
+    const trustOverride = isValidTrustTier(trustOverrideValue) ? trustOverrideValue : null
+    const customerTrust = includeCustomerTrust
+      ? computeCustomerTrustRating(customerTrustInputs, new Date(), trustOverride)
+      : null
+    const passportPhotoUrl = 'passportPhotoUrl' in nasiya.customer ? nasiya.customer.passportPhotoUrl : null
+    const customer = {
+      id: nasiya.customer.id,
+      name: nasiya.customer.name,
+      phone: nasiya.customer.phone,
+      ...(canViewPassportPhoto ? { hasPassportPhoto: Boolean(passportPhotoUrl) } : {}),
+    }
 
     return ok(
       {
         ...nasiya,
-        customer: { ...customer, hasPassportPhoto: Boolean(passportPhotoUrl) },
+        customer,
         displayStatus: derived.displayStatus,
         isOverdue: derived.isOverdue,
         overdueAmount: derived.overdueAmount,
-        paymentScore,
-        customerTrust,
-        ...(includeOwnerResolutionData
+        ...(paymentScore ? { paymentScore } : {}),
+        ...(customerTrust ? { customerTrust } : {}),
+        ...(includeResolutionData
           ? {
               resolutionEvents: resolutionEvents.map((event) => ({
                 ...event,
@@ -290,7 +342,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('NASIYA_MANAGE')
+    const guarded = await requireShopAnyPermission(['NASIYA_EDIT', 'NASIYA_REMINDER_MANAGE'])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -306,6 +358,15 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     if (!parsed.success) {
       const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
       return badRequest(firstError)
+    }
+    const hasOrdinaryEdit = parsed.data.customerName !== undefined || parsed.data.customerPhone !== undefined ||
+      parsed.data.note !== undefined || parsed.data.importNote !== undefined || parsed.data.reason !== undefined
+    if (
+      session.user.role !== 'SUPER_ADMIN' &&
+      ((hasOrdinaryEdit && (!guarded.principal || !principalHasPermission(guarded.principal, 'NASIYA_EDIT'))) ||
+        (parsed.data.reminderEnabled !== undefined && (!guarded.principal || !principalHasPermission(guarded.principal, 'NASIYA_REMINDER_MANAGE'))))
+    ) {
+      return forbidden("So'rovdagi barcha nasiya o'zgarishlari uchun alohida ruxsat kerak")
     }
     if (
       parsed.data.customerName === undefined &&

@@ -49,12 +49,13 @@ function previewSchedule(remainingDebt: number, monthlyPayment: number, nextPaym
 
 export default function ImportNasiyaPage() {
   const { can } = useShopAccess()
-  if (!can('IMPORT_DATA')) return <ShopAccessDenied />
+  if (!can('IMPORT_OLD_NASIYA')) return <ShopAccessDenied />
   return <AuthorizedImportNasiyaPage />
 }
 
 function AuthorizedImportNasiyaPage() {
   const router = useRouter()
+  const { can } = useShopAccess()
   const { currency } = useShopCurrency()
   const [form, setForm] = useState({
     customerName: '',
@@ -155,7 +156,7 @@ function AuthorizedImportNasiyaPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Import qilishda xatolik')
-      await navigateAfterMutation(router, `/shop/nasiyalar/${json.data.nasiyaId}`, {
+      await navigateAfterMutation(router, can('NASIYA_VIEW') ? `/shop/nasiyalar/${json.data.nasiyaId}` : '/shop/import', {
         kind: 'nasiya.imported',
         nasiyaId: json.data.nasiyaId,
         deviceId: json.data.deviceId,
@@ -169,9 +170,9 @@ function AuthorizedImportNasiyaPage() {
 
   return (
     <div className="max-w-3xl space-y-5 p-6">
-      <Link href="/shop/nasiyalar" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
+      <Link href="/shop/import" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
         <ArrowLeft size={14} />
-        Nasiyalarga qaytish
+        Importga qaytish
       </Link>
 
       <div>

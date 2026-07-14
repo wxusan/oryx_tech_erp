@@ -172,6 +172,31 @@ async function shopStatsRequest() {
   return GET(new NextRequest('http://localhost/api/stats/shop'))
 }
 
+async function createStaffRequest(body: Record<string, unknown>) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/shop/staff/route')
+  return POST(new NextRequest('http://localhost/api/shop/staff', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }))
+}
+
+async function staffListRequest() {
+  const { GET } = await import('@/app/api/shop/staff/route')
+  return GET()
+}
+
+async function updateStaffRequest(staffId: string, body: Record<string, unknown>) {
+  const { NextRequest } = await import('next/server')
+  const { PATCH } = await import('@/app/api/shop/staff/[id]/route')
+  return PATCH(new NextRequest(`http://localhost/api/shop/staff/${staffId}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }), { params: Promise.resolve({ id: staffId }) })
+}
+
 async function useSuperAdmin(actor: Awaited<ReturnType<typeof seedActor>>) {
   const authSession = await prisma.authSession.create({
     data: {
@@ -280,6 +305,14 @@ async function nasiyaPaymentRequest(input: {
     }),
   })
   return POST(request, { params: Promise.resolve({ id: input.nasiyaId }) })
+}
+
+async function nasiyaDetailRequest(nasiyaId: string) {
+  const { NextRequest } = await import('next/server')
+  const { GET } = await import('@/app/api/nasiya/[id]/route')
+  return GET(new NextRequest(`http://localhost/api/nasiya/${nasiyaId}`), {
+    params: Promise.resolve({ id: nasiyaId }),
+  })
 }
 
 async function nasiyaDeferRequest(input: {
@@ -455,6 +488,128 @@ afterAll(async () => {
 })
 
 describe('real-PostgreSQL route evidence', () => {
+  it('creates default-deny staff through the real endpoint with Telegram off', async () => {
+    const actor = await seedActor('staff_defaults')
+    useShopAdmin(actor)
+
+    const response = await createStaffRequest({
+      name: 'Default deny staff',
+      phone: '+998901010101',
+      login: 'staff_default_deny',
+      password: 'safe-password',
+      isActive: false,
+    })
+
+    expect(response.status).toBe(201)
+    const member = await prisma.shopAdmin.findUniqueOrThrow({
+      where: { login: 'staff_default_deny' },
+      include: { permissions: true },
+    })
+    expect(member).toMatchObject({
+      shopId: actor.shop.id,
+      isActive: false,
+      legacyFullAccess: false,
+      telegramNotificationsEnabled: false,
+      telegramId: null,
+      telegramVerifiedAt: null,
+    })
+    expect(member.permissions).toEqual([])
+    expect(await prisma.log.count({
+      where: { shopId: actor.shop.id, action: 'STAFF_CREATE', targetId: member.id },
+    })).toBe(1)
+  })
+
+  it('lets STAFF_CREATE create only a default-deny member and blocks delegated escalation', async () => {
+    const actor = await seedActor('staff_delegated_create')
+    const manager = await seedStaff(actor, 'delegated_create', ['STAFF_CREATE'])
+    useShopAdmin(manager)
+
+    const rosterResponse = await staffListRequest()
+    expect(rosterResponse.status).toBe(200)
+    expect((await rosterResponse.json()).data).toEqual([])
+
+    const escalation = await createStaffRequest({
+      name: 'Escalation attempt',
+      phone: '+998901010102',
+      login: 'staff_escalation_attempt',
+      password: 'safe-password',
+      permissionCodes: ['SALE_RETURN_REFUND'],
+      telegramNotificationsEnabled: true,
+    })
+    expect(escalation.status).toBe(403)
+    expect(await prisma.shopAdmin.count({ where: { login: 'staff_escalation_attempt' } })).toBe(0)
+
+    const allowed = await createStaffRequest({
+      name: 'Delegated new staff',
+      phone: '+998901010103',
+      login: 'staff_delegated_default',
+      password: 'safe-password',
+    })
+    expect(allowed.status).toBe(201)
+    const member = await prisma.shopAdmin.findUniqueOrThrow({
+      where: { login: 'staff_delegated_default' },
+      include: { permissions: true },
+    })
+    expect(member.telegramNotificationsEnabled).toBe(false)
+    expect(member.permissions).toEqual([])
+  })
+
+  it('projects only fields needed by an exact staff-management capability', async () => {
+    const actor = await seedActor('staff_projection')
+    const target = await seedStaff(actor, 'projection_target', ['SALE_RETURN_REFUND'])
+    const editor = await seedStaff(actor, 'profile_editor', ['STAFF_EDIT_PROFILE'])
+    useShopAdmin(editor)
+
+    const response = await staffListRequest()
+    expect(response.status).toBe(200)
+    const payload = await response.json() as { data: Array<Record<string, unknown>> }
+    const projected = payload.data.find((member) => member.id === target.admin.id)
+    expect(projected).toMatchObject({
+      id: target.admin.id,
+      name: target.admin.name,
+      login: target.admin.login,
+      phone: target.admin.phone,
+      isActive: null,
+      telegramId: null,
+      telegramVerifiedAt: null,
+      telegramNotificationsEnabled: null,
+      logsViewEnabled: null,
+      permissionVersion: null,
+      permissionCodes: null,
+    })
+  })
+
+  it('atomically replaces exact grants and revokes the target session', async () => {
+    const actor = await seedActor('staff_permission_update')
+    const target = await seedStaff(actor, 'permission_target', ['INVENTORY_VIEW'])
+    useShopAdmin(actor)
+
+    const response = await updateStaffRequest(target.admin.id, {
+      permissionCodes: ['SALE_RETURN_REFUND'],
+      logsViewEnabled: false,
+      telegramNotificationsEnabled: true,
+      note: 'Exact permission update integration proof',
+    })
+    expect(response.status).toBe(200)
+
+    const [member, permissions, session] = await Promise.all([
+      prisma.shopAdmin.findUniqueOrThrow({ where: { id: target.admin.id } }),
+      prisma.shopMemberPermission.findMany({
+        where: { shopAdminId: target.admin.id },
+        select: { permissionCode: true },
+      }),
+      prisma.authSession.findUniqueOrThrow({ where: { id: target.authSession.id } }),
+    ])
+    expect(permissions).toEqual([{ permissionCode: 'SALE_RETURN_REFUND' }])
+    expect(member.permissionVersion).toBe(target.admin.permissionVersion + 1)
+    expect(member.sessionVersion).toBe(target.admin.sessionVersion + 1)
+    expect(member.telegramNotificationsEnabled).toBe(true)
+    expect(session.revokedAt).not.toBeNull()
+
+    useShopAdmin(target)
+    expect((await deviceListRequest()).status).toBe(401)
+  })
+
   it('enforces live staff permissions on real routes while preserving allowed inventory access', async () => {
     const actor = await seedActor('staff_matrix')
     const staff = await seedStaff(actor, 'staff_matrix', ['INVENTORY_VIEW'])
@@ -466,6 +621,38 @@ describe('real-PostgreSQL route evidence', () => {
     await prisma.shopMemberPermission.deleteMany({ where: { shopAdminId: staff.admin.id } })
     await prisma.shopAdmin.update({ where: { id: staff.admin.id }, data: { permissionVersion: { increment: 1 } } })
     expect((await deviceListRequest()).status).toBe(403)
+  })
+
+  it('returns a payment-only Nasiya projection without trust, passport, reminder, or import context', async () => {
+    const actor = await seedActor('payment_projection')
+    const contract = await seedNasiya(actor, 'payment_projection', 5_000)
+    const collector = await seedStaff(actor, 'payment_projection', ['NASIYA_PAYMENT_RECEIVE'])
+    useShopAdmin(collector)
+
+    const response = await nasiyaDetailRequest(contract.nasiya.id)
+    expect(response.status).toBe(200)
+    const payload = await response.json() as { data: Record<string, unknown> & {
+      customer: Record<string, unknown>
+      schedules: unknown[]
+      payments: unknown[]
+    } }
+    expect(payload.data.customer).toMatchObject({
+      id: contract.customer.id,
+      name: contract.customer.name,
+      phone: contract.customer.phone,
+    })
+    expect(payload.data.schedules).toHaveLength(1)
+    expect(payload.data.payments).toEqual([])
+    for (const field of [
+      'customerTrust', 'paymentScore', 'reminderEnabled', 'note', 'isImported',
+      'importSource', 'importedAt', 'originalSaleDate', 'originalTotalAmount',
+      'alreadyPaidBeforeImport', 'remainingAtImport', 'importNote',
+    ]) {
+      expect(payload.data).not.toHaveProperty(field)
+    }
+    expect(payload.data.customer).not.toHaveProperty('hasPassportPhoto')
+    expect(payload.data.customer).not.toHaveProperty('passportPhotoUrl')
+    expect(payload.data.customer).not.toHaveProperty('trustOverride')
   })
 
   it('preserves the original Sale and receipts while posting an allocated return event', async () => {
@@ -1086,7 +1273,7 @@ describe('real-PostgreSQL route evidence', () => {
     expect(paymentCount).toBe(0)
   })
 
-  it('denies Nasiya archive/write-off to every staff member, even a legacy direct grant', async () => {
+  it('isolates Nasiya archive from view and write-off grants', async () => {
     const actor = await seedActor('writeoff_rbac')
     const contract = await seedNasiya(actor, 'writeoff_rbac', 3_000)
     const deniedStaff = await seedStaff(actor, 'writeoff_denied', ['NASIYA_VIEW'])
@@ -1098,16 +1285,28 @@ describe('real-PostgreSQL route evidence', () => {
       key: 'writeoff-rbac-denied',
     })).status).toBe(403)
 
-    const grantedStaff = await seedStaff(actor, 'writeoff_granted', ['NASIYA_VIEW', 'WRITEOFF_MANAGE'])
-    useShopAdmin(grantedStaff)
+    const writeOffStaff = await seedStaff(actor, 'writeoff_granted', ['NASIYA_VIEW', 'NASIYA_WRITE_OFF'])
+    useShopAdmin(writeOffStaff)
     expect((await nasiyaResolutionRequest({
       nasiyaId: contract.nasiya.id,
       action: 'ARCHIVE',
-      reason: 'Legacy direct grant must not archive',
+      reason: 'Write-off grant must not archive',
       key: 'writeoff-rbac-granted',
     })).status).toBe(403)
-    expect(await prisma.nasiyaResolutionEvent.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(0)
-    expect((await prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } })).resolutionState).toBe('ACTIVE')
+
+    const archiveStaff = await seedStaff(actor, 'archive_granted', ['NASIYA_VIEW', 'NASIYA_ARCHIVE'])
+    useShopAdmin(archiveStaff)
+    expect((await nasiyaResolutionRequest({
+      nasiyaId: contract.nasiya.id,
+      action: 'ARCHIVE',
+      reason: 'Exact archive grant may archive',
+      key: 'archive-rbac-granted',
+    })).status).toBe(200)
+
+    const events = await prisma.nasiyaResolutionEvent.findMany({ where: { nasiyaId: contract.nasiya.id } })
+    expect(events).toHaveLength(1)
+    expect(events[0].eventType).toBe('ARCHIVE')
+    expect((await prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } })).resolutionState).toBe('ARCHIVED')
   })
 
   it('does not let a shop resolve another shop Nasiya', async () => {

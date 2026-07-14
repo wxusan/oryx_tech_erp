@@ -352,6 +352,9 @@ export const FORM_SURFACE_CONTRACT = [
     id: 'device.return', source: 'src/app/(shop)/shop/qurilmalar/[id]/page.tsx', endpoint: 'POST /api/devices/[id]/return', schemaSource: 'src/app/api/devices/[id]/return/route.ts#returnDeviceSchema', fields: [always('device.return', 'note'), optional('device.return', 'refundAmount', 'MONEY'), conditional('device.return', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER')],
   },
   {
+    id: 'device.return.queue', source: 'src/app/(shop)/shop/qaytarish/return-work-queue.tsx', endpoint: 'POST /api/devices/[id]/return', schemaSource: 'src/app/api/devices/[id]/return/route.ts#returnDeviceSchema', fields: [always('device.return.queue', 'note'), optional('device.return.queue', 'refundAmount', 'MONEY'), conditional('device.return.queue', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER')],
+  },
+  {
     id: 'device.restock', source: 'src/app/(shop)/shop/qurilmalar/[id]/page.tsx', endpoint: 'POST /api/devices/[id]/restock', schemaSource: 'src/app/api/devices/[id]/restock/route.ts#restockDeviceSchema', fields: [always('device.restock', 'note')],
   },
   {
@@ -381,6 +384,13 @@ export const FORM_SURFACE_CONTRACT = [
   {
     id: 'nasiya.import', source: 'src/app/(shop)/shop/nasiyalar/import/page.tsx', endpoint: 'POST /api/nasiya/import', schemaSource: 'src/lib/validations.ts#importNasiyaSchema', fields: [
       always('nasiya.import', 'customerName', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'nasiya-list'] }), always('nasiya.import', 'customerPhone', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'nasiya-list'] }), always('nasiya.import', 'deviceModel', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list', 'nasiya-list'] }), optional('nasiya.import', 'imei', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list', 'nasiya-list'] }), optional('nasiya.import', 'secondaryImei', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list', 'nasiya-list'] }), optional('nasiya.import', 'storageAmount', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list'] }), optional('nasiya.import', 'storageUnit', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list'] }), always('nasiya.import', 'conditionCode', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list'] }), optional('nasiya.import', 'color', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list'] }), optional('nasiya.import', 'batteryHealth'), always('nasiya.import', 'originalTotalAmount', 'MONEY'), always('nasiya.import', 'alreadyPaidBeforeImport', 'MONEY'), always('nasiya.import', 'remainingDebt', 'MONEY'), always('nasiya.import', 'monthlyPayment', 'MONEY'), always('nasiya.import', 'nextPaymentDate', 'DATE_FILTER'), optional('nasiya.import', 'originalSaleDate', 'DATE_FILTER'), optional('nasiya.import', 'totalMonths'), optional('nasiya.import', 'importNote', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['nasiya-list'] }),
+    ],
+  },
+  {
+    id: 'customer.import', source: 'src/app/(shop)/shop/import/import-center.tsx', endpoint: 'POST /api/import/customers', schemaSource: 'src/app/api/import/customers/route.ts#customerImportSchema', fields: [
+      always('customer.import', 'customers.name', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list'] }),
+      always('customer.import', 'customers.phone', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list'] }),
+      optional('customer.import', 'customers.note'),
     ],
   },
   {
@@ -455,7 +465,7 @@ export const SEARCH_SURFACE_CONTRACT = [
     id: 'shop-report-range', source: 'src/app/api/reports/shop/route.ts', endpoint: 'GET /api/reports/shop', transport: 'QUERY', parameters: ['month', 'preset', 'startMonth', 'endMonth', 'admin'], searchableFields: ['explicit calendar-month range', 'admin attribution'], scope: 'SHOP_SESSION', privacy: 'Authoritative available-month, preset, range, and trend contract; REPORTS feature plus REPORT_VIEW permission and resolved shop are enforced.',
   },
   {
-    id: 'legacy-shop-stats', source: 'src/app/api/stats/shop/route.ts', endpoint: 'GET /api/stats/shop', transport: 'QUERY', parameters: ['month', 'admin'], searchableFields: ['explicit single calendar month', 'admin attribution'], scope: 'SHOP_SESSION', privacy: 'Legacy dashboard-summary companion only; REPORT_VIEW and resolved-shop scope are enforced, while range discovery and trends remain authoritative in shop-report-range.',
+    id: 'legacy-shop-stats', source: 'src/app/api/stats/shop/route.ts', endpoint: 'GET /api/stats/shop', transport: 'QUERY', parameters: ['month', 'admin'], searchableFields: ['explicit single calendar month', 'admin attribution'], scope: 'SHOP_SESSION', privacy: 'Dashboard companion only; an exact dashboard/report capability and resolved-shop scope are enforced. Operational-only access uses a count-only projection, while range discovery and trends remain authoritative in shop-report-range.',
   },
 ] as const satisfies readonly SearchSurfaceContract[]
 

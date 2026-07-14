@@ -40,7 +40,7 @@ function isAuthorizedForKey(role: string, sessionShopId: string | null | undefin
 }
 
 export async function POST(request: Request) {
-  const guarded = await requireShopAnyPermission(['NASIYA_CREATE', 'CUSTOMER_MANAGE', 'IMPORT_DATA'])
+  const guarded = await requireShopAnyPermission(['NASIYA_CREATE', 'CUSTOMER_PASSPORT_MANAGE', 'IMPORT_OLD_NASIYA'])
   if (!guarded.ok) return guarded.response
 
   try {

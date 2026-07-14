@@ -12,10 +12,11 @@
  */
 
 import { NextRequest } from 'next/server'
-import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopAnyPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, forbidden, serverError } from '@/lib/api-helpers'
 import { logger } from '@/lib/logger'
 import { getShopNasiyalarList, type NasiyaCohortFilter, type NasiyaStatusFilter } from '@/lib/server/shop-lists'
+import { principalHasPermission } from '@/lib/server/shop-access'
 
 const nasiyaStatuses = ['ACTIVE', 'COMPLETED', 'OVERDUE', 'CANCELLED'] as const
 const resolutionFilters = ['ARCHIVED', 'WRITTEN_OFF'] as const
@@ -23,7 +24,14 @@ const cohortFilters = ['ACTIVE', 'OVERDUE', 'DUE_TODAY', 'UPCOMING'] as const
 
 export async function GET(req: NextRequest) {
   try {
-    const guarded = await requireShopPermission('NASIYA_VIEW')
+    const guarded = await requireShopAnyPermission([
+      'NASIYA_VIEW',
+      'NASIYA_EDIT',
+      'NASIYA_REMINDER_MANAGE',
+      'NASIYA_ARCHIVE',
+      'NASIYA_WRITE_OFF',
+      'NASIYA_REOPEN',
+    ])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -51,10 +59,17 @@ export async function GET(req: NextRequest) {
     const resolutionState = resolutionFilters.includes(statusParam as (typeof resolutionFilters)[number])
       ? statusParam as (typeof resolutionFilters)[number]
       : undefined
-    const includeOwnerResolutionData =
-      session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
-    if (resolutionState && !includeOwnerResolutionData) {
-      return forbidden("Arxivlangan va hisobdan chiqarilgan Nasiyalar faqat do'kon egasiga ochiq")
+    const includeResolutionData = session.user.role === 'SUPER_ADMIN' ||
+      guarded.principal?.memberKind === 'SHOP_OWNER' || Boolean(
+        guarded.principal && ['NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'].some((permission) => (
+          principalHasPermission(
+            guarded.principal!,
+            permission as 'NASIYA_ARCHIVE' | 'NASIYA_WRITE_OFF' | 'NASIYA_REOPEN',
+          )
+        )),
+      )
+    if (resolutionState && !includeResolutionData) {
+      return forbidden("Arxivlangan va hisobdan chiqarilgan nasiyalar uchun ruxsat berilmagan")
     }
     const status = resolutionState || cohort ? undefined : statusParam as NasiyaStatusFilter | undefined
     const search = searchParams.get('search')?.trim()

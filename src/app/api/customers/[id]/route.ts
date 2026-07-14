@@ -2,8 +2,8 @@ import { NextRequest } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
-import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { requireShopAnyPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { ok, badRequest, forbidden, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { invalidateShopCustomerMutation } from '@/lib/server/cache-tags'
 import { normalizePhone, normalizeAdditionalPhones } from '@/lib/phone'
 import { phoneSchema } from '@/lib/validations'
@@ -11,6 +11,7 @@ import { logger } from '@/lib/logger'
 import { computeCustomerTrustRating, isValidTrustTier, type CustomerNasiyaInput } from '@/lib/nasiya-customer-trust'
 import { isValidPassportIdentifier, passportIdentifierStorage } from '@/lib/customer-passport'
 import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
+import { principalHasPermission } from '@/lib/server/shop-access'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -30,7 +31,7 @@ const updateCustomerSchema = z.object({
 
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('CUSTOMER_VIEW')
+    const guarded = await requireShopAnyPermission(['CUSTOMER_VIEW', 'CUSTOMER_TRUST_OVERRIDE'])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -108,7 +109,11 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('CUSTOMER_MANAGE')
+    const guarded = await requireShopAnyPermission([
+      'CUSTOMER_EDIT',
+      'CUSTOMER_PASSPORT_MANAGE',
+      'CUSTOMER_TRUST_OVERRIDE',
+    ])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -119,6 +124,19 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
       return badRequest(firstError)
     }
+
+    const can = (permission: 'CUSTOMER_EDIT' | 'CUSTOMER_PASSPORT_MANAGE' | 'CUSTOMER_TRUST_OVERRIDE') => (
+      guarded.session.user.role === 'SUPER_ADMIN' ||
+      Boolean(guarded.principal && principalHasPermission(guarded.principal, permission))
+    )
+    const changesBasicProfile = parsed.data.name !== undefined || parsed.data.phone !== undefined ||
+      parsed.data.additionalPhones !== undefined || parsed.data.note !== undefined
+    const changesPassport = parsed.data.passportIdentifier !== undefined || parsed.data.passportPhotoUrl !== undefined
+    const changesTrust = parsed.data.trustOverride !== undefined
+    if (!changesBasicProfile && !changesPassport && !changesTrust) return badRequest("O'zgartirish uchun maydon yuborilmadi")
+    if (changesBasicProfile && !can('CUSTOMER_EDIT')) return forbidden("Mijoz ma'lumotlarini tahrirlash ruxsati berilmagan")
+    if (changesPassport && !can('CUSTOMER_PASSPORT_MANAGE')) return forbidden("Pasport ma'lumotlarini boshqarish ruxsati berilmagan")
+    if (changesTrust && !can('CUSTOMER_TRUST_OVERRIDE')) return forbidden("Ishonch darajasini boshqarish ruxsati berilmagan")
 
     const resolved = await resolveActiveShopId(session, parsed.data.shopId)
     if (!resolved.ok) return resolved.response

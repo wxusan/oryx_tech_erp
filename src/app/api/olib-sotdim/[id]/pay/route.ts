@@ -29,7 +29,7 @@ const PAYABLE_NOT_OPEN_MESSAGE = "Faqat kutilayotgan yoki muddati o'tgan qarzdor
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermissionAndFeature('PAYMENT_RECEIVE', 'OLIB_SOTDIM')
+    const guarded = await requireShopPermissionAndFeature('SUPPLIER_PAYMENT_MARK_PAID', 'OLIB_SOTDIM')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

@@ -2,8 +2,9 @@ import { NextRequest, after } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
-import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
-import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
+import { requireShopAnyPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { ok, badRequest, notFound, conflict, forbidden, serverError } from '@/lib/api-helpers'
+import { principalHasPermission } from '@/lib/server/shop-access'
 import { invalidateShopReturnMutation } from '@/lib/server/cache-tags'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { logger } from '@/lib/logger'
@@ -62,7 +63,7 @@ function paymentSource(
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('RETURN_MANAGE')
+    const guarded = await requireShopAnyPermission(['SALE_RETURN_REFUND', 'NASIYA_CANCEL'])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -95,6 +96,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
       })
       if (replay) {
+        const requiredPermission = replay.saleId ? 'SALE_RETURN_REFUND' : 'NASIYA_CANCEL'
+        if (
+          session.user.role !== 'SUPER_ADMIN' &&
+          (!guarded.principal || !principalHasPermission(guarded.principal, requiredPermission))
+        ) {
+          throw { status: 403, message: 'Bu turdagi qaytarish uchun ruxsat berilmagan' }
+        }
         const samePayload = (
           replay.deviceId === deviceId &&
           Number(replay.refundInputAmount ?? replay.refundAmount) === parsed.data.refundAmount &&
@@ -139,6 +147,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const nasiya = device.nasiya[0]
       if ((sale ? 1 : 0) + (nasiya ? 1 : 0) !== 1) {
         throw { status: 409, message: 'Qurilmaning faol sotuv shartnomasi yagona emas. Avval ma\'lumotni tekshiring.' }
+      }
+      const requiredPermission = sale ? 'SALE_RETURN_REFUND' : 'NASIYA_CANCEL'
+      if (
+        session.user.role !== 'SUPER_ADMIN' &&
+        (!guarded.principal || !principalHasPermission(guarded.principal, requiredPermission))
+      ) {
+        throw { status: 403, message: 'Bu turdagi qaytarish uchun ruxsat berilmagan' }
       }
 
       const contractCurrency: CurrencyCode = sale?.contractCurrency ?? nasiya!.contractCurrency
@@ -343,6 +358,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }
       if (e.status === 400) return badRequest(e.message)
+      if (e.status === 403) return forbidden(e.message)
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
     }

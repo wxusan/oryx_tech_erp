@@ -2,7 +2,7 @@ import { NextRequest } from 'next/server'
 import { z, ZodError } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
-import { badRequest, conflict, created, ok, serverError } from '@/lib/api-helpers'
+import { badRequest, conflict, created, forbidden, ok, serverError } from '@/lib/api-helpers'
 import { normalizeAdditionalPhones, normalizePhone } from '@/lib/phone'
 import { logger } from '@/lib/logger'
 import { passportIdentifierStorage } from '@/lib/customer-passport'
@@ -11,6 +11,7 @@ import { invalidateShopCustomerMutation } from '@/lib/server/cache-tags'
 import { Prisma } from '@/generated/prisma/client'
 import { getCustomerList } from '@/lib/server/customer-list'
 import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
+import { principalHasPermission } from '@/lib/server/shop-access'
 
 export async function GET(req: NextRequest) {
   try {
@@ -60,13 +61,20 @@ const createCustomerSchema = z.object({
 
 export async function POST(req: NextRequest) {
   try {
-    const guarded = await requireShopPermission('CUSTOMER_MANAGE')
+    const guarded = await requireShopPermission('CUSTOMER_CREATE')
     if (!guarded.ok) return guarded.response
 
     const body: unknown = await req.json()
     const parsed = createCustomerSchema.safeParse(body)
     if (!parsed.success) {
       return badRequest((parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot")
+    }
+    const includesPassport = parsed.data.passportIdentifier !== undefined || parsed.data.passportPhotoUrl !== undefined
+    if (
+      includesPassport && guarded.session.user.role !== 'SUPER_ADMIN' &&
+      (!guarded.principal || !principalHasPermission(guarded.principal, 'CUSTOMER_PASSPORT_MANAGE'))
+    ) {
+      return forbidden("Pasport ma'lumotlarini qo'shish ruxsati berilmagan")
     }
     const resolved = await resolveActiveShopId(guarded.session, parsed.data.shopId)
     if (!resolved.ok) return resolved.response

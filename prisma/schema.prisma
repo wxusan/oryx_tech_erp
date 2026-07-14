@@ -277,7 +277,7 @@ model ShopAdmin {
   permissionVersion            Int       @default(1)
   isActive                     Boolean   @default(true)
   legacyFullAccess             Boolean   @default(false)
-  telegramNotificationsEnabled Boolean   @default(true)
+  telegramNotificationsEnabled Boolean   @default(false)
   createdAt                    DateTime  @default(now())
   deletedAt                    DateTime?
   deletedBy                    String?

@@ -218,7 +218,7 @@ export default function HisobotClient({
           <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500">
             Pul tushumi va ochiq majburiyatlar alohida hisoblanadi
           </div>
-          {preset === 'single' && rangeReport && can('EXPORT_DATA') && (
+          {preset === 'single' && rangeReport && can('EXPORT_REPORTS') && (
             <div className="flex gap-2">
               <a href={singleExportHref('csv')} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-9')}>
                 <Download data-icon="inline-start" /> CSV
@@ -253,7 +253,7 @@ export default function HisobotClient({
       )}
 
       {preset !== 'single' && rangeReport ? (
-        <ShopRangeReportPanel report={rangeReport} currency={currency} canExport={can('EXPORT_DATA')} />
+        <ShopRangeReportPanel report={rangeReport} currency={currency} canExport={can('EXPORT_REPORTS')} />
       ) : rangeReport ? (
         <>
 

@@ -36,7 +36,7 @@ import { resolvePrivateUploadReference } from '@/lib/server/private-upload-refer
 
 export async function POST(req: NextRequest) {
   try {
-    const guarded = await requireShopPermissionAndFeature('IMPORT_DATA', 'NASIYA')
+    const guarded = await requireShopPermissionAndFeature('IMPORT_OLD_NASIYA', 'NASIYA')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

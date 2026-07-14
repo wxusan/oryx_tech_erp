@@ -13,18 +13,16 @@ describe('due-today/overdue authoritative contract', () => {
   const queries = read('src/lib/server/shop-stats-queries.ts')
   const syncRoute = read('src/app/api/sync/route.ts')
 
-  it('keeps tenant-wide payment aggregates owner-only while using live module access to select sources', () => {
+  it('uses exact receivables and action capabilities to select each contract source', () => {
     expect(summaryRoute).toContain('requireReceivableView()')
     expect(listRoute).toContain('requireReceivableView()')
     expect(auth).toContain("principalHasFeature(guarded.principal, 'CASH_SALES')")
-    expect(auth).toContain("principalHasPermission(guarded.principal, 'INVENTORY_VIEW')")
+    expect(auth).toContain("['RECEIVABLES_VIEW', 'SALE_VIEW', 'SALE_PAYMENT_RECEIVE']")
     expect(auth).toContain("principalHasFeature(guarded.principal, 'NASIYA')")
-    expect(auth).toContain("principalHasPermission(guarded.principal, 'NASIYA_VIEW')")
-    expect(auth).toContain('const isFinancialOwner =')
-    expect(auth).toContain("To'lovlar xulosasi faqat do'kon egasi uchun")
-    expect(summaryRoute).not.toContain('PAYMENT_RECEIVE')
-    expect(listRoute).not.toContain('PAYMENT_RECEIVE')
-    expect(syncRoute).toContain('if (canViewReceivables) domains.add(\'overdue\')')
+    expect(auth).toContain("['RECEIVABLES_VIEW', 'NASIYA_VIEW', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER']")
+    expect(summaryRoute).not.toContain("'PAYMENT_RECEIVE'")
+    expect(listRoute).not.toContain("'PAYMENT_RECEIVE'")
+    expect(syncRoute).toContain("], ['overdue'])")
   })
 
   it('uses disjoint Tashkent-midnight predicates and makes today overdue only tomorrow', () => {
@@ -61,13 +59,12 @@ describe('global payment banners and exact destination UX', () => {
   const shell = read('src/app/(shop)/shop-layout-client.tsx')
   const page = read('src/app/(shop)/shop/tolovlar/receivables-client.tsx')
 
-  it('renders overdue first and due-today second with source-specific operational links', () => {
+  it('renders overdue first and due-today second into the capability-safe consolidated queue', () => {
     expect(banner.indexOf('summary.overdue.dealCount > 0')).toBeLessThan(banner.indexOf('summary.dueToday.dealCount > 0'))
-    expect(banner).toContain('const saleHref = `/shop/qurilmalar?tab=qarz&focus=${cohort}`')
-    expect(banner).toContain('const nasiyaHref = `/shop/nasiyalar?tab=${cohort}`')
+    expect(banner).toContain('const href = `/shop/tolovlar?cohort=${cohort}`')
     expect(banner).toContain('summary.sources.sale')
     expect(banner).toContain('summary.sources.nasiya')
-    expect(banner).not.toContain('/shop/tolovlar?cohort=OVERDUE')
+    expect(banner).not.toContain('/shop/qurilmalar?tab=qarz')
   })
 
   it('uses the two-minute scoped React Query cache and mutation deltas without fallback polling', () => {
@@ -78,10 +75,12 @@ describe('global payment banners and exact destination UX', () => {
     expect(banner).not.toContain('router.refresh')
   })
 
-  it('is visible only to owners across their shop pages and stays outside main scroll content', () => {
+  it('is visible to exact receivable/action capabilities and stays outside main scroll content', () => {
     expect(shell).toContain('canSeeReceivables')
-    expect(shell).toContain("const canSeeReceivables = memberKind === 'SHOP_OWNER'")
-    expect(shell).not.toContain("principalCan(principal, 'PAYMENT_RECEIVE') && <DueOverdueBanner")
+    expect(shell).toContain("'RECEIVABLES_VIEW'")
+    expect(shell).toContain("'SALE_PAYMENT_RECEIVE'")
+    expect(shell).toContain("'NASIYA_DEFER'")
+    expect(shell).not.toContain("principalCan(principal, 'PAYMENT_RECEIVE')")
     expect(shell).toContain('<DueOverdueBanner initialData={initialDueSummary} />')
     const bannerIndex = shell.indexOf('<DueOverdueBanner')
     expect(bannerIndex).toBeGreaterThan(-1)

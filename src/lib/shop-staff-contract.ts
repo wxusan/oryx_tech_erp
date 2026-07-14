@@ -2,6 +2,7 @@ import { z } from 'zod'
 import {
   SHOP_PERMISSION_CATALOG,
   SHOP_PERMISSION_CODES,
+  permissionRequiredFeatures,
   type ShopFeatureCode,
   type ShopPermissionCode,
 } from '@/lib/access-control'
@@ -16,7 +17,7 @@ import { passwordSchema, phoneSchema } from '@/lib/validations'
 export const STAFF_LOGS_PERMISSION: ShopPermissionCode = 'LOG_VIEW'
 
 export const staffAssignablePermissionCodes: readonly ShopPermissionCode[] = SHOP_PERMISSION_CATALOG
-  .filter((permission) => !permission.ownerOnly && permission.code !== STAFF_LOGS_PERMISSION)
+  .filter((permission) => !permission.ownerOnly && !permission.retired)
   .map((permission) => permission.code)
 
 export type StaffAssignablePermissionCode = (typeof staffAssignablePermissionCodes)[number]
@@ -25,7 +26,9 @@ const permissionCodesSchema = z.array(z.enum(SHOP_PERMISSION_CODES))
   .max(SHOP_PERMISSION_CODES.length)
   .refine((codes) => new Set(codes).size === codes.length, 'Bir xil ruxsat takrorlangan')
   .refine(
-    (codes) => codes.every((code) => staffAssignablePermissionCodes.includes(code)),
+    (codes) => codes.every((code) => (
+      code !== STAFF_LOGS_PERMISSION && staffAssignablePermissionCodes.includes(code)
+    )),
     "Xodimga faqat operatsion ruxsatlar berilishi mumkin",
   )
 
@@ -47,8 +50,8 @@ export function legacyStaffPermissionCodes(
 ): ShopPermissionCode[] {
   return SHOP_PERMISSION_CATALOG
     .filter((permission) => (
-      !permission.ownerOnly &&
-      (!permission.featureCode || enabledFeatures.has(permission.featureCode))
+      !permission.retired && permission.legacyOperational &&
+      permissionRequiredFeatures(permission.code).every((feature) => enabledFeatures.has(feature))
     ))
     .map((permission) => permission.code)
 }
@@ -57,13 +60,14 @@ const memberFields = {
   name: z.string().trim().min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak").max(100),
   phone: phoneSchema,
   telegramId: z.string().trim().regex(/^\d{5,20}$/, "Telegram ID faqat raqamlardan iborat bo'lishi kerak").optional().or(z.literal('')),
-  telegramNotificationsEnabled: z.boolean().default(true),
-  logsViewEnabled: z.boolean().default(true),
+  telegramNotificationsEnabled: z.boolean().default(false),
+  logsViewEnabled: z.boolean().default(false),
   permissionCodes: permissionCodesSchema.default([]),
 }
 
 export const createShopStaffSchema = z.object({
   ...memberFields,
+  isActive: z.boolean().default(true),
   login: z.string().trim().min(3).max(64)
     .regex(/^[a-zA-Z0-9_]+$/, "Login faqat lotin harflari, raqamlar va _ belgisidan iborat bo'lishi kerak"),
   password: passwordSchema,
@@ -95,14 +99,14 @@ export const deleteShopStaffSchema = z.object({
 export interface ShopStaffDto {
   id: string
   name: string
-  phone: string
+  phone: string | null
   login: string
-  isActive: boolean
+  isActive: boolean | null
   telegramId: string | null
   telegramVerifiedAt: string | null
-  telegramNotificationsEnabled: boolean
-  logsViewEnabled: boolean
-  permissionVersion: number
-  permissionCodes: ShopPermissionCode[]
+  telegramNotificationsEnabled: boolean | null
+  logsViewEnabled: boolean | null
+  permissionVersion: number | null
+  permissionCodes: ShopPermissionCode[] | null
   createdAt: string
 }

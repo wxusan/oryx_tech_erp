@@ -63,6 +63,197 @@ export async function getShopStats(session: Session, shopId: string, options: Sh
   )()
 }
 
+export type ShopStatsResult = Awaited<ReturnType<typeof getShopStats>>
+
+/** Count-only dashboard path for operational staff. It never selects prices,
+ * balances, payment amounts, cost basis, profit, refunds, or write-off money. */
+export async function getShopOperationalStats(session: Session, shopId: string): Promise<ShopStatsResult> {
+  const role = session.user.role
+  return unstable_cache(
+    () => getShopOperationalStatsFresh(role, shopId),
+    ['shop-operational-stats:v1', shopId, role],
+    {
+      revalidate: 15,
+      tags: [
+        shopCacheTag.stats(shopId),
+        shopCacheTag.devices(shopId),
+        shopCacheTag.sales(shopId),
+        shopCacheTag.nasiyalar(shopId),
+        shopCacheTag.nasiyaSchedules(shopId),
+        shopCacheTag.returns(shopId),
+        shopCacheTag.logs(shopId),
+      ],
+    },
+  )()
+}
+
+async function getShopOperationalStatsFresh(role: StatsRole, shopId: string): Promise<ShopStatsResult> {
+  const now = new Date()
+  const { start: monthStart, end: monthEnd, monthKey } = tashkentMonthRangeFromKey(null, now)
+  const { start: todayStart } = tashkentDayRange(now)
+  const openScheduleStatus = ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'] as const
+  const [
+    totalDevices,
+    soldThisMonth,
+    activeNasiyalar,
+    overdueNasiyaCount,
+    overdueSaleCount,
+    returnsThisMonth,
+    recentActivity,
+    upcomingPayments,
+  ] = await Promise.all([
+    prisma.device.count({ where: { shopId, deletedAt: null, isImported: false } }),
+    prisma.sale.count({ where: { shopId, deletedAt: null, createdAt: { gte: monthStart, lt: monthEnd } } }),
+    prisma.nasiya.count({
+      where: { shopId, deletedAt: null, resolutionState: 'ACTIVE', status: { in: ['ACTIVE', 'OVERDUE'] } },
+    }),
+    prisma.nasiyaSchedule.count({
+      where: {
+        shopId,
+        status: { in: [...openScheduleStatus] },
+        OR: [
+          { delayedUntil: { lt: todayStart } },
+          { delayedUntil: null, dueDate: { lt: todayStart } },
+        ],
+        nasiya: { deletedAt: null, returnedAt: null, status: { not: 'CANCELLED' }, resolutionState: 'ACTIVE' },
+      },
+    }),
+    prisma.sale.count({
+      where: {
+        shopId,
+        deletedAt: null,
+        returnedAt: null,
+        paidFully: false,
+        dueDate: { lt: todayStart },
+      },
+    }),
+    prisma.deviceReturn.count({ where: { shopId, createdAt: { gte: monthStart, lt: monthEnd } } }),
+    prisma.log.findMany({
+      where: { shopId, ...(role === 'SHOP_ADMIN' ? { actorType: 'SHOP_ADMIN' as const } : {}) },
+      orderBy: { createdAt: 'desc' },
+      take: 5,
+      select: { id: true, action: true, createdAt: true, actorId: true },
+    }),
+    prisma.nasiyaSchedule.findMany({
+      where: {
+        shopId,
+        status: { in: [...openScheduleStatus] },
+        nasiya: { deletedAt: null, returnedAt: null, status: { not: 'CANCELLED' }, resolutionState: 'ACTIVE' },
+      },
+      orderBy: [{ dueDate: 'asc' }, { id: 'asc' }],
+      take: 5,
+      select: {
+        dueDate: true,
+        delayedUntil: true,
+        status: true,
+        nasiya: {
+          select: {
+            id: true,
+            contractCurrency: true,
+            customer: { select: { name: true } },
+            device: { select: { model: true } },
+          },
+        },
+      },
+    }),
+  ])
+
+  const computed = computeShopStatsFromRows({
+    now,
+    monthStart,
+    monthEnd,
+    usdUzsRate: null,
+    totalDevices,
+    cashSalesThisMonth: [],
+    accrualAggregate: {
+      saleCount: soldThisMonth,
+      saleRevenueUzs: 0,
+      saleDeviceCostUzs: 0,
+      nasiyaRevenueUzs: 0,
+      nasiyaInterestUzs: 0,
+      nasiyaDeviceCostUzs: 0,
+    },
+    saleReceivedSum: 0,
+    nasiyaSoldThisMonth: [],
+    nasiyaReceivedSum: 0,
+    activeNasiyalar,
+    nasiyaSchedulesForStats: [],
+    unpaidSales: [],
+    obligationAggregate: {
+      expectedUzs: 0,
+      expectedUsd: 0,
+      overdueUzs: 0,
+      overdueUsd: 0,
+      overdueCount: overdueNasiyaCount + overdueSaleCount,
+    },
+    inventoryPurchaseCostSum: 0,
+    returnRefundSum: 0,
+    returnsThisMonth,
+    recentActivity: recentActivity.map((activity) => ({ ...activity, actorId: '' })),
+    upcomingPayments: upcomingPayments.map((payment) => ({
+      ...payment,
+      expectedAmount: 0,
+      paidAmount: 0,
+      contractExpectedAmount: 0,
+      contractPaidAmount: 0,
+    })),
+  })
+
+  return {
+    ...computed,
+    writeOffsThisMonthNativeUzs: 0,
+    writeOffsThisMonthNativeUsd: 0,
+    writeOffsThisMonthFrozenUzs: 0,
+    writeOffCountThisMonth: 0,
+    writeOffReopenCountThisMonth: 0,
+    monthKey,
+    filteredByAdmin: null,
+    nonAttributableFields: ['totalDevices', 'activeNasiyalar', 'inventoryPurchaseCost', 'expectedThisMonth', 'overdueMoney', 'upcomingPayments'] as const,
+  }
+}
+
+/** Remove every monetary value before an operational-only dashboard response leaves the server. */
+export function redactFinancialShopStats(stats: ShopStatsResult): ShopStatsResult {
+  return {
+    ...stats,
+    cashReceivedThisMonth: 0,
+    expectedThisMonth: 0,
+    expectedThisMonthUzs: 0,
+    expectedThisMonthUsd: 0,
+    overdueMoney: 0,
+    overdueMoneyUzs: 0,
+    overdueMoneyUsd: 0,
+    inventoryPurchaseCost: 0,
+    realProfitThisMonth: 0,
+    accrualRevenueThisMonth: 0,
+    accrualRevenueBeforeReturnsThisMonth: 0,
+    accrualGrossProfitThisMonth: 0,
+    accrualGrossProfitBeforeReturnsThisMonth: 0,
+    nasiyaInterestThisMonth: 0,
+    nasiyaInterestBeforeReturnsThisMonth: 0,
+    expectedProfitWithInterestThisMonth: 0,
+    grossCashInThisMonth: 0,
+    cashCollectedThisMonth: 0,
+    returnRefundsThisMonth: 0,
+    returnRevenueReversalsThisMonth: 0,
+    returnInterestReversalsThisMonth: 0,
+    returnInventoryCostRecoveriesThisMonth: 0,
+    returnRetainedValueThisMonth: 0,
+    netCashFlowThisMonth: 0,
+    netCashAfterReturnsThisMonth: 0,
+    writeOffsThisMonthNativeUzs: 0,
+    writeOffsThisMonthNativeUsd: 0,
+    writeOffsThisMonthFrozenUzs: 0,
+    upcomingPayments: stats.upcomingPayments.map((payment) => ({
+      ...payment,
+      expectedAmount: 0,
+      paidAmount: 0,
+      contractExpectedAmount: 0,
+      contractPaidAmount: 0,
+    })),
+  }
+}
+
 async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: string | null, adminId: string | null) {
   const now = new Date()
   const { start: monthStart, end: monthEnd } = tashkentMonthRangeFromKey(monthKey, now)

@@ -1,0 +1,55 @@
+'use client'
+
+import { Download, FileSpreadsheet } from 'lucide-react'
+import { Button } from '@/components/ui/button'
+import { useShopAccess } from '@/components/shop/shop-access-context'
+import { exportUrl, type ExportEntity, type ExportFormat } from '@/lib/export-url'
+import type { ShopPermissionCode } from '@/lib/access-control'
+
+const exports = [
+  { entity: 'devices', permission: 'EXPORT_DEVICES', label: 'Qurilmalar' },
+  { entity: 'customers', permission: 'EXPORT_CUSTOMERS', label: 'Mijozlar' },
+  { entity: 'sales', permission: 'EXPORT_SALES', label: 'Sotuvlar' },
+  { entity: 'nasiya', permission: 'EXPORT_NASIYA', label: 'Nasiyalar' },
+  { entity: 'olib', permission: 'EXPORT_OLIB', label: 'Olib-sotdim' },
+  { entity: 'returns', permission: 'EXPORT_RETURNS', label: 'Qaytarish va refundlar' },
+  { entity: 'logs', permission: 'EXPORT_LOGS', label: 'Faoliyat loglari' },
+  { entity: 'report', permission: 'EXPORT_REPORTS', label: 'Moliyaviy hisobot' },
+] satisfies Array<{ entity: ExportEntity; permission: ShopPermissionCode; label: string }>
+
+export default function ExportCenter() {
+  const { can } = useShopAccess()
+  const available = exports.filter((item) => can(item.permission))
+
+  function download(entity: ExportEntity, format: ExportFormat) {
+    window.location.assign(exportUrl(entity, format))
+  }
+
+  return (
+    <div className="mx-auto max-w-5xl space-y-5 p-6">
+      <div>
+        <h1 className="text-xl font-bold text-zinc-900">Eksport</h1>
+        <p className="mt-1 text-sm text-zinc-500">Ruxsat berilgan ma&apos;lumot fayllari</p>
+      </div>
+
+      <div className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 bg-white">
+        {available.map((item) => (
+          <div key={item.entity} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex min-w-0 items-center gap-3">
+              <FileSpreadsheet className="shrink-0 text-zinc-500" size={20} aria-hidden="true" />
+              <span className="truncate text-sm font-medium text-zinc-900">{item.label}</span>
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" onClick={() => download(item.entity, 'csv')}>
+                <Download size={15} aria-hidden="true" /> CSV
+              </Button>
+              <Button type="button" onClick={() => download(item.entity, 'xlsx')}>
+                <Download size={15} aria-hidden="true" /> Excel
+              </Button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}

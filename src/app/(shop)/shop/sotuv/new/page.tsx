@@ -47,7 +47,7 @@ function deviceMeta(device: Device) {
 
 export default function NewSotuvPage() {
   const { can } = useShopAccess()
-  if (!can('CASH_SALE_CREATE')) return <ShopAccessDenied />
+  if (!can('SALE_CREATE')) return <ShopAccessDenied />
   return <AuthorizedNewSotuvPage />
 }
 
@@ -221,6 +221,7 @@ function AuthorizedNewSotuvPage() {
       {step === 1 && (
         <div className="space-y-3">
           <InStockDevicePicker
+            purpose="sale"
             selectedDevice={selectedDevice}
             onSelect={selectDevice}
             onDeepLinkSelect={(device) => {

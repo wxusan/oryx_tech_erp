@@ -25,14 +25,14 @@ import { CustomerCombobox, type CustomerPickerOption } from '@/components/shop/c
 
 export default function NewOlibSotdimPage() {
   const { can } = useShopAccess()
-  if (!can('OLIB_MANAGE')) return <ShopAccessDenied />
+  if (!can('OLIB_CREATE')) return <ShopAccessDenied />
   return <AuthorizedNewOlibSotdimPage />
 }
 
 function AuthorizedNewOlibSotdimPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
-  const { memberKind } = useShopAccess()
+  const { can, memberKind } = useShopAccess()
   const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const today = tashkentTodayInputValue()
   const [step, setStep] = useState<1 | 2>(1)
@@ -180,7 +180,7 @@ function AuthorizedNewOlibSotdimPage() {
       })
       const json = await res.json()
       if (!res.ok || !json.success) throw new Error(json.error || 'Saqlashda xatolik')
-      await navigateAfterMutation(router, '/shop/olib-sotdim', {
+      await navigateAfterMutation(router, can('OLIB_VIEW') || can('SUPPLIER_PAYMENT_MARK_PAID') ? '/shop/olib-sotdim' : '/shop/yangi-operatsiya', {
         kind: 'olibSotdim.created',
         deviceId: json.data?.deviceId,
       })

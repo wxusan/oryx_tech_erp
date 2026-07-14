@@ -13,6 +13,7 @@ import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { useShopCurrency } from '@/lib/use-shop-currency'
+import { useShopAccess } from '@/components/shop/shop-access-context'
 
 type ShopStats = Awaited<ReturnType<typeof getShopStats>>
 
@@ -39,7 +40,8 @@ function fmtBase(n: number, currency: CurrencyContext) {
   return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
 }
 
-function KoLink({ href, label = "Ko'rish" }: { href: string; label?: string }) {
+function KoLink({ href, enabled, label = "Ko'rish" }: { href: string; enabled: boolean; label?: string }) {
+  if (!enabled) return null
   return (
     <Link prefetch={false} href={href} className="mt-3 inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900">
       {label} <ArrowRight className="size-3" />
@@ -78,9 +80,15 @@ function statusLabel(status: string) {
   return 'Kutilmoqda'
 }
 
-export default function DashboardClient({ initialStats }: { initialStats: ShopStats }) {
+export default function DashboardClient({ initialStats, financialView }: { initialStats: ShopStats; financialView: boolean }) {
   const scope = useAuthenticatedQueryScope()
   const { currency } = useShopCurrency()
+  const { can } = useShopAccess()
+  const canViewInventory = can('INVENTORY_VIEW')
+  const canViewSales = can('SALE_VIEW')
+  const canViewNasiya = can('NASIYA_VIEW')
+  const canViewReports = can('REPORT_VIEW')
+  const canViewLogs = can('LOG_VIEW')
   const statsQuery = useQuery({
     queryKey: queryKeys.domain(scope, 'reports'),
     queryFn: async ({ signal }) => {
@@ -107,20 +115,32 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
+  const overdueCard = (
+    <Card className="rounded-lg border-red-200 bg-red-50/40 transition-colors hover:border-red-300 hover:bg-red-50">
+      <CardHeader>
+        <CardDescription className="text-red-700">Kechikkan to&apos;lovlar</CardDescription>
+        <CardAction><AlertTriangle className="size-4 text-red-500" /></CardAction>
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold text-red-700">{overdueText}</div>
+        <p className="mt-2 text-xs text-red-700/70">{stats.overdueCount} ta muddatdan o&apos;tgan yozuv · joriy kurs bo&apos;yicha</p>
+      </CardContent>
+    </Card>
+  )
 
   return (
     <div className="p-6 space-y-6 max-w-7xl">
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Boshqaruv paneli</h1>
-          <p className="text-sm text-zinc-500 mt-0.5">Naqd tushum, kutilayotgan to'lovlar va nasiya holati</p>
+          <p className="text-sm text-zinc-500 mt-0.5">{financialView ? "Pul oqimi va ish holati" : "Qurilmalar, sotuvlar va ish holati"}</p>
         </div>
         <Badge variant="outline" className="h-6 w-fit rounded-md border-zinc-200 text-zinc-600">
           {uzMonthYear(new Date())} · {currency.currency}
         </Badge>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
+      {financialView && <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
         <Card className="rounded-lg lg:col-span-5">
           <CardHeader className="border-b border-zinc-100">
             <CardTitle>Bu oy pul oqimi</CardTitle>
@@ -151,7 +171,7 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
                 Qabul qilingan pul va ochiq majburiyatlar alohida ko'rsatiladi; ular turli shartnoma davrlaridan bo'lishi mumkin.
               </p>
             </div>
-            <KoLink href="/shop/hisobot" />
+            <KoLink href="/shop/hisobot" enabled={canViewReports} />
           </CardContent>
         </Card>
 
@@ -169,7 +189,7 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
                 Sotuv narxidan tannarx ayiriladi
                 {stats.nasiyaInterestThisMonth > 0 ? ` · Nasiya foizi: ${fmt(stats.nasiyaInterestThisMonth, currency)}` : ''}
               </p>
-              <KoLink href="/shop/hisobot" />
+              <KoLink href="/shop/hisobot" enabled={canViewReports} />
             </CardContent>
           </Card>
 
@@ -183,26 +203,15 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
             <CardContent>
               <div className="text-2xl font-bold text-zinc-900">{fmt(stats.inventoryPurchaseCost, currency)}</div>
               <p className="mt-2 text-xs text-zinc-500">Omborda turgan qurilmalar tannarxi</p>
-              <KoLink href="/shop/qurilmalar?status=IN_STOCK" />
+              <KoLink href="/shop/qurilmalar?status=IN_STOCK" enabled={canViewInventory} />
             </CardContent>
           </Card>
 
-          <Link prefetch={false} href="/shop/nasiyalar?status=OVERDUE" className="block">
-            <Card className="rounded-lg border-red-200 bg-red-50/40 transition-colors hover:border-red-300 hover:bg-red-50">
-              <CardHeader>
-                <CardDescription className="text-red-700">Kechikkan to'lovlar</CardDescription>
-                <CardAction>
-                  <AlertTriangle className="size-4 text-red-500" />
-                </CardAction>
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-red-700">{overdueText}</div>
-                <p className="mt-2 text-xs text-red-700/70">{stats.overdueCount} ta muddatdan o'tgan yozuv · joriy kurs bo'yicha</p>
-              </CardContent>
-            </Card>
-          </Link>
+          {canViewNasiya
+            ? <Link prefetch={false} href="/shop/nasiyalar?status=OVERDUE" className="block">{overdueCard}</Link>
+            : overdueCard}
         </div>
-      </div>
+      </div>}
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
         <Card className="rounded-lg" size="sm">
@@ -214,7 +223,7 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
               </div>
               <Package className="size-5 text-zinc-400" />
             </div>
-            <KoLink href="/shop/qurilmalar" />
+            <KoLink href="/shop/qurilmalar" enabled={canViewInventory} />
           </CardContent>
         </Card>
         <Card className="rounded-lg" size="sm">
@@ -226,7 +235,7 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
               </div>
               <ReceiptText className="size-5 text-zinc-400" />
             </div>
-            <KoLink href="/shop/qurilmalar" />
+            <KoLink href="/shop/sotuvlar" enabled={canViewSales} />
           </CardContent>
         </Card>
         <Card className="rounded-lg" size="sm">
@@ -238,21 +247,19 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
               </div>
               <ClipboardList className="size-5 text-zinc-400" />
             </div>
-            <KoLink href="/shop/nasiyalar?status=ACTIVE" />
+            <KoLink href="/shop/nasiyalar?status=ACTIVE" enabled={canViewNasiya} />
           </CardContent>
         </Card>
         <Card className="rounded-lg" size="sm">
           <CardContent>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-xs text-zinc-500" title="Har bir shartnoma o'z valyutasidan joriy kurs bo'yicha bir marta hisoblanadi">
-                  Bu oy kutilmoqda
-                </div>
-                <div className="mt-1 text-xl font-bold text-zinc-900">{expectedText}</div>
+                <div className="text-xs text-zinc-500">{financialView ? 'Bu oy kutilmoqda' : "Muddati o'tgan"}</div>
+                <div className="mt-1 text-xl font-bold text-zinc-900">{financialView ? expectedText : stats.overdueCount}</div>
               </div>
               <CalendarClock className="size-5 text-zinc-400" />
             </div>
-            <KoLink href="/shop/nasiyalar" />
+            <KoLink href="/shop/nasiyalar" enabled={canViewNasiya} />
           </CardContent>
         </Card>
       </div>
@@ -262,20 +269,16 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
           <CardHeader className="border-b border-zinc-100">
             <CardTitle>Yaqin to'lov sanalari</CardTitle>
             <CardDescription>Nasiya bo'yicha eng yaqin va kechikkan oyliklar</CardDescription>
-            <CardAction>
+            {canViewNasiya && <CardAction>
               <Link prefetch={false} href="/shop/nasiyalar" className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900">
                 Barchasini ko'rish <ArrowRight className="size-3" />
               </Link>
-            </CardAction>
+            </CardAction>}
           </CardHeader>
           <CardContent className="space-y-2">
             {stats.upcomingPayments.length > 0 ? (
-              stats.upcomingPayments.map((p, i) => (
-                <IntentPrefetchLink
-                  key={i}
-                  href={`/shop/nasiyalar/${p.nasiya.id}`}
-                  className="flex items-center justify-between gap-3 py-3 border-b border-zinc-100 last:border-0 hover:bg-zinc-50 -mx-2 px-2 rounded transition-colors"
-                >
+              stats.upcomingPayments.map((p, i) => {
+                const content = <>
                   <div>
                     <div className="text-sm font-medium text-zinc-900">{p.nasiya.customer.name}</div>
                     <div className="mt-0.5 text-xs text-zinc-500">
@@ -285,7 +288,7 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
                       {statusLabel(p.status)}
                     </Badge>
                   </div>
-                  <div className="text-right">
+                  {financialView && <div className="text-right">
                     <div className="text-sm font-semibold text-zinc-900">
                       {formatUserFacingMoney({
                         amount: outstanding(p),
@@ -295,9 +298,15 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
                       })}
                     </div>
                     <div className="mt-0.5 text-xs text-zinc-400">qolgan</div>
-                  </div>
-                </IntentPrefetchLink>
-              ))
+                  </div>}
+                </>
+                const className = "flex items-center justify-between gap-3 border-b border-zinc-100 px-2 py-3 last:border-0"
+                return canViewNasiya ? (
+                  <IntentPrefetchLink key={i} href={`/shop/nasiyalar/${p.nasiya.id}`} className={`${className} -mx-2 rounded transition-colors hover:bg-zinc-50`}>
+                    {content}
+                  </IntentPrefetchLink>
+                ) : <div key={i} className={className}>{content}</div>
+              })
             ) : (
               <div className="text-sm text-zinc-400 py-4 text-center">To'lovlar yo'q</div>
             )}
@@ -308,11 +317,11 @@ export default function DashboardClient({ initialStats }: { initialStats: ShopSt
           <CardHeader className="border-b border-zinc-100">
             <CardTitle>Oxirgi operatsiyalar</CardTitle>
             <CardDescription>Do'kon ichidagi oxirgi harakatlar</CardDescription>
-            <CardAction>
+            {canViewLogs && <CardAction>
               <Link prefetch={false} href="/shop/logs" className="inline-flex items-center gap-1 text-xs font-medium text-zinc-500 hover:text-zinc-900">
                 Barchasini ko'rish <ArrowRight className="size-3" />
               </Link>
-            </CardAction>
+            </CardAction>}
           </CardHeader>
           <CardContent className="space-y-2">
             {stats.recentActivity.length > 0 ? (

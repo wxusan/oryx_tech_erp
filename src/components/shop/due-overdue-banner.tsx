@@ -39,21 +39,20 @@ function CohortSourceLinks({
   summary: ReceivableCohortSummary
   currency: CurrencyContext
 }) {
-  const saleHref = `/shop/qurilmalar?tab=qarz&focus=${cohort}`
-  const nasiyaHref = `/shop/nasiyalar?tab=${cohort}`
+  const href = `/shop/tolovlar?cohort=${cohort}`
   const sale = summary.sources.sale
   const nasiya = summary.sources.nasiya
 
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
       {sale.dealCount > 0 && (
-        <Link href={saleHref} className="font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current">
+        <Link href={href} className="font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current">
           {sourceText('Qarz', sale, currency)}
         </Link>
       )}
       {sale.dealCount > 0 && nasiya.dealCount > 0 && <span aria-hidden="true">·</span>}
       {nasiya.dealCount > 0 && (
-        <Link href={nasiyaHref} className="font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current">
+        <Link href={href} className="font-medium underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-current">
           {sourceText('Nasiya', nasiya, currency)}
         </Link>
       )}

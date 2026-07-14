@@ -2,9 +2,10 @@ import { NextRequest } from 'next/server'
 import type { ZodError } from 'zod'
 import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
-import { requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-auth'
+import { requireShopAnyPermission, resolveActiveShopId } from '@/lib/api-auth'
+import { principalHasPermission } from '@/lib/server/shop-access'
 import { resolveNasiyaSchema } from '@/lib/validations'
-import { badRequest, conflict, notFound, ok, serverError, tooManyRequests } from '@/lib/api-helpers'
+import { badRequest, conflict, forbidden, notFound, ok, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
@@ -39,7 +40,7 @@ function validTransition(action: ResolutionAction, state: 'ACTIVE' | 'ARCHIVED' 
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermissionAndFeature('WRITEOFF_MANAGE', 'NASIYA')
+    const guarded = await requireShopAnyPermission(['NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -49,6 +50,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!parsed.success) {
       const message = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
       return badRequest(message)
+    }
+    const requiredPermission = auditAction[parsed.data.action]
+    if (
+      session.user.role !== 'SUPER_ADMIN' &&
+      (!guarded.principal || !principalHasPermission(guarded.principal, requiredPermission))
+    ) {
+      return forbidden("Bu nasiya holati amali uchun ruxsat berilmagan")
     }
     const idempotencyKey = req.headers.get('idempotency-key')?.trim()
     if (!idempotencyKey) return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')

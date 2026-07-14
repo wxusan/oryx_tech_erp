@@ -10,7 +10,7 @@
 import { NextRequest } from 'next/server'
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
-import { requireShopPermission } from '@/lib/api-auth'
+import { requireShopAnyPermission, requireShopPermission } from '@/lib/api-auth'
 import { ok, badRequest, conflict, forbidden, notFound, serverError } from '@/lib/api-helpers'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
 import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
@@ -74,7 +74,31 @@ const deleteDeviceSchema = z.object({
 
 export async function GET(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('INVENTORY_VIEW')
+    const pickerPurpose = req.nextUrl.searchParams.get('view') === 'picker'
+      ? req.nextUrl.searchParams.get('purpose')
+      : null
+    const detailPurpose = req.nextUrl.searchParams.get('purpose')
+    if (req.nextUrl.searchParams.get('view') === 'picker' && pickerPurpose !== 'sale' && pickerPurpose !== 'nasiya') {
+      return badRequest("Qurilma tanlash maqsadi noto'g'ri")
+    }
+    if (detailPurpose && detailPurpose !== 'device' && detailPurpose !== 'sale') {
+      return badRequest("Qurilma ma'lumoti maqsadi noto'g'ri")
+    }
+    const guarded = pickerPurpose
+      ? await requireShopPermission(pickerPurpose === 'sale' ? 'SALE_CREATE' : 'NASIYA_CREATE')
+      : detailPurpose === 'device'
+        ? await requireShopAnyPermission(['DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK'])
+        : detailPurpose === 'sale'
+          ? await requireShopAnyPermission([
+              'SALE_VIEW',
+              'SALE_CREATE',
+              'SALE_EDIT',
+              'SALE_PAYMENT_RECEIVE',
+              'SALE_REMINDER_MANAGE',
+              'SALE_RETURN_REFUND',
+              'OLIB_CREATE',
+            ])
+      : await requireShopPermission('INVENTORY_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const includeOwnerFinancials =
@@ -273,7 +297,19 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
           return staffSafeDevice
         })()
 
-    return ok({ ...deviceForViewer, imageUrls }, "Qurilma ma'lumotlari")
+    const purposeScopedDevice: Record<string, unknown> = { ...deviceForViewer }
+    if (detailPurpose === 'device') {
+      delete purposeScopedDevice.sales
+      delete purposeScopedDevice.nasiya
+      delete purposeScopedDevice.supplier
+      delete purposeScopedDevice.supplierPhone
+    } else if (detailPurpose === 'sale') {
+      delete purposeScopedDevice.nasiya
+      delete purposeScopedDevice.supplier
+      delete purposeScopedDevice.supplierPhone
+    }
+
+    return ok({ ...purposeScopedDevice, imageUrls }, "Qurilma ma'lumotlari")
   } catch (err) {
     logger.error('[GET /api/devices/[id]]', { event: 'api.route_error', error: err })
     return serverError()
@@ -286,7 +322,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
 
 export async function PATCH(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('INVENTORY_MANAGE')
+    const guarded = await requireShopPermission('DEVICE_EDIT')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const includeOwnerFinancials =
@@ -490,7 +526,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
 export async function DELETE(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('INVENTORY_MANAGE')
+    const guarded = await requireShopPermission('DEVICE_DELETE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

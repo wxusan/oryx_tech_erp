@@ -33,7 +33,7 @@ const restockDeviceSchema = z.object({
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopPermission('RETURN_MANAGE')
+    const guarded = await requireShopPermission('DEVICE_RESTOCK')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 

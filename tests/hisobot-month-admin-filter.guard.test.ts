@@ -104,6 +104,7 @@ describe('hisobot page: month selector + admin filter UI', () => {
     expect(exportRoute).toContain("'cashCollectedUsd'")
     expect(exportRoute).toContain("'expectedReceivablesUzs'")
     expect(exportRoute).toContain("'expectedReceivablesUsd'")
-    expect(exportRoute).toContain("requireShopPermissionAndFeature('REPORT_VIEW', 'REPORTS')")
+    expect(exportRoute).toContain("report: 'EXPORT_REPORTS'")
+    expect(exportRoute).toContain('const guarded = await requireShopPermission(permission)')
   })
 })

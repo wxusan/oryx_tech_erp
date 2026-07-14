@@ -13,6 +13,7 @@ const RELEASE_MIGRATIONS = [
   '202607130008_nasiya_resolution_deferral',
   '202607130009_erp2_session_rbac_hardening',
   '202607130010_customer_crm_passport',
+  '202607150001_staff_permissions_v2',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))

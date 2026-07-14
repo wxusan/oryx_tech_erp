@@ -1,22 +1,27 @@
 import { NextRequest } from 'next/server'
 import bcrypt from 'bcrypt'
 import { Prisma } from '@/generated/prisma/client'
-import { requireCurrentShopPermission } from '@/lib/api-auth'
-import { badRequest, conflict, created, ok, payloadTooLarge, serverError } from '@/lib/api-helpers'
+import { requireCurrentShopAnyPermission, requireCurrentShopPermission } from '@/lib/api-auth'
+import { badRequest, conflict, created, forbidden, ok, payloadTooLarge, serverError } from '@/lib/api-helpers'
 import {
   SHOP_PERMISSION_CATALOG,
-  type ShopFeatureCode,
+  permissionRequiredFeatures,
   type ShopPermissionCode,
 } from '@/lib/access-control'
 import { prisma } from '@/lib/prisma'
-import { enabledFeatureSet, getActiveShopPackage } from '@/lib/server/shop-access'
+import {
+  getLiveShopPrincipalForMutation,
+  principalHasPermission,
+} from '@/lib/server/shop-access'
 import {
   createShopStaffSchema,
-  legacyStaffPermissionCodes,
-  STAFF_LOGS_PERMISSION,
-  type ShopStaffDto,
   withStaffLogsPermission,
 } from '@/lib/shop-staff-contract'
+import {
+  principalNeedsStaffTargets,
+  projectShopStaff,
+  shopStaffProjectionSelect,
+} from '@/lib/server/shop-staff-projection'
 import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 import {
   isInvalidRequestBody,
@@ -26,42 +31,16 @@ import {
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { logger } from '@/lib/logger'
 
-const staffSelect = {
-  id: true,
-  name: true,
-  phone: true,
-  login: true,
-  isActive: true,
-  telegramId: true,
-  telegramVerifiedAt: true,
-  telegramNotificationsEnabled: true,
-  legacyFullAccess: true,
-  permissionVersion: true,
-  createdAt: true,
-  permissions: { select: { permissionCode: true } },
-} satisfies Prisma.ShopAdminSelect
-
-type StaffRow = Prisma.ShopAdminGetPayload<{ select: typeof staffSelect }>
-
-function staffDto(row: StaffRow, enabledFeatures: ReadonlySet<ShopFeatureCode>): ShopStaffDto {
-  const effectivePermissions = row.legacyFullAccess
-    ? legacyStaffPermissionCodes(enabledFeatures)
-    : row.permissions.map((item) => item.permissionCode as ShopPermissionCode)
-  return {
-    id: row.id,
-    name: row.name,
-    phone: row.phone,
-    login: row.login,
-    isActive: row.isActive,
-    telegramId: row.telegramId,
-    telegramVerifiedAt: row.telegramVerifiedAt?.toISOString() ?? null,
-    telegramNotificationsEnabled: row.telegramNotificationsEnabled,
-    logsViewEnabled: effectivePermissions.includes(STAFF_LOGS_PERMISSION),
-    permissionVersion: row.permissionVersion,
-    createdAt: row.createdAt.toISOString(),
-    permissionCodes: effectivePermissions.filter((code) => code !== STAFF_LOGS_PERMISSION),
-  }
-}
+const STAFF_ADMIN_PERMISSIONS = [
+  'STAFF_VIEW',
+  'STAFF_CREATE',
+  'STAFF_EDIT_PROFILE',
+  'STAFF_RESET_PASSWORD',
+  'STAFF_STATUS_MANAGE',
+  'STAFF_DELETE',
+  'STAFF_PERMISSION_MANAGE',
+  'STAFF_NOTIFICATION_MANAGE',
+] as const satisfies readonly ShopPermissionCode[]
 
 function permissionError(
   permissionCodes: readonly ShopPermissionCode[],
@@ -69,8 +48,8 @@ function permissionError(
 ) {
   for (const code of permissionCodes) {
     const definition = SHOP_PERMISSION_CATALOG.find((item) => item.code === code)
-    if (!definition || definition.ownerOnly) return "Xodimga bu ruxsatni berib bo'lmaydi"
-    if (definition.featureCode && !enabledFeatures.has(definition.featureCode)) {
+    if (!definition || definition.retired || definition.ownerOnly) return "Xodimga bu ruxsatni berib bo'lmaydi"
+    if (permissionRequiredFeatures(code).some((feature) => !enabledFeatures.has(feature))) {
       return `${definition.label} uchun kerakli modul do'kon paketida yoqilmagan`
     }
   }
@@ -90,21 +69,23 @@ async function runSerializable<T>(operation: () => Promise<T>) {
 
 export async function GET() {
   try {
-    const guarded = await requireCurrentShopPermission('MEMBER_MANAGE')
+    const guarded = await requireCurrentShopAnyPermission(STAFF_ADMIN_PERMISSIONS)
     if (!guarded.ok) return guarded.response
     const { shopId, principal } = guarded
     if (!shopId || !principal) return serverError()
+    if (!principalNeedsStaffTargets(principal)) return ok([])
 
+    const shop = await prisma.shop.findUnique({ where: { id: shopId }, select: { ownerAdminId: true } })
     const staff = await prisma.shopAdmin.findMany({
       where: {
         shopId,
-        id: { not: principal.actorId },
+        id: { notIn: [principal.actorId, shop?.ownerAdminId].filter((id): id is string => Boolean(id)) },
         deletedAt: null,
       },
       orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
-      select: staffSelect,
+      select: shopStaffProjectionSelect,
     })
-    return ok(staff.map((row) => staffDto(row, principal.enabledFeatures)))
+    return ok(staff.map((row) => projectShopStaff(row, principal)))
   } catch (error) {
     logger.error('[GET /api/shop/staff]', { event: 'api.route_error', error })
     return serverError()
@@ -113,7 +94,7 @@ export async function GET() {
 
 export async function POST(request: NextRequest) {
   try {
-    const guarded = await requireCurrentShopPermission('MEMBER_MANAGE')
+    const guarded = await requireCurrentShopPermission('STAFF_CREATE')
     if (!guarded.ok) return guarded.response
     const { shopId, principal, session } = guarded
     if (!shopId || !principal) return serverError()
@@ -125,6 +106,12 @@ export async function POST(request: NextRequest) {
       parsed.data.permissionCodes,
       parsed.data.logsViewEnabled,
     )
+    if (
+      principal.memberKind === 'SHOP_STAFF' &&
+      (permissionCodes.length > 0 || parsed.data.telegramNotificationsEnabled)
+    ) {
+      return forbidden("Xodim yangi profilni ruxsatsiz va Telegram xabarlari o'chirilgan holatda yaratishi mumkin")
+    }
     const permissionMessage = permissionError(permissionCodes, principal.enabledFeatures)
     if (permissionMessage) return badRequest(permissionMessage)
     if (parsed.data.telegramNotificationsEnabled && !principal.enabledFeatures.has('TELEGRAM')) {
@@ -139,6 +126,26 @@ export async function POST(request: NextRequest) {
 
     const row = await runSerializable(() => prisma.$transaction(async (tx) => {
       await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Shop" WHERE "id" = ${shopId} FOR UPDATE`)
+      const livePrincipal = await getLiveShopPrincipalForMutation(tx, {
+        shopId,
+        actorId: session.user.id,
+      })
+      if (!livePrincipal || !principalHasPermission(livePrincipal, 'STAFF_CREATE')) {
+        throw Object.assign(new Error('AUTHORIZATION_CHANGED'), { code: 'AUTHORIZATION_CHANGED' })
+      }
+      if (
+        livePrincipal.memberKind === 'SHOP_STAFF' &&
+        (permissionCodes.length > 0 || parsed.data.telegramNotificationsEnabled)
+      ) {
+        throw Object.assign(new Error('DELEGATED_CREATE_SCOPE'), { code: 'DELEGATED_CREATE_SCOPE' })
+      }
+      const livePermissionMessage = permissionError(permissionCodes, livePrincipal.enabledFeatures)
+      if (livePermissionMessage) {
+        throw Object.assign(new Error(livePermissionMessage), { code: 'PERMISSION_INVALID' })
+      }
+      if (parsed.data.telegramNotificationsEnabled && !livePrincipal.enabledFeatures.has('TELEGRAM')) {
+        throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
+      }
       if (telegramId) {
         await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`telegram:${telegramId}`}))`)
         const [superAdminOwner, shopAdminOwner] = await Promise.all([
@@ -149,11 +156,6 @@ export async function POST(request: NextRequest) {
           throw Object.assign(new Error('TELEGRAM_TAKEN'), { code: 'TELEGRAM_TAKEN' })
         }
       }
-      const activePackage = await getActiveShopPackage(shopId, new Date(), tx)
-      if (!activePackage || !enabledFeatureSet(activePackage).has('STAFF_ACCESS')) {
-        throw Object.assign(new Error('STAFF_ACCESS_DISABLED'), { code: 'STAFF_ACCESS_DISABLED' })
-      }
-
       const createdStaff = await tx.shopAdmin.create({
         data: {
           shopId,
@@ -163,6 +165,7 @@ export async function POST(request: NextRequest) {
           telegramId,
           telegramVerifiedAt: null,
           telegramNotificationsEnabled: parsed.data.telegramNotificationsEnabled,
+          isActive: parsed.data.isActive,
           passwordHash,
           legacyFullAccess: false,
         },
@@ -191,21 +194,26 @@ export async function POST(request: NextRequest) {
           newValue: {
             name: parsed.data.name,
             login: parsed.data.login,
+            isActive: parsed.data.isActive,
             permissionCodes,
             logsViewEnabled: parsed.data.logsViewEnabled,
             telegramNotificationsEnabled: parsed.data.telegramNotificationsEnabled,
           },
         },
       })
-      return tx.shopAdmin.findUniqueOrThrow({ where: { id: createdStaff.id }, select: staffSelect })
+      return tx.shopAdmin.findUniqueOrThrow({ where: { id: createdStaff.id }, select: shopStaffProjectionSelect })
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }))
 
-    return created(staffDto(row, principal.enabledFeatures), "Xodim profili qo'shildi")
+    return created(projectShopStaff(row, principal), "Xodim profili qo'shildi")
   } catch (error) {
     if (isRequestBodyTooLarge(error)) return payloadTooLarge()
     if (isInvalidRequestBody(error)) return badRequest("So'rov ma'lumoti noto'g'ri")
     if (error && typeof error === 'object' && 'code' in error) {
       if (error.code === 'STAFF_ACCESS_DISABLED') return conflict("Xodimlar profili o'chirilgan")
+      if (error.code === 'AUTHORIZATION_CHANGED') return forbidden("Ruxsat o'zgargan. Sahifani yangilang")
+      if (error.code === 'DELEGATED_CREATE_SCOPE') return forbidden("Xodim yangi profilga ruxsat yoki Telegram bera olmaydi")
+      if (error.code === 'PERMISSION_INVALID') return badRequest(error instanceof Error ? error.message : "Ruxsat noto'g'ri")
+      if (error.code === 'TELEGRAM_DISABLED') return badRequest("Telegram moduli yoqilmagan")
       if (error.code === 'TELEGRAM_TAKEN') return conflict('Bu Telegram ID allaqachon mavjud')
       if (error.code === 'P2002') return conflict('Login yoki Telegram ID allaqachon mavjud')
     }

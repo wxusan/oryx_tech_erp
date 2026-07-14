@@ -16,7 +16,8 @@ export function CustomerPassportPanel({
   hasPassportPhoto: boolean
 }) {
   const { can } = useShopAccess()
-  const canReveal = can('CUSTOMER_PII_REVEAL')
+  const canReveal = can('CUSTOMER_PASSPORT_REVEAL')
+  const canViewPhoto = can('CUSTOMER_PASSPORT_PHOTO_VIEW')
   const [identifier, setIdentifier] = useState<string | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState<'identifier' | 'image' | null>(null)
@@ -87,7 +88,7 @@ export function CustomerPassportPanel({
             {loading === 'identifier' ? 'Ochilmoqda…' : identifier ? 'Yashirish' : "To'liq ko'rish"}
           </Button>
         )}
-        {hasPassportPhoto && (
+        {hasPassportPhoto && canViewPhoto && (
           <Button type="button" variant="outline" size="sm" onClick={showImage} disabled={loading === 'image'}>
             <FileImage className="mr-1.5 size-4" aria-hidden="true" />
             {loading === 'image' ? 'Ochilmoqda…' : imageUrl ? 'Rasmni yopish' : "Rasmni ko'rish"}

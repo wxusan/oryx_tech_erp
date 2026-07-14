@@ -84,7 +84,7 @@ interface Nasiya {
   /** Omitted from the server DTO for staff because it contains owner-only write-off/archive amounts. */
   resolutionEvents?: ResolutionEvent[]
   displayStatus?: 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
-  reminderEnabled: boolean
+  reminderEnabled?: boolean
   note?: string | null
   isImported?: boolean
   importSource?: string | null
@@ -95,10 +95,10 @@ interface Nasiya {
   remainingAtImport?: number | null
   importNote?: string | null
   device: { model: string }
-  customer: { id: string; name: string; phone: string; hasPassportPhoto: boolean }
+  customer: { id: string; name: string; phone: string; hasPassportPhoto?: boolean }
   schedules: NasiyaSchedule[]
-  payments: NasiyaPayment[]
-  paymentScore: {
+  payments?: NasiyaPayment[]
+  paymentScore?: {
     score: number
     label: string
     color: 'green' | 'yellow' | 'red' | 'gray'
@@ -152,15 +152,35 @@ function ImportField({ label, value }: { label: string; value: string }) {
 
 export default function NasiyaDetailPage() {
   const { can } = useShopAccess()
-  if (!can('NASIYA_VIEW')) return <ShopAccessDenied />
+  const canOpen = [
+    'NASIYA_VIEW',
+    'NASIYA_CREATE',
+    'NASIYA_EDIT',
+    'NASIYA_PAYMENT_RECEIVE',
+    'NASIYA_DEFER',
+    'NASIYA_REMINDER_MANAGE',
+    'NASIYA_CANCEL',
+    'NASIYA_ARCHIVE',
+    'NASIYA_WRITE_OFF',
+    'NASIYA_REOPEN',
+  ].some((permission) => can(permission as Parameters<typeof can>[0]))
+  if (!canOpen) return <ShopAccessDenied />
   return <AuthorizedNasiyaDetailPage />
 }
 
 function AuthorizedNasiyaDetailPage() {
   const { can } = useShopAccess()
-  const canManageNasiya = can('NASIYA_MANAGE')
-  const canReceivePayment = can('PAYMENT_RECEIVE')
-  const canResolveNasiya = can('WRITEOFF_MANAGE')
+  const canBrowseNasiyas = can('NASIYA_VIEW') || can('NASIYA_EDIT') || can('NASIYA_REMINDER_MANAGE') || can('NASIYA_ARCHIVE') || can('NASIYA_WRITE_OFF') || can('NASIYA_REOPEN')
+  const canEditNasiya = can('NASIYA_EDIT')
+  const canReceivePayment = can('NASIYA_PAYMENT_RECEIVE')
+  const canDeferNasiya = can('NASIYA_DEFER')
+  const canManageReminder = can('NASIYA_REMINDER_MANAGE')
+  const canArchiveNasiya = can('NASIYA_ARCHIVE')
+  const canWriteOffNasiya = can('NASIYA_WRITE_OFF')
+  const canReopenNasiya = can('NASIYA_REOPEN')
+  const canResolveNasiya = canArchiveNasiya || canWriteOffNasiya || canReopenNasiya
+  const canViewPassportPhoto = can('CUSTOMER_PASSPORT_PHOTO_VIEW')
+  const canViewLogs = can('LOG_VIEW')
   const resolutionCommand = useLogicalCommandIdempotency()
   const params = useParams()
   const id = params.id as string
@@ -215,7 +235,7 @@ function AuthorizedNasiyaDetailPage() {
   const passportCustomerId = nasiya?.customer?.id ?? null
   const hasPassportPhoto = nasiya?.customer?.hasPassportPhoto ?? false
   useEffect(() => {
-    if (!passportCustomerId || !hasPassportPhoto) return
+    if (!canViewPassportPhoto || !passportCustomerId || !hasPassportPhoto) return
     let cancelled = false
     fetch(`/api/customers/${encodeURIComponent(passportCustomerId)}/passport/image`)
       .then((r) => r.json())
@@ -228,13 +248,13 @@ function AuthorizedNasiyaDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [hasPassportPhoto, passportCustomerId])
+  }, [canViewPassportPhoto, hasPassportPhoto, passportCustomerId])
 
   // Fetch recent action logs for this nasiya (reminder toggles, payments, etc.).
   const nasiyaShopId = nasiya?.shopId
   const nasiyaId = nasiya?.id
   useEffect(() => {
-    if (!nasiyaId) return
+    if (!canViewLogs || !nasiyaId) return
     const targetIds = [nasiyaId, ...(nasiya?.schedules?.map((s) => s.id) ?? [])]
     const url = new URL('/api/logs', window.location.origin)
     if (nasiyaShopId) url.searchParams.set('shopId', nasiyaShopId)
@@ -254,7 +274,7 @@ function AuthorizedNasiyaDetailPage() {
       cancelled = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nasiyaId, nasiyaShopId])
+  }, [canViewLogs, nasiyaId, nasiyaShopId])
 
   function openEdit() {
     setEditCustomerName(nasiya?.customer.name ?? '')
@@ -271,10 +291,10 @@ function AuthorizedNasiyaDetailPage() {
     if (!nasiya || editSaving) return
     const customerName = editCustomerName.trim()
     const customerPhone = editCustomerPhone.trim()
-    const fieldErrors = {
+    const fieldErrors = canEditNasiya ? {
       ...(customerName.length < 2 ? { customerName: "Mijoz ismi kamida 2 ta harfdan iborat bo'lishi kerak" } : {}),
       ...(!isValidPhone(customerPhone) ? { customerPhone: "Telefon raqam noto'g'ri. Masalan: +998 90 123 45 67" } : {}),
-    }
+    } : {}
     if (Object.keys(fieldErrors).length > 0) {
       setEditFieldErrors(fieldErrors)
       // Keep the dialog usable with a keyboard: the first invalid editable
@@ -292,11 +312,13 @@ function AuthorizedNasiyaDetailPage() {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          customerName: editCustomerName.trim(),
-          customerPhone: editCustomerPhone.trim(),
-          note: editNote.trim(),
-          importNote: nasiya.isImported ? editImportNote.trim() : undefined,
-          reminderEnabled: editReminderEnabled,
+          ...(canEditNasiya ? {
+            customerName: editCustomerName.trim(),
+            customerPhone: editCustomerPhone.trim(),
+            note: editNote.trim(),
+            importNote: nasiya.isImported ? editImportNote.trim() : undefined,
+          } : {}),
+          ...(canManageReminder ? { reminderEnabled: editReminderEnabled } : {}),
         }),
       })
       const json = await res.json()
@@ -441,9 +463,9 @@ function AuthorizedNasiyaDetailPage() {
 
   return (
     <div className="p-6 space-y-5 max-w-4xl">
-      <Link href="/shop/nasiyalar" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
+      <Link href={canBrowseNasiyas ? '/shop/nasiyalar' : '/shop/yangi-operatsiya'} className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
         <ArrowLeft size={14} />
-        Nasiyalarga qaytish
+        {canBrowseNasiyas ? 'Nasiyalarga qaytish' : 'Operatsiyalarga qaytish'}
       </Link>
 
       <div className="flex items-start justify-between gap-4">
@@ -472,13 +494,13 @@ function AuthorizedNasiyaDetailPage() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {canManageNasiya && (
+          {(canEditNasiya || canManageReminder) && (
             <Button variant="outline" onClick={openEdit} className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded">
               <Pencil size={14} />
               Tahrirlash
             </Button>
           )}
-          {canManageNasiya && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (
+          {canDeferNasiya && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (
             <Button variant="outline" onClick={() => setDeferModalOpen(true)} className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded">
               Muddatni uzaytirish
             </Button>
@@ -490,17 +512,17 @@ function AuthorizedNasiyaDetailPage() {
           )}
           {canResolveNasiya && displayStatus !== 'CANCELLED' && (
             <>
-              {nasiya.resolutionState === 'ACTIVE' && (
+              {canArchiveNasiya && nasiya.resolutionState === 'ACTIVE' && (
                 <Button variant="outline" onClick={() => openResolution('ARCHIVE')} className="h-9 px-3 text-sm border-zinc-200 rounded">
                   Arxivlash
                 </Button>
               )}
-              {nasiya.resolutionState !== 'WRITTEN_OFF' && nasiya.contractRemainingAmount > 0 && (
+              {canWriteOffNasiya && nasiya.resolutionState !== 'WRITTEN_OFF' && nasiya.contractRemainingAmount > 0 && (
                 <Button variant="destructive" onClick={() => openResolution('WRITE_OFF')} className="h-9 px-3 text-sm rounded">
                   Hisobdan chiqarish
                 </Button>
               )}
-              {nasiya.resolutionState !== 'ACTIVE' && (
+              {canReopenNasiya && nasiya.resolutionState !== 'ACTIVE' && (
                 <Button variant="outline" onClick={() => openResolution('REOPEN')} className="h-9 px-3 text-sm border-zinc-200 rounded">
                   Qayta ochish
                 </Button>
@@ -528,14 +550,14 @@ function AuthorizedNasiyaDetailPage() {
         </div>
       )}
 
-      {nasiya.note && (
+      {canBrowseNasiyas && nasiya.note && (
         <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3">
           <div className="text-xs font-medium text-zinc-500">Izoh</div>
           <div className="mt-1 text-sm text-zinc-800 whitespace-pre-wrap">{nasiya.note}</div>
         </div>
       )}
 
-      {nasiya.isImported && (
+      {canBrowseNasiyas && nasiya.isImported && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-center gap-2">
             <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Eski nasiya</span>
@@ -608,52 +630,69 @@ function AuthorizedNasiyaDetailPage() {
       </div>
 
       {/* Progress */}
-      <Card className="rounded-lg">
-        <CardHeader>
-          <CardTitle>Umumiy progress</CardTitle>
-          <CardDescription>{isCompleted ? "Nasiya to'liq yopilgan" : "Nasiya bo'yicha jami to'langan summa"}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="flex justify-between text-sm mb-2">
-            <span className="text-zinc-600 font-medium">{dfmt(nasiya.contractPaidAmount)} to'landi</span>
-            <span className="font-bold text-zinc-900">{pct}%</span>
-          </div>
-          <Progress value={pct} className="h-2.5 rounded-full" />
-          <div className="flex justify-between text-xs text-zinc-400 mt-1.5">
-            <span>{dfmt(0)}</span>
-            <span>{dfmt(nasiya.contractFinalAmount)}</span>
-          </div>
-        </CardContent>
-      </Card>
+      {nasiya.paymentScore && (
+        <>
+          <Card className="rounded-lg">
+            <CardHeader>
+              <CardTitle>Umumiy progress</CardTitle>
+              <CardDescription>
+                {isCompleted ? "Nasiya to'liq yopilgan" : "Nasiya bo'yicha jami to'langan summa"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex justify-between text-sm mb-2">
+                <span className="text-zinc-600 font-medium">{dfmt(nasiya.contractPaidAmount)} to'landi</span>
+                <span className="font-bold text-zinc-900">{pct}%</span>
+              </div>
+              <Progress value={pct} className="h-2.5 rounded-full" />
+              <div className="flex justify-between text-xs text-zinc-400 mt-1.5">
+                <span>{dfmt(0)}</span>
+                <span>{dfmt(nasiya.contractFinalAmount)}</span>
+              </div>
+            </CardContent>
+          </Card>
 
-      {/* Payment behavior score — retitled "historical" once completed so it never
-          reads as an active/current risk signal for a nasiya with no debt left. */}
-      <Card className="rounded-lg">
-        <CardHeader>
-          <CardTitle>{isCompleted ? "To'lov tarixi bahosi" : "To'lov ishonchi"}</CardTitle>
-          <CardDescription>
-            {isCompleted ? "Yakunlangan nasiya bo'yicha tarixiy to'lov xatti-harakati" : "Mijozning to'lov tarixiga asoslangan baho"}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex items-center gap-3">
-            <span className={`inline-block px-2.5 py-1 rounded text-sm font-medium ${scoreCardStyles[nasiya.paymentScore.color]}`}>
-              {nasiya.paymentScore.label}
-            </span>
-            <span className="text-sm font-bold text-zinc-900">{nasiya.paymentScore.score}/100</span>
-          </div>
-          <p className="text-sm text-zinc-600">{nasiya.paymentScore.reason}</p>
-          <div className="grid grid-cols-2 gap-2 text-xs text-zinc-500 sm:grid-cols-4">
-            <div>Vaqtida: {nasiya.paymentScore.factors.earlyPaymentCount + nasiya.paymentScore.factors.onTimePaymentCount}</div>
-            <div>Kechikkan: {nasiya.paymentScore.factors.latePaymentCount}</div>
-            <div>Muddati o'tgan: {nasiya.paymentScore.factors.overdueScheduleCount}</div>
-            <div>Ishonch: {historyConfidenceLabels[nasiya.paymentScore.factors.historyConfidence] ?? "Noma'lum"}</div>
-          </div>
-        </CardContent>
-      </Card>
+          {/* Payment behavior score — retitled "historical" once completed so it never
+              reads as an active/current risk signal for a nasiya with no debt left. */}
+          <Card className="rounded-lg">
+            <CardHeader>
+              <CardTitle>{isCompleted ? "To'lov tarixi bahosi" : "To'lov ishonchi"}</CardTitle>
+              <CardDescription>
+                {isCompleted
+                  ? "Yakunlangan nasiya bo'yicha tarixiy to'lov xatti-harakati"
+                  : "Mijozning to'lov tarixiga asoslangan baho"}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-3">
+                <span
+                  className={`inline-block px-2.5 py-1 rounded text-sm font-medium ${scoreCardStyles[nasiya.paymentScore.color]}`}
+                >
+                  {nasiya.paymentScore.label}
+                </span>
+                <span className="text-sm font-bold text-zinc-900">{nasiya.paymentScore.score}/100</span>
+              </div>
+              <p className="text-sm text-zinc-600">{nasiya.paymentScore.reason}</p>
+              <div className="grid grid-cols-2 gap-2 text-xs text-zinc-500 sm:grid-cols-4">
+                <div>
+                  Vaqtida:{' '}
+                  {nasiya.paymentScore.factors.earlyPaymentCount +
+                    nasiya.paymentScore.factors.onTimePaymentCount}
+                </div>
+                <div>Kechikkan: {nasiya.paymentScore.factors.latePaymentCount}</div>
+                <div>Muddati o'tgan: {nasiya.paymentScore.factors.overdueScheduleCount}</div>
+                <div>
+                  Ishonch:{' '}
+                  {historyConfidenceLabels[nasiya.paymentScore.factors.historyConfidence] ?? "Noma'lum"}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
 
       {/* Reminder toggle */}
-      <div className="border border-zinc-200 rounded p-4 flex items-center justify-between gap-4">
+      {(canBrowseNasiyas || canManageReminder) && <div className="border border-zinc-200 rounded p-4 flex items-center justify-between gap-4">
         <div>
           <div className="text-sm font-semibold text-zinc-900">To'lov eslatmasi</div>
           <div className="text-xs text-zinc-500 mt-0.5">
@@ -662,7 +701,7 @@ function AuthorizedNasiyaDetailPage() {
               : nasiya.reminderEnabled ? 'Eslatma yoqilgan' : "Eslatma o'chirilgan"}
           </div>
         </div>
-        {canManageNasiya && isOperationallyActive && (
+        {canManageReminder && isOperationallyActive && (
           <Button
             onClick={handleToggleReminder}
             disabled={reminderSubmitting}
@@ -676,7 +715,7 @@ function AuthorizedNasiyaDetailPage() {
             {reminderSubmitting ? 'Saqlanmoqda...' : nasiya.reminderEnabled ? "Eslatmani o'chirish" : 'Eslatmani yoqish'}
           </Button>
         )}
-      </div>
+      </div>}
 
       {canResolveNasiya && resolutionEvents.length > 0 && (
         <Card className="rounded-lg">
@@ -712,7 +751,7 @@ function AuthorizedNasiyaDetailPage() {
       )}
 
       {/* Passport photo */}
-      <div className="border border-zinc-200 rounded overflow-hidden">
+      {canViewPassportPhoto && <div className="border border-zinc-200 rounded overflow-hidden">
         <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">Pasport rasmi</div>
         <div className="p-4">
           {hasPassportPhoto && passportUrl ? (
@@ -725,7 +764,7 @@ function AuthorizedNasiyaDetailPage() {
             <div className="text-sm text-zinc-400">Pasport rasmi yuklanmagan</div>
           )}
         </div>
-      </div>
+      </div>}
 
       <NasiyaHistorySections
         schedules={nasiya.schedules ?? []}
@@ -751,7 +790,7 @@ function AuthorizedNasiyaDetailPage() {
         />
       )}
 
-      {canManageNasiya && isOperationallyActive && (
+      {canDeferNasiya && isOperationallyActive && (
         <NasiyaDeferModal
           nasiyaId={nasiya.id}
           open={deferModalOpen}
@@ -846,6 +885,7 @@ function AuthorizedNasiyaDetailPage() {
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Mijoz ismi" required error={editFieldErrors.customerName}>
                   <Input
+                    disabled={!canEditNasiya}
                     id="nasiya-edit-customer"
                     value={editCustomerName}
                     onChange={(event) => setEditCustomerName(event.target.value)}
@@ -855,6 +895,7 @@ function AuthorizedNasiyaDetailPage() {
                 </Field>
                 <Field label="Telefon" required error={editFieldErrors.customerPhone}>
                   <PhoneInput
+                    disabled={!canEditNasiya}
                     id="nasiya-edit-phone"
                     value={editCustomerPhone}
                     onChange={setEditCustomerPhone}
@@ -871,6 +912,7 @@ function AuthorizedNasiyaDetailPage() {
               </div>
               <Field label="Ichki izoh" help="Ixtiyoriy">
                 <Textarea
+                  disabled={!canEditNasiya}
                   id="nasiya-edit-note"
                   value={editNote}
                   onChange={(event) => setEditNote(event.target.value)}
@@ -881,6 +923,7 @@ function AuthorizedNasiyaDetailPage() {
               {nasiya.isImported && (
                 <Field label="Import izohi" help="Ixtiyoriy">
                   <Textarea
+                    disabled={!canEditNasiya}
                     id="nasiya-edit-import-note"
                     value={editImportNote}
                     onChange={(event) => setEditImportNote(event.target.value)}
@@ -895,6 +938,7 @@ function AuthorizedNasiyaDetailPage() {
                   <input
                     id="edit-nasiya-reminder"
                     type="checkbox"
+                    disabled={!canManageReminder}
                     checked={editReminderEnabled}
                     onChange={(event) => setEditReminderEnabled(event.target.checked)}
                     className="mt-0.5 h-4 w-4 rounded border-zinc-300"
