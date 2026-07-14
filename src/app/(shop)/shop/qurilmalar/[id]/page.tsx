@@ -213,6 +213,8 @@ function AuthorizedQurilmaDetailPage() {
       : 'sale'
   const backHref = canViewInventory || detailPurpose === 'device'
     ? '/shop/qurilmalar'
+    : (canReturnSale || canCancelNasiya)
+      ? '/shop/qurilmalar'
     : (can('SALE_VIEW') || canEditCashSale || canManageSaleReminder)
       ? '/shop/sotuvlar'
       : canReceiveSalePayment

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, ScrollText, Settings, UserCog, WalletCards, Download, Upload, Repeat, ShoppingBag } from 'lucide-react'
+import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, ScrollText, Settings, UserCog, WalletCards, ShoppingBag } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
 import { DueOverdueBanner, type DueOverdueSummary } from '@/components/shop/due-overdue-banner'
@@ -15,20 +15,17 @@ import {
 import { ShopAccessProvider } from '@/components/shop/shop-access-context'
 
 const navLinks = [
-  { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard, prefetch: true, permission: null, anyPermissions: ['DASHBOARD_OPERATIONAL_VIEW', 'DASHBOARD_FINANCIAL_VIEW'], ownerOnly: false },
-  { href: '/shop/qurilmalar', label: 'Qurilmalar', icon: Smartphone, prefetch: true, permission: null, anyPermissions: ['INVENTORY_VIEW', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK'], ownerOnly: false },
-  { href: '/shop/sotuvlar', label: 'Sotuvlar', icon: ShoppingBag, prefetch: false, permission: null, anyPermissions: ['SALE_VIEW', 'SALE_EDIT', 'SALE_REMINDER_MANAGE'], ownerOnly: false },
-  { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users, prefetch: false, permission: null, anyPermissions: ['CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_PHOTO_VIEW', 'CUSTOMER_PASSPORT_REVEAL', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'], ownerOnly: false },
-  { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard, prefetch: true, permission: null, anyPermissions: ['NASIYA_VIEW', 'NASIYA_EDIT', 'NASIYA_REMINDER_MANAGE', 'NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'], ownerOnly: false },
-  { href: '/shop/olib-sotdim', label: 'Olib-sotdim', icon: Repeat, prefetch: false, permission: null, anyPermissions: ['OLIB_VIEW', 'SUPPLIER_PAYMENT_MARK_PAID'], ownerOnly: false },
-  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus, prefetch: false, permission: null, anyPermissions: ['DEVICE_CREATE', 'SALE_CREATE', 'NASIYA_CREATE', 'OLIB_CREATE', 'SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER', 'SALE_RETURN_REFUND', 'NASIYA_CANCEL'], ownerOnly: false },
-  { href: '/shop/tolovlar', label: "To'lovlar", icon: WalletCards, prefetch: false, permission: null, anyPermissions: ['RECEIVABLES_VIEW', 'SALE_VIEW', 'SALE_PAYMENT_RECEIVE', 'NASIYA_VIEW', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER'], ownerOnly: false },
-  { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3, prefetch: false, permission: 'REPORT_VIEW', anyPermissions: [], ownerOnly: false },
-  { href: '/shop/logs', label: 'Loglar', icon: ScrollText, prefetch: false, permission: 'LOG_VIEW', anyPermissions: [], ownerOnly: false },
-  { href: '/shop/import', label: 'Import', icon: Upload, prefetch: false, permission: null, anyPermissions: ['IMPORT_CUSTOMERS', 'IMPORT_OLD_NASIYA'], ownerOnly: false },
-  { href: '/shop/eksport', label: 'Eksport', icon: Download, prefetch: false, permission: null, anyPermissions: ['EXPORT_DEVICES', 'EXPORT_CUSTOMERS', 'EXPORT_SALES', 'EXPORT_NASIYA', 'EXPORT_OLIB', 'EXPORT_RETURNS', 'EXPORT_LOGS', 'EXPORT_REPORTS'], ownerOnly: false },
-  { href: '/shop/xodimlar', label: 'Xodimlar', icon: UserCog, prefetch: false, permission: null, anyPermissions: ['STAFF_VIEW', 'STAFF_CREATE', 'STAFF_EDIT_PROFILE', 'STAFF_RESET_PASSWORD', 'STAFF_STATUS_MANAGE', 'STAFF_DELETE', 'STAFF_PERMISSION_MANAGE', 'STAFF_NOTIFICATION_MANAGE'], ownerOnly: false },
-  { href: '/shop/settings', label: 'Sozlamalar', icon: Settings, prefetch: false, permission: null, anyPermissions: [], ownerOnly: false },
+  { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard, prefetch: true, permission: null, anyPermissions: ['DASHBOARD_OPERATIONAL_VIEW', 'DASHBOARD_FINANCIAL_VIEW'], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus, prefetch: false, permission: null, anyPermissions: ['DEVICE_CREATE', 'SALE_CREATE', 'NASIYA_CREATE', 'OLIB_CREATE', 'SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE'], ownerOnly: false, sidebar: true, header: true },
+  { href: '/shop/qurilmalar', label: 'Qurilmalar', icon: Smartphone, prefetch: true, permission: null, anyPermissions: ['INVENTORY_VIEW', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_RETURN_REFUND', 'NASIYA_CANCEL'], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/sotuvlar', label: 'Sotuvlar', icon: ShoppingBag, prefetch: false, permission: null, anyPermissions: ['SALE_VIEW', 'SALE_EDIT', 'SALE_REMINDER_MANAGE'], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard, prefetch: true, permission: null, anyPermissions: ['NASIYA_VIEW', 'NASIYA_EDIT', 'NASIYA_REMINDER_MANAGE', 'NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/tolovlar', label: "To'lovlar", icon: WalletCards, prefetch: false, permission: null, anyPermissions: ['RECEIVABLES_VIEW', 'SALE_VIEW', 'SALE_PAYMENT_RECEIVE', 'NASIYA_VIEW', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER'], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users, prefetch: false, permission: null, anyPermissions: ['CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_PHOTO_VIEW', 'CUSTOMER_PASSPORT_REVEAL', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3, prefetch: false, permission: 'REPORT_VIEW', anyPermissions: [], ownerOnly: false, sidebar: false, header: true },
+  { href: '/shop/logs', label: 'Loglar', icon: ScrollText, prefetch: false, permission: 'LOG_VIEW', anyPermissions: [], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/xodimlar', label: 'Xodimlar', icon: UserCog, prefetch: false, permission: null, anyPermissions: ['STAFF_VIEW', 'STAFF_CREATE', 'STAFF_EDIT_PROFILE', 'STAFF_RESET_PASSWORD', 'STAFF_STATUS_MANAGE', 'STAFF_DELETE', 'STAFF_PERMISSION_MANAGE', 'STAFF_NOTIFICATION_MANAGE'], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/settings', label: 'Sozlamalar', icon: Settings, prefetch: false, permission: null, anyPermissions: [], ownerOnly: false, sidebar: true, header: false },
 ] satisfies Array<{
   href: string
   label: string
@@ -37,6 +34,8 @@ const navLinks = [
   permission: ShopPermissionCode | null
   anyPermissions: ShopPermissionCode[]
   ownerOnly: boolean
+  sidebar: boolean
+  header: boolean
 }>
 
 function initials(name: string) {
@@ -76,12 +75,8 @@ export function ShopLayoutClient({
     (!link.permission || principalCan(principal, link.permission)) &&
     (!link.anyPermissions.length || link.anyPermissions.some((permission) => principalCan(principal, permission))),
   )
-  const visibleNavLinks = memberKind === 'SHOP_STAFF'
-    ? [
-        ...permittedNavLinks.filter((link) => link.href === '/shop/yangi-operatsiya'),
-        ...permittedNavLinks.filter((link) => link.href !== '/shop/yangi-operatsiya'),
-      ]
-    : permittedNavLinks
+  const visibleSidebarLinks = permittedNavLinks.filter((link) => link.sidebar)
+  const visibleHeaderLinks = permittedNavLinks.filter((link) => link.header)
   const canSeeReceivables = [
     'RECEIVABLES_VIEW',
     'SALE_VIEW',
@@ -111,7 +106,7 @@ export function ShopLayoutClient({
         </div>
 
         <nav className="flex gap-1 overflow-x-auto px-2 py-3 md:block md:flex-1 md:space-y-0.5">
-          {visibleNavLinks.map(({ href, label, icon: Icon, prefetch }) => {
+          {visibleSidebarLinks.map(({ href, label, icon: Icon, prefetch }) => {
             const isActive = pathname === href || pathname.startsWith(href + '/')
             return (
               <Link
@@ -140,8 +135,37 @@ export function ShopLayoutClient({
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
-        <header className="sticky top-0 z-40 flex h-14 flex-shrink-0 items-center justify-end gap-2 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur sm:justify-between sm:px-6">
-          <span className="hidden text-sm font-medium text-zinc-900 sm:inline">Do&apos;kon portali</span>
+        <header className="sticky top-0 z-40 flex h-14 flex-shrink-0 items-center justify-between gap-2 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur sm:px-6">
+          <div className="flex min-w-0 items-center gap-2 sm:gap-3">
+            <span className="hidden text-sm font-medium text-zinc-900 sm:inline">Do&apos;kon portali</span>
+            {visibleHeaderLinks.length > 0 && (
+              <nav className="flex items-center gap-1" aria-label="Tezkor navigatsiya">
+                {visibleHeaderLinks.map(({ href, label, icon: Icon, prefetch }) => {
+                  const isActive = pathname === href || pathname.startsWith(href + '/')
+                  const isPrimaryAction = href === '/shop/yangi-operatsiya'
+                  return (
+                    <Link
+                      key={href}
+                      href={href}
+                      prefetch={prefetch}
+                      aria-label={label}
+                      title={label}
+                      className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors sm:px-2.5 ${
+                        isPrimaryAction
+                          ? 'bg-zinc-900 text-white hover:bg-zinc-800'
+                          : isActive
+                            ? 'bg-zinc-900 text-white'
+                            : 'border border-zinc-200 text-zinc-700 hover:bg-zinc-100'
+                      }`}
+                    >
+                      <Icon size={15} aria-hidden="true" />
+                      <span className="hidden sm:inline">{label}</span>
+                    </Link>
+                  )
+                })}
+              </nav>
+            )}
+          </div>
           <div className="flex min-w-0 items-center gap-2">
             <div className="min-w-0 text-right">
               <div className="max-w-32 truncate text-xs text-zinc-500 sm:max-w-40 sm:text-sm">{adminName}</div>
