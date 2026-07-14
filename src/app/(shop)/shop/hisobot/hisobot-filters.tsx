@@ -72,9 +72,9 @@ export default function HisobotFilters({
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="single">Bitta oy</SelectItem>
-            <SelectItem value="trailing3">Oxirgi 3 oy</SelectItem>
-            <SelectItem value="trailing6">Oxirgi 6 oy</SelectItem>
-            <SelectItem value="trailing12">Oxirgi 12 oy</SelectItem>
+            {monthOptions.length >= 3 && <SelectItem value="trailing3">Oxirgi 3 oy</SelectItem>}
+            {monthOptions.length >= 6 && <SelectItem value="trailing6">Oxirgi 6 oy</SelectItem>}
+            {monthOptions.length >= 12 && <SelectItem value="trailing12">Oxirgi 12 oy</SelectItem>}
             <SelectItem value="custom">Maxsus oraliq</SelectItem>
           </SelectContent>
         </Select>
@@ -146,11 +146,11 @@ export default function HisobotFilters({
         <form className="flex flex-wrap items-end gap-2" onSubmit={submitCustom}>
           <div className="space-y-1">
             <Label htmlFor="report-start-month" className="text-xs">Boshlanish oyi</Label>
-            <Input id="report-start-month" name="startMonth" type="month" required defaultValue={startMonth} className="h-9 w-[160px] bg-white" />
+            <Input id="report-start-month" name="startMonth" type="month" required min={monthOptions.at(-1)?.value} max={monthOptions[0]?.value} defaultValue={startMonth} className="h-9 w-[160px] bg-white" />
           </div>
           <div className="space-y-1">
             <Label htmlFor="report-end-month" className="text-xs">Yakun oyi</Label>
-            <Input id="report-end-month" name="endMonth" type="month" required defaultValue={endMonth} className="h-9 w-[160px] bg-white" />
+            <Input id="report-end-month" name="endMonth" type="month" required min={monthOptions.at(-1)?.value} max={monthOptions[0]?.value} defaultValue={endMonth} className="h-9 w-[160px] bg-white" />
           </div>
           <Button type="submit" variant="outline" size="sm" className="h-9">Ko'rsatish</Button>
         </form>
