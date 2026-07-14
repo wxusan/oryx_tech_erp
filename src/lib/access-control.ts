@@ -100,13 +100,16 @@ export const SHOP_PERMISSION_CATALOG: readonly ShopPermissionCatalogItem[] = [
   { code: 'CUSTOMER_MANAGE', label: 'Mijozlarni boshqarish', featureCode: 'CUSTOMER_CRM', ownerOnly: false },
   { code: 'CUSTOMER_PII_REVEAL', label: "Pasport raqamini to'liq ko'rish", featureCode: 'CUSTOMER_CRM', ownerOnly: true },
   { code: 'RETURN_MANAGE', label: 'Qaytarishni boshqarish', featureCode: 'INVENTORY', ownerOnly: true },
-  // Never inherited through legacyFullAccess (see principalCan), but an owner
-  // may deliberately grant it to a specific staff member.
-  { code: 'WRITEOFF_MANAGE', label: 'Qarzni yopish va arxivlash', featureCode: 'NASIYA', ownerOnly: false },
+  // Resolution events are financially consequential and immutable. They are
+  // deliberately owner-only; no staff permission may grant this capability.
+  { code: 'WRITEOFF_MANAGE', label: 'Qarzni yopish va arxivlash', featureCode: 'NASIYA', ownerOnly: true },
   { code: 'REPORT_VIEW', label: "Hisobotlarni ko'rish", featureCode: 'REPORTS', ownerOnly: true },
   { code: 'EXPORT_DATA', label: 'Eksport qilish', featureCode: 'EXPORTS', ownerOnly: true },
   { code: 'IMPORT_DATA', label: 'Import qilish', featureCode: 'IMPORTS', ownerOnly: true },
-  { code: 'LOG_VIEW', label: "Loglarni ko'rish", featureCode: null, ownerOnly: true },
+  // This is the one audited visibility capability an owner may opt into for
+  // a staff member. It is presented as its own toggle in staff management,
+  // rather than being bundled into general operational permissions.
+  { code: 'LOG_VIEW', label: "Loglarni ko'rish", featureCode: null, ownerOnly: false },
   { code: 'SETTINGS_MANAGE', label: "Do'kon sozlamalarini boshqarish", featureCode: null, ownerOnly: true },
   { code: 'MEMBER_MANAGE', label: 'Xodimlarni boshqarish', featureCode: 'STAFF_ACCESS', ownerOnly: true },
   { code: 'TELEGRAM_MANAGE', label: 'Telegram sozlamalarini boshqarish', featureCode: 'TELEGRAM', ownerOnly: true },
@@ -220,11 +223,13 @@ export function principalCan(principal: ShopPrincipalAccess, permission: ShopPer
   if (!definition) return false
   if (definition.featureCode && !principal.enabledFeatures.has(definition.featureCode)) return false
   if (principal.memberKind === 'SHOP_OWNER') return true
-  // Migrated unresolved shops retain their pre-RBAC operational capability
-  // until an owner explicitly saves a permission set. Keep this compatibility
-  // before the new owner-only split, while never inheriting newly introduced
-  // member-management or debt-write-off powers.
-  if (principal.legacyFullAccess) return permission !== 'MEMBER_MANAGE' && permission !== 'WRITEOFF_MANAGE'
+  // Legacy compatibility never overrides the current owner-only boundary.
+  // This prevents migrated staff from seeing reports, exports, shop settings,
+  // member administration, Telegram configuration, or receivable resolutions.
   if (definition.ownerOnly) return false
+  // Migrated unresolved shops retain their pre-RBAC operational capability
+  // until an owner explicitly saves a permission set. Owner-only powers above
+  // are deliberately excluded even during that compatibility window.
+  if (principal.legacyFullAccess) return true
   return principal.grantedPermissions.has(permission)
 }

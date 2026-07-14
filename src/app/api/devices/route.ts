@@ -34,6 +34,8 @@ export async function GET(req: NextRequest) {
     const guarded = await requireShopPermission('INVENTORY_VIEW')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
+    const includeOwnerFinancials =
+      session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
 
     const { searchParams } = req.nextUrl
 
@@ -90,9 +92,9 @@ export async function GET(req: NextRequest) {
 
       return ok(
         {
-          items: rows.map((device) => ({
+          items: rows.map(({ purchasePrice, ...device }) => ({
             ...device,
-            purchasePrice: Number(device.purchasePrice),
+            ...(includeOwnerFinancials ? { purchasePrice: Number(purchasePrice) } : {}),
             storageDisplay: formatDeviceStorage(device) || null,
             secondaryImei: device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
             conditionLabel: deviceConditionLabel(device.conditionCode),
@@ -118,7 +120,7 @@ export async function GET(req: NextRequest) {
       condition: conditionParam as 'NEW' | 'USED' | undefined,
       skip,
       take,
-    })
+    }, { includeOwnerFinancials })
     return ok({ items, total, skip, take }, "Qurilmalar ro'yxati")
   } catch (err) {
     logger.error('[GET /api/devices]', { event: 'api.route_error', error: err })
@@ -135,6 +137,8 @@ export async function POST(req: NextRequest) {
     const guarded = await requireShopPermission('INVENTORY_MANAGE')
     if (!guarded.ok) return guarded.response
     const { session } = guarded
+    const includeOwnerFinancials =
+      session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
 
     const body: unknown = await req.json()
 
@@ -175,7 +179,7 @@ export async function POST(req: NextRequest) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
     const [shop, currency] = await Promise.all([
-      prisma.shop.findUnique({ where: { id: resolvedShopId }, select: { name: true } }),
+      prisma.shop.findUnique({ where: { id: resolvedShopId }, select: { name: true, ownerAdminId: true } }),
       getShopCurrencyContext(resolvedShopId),
     ])
     const notificationMessage = deviceAddedMessage({
@@ -248,7 +252,16 @@ export async function POST(req: NextRequest) {
       })
 
       const notificationAdmins = await tx.shopAdmin.findMany({
-        where: { shopId: resolvedShopId, isActive: true, telegramId: { not: null }, telegramVerifiedAt: { not: null }, deletedAt: null },
+        // The device-added template includes the purchase cost. Do not send
+        // that owner-financial data to staff Telegram identities.
+        where: {
+          shopId: resolvedShopId,
+          id: shop?.ownerAdminId ?? '__no-shop-owner__',
+          isActive: true,
+          telegramId: { not: null },
+          telegramVerifiedAt: { not: null },
+          deletedAt: null,
+        },
         select: { id: true, telegramId: true },
       })
       if (notificationAdmins.length) {
@@ -287,7 +300,7 @@ export async function POST(req: NextRequest) {
     })
 
     const [item, changeCursor] = await Promise.all([
-      getShopDeviceListItemsByIds(resolvedShopId, [device.id]).then((items) => items[0]),
+      getShopDeviceListItemsByIds(resolvedShopId, [device.id], { includeOwnerFinancials }).then((items) => items[0]),
       latestChangeCursorForShop(resolvedShopId),
     ])
     if (!item) throw new Error('CREATED_DEVICE_DTO_NOT_FOUND')

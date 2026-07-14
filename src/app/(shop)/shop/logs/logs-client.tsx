@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
-import { useRouter } from 'next/navigation'
 import { Input } from '@/components/ui/input'
 import { DateInput } from '@/components/ui/date-input'
 import {
@@ -20,6 +19,7 @@ import type { CurrencyContext } from '@/lib/currency'
 import { replaceListUrlState } from '@/lib/list-url-state'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { StretchedLink } from '@/components/ui/stretched-link'
 
 type ActorType = 'SUPER_ADMIN' | 'SHOP_ADMIN'
 
@@ -33,6 +33,7 @@ interface LogEntry {
   targetId: string
   note: string | null
   newValue: unknown
+  href: string | null
   actorName?: string | null
   actorLogin?: string | null
 }
@@ -48,11 +49,6 @@ interface LogsPayload {
   total: number
 }
 
-// Item 8 — target types that MIGHT resolve to a shop-facing detail page.
-// Customer/Shop/ShopAdmin/CurrencyRate/SuperAdmin/Database never do (no
-// detail page exists), so those rows never attempt the link lookup at all.
-const LINKABLE_TARGET_TYPES = new Set(['Device', 'Nasiya', 'NasiyaSchedule', 'Sale', 'SupplierPayable'])
-
 interface DisplayLog {
   id: string
   datetime: string
@@ -64,7 +60,7 @@ interface DisplayLog {
   target: string
   note: string
   targetType: string
-  linkable: boolean
+  href: string | null
 }
 
 const PER_PAGE = 10
@@ -92,7 +88,7 @@ function displayLog(log: LogEntry, currency: CurrencyContext): DisplayLog {
     target: targetLabel(log.targetType, log.targetId, log.newValue),
     note: log.note || formatLogValue(log.newValue, currency),
     targetType: log.targetType,
-    linkable: LINKABLE_TARGET_TYPES.has(log.targetType),
+    href: log.href,
   }
 }
 
@@ -111,32 +107,8 @@ interface ShopLogsClientProps {
 }
 
 export default function ShopLogsClient({ initialPayload, initialRequestKey, currency, initialState }: ShopLogsClientProps) {
-  const router = useRouter()
   const scope = useAuthenticatedQueryScope()
   const queryClient = useQueryClient()
-  const [resolvingLogId, setResolvingLogId] = useState<string | null>(null)
-
-  // Item 8 — clicking a log row opens the related sale/nasiya/device profile.
-  // Resolved server-side (the log's targetId isn't always the URL id
-  // directly — e.g. a nasiya payment log's targetId is the SCHEDULE's id).
-  // A row with no possible link (Customer/Shop/account/etc.) never calls
-  // this at all; a row whose target was deleted resolves to `href: null`
-  // and simply does nothing rather than crashing or guessing a URL.
-  async function openLogTarget(log: DisplayLog) {
-    if (!log.linkable || resolvingLogId) return
-    setResolvingLogId(log.id)
-    try {
-      const res = await fetch(`/api/logs/${log.id}/link`)
-      const json: ApiResponse<{ href: string | null }> = await res.json()
-      if (json.success && json.data?.href) {
-        router.push(json.data.href)
-      }
-    } catch {
-      // Silently no-op — a failed lookup must never crash the logs page.
-    } finally {
-      setResolvingLogId(null)
-    }
-  }
   const [search, setSearch] = useState(initialState.search)
   const [debouncedSearch, setDebouncedSearch] = useState(initialState.search)
   const [dateFrom, setDateFrom] = useState(initialState.dateFrom)
@@ -319,16 +291,23 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
               logs.map((log) => (
                 <TableRow
                   key={log.id}
-                  onClick={() => openLogTarget(log)}
-                  aria-disabled={!log.linkable}
                   className={[
-                    'border-zinc-100 hover:bg-zinc-50',
-                    log.linkable ? 'cursor-pointer' : '',
-                    resolvingLogId === log.id ? 'opacity-60' : '',
+                    'relative border-zinc-100 hover:bg-zinc-50 focus-within:bg-zinc-50',
+                    log.href ? 'cursor-pointer' : '',
                   ].join(' ')}
                 >
                   <TableCell className="pl-5">
-                    <span className="font-mono text-xs text-zinc-500">{log.datetime}</span>
+                    {log.href ? (
+                      <StretchedLink
+                        href={log.href}
+                        aria-label={`${log.target} tafsilotlarini ochish`}
+                        className="font-mono text-xs text-zinc-500 hover:underline"
+                      >
+                        {log.datetime}
+                      </StretchedLink>
+                    ) : (
+                      <span className="font-mono text-xs text-zinc-500">{log.datetime}</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     <div>

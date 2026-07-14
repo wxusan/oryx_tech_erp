@@ -20,8 +20,13 @@ describe('due/overdue summary query bounds', () => {
   })
 
   it('filters effective nasiya and sale due dates inside PostgreSQL', () => {
-    expect(queries).toContain('coalesce(s."delayedUntil", s."dueDate") < ${input.todayStart}')
-    expect(queries).toContain('coalesce(s."delayedUntil", s."dueDate") < ${input.tomorrowStart}')
+    // A Nasiya schedule due today remains due today even if another schedule
+    // on the same contract is already overdue. The aggregate is consequently
+    // keyed by cohort as well as contract.
+    expect(queries).toContain("WHEN coalesce(s.\"delayedUntil\", s.\"dueDate\") < ${input.todayStart} THEN 'OVERDUE'::text")
+    expect(queries).toContain("WHEN coalesce(s.\"delayedUntil\", s.\"dueDate\") < ${input.tomorrowStart} THEN 'DUE_TODAY'::text")
+    expect(queries).toContain('GROUP BY cohort, deal_id, customer_id, customer_name, customer_phone, device_id, device_model, currency')
+    expect(queries).not.toContain('bool_or(effective_due < ${input.todayStart})')
     expect(queries).toContain('AND s."dueDate" < ${input.tomorrowStart}')
   })
 

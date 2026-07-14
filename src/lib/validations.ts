@@ -307,8 +307,11 @@ export const addSalePaymentSchema = z.object({
   paymentBreakdown: paymentBreakdownSchema,
   paidAt: z.coerce.date().optional(),
   nextDueDate: z.coerce.date().optional(),
-  note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
-  reason: z.string().max(1000, "Sabab 1000 ta belgidan oshmasligi kerak").optional(),
+  // Payment notes are ordinary optional context. Normalize blank input at the
+  // validation boundary so UI/API/audit rows never disagree about whether an
+  // empty comment exists.
+  note: z.string().trim().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
+  reason: z.string().trim().max(1000, "Sabab 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
   idempotencyKey: z.string().min(8).max(120).optional(),
   inputCurrency: currencyCodeSchema.optional(),
 })
@@ -467,7 +470,8 @@ export const addNasiyaPaymentSchema = z
     paymentMethod: paymentMethodSchema,
     paymentBreakdown: paymentBreakdownSchema,
     date: z.coerce.date({ error: "To'lov sanasi kiritilishi shart" }),
-    note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
+    // A regular payment can be recorded without an explanatory comment.
+    note: z.string().trim().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
     inputCurrency: currencyCodeSchema.optional(),
   })
 
@@ -479,11 +483,15 @@ export type AddNasiyaPaymentInput = z.infer<typeof addNasiyaPaymentSchema>
 export const deferNasiyaScheduleSchema = z.object({
   nasiyaScheduleId: z.string({ error: "Jadval ID kiritilishi shart" }).min(1),
   newDueDate: z.coerce.date({ error: "Yangi to'lov sanasi kiritilishi shart" }),
+  // This is an operational note, not a destructive write-off reason. Keep
+  // the immutable deferral event, but do not block a valid due-date change
+  // because its optional comment was left blank.
   reason: z
-    .string({ error: "Kechiktirish sababi kiritilishi shart" })
+    .string()
     .trim()
-    .min(5, "Kechiktirish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
-    .max(1000, "Kechiktirish sababi 1000 ta belgidan oshmasligi kerak"),
+    .max(1000, "Izoh 1000 ta belgidan oshmasligi kerak")
+    .optional()
+    .transform((value) => value || undefined),
 })
 
 export type DeferNasiyaScheduleInput = z.infer<typeof deferNasiyaScheduleSchema>

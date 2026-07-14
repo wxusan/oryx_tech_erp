@@ -13,22 +13,29 @@ describe('due-today/overdue authoritative contract', () => {
   const queries = read('src/lib/server/shop-stats-queries.ts')
   const syncRoute = read('src/app/api/sync/route.ts')
 
-  it('requires live view permission/module access, not payment-receive permission', () => {
+  it('keeps tenant-wide payment aggregates owner-only while using live module access to select sources', () => {
     expect(summaryRoute).toContain('requireReceivableView()')
     expect(listRoute).toContain('requireReceivableView()')
     expect(auth).toContain("principalHasFeature(guarded.principal, 'CASH_SALES')")
     expect(auth).toContain("principalHasPermission(guarded.principal, 'INVENTORY_VIEW')")
     expect(auth).toContain("principalHasFeature(guarded.principal, 'NASIYA')")
     expect(auth).toContain("principalHasPermission(guarded.principal, 'NASIYA_VIEW')")
+    expect(auth).toContain('const isFinancialOwner =')
+    expect(auth).toContain("To'lovlar xulosasi faqat do'kon egasi uchun")
     expect(summaryRoute).not.toContain('PAYMENT_RECEIVE')
     expect(listRoute).not.toContain('PAYMENT_RECEIVE')
     expect(syncRoute).toContain('if (canViewReceivables) domains.add(\'overdue\')')
   })
 
   it('uses disjoint Tashkent-midnight predicates and makes today overdue only tomorrow', () => {
-    expect(queries).toContain('coalesce(s."delayedUntil", s."dueDate") < ${input.todayStart} THEN \'OVERDUE\'::text')
-    expect(queries).toContain('>= ${input.todayStart}')
-    expect(queries).toContain('coalesce(s."delayedUntil", s."dueDate") < ${input.tomorrowStart} THEN \'DUE_TODAY\'::text')
+    // Cohorts are assigned before contract aggregation: a separate schedule
+    // due today must not inherit the contract's overdue label.
+    expect(queries).toContain("WHEN coalesce(s.\"delayedUntil\", s.\"dueDate\") < ${input.todayStart} THEN 'OVERDUE'::text")
+    expect(queries).toContain("WHEN coalesce(s.\"delayedUntil\", s.\"dueDate\") < ${input.tomorrowStart} THEN 'DUE_TODAY'::text")
+    expect(queries).toContain('GROUP BY cohort, deal_id, customer_id, customer_name, customer_phone, device_id, device_model, currency')
+    expect(queries).not.toContain('bool_or(effective_due < ${input.todayStart})')
+    expect(queries).toContain('A Nasiya obligation is a schedule, not the whole contract')
+    expect(queries).toContain("WHEN s.\"dueDate\" < ${input.todayStart} THEN 'OVERDUE'::text")
   })
 
   it('shares the exact receivable CTE between summary and destination list', () => {
@@ -44,6 +51,8 @@ describe('due-today/overdue authoritative contract', () => {
     expect(queries).toContain('count(DISTINCT customer_id)::integer AS customer_count')
     expect(queries).toContain("sum(outstanding) FILTER (WHERE currency = 'UZS')")
     expect(queries).toContain("sum(outstanding) FILTER (WHERE currency = 'USD')")
+    expect(queries).toContain("deal_type = 'sale' AND currency = 'UZS'")
+    expect(queries).toContain("deal_type = 'nasiya' AND currency = 'USD'")
   })
 })
 
@@ -52,12 +61,13 @@ describe('global payment banners and exact destination UX', () => {
   const shell = read('src/app/(shop)/shop-layout-client.tsx')
   const page = read('src/app/(shop)/shop/tolovlar/receivables-client.tsx')
 
-  it('renders overdue first and due-today second with exact filtered links', () => {
+  it('renders overdue first and due-today second with source-specific operational links', () => {
     expect(banner.indexOf('summary.overdue.dealCount > 0')).toBeLessThan(banner.indexOf('summary.dueToday.dealCount > 0'))
-    expect(banner).toContain('href="/shop/tolovlar?cohort=OVERDUE"')
-    expect(banner).toContain('href="/shop/tolovlar?cohort=DUE_TODAY"')
-    expect(banner).toContain('summary.customerCount')
-    expect(banner).toContain('summary.dealCount')
+    expect(banner).toContain('const saleHref = `/shop/qurilmalar?tab=qarz&focus=${cohort}`')
+    expect(banner).toContain('const nasiyaHref = `/shop/nasiyalar?tab=${cohort}`')
+    expect(banner).toContain('summary.sources.sale')
+    expect(banner).toContain('summary.sources.nasiya')
+    expect(banner).not.toContain('/shop/tolovlar?cohort=OVERDUE')
   })
 
   it('uses the two-minute scoped React Query cache and mutation deltas without fallback polling', () => {
@@ -68,8 +78,9 @@ describe('global payment banners and exact destination UX', () => {
     expect(banner).not.toContain('router.refresh')
   })
 
-  it('is visible for authorized viewers across every shop page and stays outside main scroll content', () => {
+  it('is visible only to owners across their shop pages and stays outside main scroll content', () => {
     expect(shell).toContain('canSeeReceivables')
+    expect(shell).toContain("const canSeeReceivables = memberKind === 'SHOP_OWNER'")
     expect(shell).not.toContain("principalCan(principal, 'PAYMENT_RECEIVE') && <DueOverdueBanner")
     expect(shell).toContain('<DueOverdueBanner initialData={initialDueSummary} />')
     const bannerIndex = shell.indexOf('<DueOverdueBanner')
@@ -79,11 +90,13 @@ describe('global payment banners and exact destination UX', () => {
     expect(banner).toContain('sticky top-14 z-30')
   })
 
-  it('provides desktop table, mobile cards, pagination and real Sale/Nasiya detail links', () => {
+  it('keeps the consolidated mixed queue, with direct accessible Sale/Nasiya detail links', () => {
     expect(page).toContain('hidden overflow-hidden')
     expect(page).toContain('md:hidden')
     expect(page).toContain("item.dealType === 'nasiya'")
     expect(page).toContain('`/shop/qurilmalar/${item.deviceId}`')
     expect(page).toContain('data.total > data.take')
+    expect(page).toContain('<StretchedLink')
+    expect(page).not.toContain("Ko'rish")
   })
 })

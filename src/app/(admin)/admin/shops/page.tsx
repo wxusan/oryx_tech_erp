@@ -6,7 +6,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { formatUzPhoneDisplay } from '@/lib/phone'
-import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
+import { StretchedLink } from '@/components/ui/stretched-link'
 import {
   Table,
   TableBody,
@@ -123,11 +123,9 @@ export default function ShopsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-zinc-900">Do&apos;konlar</h1>
-        <Link href="/admin/shops/new">
-          <Button className="bg-zinc-900 text-white hover:bg-zinc-700 h-8 px-3 text-sm rounded-none">
-            + Yangi do&apos;kon
-          </Button>
-        </Link>
+        <Button render={<Link href="/admin/shops/new" />} size="lg">
+          + Yangi do&apos;kon
+        </Button>
       </div>
 
       {error && (
@@ -174,19 +172,18 @@ export default function ShopsPage() {
               <TableHead className="text-xs text-zinc-500 font-medium">Do&apos;kon raqami</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">Status</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">Keyingi to&apos;lov sanasi</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium pr-5 text-right">Amallar</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-10 text-sm text-zinc-400">
+                <TableCell colSpan={6} className="text-center py-10 text-sm text-zinc-400">
                   Yuklanmoqda...
                 </TableCell>
               </TableRow>
             ) : filtered.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-10 text-sm text-zinc-400">
+                <TableCell colSpan={6} className="text-center py-10 text-sm text-zinc-400">
                   Hech qanday do&apos;kon topilmadi
                 </TableCell>
               </TableRow>
@@ -194,8 +191,16 @@ export default function ShopsPage() {
               filtered.map((shop) => {
                 const overdue = isOverdueShop(shop)
                 return (
-                  <TableRow key={shop.id} className="border-zinc-100 hover:bg-zinc-50">
-                    <TableCell className="pl-5 text-sm font-medium text-zinc-900">{shop.name}</TableCell>
+                  <TableRow key={shop.id} className="relative border-zinc-100 hover:bg-zinc-50">
+                    <TableCell className="pl-5 text-sm font-medium text-zinc-900">
+                      <StretchedLink
+                        href={`/admin/shops/${shop.id}`}
+                        aria-label={`${shop.name} do'koni ma'lumotlarini ochish`}
+                        className="font-medium text-zinc-900 hover:underline"
+                      >
+                        {shop.name}
+                      </StretchedLink>
+                    </TableCell>
                     <TableCell className="text-sm text-zinc-600">{shop.ownerName}</TableCell>
                     <TableCell className="text-sm text-zinc-500 font-mono">{formatUzPhoneDisplay(shop.ownerPhone)}</TableCell>
                     <TableCell className="text-sm text-zinc-500">{shop.shopNumber}</TableCell>
@@ -204,14 +209,6 @@ export default function ShopsPage() {
                     </TableCell>
                     <TableCell className={overdue ? 'text-sm font-medium text-red-700' : 'text-sm text-zinc-500'}>
                       {formatDate(shop.subscriptionDue)}
-                    </TableCell>
-                    <TableCell className="pr-5 text-right">
-                      <IntentPrefetchLink
-                        href={`/admin/shops/${shop.id}`}
-                        className="text-xs text-zinc-500 hover:text-zinc-900 border border-zinc-200 px-2.5 py-1 hover:bg-zinc-50 transition-colors"
-                      >
-                        Ko&apos;rish
-                      </IntentPrefetchLink>
                     </TableCell>
                   </TableRow>
                 )

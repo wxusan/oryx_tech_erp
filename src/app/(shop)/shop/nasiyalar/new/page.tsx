@@ -64,6 +64,8 @@ export default function NewNasiyaPage() {
 function AuthorizedNewNasiyaPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
+  const { memberKind } = useShopAccess()
+  const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
 
@@ -100,13 +102,6 @@ function AuthorizedNewNasiyaPage() {
   const [note, setNote] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState('')
-
-  // The device's price in the shop's display currency (UZS base → USD when set).
-  function priceFor(d: Device) {
-    return currency.currency === 'USD' && currency.usdUzsRate
-      ? convertUzsToUsd(d.purchasePrice, currency.usdUzsRate).toFixed(2)
-      : String(d.purchasePrice)
-  }
 
   // Sotilish narxi (selling price) starts empty — the shop decides this price
   // per deal; it must never silently default to the device's own purchase
@@ -498,13 +493,13 @@ function AuthorizedNewNasiyaPage() {
               <span className="text-sm font-semibold text-zinc-900">Nasiya shartlari</span>
             </div>
             <div className="p-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
-              {selectedDevice && (
+              {canSeeOwnerFinancials && selectedDevice?.purchasePrice != null && (
                 <div className="sm:col-span-2" role="group" aria-labelledby="nasiya-device-cost-label">
                   <div id="nasiya-device-cost-label" className="block text-xs font-medium text-zinc-700 mb-1.5">
                     Kelish narxi (qurilma tannarxi)
                   </div>
                   <div className="flex h-9 items-center rounded border border-zinc-200 bg-zinc-50 px-2.5 text-sm text-zinc-500">
-                    {currencyLabel(currency.currency)} {priceFor(selectedDevice)}
+                    {formatMoneyByCurrency(selectedDevice.purchasePrice, currency.currency, currency.usdUzsRate)}
                   </div>
                 </div>
               )}

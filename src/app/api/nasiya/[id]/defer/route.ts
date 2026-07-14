@@ -125,7 +125,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           status: 'DEFERRED',
           delayedUntil: newDueDate,
           deferredToNext: true,
-          note: reason,
+          note: reason ?? null,
         },
       })
       const event = await tx.nasiyaDeferral.create({
@@ -136,7 +136,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           originalDueDate,
           newDueDate,
           delayedUntil: newDueDate,
-          note: reason,
+          note: reason ?? null,
           idempotencyKey,
           createdBy: session.user.id,
           createdByType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
@@ -155,9 +155,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             deferralEventId: event.id,
             oldDueDate: originalDueDate.toISOString(),
             newDueDate: newDueDate.toISOString(),
-            auditReason: reason,
+            auditReason: reason ?? null,
           },
-          note: reason,
+          note: reason ?? null,
         },
       })
       return {

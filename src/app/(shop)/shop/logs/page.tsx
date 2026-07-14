@@ -18,7 +18,9 @@ export default async function ShopLogsPage({
 
   const cursor = await latestChangeCursorForSession(guarded.session)
   const [payload, currency] = await Promise.all([
-    getShopLogsInitial(guarded.shopId),
+    getShopLogsInitial(guarded.shopId, {
+      includeOwnerFinancials: guarded.principal?.memberKind === 'SHOP_OWNER',
+    }),
     getShopCurrencyContext(guarded.shopId),
   ])
 

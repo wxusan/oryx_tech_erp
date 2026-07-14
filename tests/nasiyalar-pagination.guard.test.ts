@@ -20,7 +20,7 @@ describe('GET /api/nasiya: real pagination envelope', () => {
   })
 
   it('delegates to getShopNasiyalarList (shared with the SSR first page, so they never drift apart)', () => {
-    expect(route).toContain('getShopNasiyalarList(shopId, { search, status, resolutionState, skip, take })')
+    expect(route).toContain('getShopNasiyalarList(shopId, { search, status, cohort, resolutionState, skip, take })')
   })
 
   it('page size is a real per-page size, not the old 200/500 load-everything default', () => {
@@ -77,11 +77,13 @@ describe('nasiyalar client: mobile card view alongside the desktop list', () => 
     expect(client).toContain('hidden sm:block space-y-2')
   })
 
-  it('a separate card list is shown only below sm:, with a directly-visible Ko\'rish link and the payment action', () => {
+  it('a separate card list is shown only below sm:, with a full-card detail link and the payment action', () => {
     expect(client).toContain('sm:hidden space-y-3')
     const mobileBlockStart = client.indexOf('sm:hidden space-y-3')
-    const mobileBlock = client.slice(mobileBlockStart, mobileBlockStart + 3500)
-    expect(mobileBlock).toContain("Ko&apos;rish")
+    // The cohort amount/context adds a little more mobile-card markup; keep
+    // this guard scoped to the mobile block without truncating its actions.
+    const mobileBlock = client.slice(mobileBlockStart, mobileBlockStart + 6500)
+    expect(mobileBlock).toContain('<StretchedLink href={`/shop/nasiyalar/${n.id}`}')
     expect(mobileBlock).toContain("To&apos;lov qabul qilish")
     expect(mobileBlock).toContain('onClick={() => setPayFor(n)}')
   })

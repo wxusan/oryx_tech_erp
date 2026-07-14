@@ -124,7 +124,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currency = await getShopCurrencyContext(shopId)
-    const auditNote = note?.trim()
+    // A regular payment note is optional. Store blank input as NULL, never as
+    // a fabricated placeholder or an empty string.
+    const auditNote = note?.trim() || undefined
     let amountInput: Awaited<ReturnType<typeof moneyInputToUzs>>
     try {
       amountInput = await moneyInputToUzs(amount, parsed.data.inputCurrency)

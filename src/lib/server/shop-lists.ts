@@ -3,11 +3,13 @@ import 'server-only'
 import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { enrichLogsWithActors } from '@/lib/server/log-actors'
+import { resolveShopLogTargetHrefs, shopLogTargetKey } from '@/lib/server/log-links'
+import { redactShopStaffLogValue } from '@/lib/log-financial-redaction'
 import type { NasiyaDisplayStatus } from '@/lib/nasiya-utils'
 import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { computeNasiyaPaymentScore, type NasiyaPaymentScore } from '@/lib/nasiya-payment-score'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { computeSaleContractMargin, type PurchaseCostLike } from '@/lib/nasiya-contract'
+import { computeSaleContractMargin, contractScheduleOutstanding, roundContractMoney, type PurchaseCostLike } from '@/lib/nasiya-contract'
 import type { CurrencyCode } from '@/lib/currency'
 import { normalizePhone } from '@/lib/phone'
 import type { DeviceListItem, DeviceListSaleInfo } from '@/lib/device-list-contract'
@@ -60,6 +62,33 @@ function clampSkip(skip?: number): number {
 export type ShopDeviceSaleInfo = DeviceListSaleInfo
 export type ShopDeviceListItem = DeviceListItem
 
+/**
+ * The device list is also used as the canonical mutation/sync DTO. Make
+ * owner-financial visibility explicit at every call site so a worker never
+ * receives purchase cost or margin merely because the UI happens to hide it.
+ */
+export interface ShopDeviceListVisibility {
+  includeOwnerFinancials: boolean
+}
+
+/**
+ * A schedule-derived collection task, scoped to one operational tab. A
+ * contract can have a different unpaid schedule in both OVERDUE and
+ * DUE_TODAY; that is intentional. Each individual schedule belongs to only
+ * one cohort, and each contract appears at most once within a given tab.
+ */
+export type NasiyaCollectionCohort = 'OVERDUE' | 'DUE_TODAY' | 'UPCOMING'
+
+export interface NasiyaCollectionWorkItem {
+  cohort: NasiyaCollectionCohort
+  /** Outstanding balance of schedules in this cohort, in contract currency. */
+  outstanding: number
+  /** Earliest effective due date represented by this collection task. */
+  effectiveDue: string
+  /** First still-open schedule in this cohort; payment/defer actions target it. */
+  preferredScheduleId: string
+}
+
 export interface ShopNasiyaListItem {
   id: string
   totalAmount: number
@@ -96,6 +125,8 @@ export interface ShopNasiyaListItem {
     delayedUntil: string | null
     status: string
   }[]
+  /** Present only for a schedule-derived operational queue tab. */
+  collectionWorkItem: NasiyaCollectionWorkItem | null
   /** Professional payment-behavior score (docs/nasiya-payment-scoring.md). */
   paymentScore: NasiyaPaymentScore
 }
@@ -112,6 +143,7 @@ export interface ShopLogListItem {
   targetId: string
   note: string | null
   newValue: Prisma.JsonValue | null
+  href: string | null
 }
 
 export interface ShopLogsPayload {
@@ -203,6 +235,7 @@ const shopDeviceListSelect = {
       contractSalePrice: true,
       contractRemainingAmount: true,
       contractExchangeRateAtCreation: true,
+      dueDate: true,
     },
   },
   nasiya: {
@@ -243,6 +276,7 @@ function buildDeviceSaleInfo(device: {
     contractSalePrice: unknown
     contractRemainingAmount: unknown
     contractExchangeRateAtCreation: unknown
+    dueDate: Date | null
   }[]
   nasiya: {
     totalAmount: unknown
@@ -294,6 +328,7 @@ function buildDeviceSaleInfo(device: {
       contractProfit: returned ? null : computeSaleContractMargin(contractSoldPrice, contractCurrency, contractExchangeRateAtCreation, purchase),
       customerName: latestNasiya.customer.name,
       soldAt: latestNasiya.createdAt.toISOString(),
+      dueDate: null,
       returned,
       refundAmount,
     }
@@ -315,6 +350,7 @@ function buildDeviceSaleInfo(device: {
     contractProfit: returned ? null : computeSaleContractMargin(contractSoldPrice, contractCurrency, contractExchangeRateAtCreation, purchase),
     customerName: latestSale!.customer.name,
     soldAt: latestSale!.createdAt.toISOString(),
+    dueDate: latestSale!.dueDate?.toISOString() ?? null,
     returned,
     refundAmount,
   }
@@ -348,6 +384,22 @@ function mapShopDeviceListRow(device: ShopDeviceListRow): ShopDeviceListItem {
 }
 
 /**
+ * Remove information that exposes a shop's cost basis or margin. Omission is
+ * intentional: null/zero values are too easy to reinterpret as real data and
+ * would remain in client caches across subsequent navigation.
+ */
+export function redactShopDeviceOwnerFinancials(item: ShopDeviceListItem): ShopDeviceListItem {
+  const safeItem = { ...item }
+  delete safeItem.purchasePrice
+  if (!safeItem.saleInfo) return { ...safeItem, saleInfo: null }
+
+  const safeSaleInfo = { ...safeItem.saleInfo }
+  delete safeSaleInfo.profit
+  delete safeSaleInfo.contractProfit
+  return { ...safeItem, saleInfo: safeSaleInfo }
+}
+
+/**
  * Real page/skip/take pagination for the devices list — search/status are
  * applied server-side (via a Prisma `where`, run through `count()` with the
  * exact same clause as `findMany` so `total` always matches what could be
@@ -355,38 +407,167 @@ function mapShopDeviceListRow(device: ShopDeviceListRow): ShopDeviceListItem {
  * GET /api/devices (IMEI / model / color / storage / note / supplier phone /
  * customer name+phone).
  */
-export async function getShopDevicesList(shopId: string, query: ShopDevicesQuery = {}): Promise<ShopListPage<ShopDeviceListItem>> {
+export async function getShopDevicesList(
+  shopId: string,
+  query: ShopDevicesQuery,
+  visibility: ShopDeviceListVisibility,
+): Promise<ShopListPage<ShopDeviceListItem>> {
   const take = clampTake(query.take)
   const skip = clampSkip(query.skip)
   const where = buildShopDevicesWhere(shopId, query)
+  const debtPage = query.status === 'SOLD_DEBT'
+    ? await findShopDebtDeviceIdsByPriority({
+        shopId,
+        search: query.search,
+        condition: query.condition,
+        skip,
+        take,
+      })
+    : null
 
   const [rows, total] = await Promise.all([
     prisma.device.findMany({
-      where,
+      // The debt work queue is selected and ordered in PostgreSQL from its
+      // authoritative Sale due-date predicates. Fetch the complete DTO by
+      // the bounded IDs afterwards so the generic device projection stays
+      // the one source of display truth.
+      where: debtPage ? { shopId, deletedAt: null, id: { in: debtPage.ids } } : where,
       orderBy: { createdAt: 'desc' },
-      skip,
-      take,
+      ...(debtPage ? {} : { skip, take }),
       select: shopDeviceListSelect,
     }),
-    prisma.device.count({ where }),
+    debtPage ? Promise.resolve(debtPage.total) : prisma.device.count({ where }),
   ])
 
+  const orderedRows = debtPage
+    ? debtPage.ids.flatMap((id) => {
+        const row = rows.find((candidate) => candidate.id === id)
+        return row ? [row] : []
+      })
+    : rows
+
   return {
-    items: rows.map(mapShopDeviceListRow),
+    items: orderedRows.map((row) => {
+      const item = mapShopDeviceListRow(row)
+      return visibility.includeOwnerFinancials ? item : redactShopDeviceOwnerFinancials(item)
+    }),
     total,
     skip,
     take,
   }
 }
 
+interface DebtDeviceIdRow {
+  id: string
+  total: bigint
+}
+
+/**
+ * Qarz is an operational queue, not a newest-device list. This bounded
+ * set-based query gives every debt device one priority:
+ * overdue → due today → upcoming → legacy/no due date. It deliberately uses
+ * the same Asia/Tashkent bounds as the payment banners and never hydrates a
+ * shop's full inventory just to sort it in JavaScript.
+ */
+async function findShopDebtDeviceIdsByPriority(input: {
+  shopId: string
+  search?: string
+  condition?: 'NEW' | 'USED'
+  skip: number
+  take: number
+  now?: Date
+}) {
+  const search = input.search?.trim() || null
+  const searchDigits = search ? normalizePhone(search) : null
+  const searchImei = search?.replace(/[\s-]/g, '') || null
+  const { start, end } = tashkentDayRange(input.now ?? new Date())
+  const conditionPredicate = input.condition
+    ? Prisma.sql`AND d."conditionCode" = ${input.condition}`
+    : Prisma.empty
+  const searchPredicate = search
+    ? Prisma.sql`AND (
+        d."imei" ILIKE '%' || ${search} || '%'
+        OR d."model" ILIKE '%' || ${search} || '%'
+        OR d."color" ILIKE '%' || ${search} || '%'
+        OR d."storage" ILIKE '%' || ${search} || '%'
+        OR d."note" ILIKE '%' || ${search} || '%'
+        OR d."supplierPhone" ILIKE '%' || ${search} || '%'
+        OR c."name" ILIKE '%' || ${search} || '%'
+        OR c."phone" ILIKE '%' || ${search} || '%'
+        OR EXISTS (
+          SELECT 1 FROM "DeviceImei" di
+          WHERE di."deviceId" = d."id" AND di."shopId" = d."shopId" AND di."deletedAt" IS NULL
+            AND (di."value" ILIKE '%' || ${search} || '%'
+              OR (${searchImei}::text IS NOT NULL AND di."normalizedValue" ILIKE '%' || ${searchImei} || '%'))
+        )
+        OR EXISTS (
+          SELECT 1 FROM "Supplier" supplier
+          WHERE supplier."id" = d."supplierId" AND supplier."shopId" = d."shopId"
+            AND (supplier."name" ILIKE '%' || ${search} || '%'
+              OR supplier."phone" ILIKE '%' || ${search} || '%')
+        )
+        OR (${searchDigits}::text IS NOT NULL AND c."additionalPhones" @> ARRAY[${searchDigits}]::text[])
+      )`
+    : Prisma.empty
+
+  const rows = await prisma.$queryRaw<DebtDeviceIdRow[]>(Prisma.sql`
+    WITH debt_devices AS (
+      SELECT
+        d."id",
+        sale."dueDate" AS due_date,
+        sale."createdAt" AS sale_created_at,
+        CASE
+          WHEN sale."dueDate" < ${start} THEN 0
+          WHEN sale."dueDate" < ${end} THEN 1
+          WHEN sale."dueDate" IS NOT NULL THEN 2
+          ELSE 3
+        END AS payment_priority
+      FROM "Device" d
+      JOIN LATERAL (
+        SELECT s."dueDate", s."createdAt", s."customerId"
+        FROM "Sale" s
+        WHERE s."deviceId" = d."id" AND s."shopId" = d."shopId"
+          AND s."deletedAt" IS NULL
+          AND s."returnedAt" IS NULL
+          AND s."paidFully" = false
+          AND s."contractRemainingAmount" > 0
+        ORDER BY s."createdAt" DESC, s."id" DESC
+        LIMIT 1
+      ) sale ON true
+      JOIN "Customer" c ON c."id" = sale."customerId" AND c."shopId" = d."shopId"
+      WHERE d."shopId" = ${input.shopId}
+        AND d."deletedAt" IS NULL
+        AND d."status" = 'SOLD_DEBT'
+        ${conditionPredicate}
+        ${searchPredicate}
+    )
+    SELECT "id", count(*) OVER()::bigint AS total
+    FROM debt_devices
+    ORDER BY payment_priority ASC, due_date ASC NULLS LAST, sale_created_at DESC, "id" ASC
+    OFFSET ${input.skip} LIMIT ${input.take}
+  `)
+
+  return {
+    ids: rows.map((row) => row.id),
+    total: rows[0] ? Number(rows[0].total) : 0,
+  }
+}
+
 /** Canonical list DTO resolver used by mutation responses and incremental sync. */
-export async function getShopDeviceListItemsByIds(shopId: string, ids: readonly string[]): Promise<ShopDeviceListItem[]> {
+export async function getShopDeviceListItemsByIds(
+  shopId: string,
+  ids: readonly string[],
+  visibility: ShopDeviceListVisibility,
+): Promise<ShopDeviceListItem[]> {
   if (ids.length === 0) return []
   const rows = await prisma.device.findMany({
     where: { shopId, id: { in: [...new Set(ids)] }, deletedAt: null },
     select: shopDeviceListSelect,
   })
-  const byId = new Map(rows.map((row) => [row.id, mapShopDeviceListRow(row)]))
+  const byId = new Map(rows.map((row) => {
+    const item = mapShopDeviceListRow(row)
+    return [row.id, visibility.includeOwnerFinancials ? item : redactShopDeviceOwnerFinancials(item)]
+  }))
   return ids.flatMap((id) => {
     const item = byId.get(id)
     return item ? [item] : []
@@ -394,6 +575,7 @@ export async function getShopDeviceListItemsByIds(shopId: string, ids: readonly 
 }
 
 export type NasiyaStatusFilter = NasiyaStatus
+export type NasiyaCohortFilter = 'ACTIVE' | NasiyaCollectionCohort
 
 export interface ShopNasiyalarQuery {
   search?: string
@@ -403,10 +585,17 @@ export interface ShopNasiyalarQuery {
    * COMPLETED while its native schedule still owes money.
    */
   status?: NasiyaStatusFilter
+  /**
+   * Operational due-date queue. Unlike the historical parent status, this is
+   * calculated from the open schedule dates with Asia/Tashkent boundaries.
+   */
+  cohort?: NasiyaCohortFilter
   /** Defaults to ACTIVE so normal collection lists are operational work queues. */
   resolutionState?: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
   skip?: number
   take?: number
+  /** Internal clock injection keeps derived page selection and DTO labels aligned in tests. */
+  now?: Date
 }
 
 export function buildShopNasiyalarWhere(
@@ -454,6 +643,68 @@ interface DerivedStatusIdRow {
   total: bigint
 }
 
+const OPEN_NASIYA_SCHEDULE_STATUSES = new Set(['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'])
+
+type CollectionSchedule = {
+  id: string
+  dueDate: Date
+  delayedUntil: Date | null
+  status: string
+  expectedAmount: unknown
+  paidAmount: unknown
+  contractExpectedAmount: unknown
+  contractPaidAmount: unknown
+}
+
+/**
+ * Builds the visible work-item context from the exact selected page of
+ * schedules. The PostgreSQL cohort query chooses/paginates contracts; this
+ * function supplies the per-cohort amount and first actionable schedule for
+ * that already-bounded page. It deliberately does not use the parent
+ * contract balance: an old installment must not make a separate installment
+ * due today look overdue or inflate its amount.
+ */
+function deriveNasiyaCollectionWorkItem(input: {
+  cohort: NasiyaCohortFilter | undefined
+  contractCurrency: CurrencyCode
+  schedules: readonly CollectionSchedule[]
+  now: Date
+}): NasiyaCollectionWorkItem | null {
+  if (!input.cohort || input.cohort === 'ACTIVE') return null
+
+  const { start, end } = tashkentDayRange(input.now)
+  const matches = input.schedules.flatMap((schedule) => {
+    if (!OPEN_NASIYA_SCHEDULE_STATUSES.has(schedule.status)) return []
+
+    const contractExpected = Number(schedule.contractExpectedAmount)
+    const contractPaid = Number(schedule.contractPaidAmount)
+    const outstanding = Number.isFinite(contractExpected) && Number.isFinite(contractPaid)
+      ? contractScheduleOutstanding(contractExpected, contractPaid, input.contractCurrency)
+      : Math.max(0, Number(schedule.expectedAmount) - Number(schedule.paidAmount))
+    if (!Number.isFinite(outstanding) || outstanding <= 0) return []
+
+    const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
+    const dueAt = effectiveDue.getTime()
+    const belongsToCohort = input.cohort === 'OVERDUE'
+      ? dueAt < start.getTime()
+      : input.cohort === 'DUE_TODAY'
+        ? dueAt >= start.getTime() && dueAt < end.getTime()
+        : dueAt >= end.getTime()
+    return belongsToCohort ? [{ id: schedule.id, effectiveDue, outstanding }] : []
+  }).sort((left, right) => {
+    const byDue = left.effectiveDue.getTime() - right.effectiveDue.getTime()
+    return byDue || left.id.localeCompare(right.id)
+  })
+
+  if (matches.length === 0) return null
+  return {
+    cohort: input.cohort,
+    outstanding: roundContractMoney(matches.reduce((sum, schedule) => sum + schedule.outstanding, 0), input.contractCurrency),
+    effectiveDue: matches[0].effectiveDue.toISOString(),
+    preferredScheduleId: matches[0].id,
+  }
+}
+
 /**
  * Page a derived nasiya status in PostgreSQL instead of loading every contract
  * and filtering in Node. The SQL mirrors deriveContractNasiyaStatus for the
@@ -489,7 +740,6 @@ export async function findShopNasiyaIdsByDerivedStatus(input: {
         OR (${searchDigits}::text IS NOT NULL AND c."additionalPhones" @> ARRAY[${searchDigits}]::text[])
       )`
     : Prisma.empty
-
   const rows = await prisma.$queryRaw<DerivedStatusIdRow[]>(Prisma.sql`
     WITH contract_rows AS (
       SELECT
@@ -509,7 +759,7 @@ export async function findShopNasiyaIdsByDerivedStatus(input: {
           END
         ) FILTER (WHERE s."id" IS NOT NULL), false) AS all_schedules_paid,
         coalesce(bool_or(
-          s."status" <> 'CANCELLED'
+          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
           AND (CASE WHEN n."contractCurrency" = 'USD'
             THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
             ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
@@ -517,7 +767,7 @@ export async function findShopNasiyaIdsByDerivedStatus(input: {
           AND coalesce(s."delayedUntil", s."dueDate") < ${start}
         ), false) AS has_overdue,
         min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
-          s."status" <> 'CANCELLED'
+          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
           AND CASE WHEN n."contractCurrency" = 'USD'
             THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
             ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
@@ -561,14 +811,179 @@ export async function findShopNasiyaIdsByDerivedStatus(input: {
 }
 
 /**
+ * Page the operational Nasiya collection queues in PostgreSQL. Cohorts are
+ * defined per unpaid schedule at Tashkent midnight, never by a parent
+ * contract's most severe schedule. A contract with distinct overdue and
+ * due-today schedules therefore appears once in each relevant queue; no
+ * individual schedule can appear in more than one queue.
+ */
+export async function findShopNasiyaIdsByCohort(input: {
+  shopId: string
+  cohort: NasiyaCohortFilter
+  search?: string
+  skip: number
+  take: number
+  now?: Date
+}) {
+  const search = input.search?.trim() || null
+  const searchDigits = search ? normalizePhone(search) : null
+  const searchImei = search?.replace(/[\s-]/g, '') || null
+  const { start, end } = tashkentDayRange(input.now ?? new Date())
+  const searchPredicate = search
+    ? Prisma.sql`AND (
+        c."name" ILIKE '%' || ${search} || '%'
+        OR c."phone" ILIKE '%' || ${search} || '%'
+        OR d."model" ILIKE '%' || ${search} || '%'
+        OR d."imei" ILIKE '%' || ${search} || '%'
+        OR n."note" ILIKE '%' || ${search} || '%'
+        OR EXISTS (
+          SELECT 1 FROM "DeviceImei" di
+          WHERE di."deviceId" = d."id" AND di."shopId" = n."shopId" AND di."deletedAt" IS NULL
+            AND (di."value" ILIKE '%' || ${search} || '%'
+              OR (${searchImei}::text IS NOT NULL AND di."normalizedValue" ILIKE '%' || ${searchImei} || '%'))
+        )
+        OR (${searchDigits}::text IS NOT NULL AND c."additionalPhones" @> ARRAY[${searchDigits}]::text[])
+      )`
+    : Prisma.empty
+  // Keep the selected work queue explicit in the generated SQL rather than
+  // binding a text parameter into boolean expressions. Besides avoiding a
+  // PostgreSQL type-inference edge case, this makes the schedule-level
+  // cohort rules easy to audit. UPCOMING deliberately remains a next-action
+  // queue: it excludes contracts that need an overdue or today's action.
+  const cohortPredicate = input.cohort === 'ACTIVE'
+    // This is the shop's live-contract tab: late Nasiya is still active, so
+    // it belongs here as well as in its more specific OVERDUE work queue.
+    ? Prisma.sql`display_status IN ('ACTIVE', 'OVERDUE')`
+    : input.cohort === 'OVERDUE'
+      ? Prisma.sql`display_status IN ('ACTIVE', 'OVERDUE') AND has_overdue`
+      : input.cohort === 'DUE_TODAY'
+        ? Prisma.sql`display_status IN ('ACTIVE', 'OVERDUE') AND has_due_today`
+        : Prisma.sql`display_status = 'ACTIVE' AND NOT has_overdue AND NOT has_due_today AND has_upcoming`
+  const cohortDueOrder = input.cohort === 'OVERDUE'
+    ? Prisma.sql`overdue_due`
+    : input.cohort === 'DUE_TODAY'
+      ? Prisma.sql`due_today_due`
+      : input.cohort === 'UPCOMING'
+        ? Prisma.sql`upcoming_due`
+        : Prisma.sql`next_due`
+
+  const rows = await prisma.$queryRaw<DerivedStatusIdRow[]>(Prisma.sql`
+    WITH contract_rows AS (
+      SELECT
+        n."id",
+        n."createdAt",
+        n."status",
+        n."contractCurrency",
+        n."contractRemainingAmount",
+        count(s."id") AS schedule_count,
+        coalesce(bool_and(
+          CASE
+            WHEN s."status" = 'CANCELLED' THEN true
+            ELSE CASE WHEN n."contractCurrency" = 'USD'
+              THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+              ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+            END <= 0
+          END
+        ) FILTER (WHERE s."id" IS NOT NULL), false) AS all_schedules_paid,
+        coalesce(bool_or(
+          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+          AND (CASE WHEN n."contractCurrency" = 'USD'
+            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+          END > 0)
+          AND coalesce(s."delayedUntil", s."dueDate") < ${start}
+        ), false) AS has_overdue,
+        coalesce(bool_or(
+          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+          AND (CASE WHEN n."contractCurrency" = 'USD'
+            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+          END > 0)
+          AND coalesce(s."delayedUntil", s."dueDate") >= ${start}
+          AND coalesce(s."delayedUntil", s."dueDate") < ${end}
+        ), false) AS has_due_today,
+        coalesce(bool_or(
+          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+          AND (CASE WHEN n."contractCurrency" = 'USD'
+            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+          END > 0)
+          AND coalesce(s."delayedUntil", s."dueDate") >= ${end}
+        ), false) AS has_upcoming,
+        min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
+          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+          AND CASE WHEN n."contractCurrency" = 'USD'
+            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+          END > 0
+        ) AS next_due,
+        min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
+          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+          AND CASE WHEN n."contractCurrency" = 'USD'
+            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+          END > 0
+          AND coalesce(s."delayedUntil", s."dueDate") < ${start}
+        ) AS overdue_due,
+        min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
+          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+          AND CASE WHEN n."contractCurrency" = 'USD'
+            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+          END > 0
+          AND coalesce(s."delayedUntil", s."dueDate") >= ${start}
+          AND coalesce(s."delayedUntil", s."dueDate") < ${end}
+        ) AS due_today_due,
+        min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
+          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+          AND CASE WHEN n."contractCurrency" = 'USD'
+            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
+            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
+          END > 0
+          AND coalesce(s."delayedUntil", s."dueDate") >= ${end}
+        ) AS upcoming_due
+      FROM "Nasiya" n
+      JOIN "Customer" c ON c."id" = n."customerId" AND c."shopId" = n."shopId"
+      JOIN "Device" d ON d."id" = n."deviceId" AND d."shopId" = n."shopId"
+      LEFT JOIN "NasiyaSchedule" s ON s."nasiyaId" = n."id" AND s."shopId" = n."shopId"
+      WHERE n."shopId" = ${input.shopId} AND n."deletedAt" IS NULL AND n."returnedAt" IS NULL
+        AND n."resolutionState" = 'ACTIVE'
+      ${searchPredicate}
+      GROUP BY n."id"
+    ), derived AS (
+      SELECT *, CASE
+        WHEN "status" = 'CANCELLED' THEN 'CANCELLED'
+        WHEN (schedule_count > 0 AND all_schedules_paid)
+          OR (schedule_count = 0 AND CASE WHEN "contractCurrency" = 'USD'
+            THEN round(greatest("contractRemainingAmount", 0), 2)
+            ELSE round(greatest("contractRemainingAmount", 0), 0)
+          END <= 0) THEN 'COMPLETED'
+        WHEN has_overdue THEN 'OVERDUE'
+        ELSE 'ACTIVE'
+      END AS display_status
+      FROM contract_rows
+    )
+    SELECT "id", count(*) OVER()::bigint AS total
+    FROM derived
+    WHERE ${cohortPredicate}
+    ORDER BY ${cohortDueOrder} ASC NULLS LAST, "createdAt" DESC, "id" ASC
+    OFFSET ${input.skip} LIMIT ${input.take}
+  `)
+
+  return {
+    ids: rows.map((row) => row.id),
+    total: rows[0] ? Number(rows[0].total) : 0,
+  }
+}
+
+/**
  * Real page/skip/take pagination for the nasiyalar list. `search` mirrors
  * the OR clause already used by GET /api/nasiya (customer name/phone,
  * device model/IMEI, note). Rows are ordered `createdAt desc` at the
  * database level (required for `total`/`skip`/`take` to mean anything
- * across pages); the overdue-first / earliest-next-payment secondary sort
- * that used to run across the whole shop's data is preserved but now only
- * reorders the current page — see docs/currency-accounting-model.md for the
- * money fields and nasiya-payment-scoring.md for `paymentScore`.
+ * across pages). Cohort pages retain their database order, including their
+ * cohort-specific effective due date; the unfiltered page keeps its local
+ * overdue-first / earliest-next-payment ordering.
  */
 export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQuery = {}): Promise<ShopListPage<ShopNasiyaListItem>> {
   // Payment-score reason text must reflect the shop's selected display
@@ -577,19 +992,25 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
 
   const take = clampTake(query.take)
   const skip = clampSkip(query.skip)
+  // Resolve one clock for both the set-based queue and DTO-derived labels.
+  // This avoids a midnight race where a row is selected by one day boundary
+  // and rendered by another.
+  const now = query.now ?? new Date()
   const where = buildShopNasiyalarWhere(shopId, query)
-  const derivedStatusPage = query.status
-    ? await findShopNasiyaIdsByDerivedStatus({ shopId, status: query.status, search: query.search, skip, take })
+  const derivedPage = query.cohort
+    ? await findShopNasiyaIdsByCohort({ shopId, cohort: query.cohort, search: query.search, skip, take, now })
+    : query.status
+    ? await findShopNasiyaIdsByDerivedStatus({ shopId, status: query.status, search: query.search, skip, take, now })
     : null
 
   const [rows, rawTotal] = await Promise.all([
     prisma.nasiya.findMany({
-    where: derivedStatusPage ? { ...where, id: { in: derivedStatusPage.ids } } : where,
+    where: derivedPage ? { ...where, id: { in: derivedPage.ids } } : where,
     orderBy: { createdAt: 'desc' },
     // A requested status is itself derived from contract schedules. Fetch
     // matching search candidates first, then filter/paginate the derived
     // status below; raw status filtering here would hide P0-01 debt.
-    ...(derivedStatusPage ? {} : { skip, take }),
+    ...(derivedPage ? {} : { skip, take }),
     select: {
       id: true,
       totalAmount: true,
@@ -639,13 +1060,20 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
       },
     },
     }),
-    derivedStatusPage ? Promise.resolve(derivedStatusPage.total) : prisma.nasiya.count({ where }),
+    derivedPage ? Promise.resolve(derivedPage.total) : prisma.nasiya.count({ where }),
   ])
 
-  // Single `now` for the whole batch so all rows are judged against the same instant.
-  const now = new Date()
+  // Prisma's `id IN (...)` does not retain the ordered raw-CTE ID list.
+  // Restore that stable database order before mapping the canonical DTO.
+  const orderedRows = derivedPage
+    ? derivedPage.ids.flatMap((id) => {
+        const row = rows.find((candidate) => candidate.id === id)
+        return row ? [row] : []
+      })
+    : rows
 
-  const derivedItems = rows
+  // Single `now` for the whole batch so all rows are judged against the same instant.
+  const derivedItems = orderedRows
     .map((nasiya) => {
       const scheduleInputs = nasiya.schedules.map((s) => ({
         status: s.status,
@@ -684,6 +1112,12 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
         currency,
         nasiya.contractCurrency,
       )
+      const collectionWorkItem = deriveNasiyaCollectionWorkItem({
+        cohort: query.cohort,
+        contractCurrency: nasiya.contractCurrency,
+        schedules: nasiya.schedules,
+        now,
+      })
 
       return {
         id: nasiya.id,
@@ -716,10 +1150,13 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
           delayedUntil: schedule.delayedUntil?.toISOString() ?? null,
           status: schedule.status,
         })),
+        collectionWorkItem,
         paymentScore,
       }
     })
-    .sort((left, right) => {
+  const items = derivedPage
+    ? derivedItems
+    : derivedItems.sort((left, right) => {
       // Overdue contracts first, then by earliest upcoming payment, then newest.
       if (left.isOverdue !== right.isOverdue) return left.isOverdue ? -1 : 1
 
@@ -733,17 +1170,21 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
       return nextLeft - nextRight
     })
 
-  const matchingItems = query.status ? derivedItems.filter((item) => item.displayStatus === query.status) : derivedItems
-  const items = matchingItems
   const total = rawTotal
 
   return { items, total, skip, take }
 }
 
-export async function getShopLogsInitial(shopId: string): Promise<ShopLogsPayload> {
-  const where = {
+export async function getShopLogsInitial(
+  shopId: string,
+  visibility: { includeOwnerFinancials: boolean },
+): Promise<ShopLogsPayload> {
+  const where: Prisma.LogWhereInput = {
     shopId,
     actorType: 'SHOP_ADMIN' as const,
+    // Historic RESTOCK rows are retained for platform audit but intentionally
+    // absent from the shop-facing log bootstrap and its visible total.
+    NOT: { action: 'RESTOCK', targetType: 'Device' },
   }
 
   const [logs, total] = await Promise.all([
@@ -766,13 +1207,18 @@ export async function getShopLogsInitial(shopId: string): Promise<ShopLogsPayloa
     prisma.log.count({ where }),
   ])
 
-  const logsWithActors = await enrichLogsWithActors(logs)
+  const [logsWithActors, hrefs] = await Promise.all([
+    enrichLogsWithActors(logs),
+    resolveShopLogTargetHrefs(shopId, logs),
+  ])
 
   return {
     total,
     logs: logsWithActors.map((log) => ({
       ...log,
+      ...(!visibility.includeOwnerFinancials ? { newValue: redactShopStaffLogValue(log.newValue) } : {}),
       createdAt: log.createdAt.toISOString(),
+      href: hrefs.get(shopLogTargetKey(log)) ?? null,
     })),
   }
 }

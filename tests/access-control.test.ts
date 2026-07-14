@@ -113,8 +113,9 @@ describe('owner and staff authorization', () => {
 
   it('preserves legacy operational access without expanding it to new owner-only powers', () => {
     expect(principalCan(principal({ legacyFullAccess: true }), 'CASH_SALE_CREATE')).toBe(true)
-    expect(principalCan(principal({ legacyFullAccess: true }), 'REPORT_VIEW')).toBe(true)
-    expect(principalCan(principal({ legacyFullAccess: true }), 'EXPORT_DATA')).toBe(true)
+    expect(principalCan(principal({ legacyFullAccess: true }), 'LOG_VIEW')).toBe(true)
+    expect(principalCan(principal({ legacyFullAccess: true }), 'REPORT_VIEW')).toBe(false)
+    expect(principalCan(principal({ legacyFullAccess: true }), 'EXPORT_DATA')).toBe(false)
     expect(principalCan(principal({ legacyFullAccess: true }), 'WRITEOFF_MANAGE')).toBe(false)
     expect(principalCan(principal({ legacyFullAccess: true }), 'MEMBER_MANAGE')).toBe(false)
   })

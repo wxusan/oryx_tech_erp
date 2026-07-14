@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
 import { getReceivableCohortPage, getReceivableCohortSummaries } from '@/lib/server/shop-stats-queries'
+import { getShopNasiyalarList } from '@/lib/server/shop-lists'
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL or DATABASE_URL is required')
@@ -177,8 +178,13 @@ describe('authoritative due-today and overdue receivable cohorts', () => {
       includeNasiya: true,
     }
     const summaries = await getReceivableCohortSummaries(input)
+    // Each open Nasiya schedule is classified at the Tashkent boundary before
+    // the contract work item is formed. The $300 due today must never be
+    // counted as part of the $200 overdue obligation.
     expect(summaries.OVERDUE).toMatchObject({ nativeUzs: 300, nativeUsd: 0, dealCount: 2, customerCount: 1 })
+    expect(summaries.OVERDUE.sources.nasiya).toMatchObject({ nativeUzs: 200, dealCount: 1, customerCount: 1 })
     expect(summaries.DUE_TODAY).toMatchObject({ nativeUzs: 700, nativeUsd: 50, dealCount: 3, customerCount: 2 })
+    expect(summaries.DUE_TODAY.sources.nasiya).toMatchObject({ nativeUzs: 300, nativeUsd: 0, dealCount: 1, customerCount: 1 })
 
     const overdue = await getReceivableCohortPage({ ...input, cohort: 'OVERDUE', skip: 0, take: 100 })
     const dueToday = await getReceivableCohortPage({ ...input, cohort: 'DUE_TODAY', skip: 0, take: 100 })
@@ -189,5 +195,44 @@ describe('authoritative due-today and overdue receivable cohorts', () => {
     expect(dueToday.items.filter((item) => item.currency === 'USD').reduce((sum, item) => sum + item.outstanding, 0)).toBe(50)
     expect([...overdue.items, ...dueToday.items]).not.toContainEqual(expect.objectContaining({ outstanding: 777 }))
     expect([...overdue.items, ...dueToday.items]).not.toContainEqual(expect.objectContaining({ outstanding: 999 }))
+    const overdueNasiya = overdue.items.find((item) => item.dealType === 'nasiya' && item.dealId === nasiya.id)
+    const dueTodayNasiya = dueToday.items.find((item) => item.dealType === 'nasiya' && item.dealId === nasiya.id)
+    expect(overdueNasiya).toMatchObject({ outstanding: 200, effectiveDue: new Date('2026-07-12T18:59:59.999Z') })
+    expect(dueTodayNasiya).toMatchObject({ outstanding: 300, effectiveDue: todayStart })
+
+    // The Nasiya destination tabs use the same schedule boundaries. The
+    // contract is one work item in each distinct tab because it has distinct
+    // overdue and due-today schedule obligations; neither schedule is placed
+    // in the wrong cohort.
+    const nasiyaOverdue = await getShopNasiyalarList(shop.id, {
+      cohort: 'OVERDUE',
+      skip: 0,
+      take: 100,
+      now: new Date('2026-07-13T12:00:00.000Z'),
+    })
+    const nasiyaDueToday = await getShopNasiyalarList(shop.id, {
+      cohort: 'DUE_TODAY',
+      skip: 0,
+      take: 100,
+      now: new Date('2026-07-13T12:00:00.000Z'),
+    })
+    const overdueNasiyaListItem = nasiyaOverdue.items.find((item) => item.id === nasiya.id)
+    const dueTodayNasiyaListItem = nasiyaDueToday.items.find((item) => item.id === nasiya.id)
+    expect(overdueNasiyaListItem).toMatchObject({
+      collectionWorkItem: {
+        cohort: 'OVERDUE',
+        outstanding: 200,
+        effectiveDue: '2026-07-12T18:59:59.999Z',
+        preferredScheduleId: expect.any(String),
+      },
+    })
+    expect(dueTodayNasiyaListItem).toMatchObject({
+      collectionWorkItem: {
+        cohort: 'DUE_TODAY',
+        outstanding: 300,
+        effectiveDue: todayStart.toISOString(),
+        preferredScheduleId: expect.any(String),
+      },
+    })
   })
 })

@@ -7,7 +7,6 @@ export type LogCategory =
   | 'payment'
   | 'supplier_payment'
   | 'return'
-  | 'restock'
   | 'import_nasiya'
   | 'customer'
   | 'settings'
@@ -23,7 +22,6 @@ export const logCategoryOptions: { value: LogCategory; label: string }[] = [
   { value: 'payment', label: "Sotuv to'lovlari" },
   { value: 'supplier_payment', label: "Yetkazib beruvchi to'lovi" },
   { value: 'return', label: 'Qaytarish' },
-  { value: 'restock', label: 'Qayta sotuv' },
   { value: 'import_nasiya', label: 'Eski nasiya import' },
   { value: 'customer', label: 'Mijozlar' },
   { value: 'settings', label: 'Sozlamalar' },
@@ -58,7 +56,10 @@ export function logCategoryFor(action: string, targetType: string): LogCategory 
   if (targetType === 'Device') {
     if (action === 'SELL') return 'sale'
     if (action === 'RETURN') return 'return'
-    if (action === 'RESTOCK') return 'restock'
+    // RESTOCK remains an immutable audit event, but it is deliberately
+    // excluded from every shop-facing log query. This fallback prevents a
+    // stale cached record from creating a now-removed presentation category.
+    if (action === 'RESTOCK') return 'device'
     return 'device'
   }
   if (targetType === 'Customer') return 'customer'
@@ -105,7 +106,6 @@ const logCategoryPairs: Record<Exclude<LogCategory, 'all'>, Array<{ action?: str
   ],
   supplier_payment: [{ targetType: 'SupplierPayable' }],
   return: [{ action: 'RETURN', targetType: 'Device' }],
-  restock: [{ action: 'RESTOCK', targetType: 'Device' }],
   import_nasiya: [{ action: 'IMPORT_NASIYA', targetType: 'Nasiya' }],
   customer: [
     { targetType: 'Customer' },

@@ -2,12 +2,21 @@ import { z } from 'zod'
 import {
   SHOP_PERMISSION_CATALOG,
   SHOP_PERMISSION_CODES,
+  type ShopFeatureCode,
   type ShopPermissionCode,
 } from '@/lib/access-control'
 import { passwordSchema, phoneSchema } from '@/lib/validations'
 
-export const staffAssignablePermissionCodes = SHOP_PERMISSION_CATALOG
-  .filter((permission) => !permission.ownerOnly)
+/**
+ * Log access is a deliberately separate owner decision. Keeping it out of
+ * the generic permission checklist prevents it from being enabled by accident
+ * while still storing the authoritative LOG_VIEW grant in the same typed
+ * permission table.
+ */
+export const STAFF_LOGS_PERMISSION: ShopPermissionCode = 'LOG_VIEW'
+
+export const staffAssignablePermissionCodes: readonly ShopPermissionCode[] = SHOP_PERMISSION_CATALOG
+  .filter((permission) => !permission.ownerOnly && permission.code !== STAFF_LOGS_PERMISSION)
   .map((permission) => permission.code)
 
 export type StaffAssignablePermissionCode = (typeof staffAssignablePermissionCodes)[number]
@@ -20,11 +29,36 @@ const permissionCodesSchema = z.array(z.enum(SHOP_PERMISSION_CODES))
     "Xodimga faqat operatsion ruxsatlar berilishi mumkin",
   )
 
+export function withStaffLogsPermission(
+  permissionCodes: readonly ShopPermissionCode[],
+  logsViewEnabled: boolean,
+): ShopPermissionCode[] {
+  const withoutLogs = permissionCodes.filter((code) => code !== STAFF_LOGS_PERMISSION)
+  return logsViewEnabled ? [...withoutLogs, STAFF_LOGS_PERMISSION] : withoutLogs
+}
+
+/**
+ * Existing staff may still be on the one-time legacy compatibility model.
+ * When an owner first saves that member, materialize only the permissions the
+ * member could actually use under the current package, never owner-only ones.
+ */
+export function legacyStaffPermissionCodes(
+  enabledFeatures: ReadonlySet<ShopFeatureCode>,
+): ShopPermissionCode[] {
+  return SHOP_PERMISSION_CATALOG
+    .filter((permission) => (
+      !permission.ownerOnly &&
+      (!permission.featureCode || enabledFeatures.has(permission.featureCode))
+    ))
+    .map((permission) => permission.code)
+}
+
 const memberFields = {
   name: z.string().trim().min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak").max(100),
   phone: phoneSchema,
   telegramId: z.string().trim().regex(/^\d{5,20}$/, "Telegram ID faqat raqamlardan iborat bo'lishi kerak").optional().or(z.literal('')),
   telegramNotificationsEnabled: z.boolean().default(true),
+  logsViewEnabled: z.boolean().default(true),
   permissionCodes: permissionCodesSchema.default([]),
 }
 
@@ -41,6 +75,7 @@ export const updateShopStaffSchema = z.object({
   phone: phoneSchema.optional(),
   password: passwordSchema.optional(),
   telegramNotificationsEnabled: z.boolean().optional(),
+  logsViewEnabled: z.boolean().optional(),
   permissionCodes: permissionCodesSchema.optional(),
   isActive: z.boolean().optional(),
   note: z.string().trim().min(5, "Sabab kamida 5 ta belgidan iborat bo'lishi kerak").max(1000),
@@ -48,6 +83,7 @@ export const updateShopStaffSchema = z.object({
   (value) => value.name !== undefined || value.phone !== undefined ||
     value.password !== undefined ||
     value.telegramNotificationsEnabled !== undefined || value.permissionCodes !== undefined ||
+    value.logsViewEnabled !== undefined ||
     value.isActive !== undefined,
   "Kamida bitta o'zgarish kiritilishi kerak",
 )
@@ -65,6 +101,7 @@ export interface ShopStaffDto {
   telegramId: string | null
   telegramVerifiedAt: string | null
   telegramNotificationsEnabled: boolean
+  logsViewEnabled: boolean
   permissionVersion: number
   permissionCodes: ShopPermissionCode[]
   createdAt: string

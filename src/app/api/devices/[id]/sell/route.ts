@@ -86,7 +86,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
-        include: { shop: { select: { name: true } }, imeis: { where: { deletedAt: null } } },
+        include: { shop: { select: { name: true, ownerAdminId: true } }, imeis: { where: { deletedAt: null } } },
       })
 
       if (!device) throw { status: 404, message: "Qurilma topilmadi" }
@@ -154,7 +154,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }
 
       const shopAdmins = await tx.shopAdmin.findMany({
-        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
+        // This template includes profit; only the shop owner may receive it.
+        where: {
+          shopId,
+          id: device.shop.ownerAdminId ?? '__no-shop-owner__',
+          deletedAt: null,
+          isActive: true,
+          telegramId: { not: '' },
+          telegramVerifiedAt: { not: null },
+        },
       })
       for (const admin of shopAdmins) {
         await tx.notification.create({

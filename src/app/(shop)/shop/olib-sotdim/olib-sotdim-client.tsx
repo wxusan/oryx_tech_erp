@@ -4,6 +4,7 @@ import { useEffect, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
+import { StretchedLink } from '@/components/ui/stretched-link'
 import { Input } from '@/components/ui/input'
 import { DateInput } from '@/components/ui/date-input'
 import { Textarea } from '@/components/ui/textarea'
@@ -71,19 +72,29 @@ interface OlibSotdimRow {
     storage: string | null
     storageDisplay: string | null
     conditionLabel: string
-    purchasePrice: number
-    purchaseCurrency: 'UZS' | 'USD'
+    /** Owner-only cost fields are omitted for a staff response. */
+    purchasePrice?: number
+    purchaseCurrency?: 'UZS' | 'USD'
   }
-  sale: { id: string; salePrice: number; contractCurrency: 'UZS' | 'USD'; customer: { name: string; phone: string } }
-  profit: number
+  sale: {
+    id: string
+    customer: { name: string; phone: string }
+    /** Owner-only: supplier payable + sale price would reveal margin. */
+    salePrice?: number
+    contractCurrency?: 'UZS' | 'USD'
+  }
+  /** Owner-only margin, omitted for staff. */
+  profit?: number
 }
 
 export default function OlibSotdimClient({ initialSearch, initialPage }: { initialSearch: string; initialPage: number }) {
   const { currency } = useShopCurrency()
   const scope = useAuthenticatedQueryScope()
-  const { can } = useShopAccess()
+  const { can, memberKind } = useShopAccess()
   const canManage = can('OLIB_MANAGE')
   const canReceivePayment = can('PAYMENT_RECEIVE')
+  const canViewDevice = can('INVENTORY_VIEW')
+  const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const [search, setSearch] = useState(initialSearch)
   const [committedSearch, setCommittedSearch] = useState(initialSearch)
   const [page, setPage] = useState(initialPage)
@@ -181,11 +192,13 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
           <p className="text-sm text-zinc-500 mt-0.5">Boshqa do&apos;kondan olib sotilgan qurilmalar va yetkazib beruvchi qarzlari</p>
         </div>
         {canManage && (
-          <Link href="/shop/olib-sotdim/new">
-            <Button className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">
-              + Olib-sotdim
-            </Button>
-          </Link>
+          <Button
+            render={<Link href="/shop/olib-sotdim/new" />}
+            size="lg"
+            className="bg-zinc-900 text-white hover:bg-zinc-800"
+          >
+            + Olib-sotdim
+          </Button>
         )}
       </div>
 
@@ -222,8 +235,16 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
         ) : rows.length === 0 ? (
           <div className="rounded border border-zinc-200 bg-white px-4 py-8 text-center text-sm text-zinc-400">Operatsiya topilmadi</div>
         ) : rows.map((row) => (
-          <article key={row.id} className="space-y-3 rounded-lg border border-zinc-200 bg-white p-4">
-            <div className="flex items-start justify-between gap-3">
+          <article key={row.id} className="relative space-y-3 rounded-lg border border-zinc-200 bg-white p-4 transition-colors hover:bg-zinc-50">
+            {canViewDevice && (
+              <StretchedLink
+                href={`/shop/qurilmalar/${row.device.id}`}
+                aria-label={`${row.device.model} qurilmasi ma'lumotlarini ochish`}
+              >
+                <span className="sr-only">{row.device.model} qurilmasi ma&apos;lumotlarini ochish</span>
+              </StretchedLink>
+            )}
+            <div className="pointer-events-none relative z-10 flex items-start justify-between gap-3">
               <div>
                 <div className="font-medium text-zinc-900">{row.device.model}</div>
                 <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'}</div>
@@ -234,18 +255,26 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                 {statusLabels[row.status]}
               </span>
             </div>
-            <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
+            <dl className="pointer-events-none relative z-10 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
               <div><dt className="text-zinc-400">Yetkazib beruvchi</dt><dd className="mt-0.5 text-zinc-800">{row.supplierName}</dd></div>
               <div><dt className="text-zinc-400">Mijoz</dt><dd className="mt-0.5 text-zinc-800">{row.sale.customer.name}</dd></div>
-              <div><dt className="text-zinc-400">Olingan</dt><dd className="mt-0.5 font-medium text-zinc-900">{fmt(row.device.purchasePrice, row.device.purchaseCurrency)}</dd></div>
-              <div><dt className="text-zinc-400">Sotilgan</dt><dd className="mt-0.5 font-medium text-zinc-900">{fmt(row.sale.salePrice, row.sale.contractCurrency)}</dd></div>
-              <div><dt className="text-zinc-400">Farq</dt><dd className={`mt-0.5 font-medium ${row.profit < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{fmt(row.profit, row.contractCurrency)}</dd></div>
+              {canSeeOwnerFinancials && row.device.purchasePrice != null && row.device.purchaseCurrency && (
+                <div><dt className="text-zinc-400">Olingan</dt><dd className="mt-0.5 font-medium text-zinc-900">{fmt(row.device.purchasePrice, row.device.purchaseCurrency)}</dd></div>
+              )}
+              {canSeeOwnerFinancials && row.sale.salePrice != null && row.sale.contractCurrency && (
+                <div><dt className="text-zinc-400">Sotilgan</dt><dd className="mt-0.5 font-medium text-zinc-900">{fmt(row.sale.salePrice, row.sale.contractCurrency)}</dd></div>
+              )}
+              {canSeeOwnerFinancials && row.profit != null && (
+                <div><dt className="text-zinc-400">Farq</dt><dd className={`mt-0.5 font-medium ${row.profit < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{fmt(row.profit, row.contractCurrency)}</dd></div>
+              )}
               <div><dt className="text-zinc-400">Sana</dt><dd className="mt-0.5 text-zinc-700">{uzDate(row.createdAt)}</dd></div>
             </dl>
             {canReceivePayment && (row.status === 'PENDING' || row.status === 'OVERDUE') && (
-              <Button variant="outline" className="h-10 w-full" onClick={() => openPay(row)}>
-                To&apos;landi deb belgilash
-              </Button>
+              <div className="relative z-10">
+                <Button variant="outline" className="h-10 w-full" onClick={() => openPay(row)}>
+                  To&apos;landi deb belgilash
+                </Button>
+              </div>
             )}
           </article>
         ))}
@@ -255,7 +284,17 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
         <table className="min-w-[1100px] w-full text-sm">
           <thead className="bg-zinc-50 border-b border-zinc-200">
             <tr>
-              {['Sana', 'Qurilma', 'Yetkazib beruvchi', 'Mijoz', 'Olingan narx', 'Sotilgan narx', 'Farq', 'Holat', ''].map((h) => (
+              {[
+                'Sana',
+                'Qurilma',
+                'Yetkazib beruvchi',
+                'Mijoz',
+                ...(canSeeOwnerFinancials ? ['Olingan narx'] : []),
+                ...(canSeeOwnerFinancials ? ['Sotilgan narx'] : []),
+                ...(canSeeOwnerFinancials ? ['Farq'] : []),
+                'Holat',
+                '',
+              ].map((h) => (
                 <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide">
                   {h}
                 </th>
@@ -264,13 +303,23 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
           </thead>
           <tbody>
             {loading ? (
-              <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-400 text-sm">Yuklanmoqda...</td></tr>
+              <tr><td colSpan={canSeeOwnerFinancials ? 9 : 6} className="px-4 py-8 text-center text-zinc-400 text-sm">Yuklanmoqda...</td></tr>
             ) : rows.length === 0 ? (
-              <tr><td colSpan={9} className="px-4 py-8 text-center text-zinc-400 text-sm">Operatsiya topilmadi</td></tr>
+              <tr><td colSpan={canSeeOwnerFinancials ? 9 : 6} className="px-4 py-8 text-center text-zinc-400 text-sm">Operatsiya topilmadi</td></tr>
             ) : (
               rows.map((row) => (
-                <tr key={row.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
-                  <td className="px-4 py-3 text-zinc-500">{uzDate(row.createdAt)}</td>
+                <tr key={row.id} className="relative border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
+                  <td className="px-4 py-3 text-zinc-500">
+                    {canViewDevice ? (
+                      <StretchedLink
+                        href={`/shop/qurilmalar/${row.device.id}`}
+                        aria-label={`${row.device.model} qurilmasi ma'lumotlarini ochish`}
+                        className="text-zinc-500 hover:underline"
+                      >
+                        {uzDate(row.createdAt)}
+                      </StretchedLink>
+                    ) : uzDate(row.createdAt)}
+                  </td>
                   <td className="px-4 py-3">
                     <div className="font-medium text-zinc-900">{row.device.model}</div>
                     <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'}</div>
@@ -285,26 +334,44 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                     <div className="text-zinc-900">{row.sale.customer.name}</div>
                     <div className="text-xs text-zinc-500">{formatUzPhoneDisplay(row.sale.customer.phone)}</div>
                   </td>
-                  <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.device.purchasePrice, row.device.purchaseCurrency)}</td>
-                  <td className="px-4 py-3 text-zinc-900 font-medium">{fmt(row.sale.salePrice, row.sale.contractCurrency)}</td>
-                  <td className="px-4 py-3">
-                    <span className={row.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>{fmt(row.profit, row.contractCurrency)}</span>
-                    {row.status !== 'PAID' && <div className="text-[10px] text-amber-600 mt-0.5">Kutilayotgan</div>}
-                  </td>
+                  {canSeeOwnerFinancials && (
+                    <td className="px-4 py-3 text-zinc-900 font-medium">
+                      {row.device.purchasePrice != null && row.device.purchaseCurrency
+                        ? fmt(row.device.purchasePrice, row.device.purchaseCurrency)
+                        : '—'}
+                    </td>
+                  )}
+                  {canSeeOwnerFinancials && (
+                    <td className="px-4 py-3 text-zinc-900 font-medium">
+                      {row.sale.salePrice != null && row.sale.contractCurrency
+                        ? fmt(row.sale.salePrice, row.sale.contractCurrency)
+                        : '—'}
+                    </td>
+                  )}
+                  {canSeeOwnerFinancials && (
+                    <td className="px-4 py-3">
+                      {row.profit != null && (
+                        <span className={row.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>{fmt(row.profit, row.contractCurrency)}</span>
+                      )}
+                      {row.status !== 'PAID' && <div className="text-[10px] text-amber-600 mt-0.5">Kutilayotgan</div>}
+                    </td>
+                  )}
                   <td className="px-4 py-3">
                     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${statusStyles[row.status]}`}>
                       {statusLabels[row.status]}
                     </span>
                   </td>
-                  <td className="px-4 py-3">
+                  <td className="relative z-10 px-4 py-3">
                     {canReceivePayment && (row.status === 'PENDING' || row.status === 'OVERDUE') && (
-                      <button
+                      <Button
                         type="button"
+                        variant="outline"
+                        size="sm"
                         onClick={() => openPay(row)}
-                        className="text-xs px-3 py-1.5 border border-zinc-200 rounded hover:bg-zinc-100 text-zinc-700 transition-colors"
+                        className="text-zinc-700"
                       >
                         To&apos;landi deb belgilash
-                      </button>
+                      </Button>
                     )}
                   </td>
                 </tr>

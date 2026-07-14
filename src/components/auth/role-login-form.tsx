@@ -12,7 +12,9 @@ type AuthSession = { user?: { role?: string } }
 
 function LoginFormInner({ mode }: { mode: LoginMode }) {
   const searchParams = useSearchParams()
-  const fallbackUrl = mode === 'admin' ? '/admin' : '/shop/dashboard'
+  // The shop root performs the final role-aware redirect: owners land on the
+  // dashboard, while workers start directly in their operational workflow.
+  const fallbackUrl = mode === 'admin' ? '/admin' : '/shop'
   const allowedPrefix = mode === 'admin' ? '/admin' : '/shop'
   const callbackUrl = searchParams.get('callbackUrl') || fallbackUrl
   const safeCallbackUrl = callbackUrl.startsWith(allowedPrefix) ? callbackUrl : fallbackUrl

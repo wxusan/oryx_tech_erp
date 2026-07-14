@@ -369,7 +369,7 @@ export const FORM_SURFACE_CONTRACT = [
       always('sale.update', 'customerName', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'customer-picker', 'device-list'] }),
       always('sale.update', 'customerPhone', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'customer-picker', 'device-list'] }),
       always('sale.update', 'paymentMethod', 'STATUS_FILTER'), optional('sale.update', 'dueDate', 'DATE_FILTER'),
-      always('sale.update', 'reminderEnabled', 'STATUS_FILTER'), optional('sale.update', 'note'), always('sale.update', 'reason'),
+      always('sale.update', 'reminderEnabled', 'STATUS_FILTER'), optional('sale.update', 'note'), optional('sale.update', 'reason'),
     ],
   },
   {
@@ -387,7 +387,7 @@ export const FORM_SURFACE_CONTRACT = [
     id: 'nasiya.payment', source: 'src/components/shop/nasiya-payment-modal.tsx', endpoint: 'POST /api/nasiya/[id]/payment', schemaSource: 'src/lib/validations.ts#addNasiyaPaymentSchema', fields: [always('nasiya.payment', 'nasiyaScheduleId', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Selected from the tenant-bound contract schedule.' }), always('nasiya.payment', 'amount', 'MONEY'), always('nasiya.payment', 'paymentMethod', 'STATUS_FILTER'), conditional('nasiya.payment', 'paymentBreakdown', 'split payment is enabled', 'MONEY'), always('nasiya.payment', 'date', 'DATE_FILTER'), optional('nasiya.payment', 'note')],
   },
   {
-    id: 'nasiya.defer', source: 'src/components/shop/nasiya-defer-modal.tsx', endpoint: 'POST /api/nasiya/[id]/defer', schemaSource: 'src/lib/validations.ts#deferNasiyaScheduleSchema', fields: [always('nasiya.defer', 'nasiyaScheduleId', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Selected from the tenant-bound contract schedule.' }), always('nasiya.defer', 'newDueDate', 'DATE_FILTER'), always('nasiya.defer', 'reason')],
+    id: 'nasiya.defer', source: 'src/components/shop/nasiya-defer-modal.tsx', endpoint: 'POST /api/nasiya/[id]/defer', schemaSource: 'src/lib/validations.ts#deferNasiyaScheduleSchema', fields: [always('nasiya.defer', 'nasiyaScheduleId', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Selected from the tenant-bound contract schedule.' }), always('nasiya.defer', 'newDueDate', 'DATE_FILTER'), optional('nasiya.defer', 'reason')],
   },
   {
     id: 'nasiya.resolve', source: 'src/app/(shop)/shop/nasiyalar/[id]/page.tsx', endpoint: 'POST /api/nasiya/[id]/resolution', schemaSource: 'src/lib/validations.ts#resolveNasiyaSchema', fields: [always('nasiya.resolve', 'action', 'STATUS_FILTER'), always('nasiya.resolve', 'reason')],
@@ -397,8 +397,8 @@ export const FORM_SURFACE_CONTRACT = [
       always('nasiya.update', 'customerName', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'customer-picker', 'nasiya-list'] }),
       always('nasiya.update', 'customerPhone', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'customer-picker', 'nasiya-list'] }),
       optional('nasiya.update', 'note', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['nasiya-list'] }),
-      conditional('nasiya.update', 'importNote', 'nasiya is imported', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['nasiya-list'] }),
-      always('nasiya.update', 'reminderEnabled', 'STATUS_FILTER'), always('nasiya.update', 'reason'),
+      optional('nasiya.update', 'importNote', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['nasiya-list'] }),
+      always('nasiya.update', 'reminderEnabled', 'STATUS_FILTER'), optional('nasiya.update', 'reason'),
     ],
   },
   {

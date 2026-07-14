@@ -52,8 +52,8 @@ describe('device detail page: no double-conversion drift for USD sales', () => {
     expect(page).not.toContain('Shartnoma: {formatContractMoney(latestSale.contractSalePrice, latestSale.contractCurrency)}')
   })
 
-  it('profit uses computeSaleContractMargin (purchase-currency aware) via saleContractProfit, falling back to the legacy computation only when null', () => {
-    expect(page).toContain('const saleProfit = latestSale ? latestSale.salePrice - device.purchasePrice : null')
+  it('owner-only profit uses computeSaleContractMargin (purchase-currency aware) via saleContractProfit, falling back to the legacy computation only when null', () => {
+    expect(page).toContain('const saleProfit = canSeeOwnerFinancials && latestSale && device.purchasePrice != null')
     expect(page).toContain('computeSaleContractMargin(')
     expect(page).toContain('saleContractProfit != null')
   })

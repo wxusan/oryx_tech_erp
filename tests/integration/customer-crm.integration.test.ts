@@ -101,7 +101,11 @@ describe('customer CRM database privacy and set-based metrics', () => {
     })
     expect(rows).toEqual([{ id: target.id, name: 'Passport target', passportIdentifierLast4: '4321' }])
     expect(JSON.stringify(rows)).not.toContain('AB7654321')
-    expect(await getCustomerProfileOverview({ shopId: second.id, customerId: target.id })).toBeNull()
+    expect(await getCustomerProfileOverview({
+      shopId: second.id,
+      customerId: target.id,
+      visibility: { includeOwnerFinancials: true },
+    })).toBeNull()
   })
 
   it('partitions currencies, respects Tashkent due boundaries, and paginates every history', async () => {
@@ -216,6 +220,7 @@ describe('customer CRM database privacy and set-based metrics', () => {
       shopId: shop.id,
       customerId: customer.id,
       now: new Date('2026-07-13T10:00:00.000Z'),
+      visibility: { includeOwnerFinancials: true },
     })
     expect(overview).not.toBeNull()
     expect(overview?.metrics.contractValue).toEqual({ UZS: 2500, USD: 430 })

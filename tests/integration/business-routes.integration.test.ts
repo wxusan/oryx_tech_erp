@@ -1086,7 +1086,7 @@ describe('real-PostgreSQL route evidence', () => {
     expect(paymentCount).toBe(0)
   })
 
-  it('permits explicitly granted WRITEOFF_MANAGE staff and denies ungranted staff', async () => {
+  it('denies Nasiya archive/write-off to every staff member, even a legacy direct grant', async () => {
     const actor = await seedActor('writeoff_rbac')
     const contract = await seedNasiya(actor, 'writeoff_rbac', 3_000)
     const deniedStaff = await seedStaff(actor, 'writeoff_denied', ['NASIYA_VIEW'])
@@ -1103,12 +1103,11 @@ describe('real-PostgreSQL route evidence', () => {
     expect((await nasiyaResolutionRequest({
       nasiyaId: contract.nasiya.id,
       action: 'ARCHIVE',
-      reason: 'Explicitly granted archive action',
+      reason: 'Legacy direct grant must not archive',
       key: 'writeoff-rbac-granted',
-    })).status).toBe(200)
-    const event = await prisma.nasiyaResolutionEvent.findFirstOrThrow({ where: { nasiyaId: contract.nasiya.id } })
-    expect(event.actorId).toBe(grantedStaff.admin.id)
-    expect(event.actorType).toBe('SHOP_ADMIN')
+    })).status).toBe(403)
+    expect(await prisma.nasiyaResolutionEvent.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(0)
+    expect((await prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } })).resolutionState).toBe('ACTIVE')
   })
 
   it('does not let a shop resolve another shop Nasiya', async () => {

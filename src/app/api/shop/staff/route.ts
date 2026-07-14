@@ -5,13 +5,17 @@ import { requireCurrentShopPermission } from '@/lib/api-auth'
 import { badRequest, conflict, created, ok, payloadTooLarge, serverError } from '@/lib/api-helpers'
 import {
   SHOP_PERMISSION_CATALOG,
+  type ShopFeatureCode,
   type ShopPermissionCode,
 } from '@/lib/access-control'
 import { prisma } from '@/lib/prisma'
 import { enabledFeatureSet, getActiveShopPackage } from '@/lib/server/shop-access'
 import {
   createShopStaffSchema,
+  legacyStaffPermissionCodes,
+  STAFF_LOGS_PERMISSION,
   type ShopStaffDto,
+  withStaffLogsPermission,
 } from '@/lib/shop-staff-contract'
 import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 import {
@@ -31,6 +35,7 @@ const staffSelect = {
   telegramId: true,
   telegramVerifiedAt: true,
   telegramNotificationsEnabled: true,
+  legacyFullAccess: true,
   permissionVersion: true,
   createdAt: true,
   permissions: { select: { permissionCode: true } },
@@ -38,7 +43,10 @@ const staffSelect = {
 
 type StaffRow = Prisma.ShopAdminGetPayload<{ select: typeof staffSelect }>
 
-function staffDto(row: StaffRow): ShopStaffDto {
+function staffDto(row: StaffRow, enabledFeatures: ReadonlySet<ShopFeatureCode>): ShopStaffDto {
+  const effectivePermissions = row.legacyFullAccess
+    ? legacyStaffPermissionCodes(enabledFeatures)
+    : row.permissions.map((item) => item.permissionCode as ShopPermissionCode)
   return {
     id: row.id,
     name: row.name,
@@ -48,9 +56,10 @@ function staffDto(row: StaffRow): ShopStaffDto {
     telegramId: row.telegramId,
     telegramVerifiedAt: row.telegramVerifiedAt?.toISOString() ?? null,
     telegramNotificationsEnabled: row.telegramNotificationsEnabled,
+    logsViewEnabled: effectivePermissions.includes(STAFF_LOGS_PERMISSION),
     permissionVersion: row.permissionVersion,
     createdAt: row.createdAt.toISOString(),
-    permissionCodes: row.permissions.map((item) => item.permissionCode as ShopPermissionCode),
+    permissionCodes: effectivePermissions.filter((code) => code !== STAFF_LOGS_PERMISSION),
   }
 }
 
@@ -95,7 +104,7 @@ export async function GET() {
       orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
       select: staffSelect,
     })
-    return ok(staff.map(staffDto))
+    return ok(staff.map((row) => staffDto(row, principal.enabledFeatures)))
   } catch (error) {
     logger.error('[GET /api/shop/staff]', { event: 'api.route_error', error })
     return serverError()
@@ -112,7 +121,11 @@ export async function POST(request: NextRequest) {
     const parsed = createShopStaffSchema.safeParse(await readLimitedJsonBody(request))
     if (!parsed.success) return badRequest(parsed.error.issues[0]?.message ?? "Xodim ma'lumoti noto'g'ri")
 
-    const permissionMessage = permissionError(parsed.data.permissionCodes, principal.enabledFeatures)
+    const permissionCodes = withStaffLogsPermission(
+      parsed.data.permissionCodes,
+      parsed.data.logsViewEnabled,
+    )
+    const permissionMessage = permissionError(permissionCodes, principal.enabledFeatures)
     if (permissionMessage) return badRequest(permissionMessage)
     if (parsed.data.telegramNotificationsEnabled && !principal.enabledFeatures.has('TELEGRAM')) {
       return badRequest("Telegram moduli yoqilmagani uchun xodim bildirishnomalarini yoqib bo'lmaydi")
@@ -155,9 +168,9 @@ export async function POST(request: NextRequest) {
         },
         select: { id: true },
       })
-      if (parsed.data.permissionCodes.length) {
+      if (permissionCodes.length) {
         await tx.shopMemberPermission.createMany({
-          data: parsed.data.permissionCodes.map((permissionCode) => ({
+          data: permissionCodes.map((permissionCode) => ({
             shopId,
             shopAdminId: createdStaff.id,
             permissionCode,
@@ -178,7 +191,8 @@ export async function POST(request: NextRequest) {
           newValue: {
             name: parsed.data.name,
             login: parsed.data.login,
-            permissionCodes: parsed.data.permissionCodes,
+            permissionCodes,
+            logsViewEnabled: parsed.data.logsViewEnabled,
             telegramNotificationsEnabled: parsed.data.telegramNotificationsEnabled,
           },
         },
@@ -186,7 +200,7 @@ export async function POST(request: NextRequest) {
       return tx.shopAdmin.findUniqueOrThrow({ where: { id: createdStaff.id }, select: staffSelect })
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable }))
 
-    return created(staffDto(row), "Xodim profili qo'shildi")
+    return created(staffDto(row, principal.enabledFeatures), "Xodim profili qo'shildi")
   } catch (error) {
     if (isRequestBodyTooLarge(error)) return payloadTooLarge()
     if (isInvalidRequestBody(error)) return badRequest("So'rov ma'lumoti noto'g'ri")

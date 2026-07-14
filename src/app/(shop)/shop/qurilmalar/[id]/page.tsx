@@ -146,13 +146,14 @@ interface Device {
   storageUnit: 'GB' | 'TB' | null
   conditionCode: 'NEW' | 'USED' | null
   batteryHealth: number | null
-  purchasePrice: number
+  /** Omitted by the server for shop staff. */
+  purchasePrice?: number
   // Native purchase-currency context — see docs/currency-accounting-model.md.
-  purchaseCurrency: 'UZS' | 'USD'
-  purchaseInputAmount: number
+  purchaseCurrency?: 'UZS' | 'USD'
+  purchaseInputAmount?: number
   // Prisma Decimal? — see the identical comment on Sale.contractExchangeRateAtCreation above.
-  purchaseExchangeRateAtCreation: number | string | null
-  purchaseAmountUzsSnapshot: number
+  purchaseExchangeRateAtCreation?: number | string | null
+  purchaseAmountUzsSnapshot?: number
   imei: string
   imeis: { slot: 'PRIMARY' | 'SECONDARY'; value: string }[]
   supplierPhone: string | null
@@ -176,7 +177,8 @@ export default function QurilmaDetailPage() {
 }
 
 function AuthorizedQurilmaDetailPage() {
-  const { can } = useShopAccess()
+  const { can, memberKind } = useShopAccess()
+  const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const canManageInventory = can('INVENTORY_MANAGE')
   const canCreateCashSale = can('CASH_SALE_CREATE')
   const canManageCashSale = can('CASH_SALE_MANAGE')
@@ -308,12 +310,13 @@ function AuthorizedQurilmaDetailPage() {
       storageUnit: device.storageUnit ?? 'GB',
       conditionCode: device.conditionCode ?? '',
       batteryHealth: device.batteryHealth != null ? String(device.batteryHealth) : '',
-      // Stored value is UZS; show it in the shop's display currency (USD when
-      // toggled) so the input matches every other money field.
-      purchasePrice:
-        currency.currency === 'USD' && currency.usdUzsRate
-          ? convertUzsToUsd(device.purchasePrice, currency.usdUzsRate).toFixed(2)
-          : String(device.purchasePrice),
+      // Cost is intentionally absent for workers. Owners see the stored UZS
+      // cost in their active display currency, just as before.
+      purchasePrice: canSeeOwnerFinancials && device.purchasePrice != null
+        ? (currency.currency === 'USD' && currency.usdUzsRate
+            ? convertUzsToUsd(device.purchasePrice, currency.usdUzsRate).toFixed(2)
+            : String(device.purchasePrice))
+        : '',
       imei: device.imei,
       secondaryImei: device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? '',
       supplierPhone: device.supplierPhone ?? '',
@@ -339,12 +342,12 @@ function AuthorizedQurilmaDetailPage() {
       setEditError('IMEI kiritilishi shart')
       return
     }
-    const price = Number(editForm.purchasePrice)
-    if (!Number.isFinite(price) || price <= 0) {
+    const price = canSeeOwnerFinancials ? Number(editForm.purchasePrice) : null
+    if (canSeeOwnerFinancials && (price == null || !Number.isFinite(price) || price <= 0)) {
       setEditError("Kelish narxi 0 dan katta bo'lishi kerak")
       return
     }
-    if (currency.currency === 'USD' && !currency.usdUzsRate) {
+    if (canSeeOwnerFinancials && currency.currency === 'USD' && !currency.usdUzsRate) {
       setEditError("USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko'ring.")
       return
     }
@@ -366,7 +369,9 @@ function AuthorizedQurilmaDetailPage() {
           ...(editForm.storage.trim() ? { storageAmount: Number(editForm.storage), storageUnit: editForm.storageUnit } : {}),
           conditionCode: editForm.conditionCode || undefined,
           ...(battery !== undefined ? { batteryHealth: battery } : {}),
-          ...(purchasePriceDirty ? { purchasePrice: price, inputCurrency: currency.currency } : {}),
+          ...(canSeeOwnerFinancials && purchasePriceDirty && price != null
+            ? { purchasePrice: price, inputCurrency: currency.currency }
+            : {}),
           imei: editForm.imei.trim(),
           secondaryImei: editForm.secondaryImei.trim(),
           supplierPhone: editForm.supplierPhone.trim(),
@@ -530,7 +535,6 @@ function AuthorizedQurilmaDetailPage() {
           dueDate: saleEditDueDate || null,
           reminderEnabled: saleEditReminderEnabled,
           note: saleEditNote.trim() || undefined,
-          reason: saleEditNote.trim() || "Sotuv ma'lumotlari tuzatildi",
         }),
       })
       const json = await res.json()
@@ -641,9 +645,8 @@ function AuthorizedQurilmaDetailPage() {
     )
   }
 
-  // Purchase price is a historical value, so cross-currency display uses the
-  // purchase-time rate when available. User-facing UI still shows only the
-  // shop's selected display currency.
+  // Purchase price is owner-only. When present, cross-currency display uses
+  // the purchase-time rate rather than today's rate.
   const infoRows: { label: string; value: string; hint?: string | null }[] = [
     { label: 'Model', value: device.model },
     { label: 'Rang', value: device.color ?? '—' },
@@ -654,15 +657,17 @@ function AuthorizedQurilmaDetailPage() {
       label: 'Batareya',
       value: device.batteryHealth != null ? `${device.batteryHealth}%` : '—',
     },
-    {
-      label: 'Kelish narxi',
-      value: formatDisplayMoneyFromContract(
-        device.purchaseInputAmount,
-        device.purchaseCurrency,
-        currency.currency,
-        device.purchaseExchangeRateAtCreation ?? currency.usdUzsRate,
-      ),
-    },
+    ...(canSeeOwnerFinancials && device.purchaseInputAmount != null && device.purchaseCurrency
+      ? [{
+          label: 'Kelish narxi',
+          value: formatDisplayMoneyFromContract(
+            device.purchaseInputAmount,
+            device.purchaseCurrency,
+            currency.currency,
+            device.purchaseExchangeRateAtCreation ?? currency.usdUzsRate,
+          ),
+        }]
+      : []),
     { label: 'IMEI', value: displayImei(device.imei) },
     { label: 'Yetkazib beruvchi', value: device.supplier?.name ?? '—' },
     { label: 'Tel raqam', value: device.supplier?.phone ?? '—' },
@@ -673,7 +678,9 @@ function AuthorizedQurilmaDetailPage() {
   const showSaleActions = device.status === 'IN_STOCK'
   const latestSale = device.sales?.[0]
   const saleHasDebt = latestSale ? Number(latestSale.contractRemainingAmount) > 0 && !latestSale.paidFully : false
-  const saleProfit = latestSale ? latestSale.salePrice - device.purchasePrice : null
+  const saleProfit = canSeeOwnerFinancials && latestSale && device.purchasePrice != null
+    ? latestSale.salePrice - device.purchasePrice
+    : null
   // Native contract-currency margin — stable, never re-derived from today's
   // rate (see computeSaleContractMargin). When the sale and the device's own
   // purchase were both entered in the same currency, this is a plain native
@@ -681,7 +688,8 @@ function AuthorizedQurilmaDetailPage() {
   // difference between the purchase-time and sale-time rates). Falls back to
   // the legacy UZS-based saleProfit above when a USD contract has no
   // creation rate on record (should not happen for a real USD sale).
-  const saleContractProfit = latestSale
+  const saleContractProfit = canSeeOwnerFinancials && latestSale &&
+    device.purchaseCurrency && device.purchaseInputAmount != null && device.purchaseAmountUzsSnapshot != null
     ? computeSaleContractMargin(latestSale.contractSalePrice, latestSale.contractCurrency, latestSale.contractExchangeRateAtCreation, {
         purchaseCurrency: device.purchaseCurrency,
         purchaseInputAmount: device.purchaseInputAmount,
@@ -710,7 +718,8 @@ function AuthorizedQurilmaDetailPage() {
   // below: a plain native subtraction when the nasiya and the device's own
   // purchase share a currency (no FX conversion, no double-counting a
   // purchase-time vs. nasiya-time rate difference).
-  const nasiyaContractProfit = latestNasiya
+  const nasiyaContractProfit = canSeeOwnerFinancials && latestNasiya &&
+    device.purchaseCurrency && device.purchaseInputAmount != null && device.purchaseAmountUzsSnapshot != null
     ? computeSaleContractMargin(
         latestNasiya.contractTotalAmount,
         latestNasiya.contractCurrency,
@@ -888,21 +897,23 @@ function AuthorizedQurilmaDetailPage() {
               <span className="text-zinc-500 w-32">Sotuv narxi</span>
               <span className="text-zinc-900 font-medium">{dfmtSale(latestSale.contractSalePrice)}</span>
             </div>
-            <div className="flex gap-4 text-sm">
-              <span className="text-zinc-500 w-32">Farq / Foyda</span>
-              {saleContractProfit != null ? (
-                <span className={saleContractProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
-                  {dfmtSale(saleContractProfit)}
-                </span>
-              ) : (
-                // Fallback for the rare case a USD contract has no creation
-                // rate on record — conservative legacy UZS figure rather than
-                // inventing a native profit (see computeContractCurrencyMargin).
-                <span className={saleProfit != null && saleProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
-                  {fmt(saleProfit ?? 0, currency)}
-                </span>
-              )}
-            </div>
+            {canSeeOwnerFinancials && (
+              <div className="flex gap-4 text-sm">
+                <span className="text-zinc-500 w-32">Farq / Foyda</span>
+                {saleContractProfit != null ? (
+                  <span className={saleContractProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
+                    {dfmtSale(saleContractProfit)}
+                  </span>
+                ) : (
+                  // Fallback for the rare case a USD contract has no creation
+                  // rate on record — conservative legacy UZS figure rather than
+                  // inventing a native profit (see computeContractCurrencyMargin).
+                  <span className={saleProfit != null && saleProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
+                    {fmt(saleProfit ?? 0, currency)}
+                  </span>
+                )}
+              </div>
+            )}
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">To'langan</span>
               <span className="text-zinc-900 font-medium">{dfmtSale(latestSale.contractAmountPaid)}</span>
@@ -1055,16 +1066,18 @@ function AuthorizedQurilmaDetailPage() {
                   </span>
                 </div>
               )}
-              <div className="flex gap-4 text-sm">
-                <span className="text-zinc-500 w-32">Sotuv farqi</span>
-                <span
-                  className={
-                    nasiyaContractProfit != null && nasiyaContractProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'
-                  }
-                >
-                  {nasiyaContractProfit != null ? dfmtNasiya(nasiyaContractProfit) : '—'}
-                </span>
-              </div>
+              {canSeeOwnerFinancials && (
+                <div className="flex gap-4 text-sm">
+                  <span className="text-zinc-500 w-32">Sotuv farqi</span>
+                  <span
+                    className={
+                      nasiyaContractProfit != null && nasiyaContractProfit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'
+                    }
+                  >
+                    {nasiyaContractProfit != null ? dfmtNasiya(nasiyaContractProfit) : '—'}
+                  </span>
+                </div>
+              )}
               <div className="flex gap-4 text-sm">
                 <span className="text-zinc-500 w-32">Nasiya jami</span>
                 <span className="text-zinc-900 font-medium">{dfmtNasiya(latestNasiya.contractFinalAmount)}</span>
@@ -1240,14 +1253,16 @@ function AuthorizedQurilmaDetailPage() {
                   className="h-10 rounded-lg border-zinc-200 text-sm"
                 />
               </Field>
-              <Field label={`Kelish narxi (${currencyLabel(currency.currency)})`} required>
-                <MoneyInput
-                  currency={currency.currency}
-                  value={editForm.purchasePrice}
-                  onChange={(v) => { setPurchasePriceDirty(true); setEditForm((f) => ({ ...f, purchasePrice: v })) }}
-                  className="h-10 rounded-lg border-zinc-200 text-sm"
-                />
-              </Field>
+              {canSeeOwnerFinancials && (
+                <Field label={`Kelish narxi (${currencyLabel(currency.currency)})`} required>
+                  <MoneyInput
+                    currency={currency.currency}
+                    value={editForm.purchasePrice}
+                    onChange={(v) => { setPurchasePriceDirty(true); setEditForm((f) => ({ ...f, purchasePrice: v })) }}
+                    className="h-10 rounded-lg border-zinc-200 text-sm"
+                  />
+                </Field>
+              )}
             </div>
             <Field
               label="Asosiy IMEI"

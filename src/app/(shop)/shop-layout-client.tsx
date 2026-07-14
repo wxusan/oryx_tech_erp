@@ -15,15 +15,15 @@ import {
 import { ShopAccessProvider } from '@/components/shop/shop-access-context'
 
 const navLinks = [
-  { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard, prefetch: true, permission: null, anyPermissions: [] },
-  { href: '/shop/qurilmalar', label: 'Qurilmalar', icon: Smartphone, prefetch: true, permission: 'INVENTORY_VIEW', anyPermissions: [] },
-  { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users, prefetch: false, permission: 'CUSTOMER_VIEW', anyPermissions: [] },
-  { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard, prefetch: true, permission: 'NASIYA_VIEW', anyPermissions: [] },
-  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus, prefetch: false, permission: null, anyPermissions: ['INVENTORY_MANAGE', 'CASH_SALE_CREATE', 'NASIYA_CREATE', 'OLIB_MANAGE'] },
-  { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3, prefetch: false, permission: 'REPORT_VIEW', anyPermissions: [] },
-  { href: '/shop/logs', label: 'Loglar', icon: ScrollText, prefetch: false, permission: 'LOG_VIEW', anyPermissions: [] },
-  { href: '/shop/xodimlar', label: 'Xodimlar', icon: UserCog, prefetch: false, permission: 'MEMBER_MANAGE', anyPermissions: [] },
-  { href: '/shop/settings', label: 'Sozlamalar', icon: Settings, prefetch: false, permission: null, anyPermissions: [] },
+  { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard, prefetch: true, permission: null, anyPermissions: [], ownerOnly: true },
+  { href: '/shop/qurilmalar', label: 'Qurilmalar', icon: Smartphone, prefetch: true, permission: 'INVENTORY_VIEW', anyPermissions: [], ownerOnly: false },
+  { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users, prefetch: false, permission: 'CUSTOMER_VIEW', anyPermissions: [], ownerOnly: false },
+  { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard, prefetch: true, permission: 'NASIYA_VIEW', anyPermissions: [], ownerOnly: false },
+  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus, prefetch: false, permission: null, anyPermissions: ['INVENTORY_MANAGE', 'CASH_SALE_CREATE', 'NASIYA_CREATE', 'OLIB_MANAGE'], ownerOnly: false },
+  { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3, prefetch: false, permission: 'REPORT_VIEW', anyPermissions: [], ownerOnly: false },
+  { href: '/shop/logs', label: 'Loglar', icon: ScrollText, prefetch: false, permission: 'LOG_VIEW', anyPermissions: [], ownerOnly: false },
+  { href: '/shop/xodimlar', label: 'Xodimlar', icon: UserCog, prefetch: false, permission: 'MEMBER_MANAGE', anyPermissions: [], ownerOnly: false },
+  { href: '/shop/settings', label: 'Sozlamalar', icon: Settings, prefetch: false, permission: null, anyPermissions: [], ownerOnly: false },
 ] satisfies Array<{
   href: string
   label: string
@@ -31,6 +31,7 @@ const navLinks = [
   prefetch: boolean
   permission: ShopPermissionCode | null
   anyPermissions: ShopPermissionCode[]
+  ownerOnly: boolean
 }>
 
 function initials(name: string) {
@@ -65,13 +66,21 @@ export function ShopLayoutClient({
     enabledFeatures: new Set(enabledFeatures),
     grantedPermissions: new Set(grantedPermissions),
   }
-  const visibleNavLinks = navLinks.filter((link) =>
+  const permittedNavLinks = navLinks.filter((link) =>
+    (!link.ownerOnly || memberKind === 'SHOP_OWNER') &&
     (!link.permission || principalCan(principal, link.permission)) &&
     (!link.anyPermissions.length || link.anyPermissions.some((permission) => principalCan(principal, permission))),
   )
-  const canSeeReceivables = (
-    enabledFeatures.includes('CASH_SALES') && principalCan(principal, 'INVENTORY_VIEW')
-  ) || principalCan(principal, 'NASIYA_VIEW')
+  const visibleNavLinks = memberKind === 'SHOP_STAFF'
+    ? [
+        ...permittedNavLinks.filter((link) => link.href === '/shop/yangi-operatsiya'),
+        ...permittedNavLinks.filter((link) => link.href !== '/shop/yangi-operatsiya'),
+      ]
+    : permittedNavLinks
+  const canSeeReceivables = memberKind === 'SHOP_OWNER' && (
+    (enabledFeatures.includes('CASH_SALES') && principalCan(principal, 'INVENTORY_VIEW')) ||
+    principalCan(principal, 'NASIYA_VIEW')
+  )
 
   return (
     <ShopAccessProvider
@@ -116,7 +125,7 @@ export function ShopLayoutClient({
         <div className="p-4 border-t border-zinc-200">
           <div className="rounded-lg border border-zinc-200 bg-zinc-50 p-3">
             <div className="truncate text-xs font-medium text-zinc-900">{shopName}</div>
-            <div className="mt-1 text-xs text-zinc-500">Ombor, nasiya, hisobot</div>
+            <div className="mt-1 text-xs text-zinc-500">{memberKind === 'SHOP_OWNER' ? 'Ombor, nasiya, hisobot' : 'Operatsiyalar va mijozlar'}</div>
           </div>
         </div>
       </aside>

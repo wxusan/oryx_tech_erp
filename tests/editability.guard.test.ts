@@ -63,8 +63,9 @@ describe('device edit safety guard', () => {
     expect(src).toContain("err.code === 'P2002'")
   })
 
-  it('requires a reason when editing a sold / nasiya device and writes an audit log', () => {
-    expect(src).toContain('hasDeviceChanges && isFinanciallyLinked')
+  it('keeps ordinary sold / nasiya device edits comment-optional while writing an audit log', () => {
+    expect(src).not.toContain('hasDeviceChanges && isFinanciallyLinked')
+    expect(src).not.toContain("Sotilgan yoki nasiya qurilma ma'lumotlarini o'zgartirish uchun izoh yoki sabab kiritilishi shart")
     expect(src).toContain('tx.log.create')
     expect(src).toContain("action: 'UPDATE'")
   })

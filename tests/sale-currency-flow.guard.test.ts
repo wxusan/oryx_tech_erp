@@ -51,12 +51,16 @@ for (const [file, { input, emptyDefault, setter }] of Object.entries(priceState)
 }
 
 describe('read-only purchase-price reference converts safely (string-safe Decimal handling)', () => {
-  it(`${NASIYA}: priceFor still exists for the read-only "Kelish narxi" reference and uses the safe convert helper`, () => {
-    expect(read(NASIYA)).toContain('convertUzsToUsd(d.purchasePrice, currency.usdUzsRate).toFixed(2)')
+  it(`${NASIYA}: the owner-only "Kelish narxi" reference uses the shared formatter`, () => {
+    const src = read(NASIYA)
+    expect(src).toContain('canSeeOwnerFinancials && selectedDevice?.purchasePrice != null')
+    expect(src).toContain('formatMoneyByCurrency(selectedDevice.purchasePrice, currency.currency, currency.usdUzsRate)')
   })
 
-  it(`${SOTUV}: the read-only purchase-price reference uses the shared money formatter (also string-safe)`, () => {
-    expect(read(SOTUV)).toContain('fmt(selectedDevice.purchasePrice, currency)')
+  it(`${SOTUV}: the owner-only purchase-price reference uses the shared money formatter`, () => {
+    const src = read(SOTUV)
+    expect(src).toContain('canSeeOwnerFinancials && selectedDevice.purchasePrice != null')
+    expect(src).toContain('fmt(selectedDevice.purchasePrice, currency)')
   })
 })
 

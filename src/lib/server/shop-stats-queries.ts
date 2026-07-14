@@ -225,8 +225,25 @@ interface ReceivableCohortRow {
   native_usd: unknown
   deal_count: number
   customer_count: number
+  sale_native_uzs: unknown
+  sale_native_usd: unknown
+  sale_deal_count: number
+  sale_customer_count: number
+  nasiya_native_uzs: unknown
+  nasiya_native_usd: unknown
+  nasiya_deal_count: number
+  nasiya_customer_count: number
   single_type: string | null
   single_id: string | null
+}
+
+export type ReceivableSource = 'sale' | 'nasiya'
+
+export interface ReceivableSourceSummary {
+  nativeUzs: number
+  nativeUsd: number
+  dealCount: number
+  customerCount: number
 }
 
 export interface ReceivableCohortSummary {
@@ -235,6 +252,8 @@ export interface ReceivableCohortSummary {
   nativeUsd: number
   dealCount: number
   customerCount: number
+  /** Source-partitioned totals drive the source-specific banner links. */
+  sources: Record<ReceivableSource, ReceivableSourceSummary>
   singleDeal: { type: 'nasiya' | 'sale'; id: string } | null
 }
 
@@ -269,10 +288,16 @@ function receivableDealsCte(input: {
   return Prisma.sql`
     WITH nasiya_installments AS (
       SELECT
+        /*
+         * A Nasiya obligation is a schedule, not the whole contract. Classify
+         * every open schedule exactly once at the Tashkent day boundary before
+         * aggregating it into a contract work item. A contract with both an
+         * old instalment and one due today therefore produces two correctly
+         * scoped work items instead of falsely counting today's money as late.
+         */
         CASE
           WHEN coalesce(s."delayedUntil", s."dueDate") < ${input.todayStart} THEN 'OVERDUE'::text
-          WHEN coalesce(s."delayedUntil", s."dueDate") >= ${input.todayStart}
-            AND coalesce(s."delayedUntil", s."dueDate") < ${input.tomorrowStart} THEN 'DUE_TODAY'::text
+          WHEN coalesce(s."delayedUntil", s."dueDate") < ${input.tomorrowStart} THEN 'DUE_TODAY'::text
         END AS cohort,
         n."id" AS deal_id,
         n."customerId" AS customer_id,
@@ -369,17 +394,32 @@ export async function getReceivableCohortSummaries(input: {
       coalesce(sum(outstanding) FILTER (WHERE currency = 'USD'), 0)::numeric AS native_usd,
       count(*)::integer AS deal_count,
       count(DISTINCT customer_id)::integer AS customer_count,
+      coalesce(sum(outstanding) FILTER (WHERE deal_type = 'sale' AND currency = 'UZS'), 0)::numeric AS sale_native_uzs,
+      coalesce(sum(outstanding) FILTER (WHERE deal_type = 'sale' AND currency = 'USD'), 0)::numeric AS sale_native_usd,
+      count(*) FILTER (WHERE deal_type = 'sale')::integer AS sale_deal_count,
+      count(DISTINCT customer_id) FILTER (WHERE deal_type = 'sale')::integer AS sale_customer_count,
+      coalesce(sum(outstanding) FILTER (WHERE deal_type = 'nasiya' AND currency = 'UZS'), 0)::numeric AS nasiya_native_uzs,
+      coalesce(sum(outstanding) FILTER (WHERE deal_type = 'nasiya' AND currency = 'USD'), 0)::numeric AS nasiya_native_usd,
+      count(*) FILTER (WHERE deal_type = 'nasiya')::integer AS nasiya_deal_count,
+      count(DISTINCT customer_id) FILTER (WHERE deal_type = 'nasiya')::integer AS nasiya_customer_count,
       CASE WHEN count(*) = 1 THEN min(deal_type) END AS single_type,
       CASE WHEN count(*) = 1 THEN min(deal_id) END AS single_id
     FROM receivable_deals
     GROUP BY cohort
   `)
+  const emptySource = (): ReceivableSourceSummary => ({
+    nativeUzs: 0,
+    nativeUsd: 0,
+    dealCount: 0,
+    customerCount: 0,
+  })
   const empty = (cohort: ReceivableCohort): ReceivableCohortSummary => ({
     cohort,
     nativeUzs: 0,
     nativeUsd: 0,
     dealCount: 0,
     customerCount: 0,
+    sources: { sale: emptySource(), nasiya: emptySource() },
     singleDeal: null,
   })
   const result: Record<ReceivableCohort, ReceivableCohortSummary> = {
@@ -393,6 +433,20 @@ export async function getReceivableCohortSummaries(input: {
       nativeUsd: Number(row.native_usd ?? 0),
       dealCount: Number(row.deal_count ?? 0),
       customerCount: Number(row.customer_count ?? 0),
+      sources: {
+        sale: {
+          nativeUzs: Number(row.sale_native_uzs ?? 0),
+          nativeUsd: Number(row.sale_native_usd ?? 0),
+          dealCount: Number(row.sale_deal_count ?? 0),
+          customerCount: Number(row.sale_customer_count ?? 0),
+        },
+        nasiya: {
+          nativeUzs: Number(row.nasiya_native_uzs ?? 0),
+          nativeUsd: Number(row.nasiya_native_usd ?? 0),
+          dealCount: Number(row.nasiya_deal_count ?? 0),
+          customerCount: Number(row.nasiya_customer_count ?? 0),
+        },
+      },
       singleDeal: row.single_id && (row.single_type === 'nasiya' || row.single_type === 'sale')
         ? { type: row.single_type, id: row.single_id }
         : null,

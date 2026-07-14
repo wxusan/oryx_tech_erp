@@ -3,7 +3,7 @@
 import { memo, useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import Link from 'next/link'
-import { Button, buttonVariants } from '@/components/ui/button'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { exportUrl } from '@/lib/export-url'
@@ -12,6 +12,7 @@ import { displayImei } from '@/lib/device-display'
 import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
 import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
 import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
+import { StretchedLink } from '@/components/ui/stretched-link'
 import { DeviceConditionBadge } from '@/components/shop/device-condition-badge'
 import { replaceListUrlState } from '@/lib/list-url-state'
 import type { DeviceListItem, DeviceListPage, DeviceStatus } from '@/lib/device-list-contract'
@@ -86,9 +87,10 @@ function ProfitValue({ d, currency }: { d: Device; currency: CurrencyContext }) 
       </span>
     )
   }
+  if (d.saleInfo.profit == null) return <>—</>
   return (
     <span className={d.saleInfo.profit != null && d.saleInfo.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>
-      {formatMoneyByCurrency(d.saleInfo.profit ?? 0, currency.currency, currency.usdUzsRate)}
+      {formatMoneyByCurrency(d.saleInfo.profit, currency.currency, currency.usdUzsRate)}
     </span>
   )
 }
@@ -96,19 +98,32 @@ function ProfitValue({ d, currency }: { d: Device; currency: CurrencyContext }) 
 const DeviceTableRow = memo(function DeviceTableRow({
   device: d,
   currency,
+  showOwnerFinancials,
 }: {
   device: Device
   currency: CurrencyContext
+  showOwnerFinancials: boolean
 }) {
   return (
-    <tr className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
-      <td className="px-4 py-3 font-medium text-zinc-900"><div>{d.model}</div><DeviceConditionBadge label={d.conditionLabel} className="mt-1" /></td>
+    <tr className="relative border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
+      <td className="px-4 py-3 font-medium text-zinc-900">
+        <StretchedLink
+          href={`/shop/qurilmalar/${d.id}`}
+          aria-label={`${d.model} qurilmasi ma'lumotlarini ochish`}
+          className="font-medium text-zinc-900 hover:underline"
+        >
+          <div>{d.model}</div>
+          <DeviceConditionBadge label={d.conditionLabel} className="mt-1" />
+        </StretchedLink>
+      </td>
       <td className="px-4 py-3 text-zinc-600">{d.color ?? '—'}</td>
       <td className="px-4 py-3 text-zinc-600">{d.storageDisplay || '—'}</td>
       <td className="px-4 py-3 text-zinc-600">{d.batteryHealth != null ? `${d.batteryHealth}%` : '—'}</td>
-      <td className="px-4 py-3 font-medium text-zinc-900">
-        {formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate)}
-      </td>
+      {showOwnerFinancials && (
+        <td className="px-4 py-3 font-medium text-zinc-900">
+          {d.purchasePrice != null ? formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate) : '—'}
+        </td>
+      )}
       <td className="px-4 py-3 font-mono text-xs text-zinc-400"><div>{displayImei(d.primaryImei)}</div>{d.secondaryImei && <div className="mt-0.5">{displayImei(d.secondaryImei)}</div>}</td>
       <td className="px-4 py-3"><StatusBadge status={d.status} /></td>
       <td className="px-4 py-3 font-medium text-zinc-900">
@@ -123,17 +138,9 @@ const DeviceTableRow = memo(function DeviceTableRow({
           </>
         ) : '—'}
       </td>
-      <td className="px-4 py-3"><ProfitValue d={d} currency={currency} /></td>
+      {showOwnerFinancials && <td className="px-4 py-3"><ProfitValue d={d} currency={currency} /></td>}
       <td className="px-4 py-3 text-zinc-600">{d.saleInfo?.customerName ?? '—'}</td>
       <td className="px-4 py-3 text-zinc-500">{uzDate(d.createdAt)}</td>
-      <td className="px-4 py-3">
-        <IntentPrefetchLink
-          href={`/shop/qurilmalar/${d.id}`}
-          className="inline-flex rounded border border-zinc-200 px-3 py-1.5 text-xs text-zinc-700 transition-colors hover:bg-zinc-100"
-        >
-          Ko&apos;rish
-        </IntentPrefetchLink>
-      </td>
     </tr>
   )
 })
@@ -141,12 +148,18 @@ const DeviceTableRow = memo(function DeviceTableRow({
 const DeviceMobileCard = memo(function DeviceMobileCard({
   device: d,
   currency,
+  showOwnerFinancials,
 }: {
   device: Device
   currency: CurrencyContext
+  showOwnerFinancials: boolean
 }) {
   return (
-    <div className="space-y-2 rounded border border-zinc-200 p-3">
+    <IntentPrefetchLink
+      href={`/shop/qurilmalar/${d.id}`}
+      aria-label={`${d.model} qurilmasi ma'lumotlarini ochish`}
+      className="block space-y-2 rounded border border-zinc-200 p-3 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-zinc-900 focus-visible:ring-offset-2"
+    >
       <div className="flex items-start justify-between gap-2">
         <div>
           <div className="font-medium text-zinc-900">{d.model}</div>
@@ -159,7 +172,7 @@ const DeviceMobileCard = memo(function DeviceMobileCard({
         {[d.color, d.storageDisplay, d.batteryHealth != null ? `${d.batteryHealth}%` : null].filter(Boolean).join(' · ') || '—'}
       </div>
       <div className="flex items-center justify-between text-xs text-zinc-600">
-        <span>Kelish: {formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate)}</span>
+        {showOwnerFinancials && <span>Kelish: {d.purchasePrice != null ? formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate) : '—'}</span>}
         {d.saleInfo && <span>Sotuv: <SoldPriceValue d={d} currency={currency} /></span>}
       </div>
       {d.status === 'SOLD_DEBT' && d.saleInfo?.contractRemainingAmount != null && (
@@ -167,20 +180,14 @@ const DeviceMobileCard = memo(function DeviceMobileCard({
           Qarz: {formatDisplayMoneyFromContract(d.saleInfo.contractRemainingAmount, d.saleInfo.contractCurrency, currency.currency, currency.usdUzsRate)}
         </div>
       )}
-      {d.saleInfo && (
+      {showOwnerFinancials && d.saleInfo && (
         <div className="flex items-center justify-between text-xs">
           <span className="text-zinc-500">{d.saleInfo.customerName ?? '—'}</span>
           <ProfitValue d={d} currency={currency} />
         </div>
       )}
       <div className="text-xs text-zinc-400">{uzDate(d.createdAt)}</div>
-      <IntentPrefetchLink
-        href={`/shop/qurilmalar/${d.id}`}
-        className={buttonVariants({ variant: 'outline', className: 'h-8 w-full rounded border-zinc-200 text-xs' })}
-      >
-        Ko&apos;rish
-      </IntentPrefetchLink>
-    </div>
+    </IntentPrefetchLink>
   )
 })
 
@@ -204,6 +211,7 @@ export default function QurilmalarClient({
   initialTotal,
   currency,
   initialStatus = 'Barchasi',
+  initialDebtFocus,
   initialSearch = '',
   initialPage = 1,
   initialSyncCursor,
@@ -212,14 +220,16 @@ export default function QurilmalarClient({
   initialTotal: number
   currency: CurrencyContext
   initialStatus?: DeviceStatus | 'Barchasi'
+  initialDebtFocus?: 'OVERDUE' | 'DUE_TODAY'
   initialSearch?: string
   initialPage?: number
   initialSyncCursor: string
 }) {
   const scope = useAuthenticatedQueryScope()
-  const { can } = useShopAccess()
+  const { can, memberKind } = useShopAccess()
   const canManageInventory = can('INVENTORY_MANAGE')
   const canExport = can('EXPORT_DATA')
+  const showOwnerFinancials = memberKind === 'SHOP_OWNER'
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState(initialSearch)
   const [debouncedSearch, setDebouncedSearch] = useState(initialSearch)
@@ -272,7 +282,14 @@ export default function QurilmalarClient({
   })
 
   useEffect(() => {
-    replaceListUrlState({ q: debouncedSearch, status: activeStatus, page })
+    // `tab=qarz` is the public work-queue URL. Keep legacy `status` links
+    // working for other inventory tabs, without dropping the banner's focus.
+    replaceListUrlState({
+      q: debouncedSearch,
+      tab: activeStatus === 'SOLD_DEBT' ? 'qarz' : null,
+      status: activeStatus === 'SOLD_DEBT' ? null : activeStatus,
+      page,
+    })
   }, [activeStatus, debouncedSearch, page])
 
   const devices = devicesQuery.data?.items ?? []
@@ -290,21 +307,21 @@ export default function QurilmalarClient({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canExport && (
-            <button
+            <Button
+              type="button"
+              size="lg"
+              variant="outline"
               onClick={() => {
                 window.location.href = exportUrl('devices', 'xlsx')
               }}
-              className="h-9 px-4 text-sm border border-zinc-200 rounded text-zinc-700 hover:bg-zinc-100 transition-colors"
             >
               Excel yuklab olish
-            </button>
+            </Button>
           )}
           {canManageInventory && (
-            <Link href="/shop/qurilmalar/new">
-              <Button className="bg-zinc-900 hover:bg-zinc-800 text-white h-9 px-4 text-sm rounded">
-                + Yangi qurilma
-              </Button>
-            </Link>
+            <Button render={<Link href="/shop/qurilmalar/new" />} size="lg">
+              + Yangi qurilma
+            </Button>
           )}
         </div>
       </div>
@@ -326,6 +343,19 @@ export default function QurilmalarClient({
         ))}
       </div>
 
+      {activeStatus === 'SOLD_DEBT' && initialDebtFocus && (
+        <div
+          id={`qarz-${initialDebtFocus.toLowerCase()}`}
+          className={initialDebtFocus === 'OVERDUE'
+            ? 'rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800'
+            : 'rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800'}
+        >
+          {initialDebtFocus === 'OVERDUE'
+            ? "Muddati o'tgan qarzlar ro'yxatning yuqorisida turadi."
+            : "Avval muddati o'tgan qarzlar, undan keyin bugun to'lanadigan qarzlar ko'rsatiladi."}
+        </div>
+      )}
+
       {/* Search */}
       <div className="flex flex-col gap-2 sm:flex-row">
         <Input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Model, IMEI, rang, xotira yoki yetkazib beruvchi bo'yicha qidirish..." className="max-w-md h-9 text-sm border-zinc-200 rounded" />
@@ -342,7 +372,19 @@ export default function QurilmalarClient({
           <table className="min-w-[1180px] w-full text-sm">
             <thead className="bg-zinc-50 border-b border-zinc-200">
               <tr>
-                {['Model', 'Rang', 'Xotira', 'Batareya', 'Kelish narxi', 'IMEI', 'Status', 'Sotuv narxi', 'Farq', 'Mijoz', 'Sana', ''].map((h) => (
+                {[
+                  'Model',
+                  'Rang',
+                  'Xotira',
+                  'Batareya',
+                  ...(showOwnerFinancials ? ['Kelish narxi'] : []),
+                  'IMEI',
+                  'Status',
+                  'Sotuv narxi',
+                  ...(showOwnerFinancials ? ['Farq'] : []),
+                  'Mijoz',
+                  'Sana',
+                ].map((h) => (
                   <th key={h} className="text-left px-4 py-2.5 text-xs font-semibold text-zinc-500 uppercase tracking-wide">
                     {h}
                   </th>
@@ -352,19 +394,19 @@ export default function QurilmalarClient({
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-zinc-400 text-sm">
+                  <td colSpan={showOwnerFinancials ? 11 : 9} className="px-4 py-8 text-center text-zinc-400 text-sm">
                     Yuklanmoqda...
                   </td>
                 </tr>
               ) : devices.length === 0 ? (
                 <tr>
-                  <td colSpan={12} className="px-4 py-8 text-center text-zinc-400 text-sm">
+                  <td colSpan={showOwnerFinancials ? 11 : 9} className="px-4 py-8 text-center text-zinc-400 text-sm">
                     Qurilma topilmadi
                   </td>
                 </tr>
               ) : (
                 devices.map((device) => (
-                  <DeviceTableRow key={device.id} device={device} currency={currency} />
+                  <DeviceTableRow key={device.id} device={device} currency={currency} showOwnerFinancials={showOwnerFinancials} />
                 ))
               )}
             </tbody>
@@ -380,7 +422,7 @@ export default function QurilmalarClient({
           <div className="border border-zinc-200 rounded px-4 py-8 text-center text-sm text-zinc-500">Qurilma topilmadi</div>
         ) : (
           devices.map((device) => (
-            <DeviceMobileCard key={device.id} device={device} currency={currency} />
+            <DeviceMobileCard key={device.id} device={device} currency={currency} showOwnerFinancials={showOwnerFinancials} />
           ))
         )}
       </div>
