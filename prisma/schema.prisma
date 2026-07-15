@@ -161,6 +161,15 @@ model SuperAdmin {
   @@index([telegramId])
 }
 
+// A single platform-wide reporting window. Resetting this boundary starts
+// Super Admin subscription-revenue aggregates over without deleting the
+// immutable ShopPayment receipts that remain available for audit and export.
+model PlatformRevenueReportWindow {
+  id                          String   @id
+  subscriptionRevenueStartsAt DateTime
+  createdAt                   DateTime @default(now())
+}
+
 // ---------------------------------------------------------------------------
 // Shop
 // ---------------------------------------------------------------------------

@@ -25,9 +25,10 @@ describe('cron schedules planned reminders with jitter', () => {
     expect(cron).toContain('for (const overdueShopId of transitionedShopIds)')
   })
 
-  it('still respects reminderEnabled + verified admins + excludes deleted (unchanged)', () => {
+  it('queues reminders only for opted-in, verified, non-deleted admins', () => {
     expect(cron).toContain('reminderEnabled: true')
     expect(cron).toContain('telegramVerifiedAt: { not: null }')
+    expect(cron).toContain('telegramNotificationsEnabled: true')
     expect(cron).toContain('deletedAt: null')
   })
 })

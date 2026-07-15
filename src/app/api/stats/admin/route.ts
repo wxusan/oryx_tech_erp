@@ -12,6 +12,12 @@ import { logger } from '@/lib/logger'
 import { adminReportingContext, summarizeShopPaymentGroups } from '@/lib/admin-money'
 import { getSuperAdminCurrencyContext } from '@/lib/server/currency'
 
+const PLATFORM_REVENUE_REPORT_WINDOW_ID = 'platform'
+
+function startsAtOrAfter(periodStart: Date, revenueStart: Date | null) {
+  return revenueStart && revenueStart > periodStart ? revenueStart : periodStart
+}
+
 export async function GET() {
   try {
     const guarded = await requireSuperAdmin()
@@ -20,6 +26,15 @@ export async function GET() {
     const now = new Date()
     const { start: monthStart, end: monthEnd } = tashkentMonthRange(now)
     const dueSoonCutoff = addDays(now, 7)
+    const revenueWindow = await prisma.platformRevenueReportWindow.findUnique({
+      where: { id: PLATFORM_REVENUE_REPORT_WINDOW_ID },
+      select: { subscriptionRevenueStartsAt: true },
+    })
+    const subscriptionRevenueStartsAt = revenueWindow?.subscriptionRevenueStartsAt ?? null
+    const reportablePaymentWhere = {
+      deletedAt: null,
+      ...(subscriptionRevenueStartsAt ? { paidAt: { gte: subscriptionRevenueStartsAt } } : {}),
+    }
 
     const [thisMonthResult, totalRevenueResult, totalShops, activeShops, suspendedShops, dueSoon, overdue, expectedRevenueRows, currency] =
       await Promise.all([
@@ -28,14 +43,17 @@ export async function GET() {
         by: ['currency'],
         _sum: { amount: true, amountUzsSnapshot: true, amountUsdSnapshot: true },
         _count: { id: true, amountUzsSnapshot: true, amountUsdSnapshot: true },
-        where: { deletedAt: null, paidAt: { gte: monthStart, lt: monthEnd } },
+        where: {
+          deletedAt: null,
+          paidAt: { gte: startsAtOrAfter(monthStart, subscriptionRevenueStartsAt), lt: monthEnd },
+        },
       }),
 
       prisma.shopPayment.groupBy({
         by: ['currency'],
         _sum: { amount: true, amountUzsSnapshot: true, amountUsdSnapshot: true },
         _count: { id: true, amountUzsSnapshot: true, amountUsdSnapshot: true },
-        where: { deletedAt: null },
+        where: reportablePaymentWhere,
       }),
 
       prisma.shop.count({

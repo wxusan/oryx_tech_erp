@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   paymentFindMany: vi.fn(),
   paymentCount: vi.fn(),
   paymentGroupBy: vi.fn(),
+  revenueWindowFindUnique: vi.fn(),
   loggerError: vi.fn(),
 }))
 
@@ -25,6 +26,9 @@ vi.mock('@/lib/prisma', () => ({
       findMany: mocks.paymentFindMany,
       count: mocks.paymentCount,
       groupBy: mocks.paymentGroupBy,
+    },
+    platformRevenueReportWindow: {
+      findUnique: mocks.revenueWindowFindUnique,
     },
   },
 }))
@@ -53,6 +57,7 @@ beforeEach(() => {
     ok: true,
     session: { user: { id: 'super-admin', role: 'SUPER_ADMIN' } },
   })
+  mocks.revenueWindowFindUnique.mockResolvedValue(null)
 })
 
 afterEach(() => {
@@ -208,5 +213,30 @@ describe('GET /api/admin/payments', () => {
 
     expect(json.data).toMatchObject({ total: 0, skip: 0, take: 100, items: [] })
     expect(mocks.paymentFindMany).toHaveBeenCalledWith(expect.objectContaining({ skip: 0, take: 100 }))
+  })
+
+  it('excludes pre-reset receipts from period summaries without deleting audit history', async () => {
+    const reportingStart = new Date('2026-07-08T00:00:00.000Z')
+    mocks.revenueWindowFindUnique.mockResolvedValue({ subscriptionRevenueStartsAt: reportingStart })
+    mocks.paymentFindMany.mockResolvedValue([])
+    mocks.paymentCount.mockResolvedValue(2)
+    mocks.paymentGroupBy.mockResolvedValue([])
+
+    const response = await getAdminPayments(new NextRequest('http://localhost/api/admin/payments'))
+    const json = await response.json()
+
+    expect(json.data.total).toBe(2)
+    expect(mocks.paymentFindMany).toHaveBeenCalledWith(expect.objectContaining({
+      where: { deletedAt: null },
+    }))
+    expect(mocks.paymentGroupBy).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      where: {
+        deletedAt: null,
+        paidAt: {
+          gte: reportingStart,
+          lt: new Date('2026-07-31T19:00:00.000Z'),
+        },
+      },
+    }))
   })
 })

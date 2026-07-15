@@ -93,6 +93,13 @@ pre-multi-currency subscription system stored and displayed them exclusively
 as UZS. Cross-currency snapshots use a governed rate recorded at or before the
 payment and no more than seven days old. Missing evidence is marked `PARTIAL`.
 
+Migration `202607150005_reset_super_admin_subscription_reporting` starts a new
+platform subscription-reporting window. Receipts recorded before that instant
+remain immutable audit and CSV history, but Super Admin dashboard and period
+aggregates start at zero. New receipts always retain their original currency
+and payment-time UZS/USD snapshots, so both currency views continue from the
+new reporting window without revaluing old payments.
+
 ## API and export contracts
 
 Super Admin aggregates expose separate native UZS/USD totals, immutable

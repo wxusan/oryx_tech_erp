@@ -197,7 +197,7 @@ export async function GET(request: NextRequest): Promise<Response> {
               include: {
                 customer: true,
                 device: { include: { imeis: { where: { deletedAt: null } } } },
-                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
               },
             },
           },
@@ -264,7 +264,7 @@ export async function GET(request: NextRequest): Promise<Response> {
               include: {
                 customer: true,
                 device: { include: { imeis: { where: { deletedAt: null } } } },
-                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
               },
             },
           },
@@ -348,7 +348,7 @@ export async function GET(request: NextRequest): Promise<Response> {
               include: {
                 customer: true,
                 device: { include: { imeis: { where: { deletedAt: null } } } },
-                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
               },
             },
           },
@@ -411,7 +411,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           include: {
             customer: true,
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
           },
           orderBy: { id: 'asc' },
           take,
@@ -467,7 +467,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           include: {
             customer: true,
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
           },
           orderBy: { id: 'asc' },
           take,
@@ -525,7 +525,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           include: {
             customer: true,
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
           },
           orderBy: { id: 'asc' },
           take,
@@ -581,7 +581,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           },
           include: {
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
           },
           orderBy: { id: 'asc' },
           take,
@@ -633,7 +633,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           },
           include: {
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
           },
           orderBy: { id: 'asc' },
           take,
@@ -709,7 +709,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           },
           include: {
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } } } } },
+            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
           },
           orderBy: { id: 'asc' },
           take,

@@ -17,6 +17,7 @@ const RELEASE_MIGRATIONS = [
   '202607150002_nasiya_archive_permission_bundle',
   '202607150003_monthly_profit_recognition',
   '202607150004_complete_accounting_redesign',
+  '202607150005_reset_super_admin_subscription_reporting',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))

@@ -19,6 +19,7 @@ import { getSuperAdminCurrencyContext } from '@/lib/server/currency'
 const DEFAULT_TAKE = 25
 const MAX_TAKE = 100
 const MAX_EXPORT_ROWS = 10_000
+const PLATFORM_REVENUE_REPORT_WINDOW_ID = 'platform'
 
 function csvCell(value: unknown) {
   const raw = value == null ? '' : String(value)
@@ -38,6 +39,10 @@ function previousMonthKey(monthKey: string) {
   return month === 1
     ? `${year - 1}-12`
     : `${year}-${String(month - 1).padStart(2, '0')}`
+}
+
+function startsAtOrAfter(periodStart: Date, revenueStart: Date | null) {
+  return revenueStart && revenueStart > periodStart ? revenueStart : periodStart
 }
 
 export async function GET(req: NextRequest) {
@@ -104,6 +109,11 @@ export async function GET(req: NextRequest) {
     const currentYear = Number(currentMonth.monthKey.slice(0, 4))
     const currentYearStart = tashkentMonthRangeFromKey(`${currentYear}-01`, now).start
     const nextYearStart = tashkentMonthRangeFromKey(`${currentYear + 1}-01`, now).start
+    const revenueWindow = await prisma.platformRevenueReportWindow.findUnique({
+      where: { id: PLATFORM_REVENUE_REPORT_WINDOW_ID },
+      select: { subscriptionRevenueStartsAt: true },
+    })
+    const subscriptionRevenueStartsAt = revenueWindow?.subscriptionRevenueStartsAt ?? null
     const baseWhere: Prisma.ShopPaymentWhereInput = { deletedAt: null }
 
     const groupSum = (where: Prisma.ShopPaymentWhereInput) => prisma.shopPayment.groupBy({
@@ -136,9 +146,9 @@ export async function GET(req: NextRequest) {
         },
       }),
       prisma.shopPayment.count({ where: baseWhere }),
-      groupSum({ ...baseWhere, paidAt: { gte: currentMonth.start, lt: currentMonth.end } }),
-      groupSum({ ...baseWhere, paidAt: { gte: previousMonth.start, lt: previousMonth.end } }),
-      groupSum({ ...baseWhere, paidAt: { gte: currentYearStart, lt: nextYearStart } }),
+      groupSum({ ...baseWhere, paidAt: { gte: startsAtOrAfter(currentMonth.start, subscriptionRevenueStartsAt), lt: currentMonth.end } }),
+      groupSum({ ...baseWhere, paidAt: { gte: startsAtOrAfter(previousMonth.start, subscriptionRevenueStartsAt), lt: previousMonth.end } }),
+      groupSum({ ...baseWhere, paidAt: { gte: startsAtOrAfter(currentYearStart, subscriptionRevenueStartsAt), lt: nextYearStart } }),
       getSuperAdminCurrencyContext(guarded.session.user.id),
     ])
 
