@@ -29,6 +29,14 @@ ALTER TABLE "ShopPayment"
   ADD COLUMN "amountUsdSnapshot" DECIMAL(12,2),
   ADD COLUMN "currencyReconstructionStatus" "AccountingReconstructionStatus" NOT NULL DEFAULT 'PENDING';
 
+-- The ERP 2.0 allocation constraint deliberately required NULL currency on
+-- LEGACY_UNALLOCATED receipts. Currency is now mandatory for every receipt,
+-- so replace that old invariant before backfilling legacy rows. Without this
+-- transition, existing production receipts reject the UZS compatibility
+-- backfill even though fresh/empty databases migrate successfully.
+ALTER TABLE "ShopPayment"
+  DROP CONSTRAINT IF EXISTS "ShopPayment_package_allocation_check";
+
 UPDATE "ShopPayment"
 SET "currency" = 'UZS'
 WHERE "currency" IS NULL;
@@ -97,6 +105,38 @@ ALTER TABLE "ShopPayment"
 
 ALTER TABLE "ShopPayment"
   VALIDATE CONSTRAINT "ShopPayment_currency_snapshot_check";
+
+ALTER TABLE "ShopPayment"
+  ADD CONSTRAINT "ShopPayment_package_allocation_check" CHECK (
+    (
+      "allocationStatus" = 'LEGACY_UNALLOCATED'
+      AND "packageVersionId" IS NULL
+      AND "currency" IS NOT NULL
+      AND "packageMonthlyPriceSnapshot" IS NULL
+      AND "servicePeriodStart" IS NULL
+      AND "servicePeriodEnd" IS NULL
+      AND "dueBefore" IS NULL
+      AND "dueAfter" IS NULL
+      AND "commandHash" IS NULL
+    )
+    OR
+    (
+      "allocationStatus" = 'PACKAGE_ALLOCATED'
+      AND "packageVersionId" IS NOT NULL
+      AND "currency" IS NOT NULL
+      AND "packageMonthlyPriceSnapshot" IS NOT NULL
+      AND "servicePeriodStart" IS NOT NULL
+      AND "servicePeriodEnd" IS NOT NULL
+      AND "dueBefore" IS NOT NULL
+      AND "dueAfter" IS NOT NULL
+      AND "commandHash" IS NOT NULL
+      AND "packageMonthlyPriceSnapshot" >= 0
+      AND "servicePeriodStart" < "servicePeriodEnd"
+    )
+  ) NOT VALID;
+
+ALTER TABLE "ShopPayment"
+  VALIDATE CONSTRAINT "ShopPayment_package_allocation_check";
 
 -- The legacy permission definition and immutable WRITE_OFF events remain for
 -- audit/history reads, but the permission can no longer be newly assigned.

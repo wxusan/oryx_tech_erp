@@ -11,6 +11,11 @@ on:
         required: false
         type: boolean
         default: false
+      resolve_failed_accounting_migration:
+        description: Resolve the rolled-back 202607150004 transaction after verifying that no schema artifacts survived
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -50,6 +55,13 @@ jobs:
           jq -e --arg sha "$GITHUB_SHA" 'any(.[]; .conclusion == "success" and .event == "push" and .headBranch == "main" and .headSha == $sha)' <<< "$ci_runs"
       - name: Pull production configuration
         run: npx vercel@51.7.0 pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
+      - name: Resolve the known rolled-back accounting migration
+        if: inputs.resolve_failed_accounting_migration == true
+        run: |
+          set -a
+          source .vercel/.env.production.local
+          set +a
+          ORYX_FAILED_MIGRATION_RESOLUTION=resolve-failed-202607150004_complete_accounting_redesign node scripts/resolve-failed-accounting-migration.mjs
       - name: Build, migrate, and create an unaliased production deployment
         id: deploy
         run: |

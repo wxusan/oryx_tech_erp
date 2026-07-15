@@ -9,6 +9,7 @@ const buildScript = readFileSync('scripts/vercel-build.mjs', 'utf8')
 const preflightScript = readFileSync('scripts/production-release-preflight.mjs', 'utf8')
 const prismaConfig = readFileSync('prisma.config.ts', 'utf8')
 const releaseWorkflow = readFileSync('.github/workflows/release-production.yml', 'utf8')
+const failedMigrationResolver = readFileSync('scripts/resolve-failed-accounting-migration.mjs', 'utf8')
 
 describe('production release guard', () => {
   it('applies migrations only inside the Vercel production builder', () => {
@@ -72,6 +73,17 @@ describe('production release guard', () => {
     expect(releaseWorkflow).not.toContain('deploy --prebuilt')
     expect(releaseWorkflow).not.toContain('PRODUCTION_DATABASE_URL')
     expect(releaseWorkflow).not.toContain('PRODUCTION_DIRECT_URL')
+  })
+
+  it('can resolve only the known fully rolled-back accounting migration under explicit release approval', () => {
+    expect(releaseWorkflow).toContain('resolve_failed_accounting_migration')
+    expect(releaseWorkflow).toContain('if: inputs.resolve_failed_accounting_migration == true')
+    expect(releaseWorkflow).toContain('scripts/resolve-failed-accounting-migration.mjs')
+    expect(failedMigrationResolver).toContain("process.env.GITHUB_ACTIONS !== 'true'")
+    expect(failedMigrationResolver).toContain('Expected exactly one active failed')
+    expect(failedMigrationResolver).toContain('releaseArtifactCount !== 0')
+    expect(failedMigrationResolver).toContain("'--rolled-back'")
+    expect(failedMigrationResolver).not.toContain('UPDATE "_prisma_migrations"')
   })
 
   it('releases only the exact green main push and rechecks main before promotion', () => {

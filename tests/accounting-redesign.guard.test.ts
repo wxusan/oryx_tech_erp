@@ -69,4 +69,18 @@ describe('complete accounting redesign release guard', () => {
     expect(migration).not.toContain('DELETE FROM "NasiyaResolutionEvent"')
     expect(migration.trimEnd()).toMatch(/COMMIT;$/)
   })
+
+  it('replaces the legacy subscription allocation constraint before currency backfill', () => {
+    const migration = read('prisma/migrations/202607150004_complete_accounting_redesign/migration.sql')
+    const dropConstraint = migration.indexOf('DROP CONSTRAINT IF EXISTS "ShopPayment_package_allocation_check"')
+    const currencyBackfill = migration.indexOf('SET "currency" = \'UZS\'')
+    const replacementConstraint = migration.lastIndexOf('ADD CONSTRAINT "ShopPayment_package_allocation_check"')
+
+    expect(dropConstraint).toBeGreaterThan(-1)
+    expect(currencyBackfill).toBeGreaterThan(dropConstraint)
+    expect(replacementConstraint).toBeGreaterThan(currencyBackfill)
+    expect(migration.slice(replacementConstraint)).toContain('"allocationStatus" = \'LEGACY_UNALLOCATED\'')
+    expect(migration.slice(replacementConstraint)).toContain('AND "currency" IS NOT NULL')
+    expect(migration.slice(replacementConstraint)).not.toContain('AND "currency" IS NULL')
+  })
 })

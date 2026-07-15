@@ -72,6 +72,14 @@ deliberately:
    snapshots exist, and the legacy write-off permission is inactive;
 6. publishes the artifact created in step 1.
 
+If migration `202607150004_complete_accounting_redesign` has the single known
+failed transaction record from the legacy `ShopPayment` constraint conflict,
+rerun the workflow with `resolve_failed_accounting_migration=true`. The
+one-time resolver first proves that exactly one unresolved failure exists and
+that none of the migration's columns or index survived the transaction. It
+then uses `prisma migrate resolve --rolled-back`; it never edits Prisma's
+migration table directly. Leave this input off for every normal release.
+
 `vercel.json` must keep `node scripts/vercel-build.mjs` as its `buildCommand`.
 Replacing it with bare `next build`, `npm run build`, or an unguarded migration
 command bypasses this ordering. No preflight query may print row contents or
