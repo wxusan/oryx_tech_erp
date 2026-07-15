@@ -36,8 +36,11 @@ describe('navigation cache integration guards', () => {
     expect(session).toContain('signOut({ callbackUrl })')
   })
 
-  it('coordinates cross-tab, polling, focus, visibility, reconnect, backoff, and scope isolation', () => {
+  it('keeps cross-tab and return-to-app sync while using quiet background polling', () => {
     const coordinator = read('src/components/navigation-cache-coordinator.tsx')
+    expect(coordinator).toContain('const SYNC_INTERVAL_MS = 120_000')
+    expect(coordinator).toContain('const SYNC_INDICATOR_DELAY_MS = 2_000')
+    expect(coordinator).toContain('window.setTimeout(() => setShowSyncing(true), SYNC_INDICATOR_DELAY_MS)')
     expect(coordinator).toContain("window.addEventListener('focus'")
     expect(coordinator).toContain("window.addEventListener('online'")
     expect(coordinator).toContain("document.addEventListener('visibilitychange'")

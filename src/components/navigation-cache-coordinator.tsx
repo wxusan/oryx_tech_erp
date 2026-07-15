@@ -16,7 +16,8 @@ import {
   type NavigationMutationBroadcast,
 } from '@/lib/client-events'
 
-const SYNC_INTERVAL_MS = 25_000
+const SYNC_INTERVAL_MS = 120_000
+const SYNC_INDICATOR_DELAY_MS = 2_000
 const MAX_BACKOFF_MS = 120_000
 
 export function NavigationCacheCoordinator({
@@ -63,7 +64,7 @@ export function NavigationCacheCoordinator({
       controllerRef.current?.abort()
       const controller = new AbortController()
       controllerRef.current = controller
-      slowTimer = window.setTimeout(() => setShowSyncing(true), 500)
+      slowTimer = window.setTimeout(() => setShowSyncing(true), SYNC_INDICATOR_DELAY_MS)
 
       try {
         let hasMore = true
