@@ -250,7 +250,7 @@ describe('set-based shop statistics', () => {
     ])
   })
 
-  it('keeps archived balances in financial totals, removes archive/write-off from work queues, and reports write-off events separately', async () => {
+  it('excludes archived and written-off balances from financial totals and work queues, while reporting write-off events separately', async () => {
     const { owner, shop, customer } = await seedMixedCurrencyObligations()
     const specialScheduleIds: string[] = []
     const contracts: Array<{ id: string; state: 'ARCHIVED' | 'WRITTEN_OFF' }> = []
@@ -328,7 +328,7 @@ describe('set-based shop statistics', () => {
     const monthEnd = new Date('2026-07-31T19:00:00.000Z')
     const todayStart = new Date('2026-07-12T19:00:00.000Z')
     await expect(getShopObligationAggregate({ shopId: shop.id, monthStart, monthEnd, todayStart }))
-      .resolves.toMatchObject({ expectedUzs: 1_900, overdueUzs: 1_900, overdueCount: 5 })
+      .resolves.toMatchObject({ expectedUzs: 900, overdueUzs: 900, overdueCount: 4 })
     const queue = await getUpcomingScheduleIds(shop.id, 20)
     expect(queue).not.toEqual(expect.arrayContaining(specialScheduleIds))
     await expect(getCurrentOverdueSummary({ shopId: shop.id, todayStart }))
