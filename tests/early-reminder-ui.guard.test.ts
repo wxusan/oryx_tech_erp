@@ -49,9 +49,10 @@ describe('early reminder checkboxes are present in both creation flows', () => {
     expect(page).toContain('earlyReminderEnabled: earlyReminder')
   })
 
-  it('sotuv/new shows the checkbox only for later-payment (fullyPaid === false) sales', () => {
+  it('sotuv/new shows the checkbox for both partial and zero-paid later sales', () => {
     const page = read('src/app/(shop)/shop/sotuv/new/page.tsx')
     expect(page).toContain('Ertaroq eslatilsinmi?')
-    expect(page).toContain('earlyReminderEnabled: fullyPaid ? false : earlyReminder')
+    expect(page).toContain("paymentMode === 'PARTIAL' || paymentMode === 'LATER'")
+    expect(page).toContain('earlyReminderEnabled: paidFully ? false : earlyReminder')
   })
 })

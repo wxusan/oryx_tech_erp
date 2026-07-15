@@ -27,10 +27,11 @@ function allMigrationCatalogCodes() {
 }
 
 describe('Staff Permissions V2 migration source guard', () => {
-  it('keeps the TypeScript and SQL active catalogs in exact parity', () => {
+  it('keeps every historical SQL catalog permission classified as active or retired', () => {
     const definedAcrossMigrations = allMigrationCatalogCodes()
     for (const code of ACTIVE_SHOP_PERMISSION_CODES) expect(definedAcrossMigrations).toContain(code)
-    for (const code of catalogInsertCodes()) expect(ACTIVE_SHOP_PERMISSION_CODES).toContain(code)
+    const classifiedCodes = [...ACTIVE_SHOP_PERMISSION_CODES, ...RETIRED_SHOP_PERMISSION_CODES]
+    for (const code of catalogInsertCodes()) expect(classifiedCodes).toContain(code)
   })
 
   it('contains every documented legacy mapping and no retired target', () => {

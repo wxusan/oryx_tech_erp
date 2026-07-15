@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Boxes, CalendarClock, CircleDollarSign, Download, FileX2, RotateCcw, TrendingUp } from 'lucide-react'
+import { AlertTriangle, Boxes, CalendarClock, CircleDollarSign, Download, RotateCcw, TrendingUp, WalletCards } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { buttonVariants } from '@/components/ui/button'
@@ -23,10 +23,6 @@ type ShopAdminOption = { id: string; name: string }
 type MonthOption = { value: string; label: string }
 
 function fmt(value: number, currency: CurrencyContext) {
-  return formatMoneyByCurrency(value, currency.currency, currency.usdUzsRate)
-}
-
-function fmtBase(value: number, currency: CurrencyContext) {
   return formatMoneyByCurrency(value, currency.currency, currency.usdUzsRate)
 }
 
@@ -138,6 +134,12 @@ export default function HisobotClient({
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
+  const expectedReceivablesText = formatPartitionedMoney({
+    amountUzs: stats.expectedReceivablesThisMonthUzs,
+    amountUsd: stats.expectedReceivablesThisMonthUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
   const overdueText = formatPartitionedMoney({
     amountUzs: stats.overdueMoneyUzs,
     amountUsd: stats.overdueMoneyUsd,
@@ -150,13 +152,6 @@ export default function HisobotClient({
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
-  const writeOffText = formatPartitionedMoney({
-    amountUzs: stats.writeOffsThisMonthNativeUzs,
-    amountUsd: stats.writeOffsThisMonthNativeUsd,
-    displayCurrency: currency.currency,
-    rate: currency.usdUzsRate,
-  })
-
   const cashFlowData = [
     {
       name: 'Umumiy aylanma',
@@ -287,47 +282,75 @@ export default function HisobotClient({
           </CardContent>
         </Card>
 
-        <Card className="rounded-lg border-orange-200 bg-orange-50/40">
+        <Card className="rounded-lg border-emerald-200 bg-emerald-50/30">
           <CardHeader>
-            <CardDescription className="text-orange-800">Hisobdan chiqarilgan qarz</CardDescription>
+            <CardDescription className="text-emerald-800">Sof tushum</CardDescription>
             <CardAction>
-              <FileX2 className="size-4 text-orange-700" />
+              <WalletCards className="size-4 text-emerald-700" />
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-orange-900">{writeOffText}</div>
-            <p className="mt-3 text-xs text-orange-800/70">
-              Bu oy {stats.writeOffCountThisMonth} ta hisobdan chiqarish, {stats.writeOffReopenCountThisMonth} ta qayta ochish · hodisa paytidagi UZS: {fmt(stats.writeOffsThisMonthFrozenUzs, currency)}
-            </p>
+            <div className="text-2xl font-bold text-emerald-900">{fmt(netCash, currency)}</div>
+            <p className="mt-3 text-xs text-emerald-800/70">Bu oy tushgan pul minus mijozga haqiqatda qaytarilgan pul</p>
           </CardContent>
         </Card>
 
-          <Card className="rounded-lg border-emerald-200 bg-emerald-50/30">
+          <Card className="rounded-lg border-teal-200 bg-teal-50/30">
             <CardHeader>
-              <CardDescription className="text-emerald-800">Bu oy kutilayotgan foyda</CardDescription>
+              <CardDescription className="text-teal-800">Bu oy to&apos;lanishi kerak</CardDescription>
             <CardAction>
               <CalendarClock className="size-4 text-teal-700" />
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-900">{expectedText}</div>
-            <p className="mt-3 text-xs text-zinc-500">Faqat shu oy muddati kelgan, hali to'lanmagan marja va foiz · kelgusi oylar kirmaydi</p>
+            <div className="text-2xl font-bold text-zinc-900">{expectedReceivablesText}</div>
+            <p className="mt-3 text-xs text-zinc-500">Faqat shu oy muddati kelgan va hali to&apos;lanmagan summa; keyingi oylar kirmaydi</p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg border-emerald-200 bg-emerald-50/30">
+          <CardHeader>
+            <CardDescription className="text-emerald-800">Bu oy haqiqiy foyda</CardDescription>
+            <CardAction>
+              <TrendingUp className="size-4 text-emerald-600" />
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-emerald-900">{fmt(grossProfit, currency)}</div>
+            <p className="mt-3 text-xs text-emerald-800/70">Faqat shu oy kelib tushgan to&apos;lovlarga tegishli marja va foiz, haqiqiy reverslar hisobga olingan</p>
           </CardContent>
         </Card>
 
         <Card className="rounded-lg">
           <CardHeader>
-            <CardDescription>Qaytarilgan pul</CardDescription>
-            <CardAction>
-              <RotateCcw className="size-4 text-purple-600" />
-            </CardAction>
+            <CardDescription>Bu oy kutilayotgan foyda</CardDescription>
+            <CardAction><CalendarClock className="size-4 text-violet-600" /></CardAction>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-900">{fmt(refunds, currency)}</div>
-            <p className="mt-3 text-xs text-zinc-500">
-              Bu oy {stats.returnsThisMonth} ta qaytarish · sotuvdan bekor qilindi: {fmt(reversedRevenue, currency)} · saqlab qolindi:{' '}
-              {fmt(retainedReturnValue, currency)}
-            </p>
+            <div className="text-2xl font-bold text-zinc-900">{expectedText}</div>
+            <p className="mt-3 text-xs text-zinc-500">Shu oy muddati kelgan, hali to&apos;lanmagan marja va foiz; kelgusi oylar kirmaydi</p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardDescription>Nasiya foizi — tushgan</CardDescription>
+            <CardAction><CircleDollarSign className="size-4 text-cyan-700" /></CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-zinc-900">{fmt(interestProfit, currency)}</div>
+            <p className="mt-3 text-xs text-zinc-500">Faqat shu oy amalda to&apos;langan foiz qismi</p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardDescription>Nasiya foizi — kutilayotgan</CardDescription>
+            <CardAction><CalendarClock className="size-4 text-cyan-700" /></CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-zinc-900">{expectedInterestText}</div>
+            <p className="mt-3 text-xs text-zinc-500">Shu oy to&apos;lanishi kerak, lekin hali tushmagan foiz qismi</p>
           </CardContent>
         </Card>
 
@@ -341,6 +364,19 @@ export default function HisobotClient({
           <CardContent>
             <div className="text-2xl font-bold text-red-700">{overdueText}</div>
             <p className="mt-3 text-xs text-red-700/70">Bugun ko'rib chiqilishi kerak bo'lgan qarzdorlik · joriy kurs bo'yicha</p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardDescription>Mijozga qaytarilgan pul</CardDescription>
+            <CardAction>
+              <RotateCcw className="size-4 text-purple-600" />
+            </CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-zinc-900">{fmt(refunds, currency)}</div>
+            <p className="mt-3 text-xs text-zinc-500">Bu oy {stats.returnsThisMonth} ta qaytarish bo&apos;yicha haqiqatda mijozga berilgan pul</p>
           </CardContent>
         </Card>
 
@@ -367,47 +403,27 @@ export default function HisobotClient({
         </div>
       )}
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card className="rounded-lg">
-          <CardHeader>
-            <CardDescription>Bu oyning haqiqiy foydasi</CardDescription>
-            <CardAction>
-              <TrendingUp className="size-4 text-emerald-600" />
-            </CardAction>
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-zinc-900">{fmt(grossProfit, currency)}</div>
-            <p className="mt-3 text-xs text-zinc-500">
-              Faqat shu oy amalda to'langan marja va foiz; qaytarishlarda faqat ilgari tan olingan foyda revers qilinadi. Omborga qaytgan tannarx: {fmt(recoveredInventoryCost, currency)}.
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className="rounded-lg">
-          <CardHeader>
-            <CardDescription>Qisqa xulosa</CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-3">
+      {stats.returnsThisMonth > 0 && (
+        <details className="rounded-lg border border-zinc-200 bg-white">
+          <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-zinc-900">Qaytarishlar qanday hisoblanganini ko&apos;rish</summary>
+          <div className="grid gap-3 border-t border-zinc-100 px-5 py-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
             {[
-              ["Yig'ilgan", fmtBase(collected, currency)],
-              ['Kutilayotgan foyda', expectedText],
-              ['Kechikkan', overdueText],
-              ['Hisobdan chiqarilgan', writeOffText],
-              ['Olingan Nasiya foizi', fmt(interestProfit, currency)],
-              ['Kutilayotgan Nasiya foizi', expectedInterestText],
-              ['Qaytarish reversali', fmt(reversedRevenue, currency)],
-              ['Qaytgan tannarx', fmt(recoveredInventoryCost, currency)],
-              ['Saqlab qolingan qiymat', fmt(retainedReturnValue, currency)],
-              ['Ombor', fmt(inventory, currency)],
+              ['Mijozga qaytarilgan pul', fmt(refunds, currency)],
+              ['Oldin tan olingan foydadan bekor qilindi', fmt(reversedRevenue, currency)],
+              ['Omborga qaytgan tannarx', fmt(recoveredInventoryCost, currency)],
+              ['Do‘konda saqlab qolingan qiymat', fmt(retainedReturnValue, currency)],
             ].map(([label, value]) => (
-              <div key={label} className="flex items-center justify-between border-b border-zinc-100 pb-2 last:border-0 last:pb-0">
-                <span className="text-sm text-zinc-500">{label}</span>
-                <span className="text-sm font-semibold text-zinc-900">{value}</span>
+              <div key={label}>
+                <div className="text-xs text-zinc-500">{label}</div>
+                <div className="mt-1 font-semibold text-zinc-900">{value}</div>
               </div>
             ))}
-          </CardContent>
-        </Card>
-      </div>
+            <p className="sm:col-span-2 lg:col-span-4 text-xs text-zinc-500">
+              To&apos;lanmagan bekor qilingan qarz pul qaytarilishi hisoblanmaydi va “Sof tushum”dan ayrilmaydi. Kelajakda olinmagan foyda ham revers qilinmaydi.
+            </p>
+          </div>
+        </details>
+      )}
         </>
       ) : null}
     </div>

@@ -1,4 +1,5 @@
 import bcrypt from 'bcrypt'
+import { createHash } from 'node:crypto'
 import { Client } from 'pg'
 import dotenv from 'dotenv'
 
@@ -104,6 +105,19 @@ async function resetExistingDemoData() {
 
   if (!shopIds.length) return
 
+  const immutableLedger = await client.query(
+    `select (
+       (select count(*) from "DeviceReturn" where "shopId" = any($1))
+       + (select count(*) from "NasiyaResolutionEvent" where "shopId" = any($1))
+       + (select count(*) from "NasiyaPaymentAllocation" where "shopId" = any($1))
+       + (select count(*) from "ReturnProfitReversal" where "shopId" = any($1))
+     )::int as count`,
+    [shopIds],
+  )
+  if (immutableLedger.rows[0].count > 0) {
+    throw new Error('Demo data has immutable accounting evidence and cannot be reset in place. Recreate the disposable demo database instead.')
+  }
+
   // The ERP 2.0 owner invariant protects a current owner from deletion, and
   // package snapshots are immutable during normal application work. This
   // explicit, transaction-local maintenance flag only permits deleting demo
@@ -122,6 +136,8 @@ async function resetExistingDemoData() {
   await client.query('delete from "Log" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Notification" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "NasiyaPayment" where "shopId" = any($1)', [shopIds])
+  await client.query('delete from "NasiyaDeferral" where "shopId" = any($1)', [shopIds])
+  await client.query('delete from "NasiyaResolutionEvent" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "NasiyaSchedule" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "Nasiya" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "SalePayment" where "shopId" = any($1)', [shopIds])
@@ -134,6 +150,7 @@ async function resetExistingDemoData() {
   await client.query('delete from "Supplier" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "ShopMemberPermission" where "shopId" = any($1)', [shopIds])
   await client.query('delete from "ShopPayment" where "shopId" = any($1)', [shopIds])
+  await client.query('delete from "AuthSession" where "shopId" = any($1)', [shopIds])
   await client.query(
     `delete from "ShopPackageFeature"
      where "packageVersionId" in (
@@ -222,7 +239,12 @@ async function seedShop(superAdminId, index, shop) {
      where id = $4`,
     [adminId, now, superAdminId, shopId],
   )
-  await createFullDemoPackage(shopId, superAdminId)
+  const packageVersionId = await createFullDemoPackage(shopId, superAdminId)
+  const dueBefore = dateFromNow(shop.subscriptionDays)
+  const servicePeriodStart = new Date(Math.max(now.getTime(), dueBefore.getTime()))
+  const servicePeriodEnd = new Date(servicePeriodStart)
+  servicePeriodEnd.setUTCMonth(servicePeriodEnd.getUTCMonth() + 3)
+  const paymentIdempotencyKey = `demo-subscription-${shopId}`
 
   await insert('ShopPayment', {
     id: id('spay'),
@@ -231,8 +253,20 @@ async function seedShop(superAdminId, index, shop) {
     months: 3,
     paymentMethod: 'TRANSFER',
     note: 'Demo subscription payment',
+    idempotencyKey: paymentIdempotencyKey,
+    commandHash: createHash('sha256').update(paymentIdempotencyKey).digest('hex'),
     paidAt: dateFromNow(-35),
     recordedById: superAdminId,
+    allocationStatus: 'PACKAGE_ALLOCATED',
+    currency: 'UZS',
+    amountUzsSnapshot: decimal(450000),
+    currencyReconstructionStatus: 'PARTIAL',
+    packageVersionId,
+    packageMonthlyPriceSnapshot: decimal(150000),
+    servicePeriodStart,
+    servicePeriodEnd,
+    dueBefore,
+    dueAfter: servicePeriodEnd,
   })
 
   const supplierIds = []
@@ -277,6 +311,9 @@ async function seedShop(superAdminId, index, shop) {
       storage: device.storage,
       batteryHealth: device.batteryHealth,
       purchasePrice: decimal(device.purchasePrice),
+      purchaseCurrency: 'UZS',
+      purchaseInputAmount: decimal(device.purchasePrice),
+      purchaseAmountUzsSnapshot: decimal(device.purchasePrice),
       imei: `${shop.imeiPrefix}${String(deviceIndex + 1).padStart(8, '0')}`,
       supplierId: supplierIds[deviceIndex % supplierIds.length],
       supplierPhone: shop.suppliers[deviceIndex % supplierIds.length].phone,

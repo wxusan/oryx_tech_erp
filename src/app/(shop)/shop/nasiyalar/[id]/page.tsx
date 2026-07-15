@@ -33,7 +33,8 @@ import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempote
 
 type NasiyaPayment = NasiyaPaymentDisplayRecord
 type ResolutionState = 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
-type ResolutionAction = 'ARCHIVE' | 'WRITE_OFF' | 'REOPEN'
+type ResolutionAction = 'ARCHIVE' | 'REOPEN'
+type ResolutionEventType = ResolutionAction | 'WRITE_OFF'
 
 interface NasiyaEditPatch {
   note: string | null
@@ -44,7 +45,7 @@ interface NasiyaEditPatch {
 
 interface ResolutionEvent {
   id: string
-  eventType: ResolutionAction
+  eventType: ResolutionEventType
   previousState: ResolutionState
   newState: ResolutionState
   contractCurrency: 'UZS' | 'USD'
@@ -161,7 +162,6 @@ export default function NasiyaDetailPage() {
     'NASIYA_REMINDER_MANAGE',
     'NASIYA_CANCEL',
     'NASIYA_ARCHIVE',
-    'NASIYA_WRITE_OFF',
     'NASIYA_REOPEN',
   ].some((permission) => can(permission as Parameters<typeof can>[0]))
   if (!canOpen) return <ShopAccessDenied />
@@ -170,15 +170,14 @@ export default function NasiyaDetailPage() {
 
 function AuthorizedNasiyaDetailPage() {
   const { can } = useShopAccess()
-  const canBrowseNasiyas = can('NASIYA_VIEW') || can('NASIYA_EDIT') || can('NASIYA_REMINDER_MANAGE') || can('NASIYA_ARCHIVE') || can('NASIYA_WRITE_OFF') || can('NASIYA_REOPEN')
+  const canBrowseNasiyas = can('NASIYA_VIEW') || can('NASIYA_EDIT') || can('NASIYA_REMINDER_MANAGE') || can('NASIYA_ARCHIVE') || can('NASIYA_REOPEN')
   const canEditNasiya = can('NASIYA_EDIT')
   const canReceivePayment = can('NASIYA_PAYMENT_RECEIVE')
   const canDeferNasiya = can('NASIYA_DEFER')
   const canManageReminder = can('NASIYA_REMINDER_MANAGE')
   const canArchiveNasiya = can('NASIYA_ARCHIVE')
-  const canWriteOffNasiya = can('NASIYA_WRITE_OFF')
   const canReopenNasiya = can('NASIYA_REOPEN')
-  const canResolveNasiya = canArchiveNasiya || canWriteOffNasiya || canReopenNasiya
+  const canResolveNasiya = canArchiveNasiya || canReopenNasiya
   const canViewPassportPhoto = can('CUSTOMER_PASSPORT_PHOTO_VIEW')
   const canViewLogs = can('LOG_VIEW')
   const resolutionCommand = useLogicalCommandIdempotency()
@@ -399,11 +398,7 @@ function AuthorizedNasiyaDetailPage() {
         return
       }
       resolutionCommand.committed()
-      const kind = resolutionAction === 'ARCHIVE'
-        ? 'nasiya.archived'
-        : resolutionAction === 'WRITE_OFF'
-          ? 'nasiya.writtenOff'
-          : 'nasiya.reopened'
+      const kind = resolutionAction === 'ARCHIVE' ? 'nasiya.archived' : 'nasiya.reopened'
       await commitNavigationMutation({ kind, nasiyaId: nasiya.id })
       setResolutionAction(null)
       setLoading(true)
@@ -517,12 +512,7 @@ function AuthorizedNasiyaDetailPage() {
                   Arxivlash
                 </Button>
               )}
-              {canWriteOffNasiya && nasiya.resolutionState !== 'WRITTEN_OFF' && nasiya.contractRemainingAmount > 0 && (
-                <Button variant="destructive" onClick={() => openResolution('WRITE_OFF')} className="h-9 px-3 text-sm rounded">
-                  Hisobdan chiqarish
-                </Button>
-              )}
-              {canReopenNasiya && nasiya.resolutionState !== 'ACTIVE' && (
+              {canReopenNasiya && nasiya.resolutionState === 'ARCHIVED' && (
                 <Button variant="outline" onClick={() => openResolution('REOPEN')} className="h-9 px-3 text-sm border-zinc-200 rounded">
                   Qayta ochish
                 </Button>
@@ -539,7 +529,7 @@ function AuthorizedNasiyaDetailPage() {
       )}
       {nasiya.resolutionState === 'WRITTEN_OFF' && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
-          Bu qarz hisobdan chiqarilgan. Tarix va qoldiq dalillari saqlangan, lekin kelajakdagi undirish, muddati o'tgan hisob va eslatmalar to'xtatilgan.
+          Bu eski qarz avvalgi tizimda hisobdan chiqarilgan. Tarix va qoldiq dalillari faqat audit uchun saqlanadi; yangi hisobdan chiqarish yoki qayta ochish amali mavjud emas.
         </div>
       )}
 
@@ -698,7 +688,7 @@ function AuthorizedNasiyaDetailPage() {
           <div className="text-sm font-semibold text-zinc-900">To'lov eslatmasi</div>
           <div className="text-xs text-zinc-500 mt-0.5">
             {!isOperationallyActive
-              ? "Arxiv/hisobdan chiqarish holatida eslatmalar yuborilmaydi"
+              ? "Arxiv yoki eski hisobdan chiqarish holatida eslatmalar yuborilmaydi"
               : nasiya.reminderEnabled ? 'Eslatma yoqilgan' : "Eslatma o'chirilgan"}
           </div>
         </div>
@@ -722,7 +712,7 @@ function AuthorizedNasiyaDetailPage() {
         <Card className="rounded-lg">
           <CardHeader>
             <CardTitle>Undirish holati tarixi</CardTitle>
-            <CardDescription>O'zgarmas arxiv, hisobdan chiqarish va qayta ochish dalillari</CardDescription>
+            <CardDescription>Arxiv/qayta ochish amallari va eski hisobdan chiqarish audit dalillari</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {resolutionEvents.map((event) => (
@@ -809,16 +799,12 @@ function AuthorizedNasiyaDetailPage() {
         <DialogContent className="w-[calc(100vw-2rem)] max-w-md rounded-xl sm:w-full">
           <DialogHeader>
             <DialogTitle>
-              {resolutionAction === 'WRITE_OFF'
-                ? 'Qarzni hisobdan chiqarish'
-                : resolutionAction === 'ARCHIVE'
+              {resolutionAction === 'ARCHIVE'
                   ? 'Nasiyani arxivlash'
                   : 'Nasiyani qayta ochish'}
             </DialogTitle>
             <DialogDescription>
-              {resolutionAction === 'WRITE_OFF'
-                ? `Qoldiq ${dfmt(nasiya.contractRemainingAmount)}. Bu amal moliyaviy tarixni o'chirmaydi, lekin kelajakdagi undirish va eslatmalarni to'xtatadi.`
-                : resolutionAction === 'ARCHIVE'
+              {resolutionAction === 'ARCHIVE'
                   ? "Moliyaviy qoldiq o'zgarmaydi; nasiya oddiy ish navbatidan olinadi."
                   : "Oldingi hodisa o'chirilmaydi. Alohida qoplovchi qayta ochish hodisasi yoziladi."}
             </DialogDescription>
@@ -845,15 +831,13 @@ function AuthorizedNasiyaDetailPage() {
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setResolutionAction(null)}>Bekor qilish</Button>
             <Button
-              variant={resolutionAction === 'WRITE_OFF' ? 'destructive' : 'default'}
+              variant="default"
               disabled={resolutionSubmitting || resolutionReason.trim().length < 5}
               onClick={handleResolution}
             >
               {resolutionSubmitting
                 ? 'Saqlanmoqda...'
-                : resolutionAction === 'WRITE_OFF'
-                  ? 'Hisobdan chiqarishni tasdiqlash'
-                  : resolutionAction === 'ARCHIVE'
+                : resolutionAction === 'ARCHIVE'
                     ? 'Arxivlash'
                     : 'Qayta ochish'}
             </Button>

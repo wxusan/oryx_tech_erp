@@ -26,12 +26,21 @@ import { uzLongDate } from '@/lib/dates'
 import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { useAdminCurrency } from '@/lib/use-admin-currency'
+import {
+  expectedAdminMoneyValue,
+  formatExpectedAdminMoney,
+  formatHistoricalAdminMoney,
+  historicalAdminMoneyValue,
+  type HistoricalAdminMoney,
+  type NativeAdminMoney,
+} from '@/lib/admin-money'
 
 interface AdminStats {
-  thisMonthRevenue: number
-  totalRevenue: number
+  thisMonthRevenue: HistoricalAdminMoney
+  totalRevenue: HistoricalAdminMoney
   totalPayments: number
-  expectedRevenue: number
+  expectedRevenue: NativeAdminMoney
   totalShops: number
   activeShops: number
   suspendedShops: number
@@ -58,10 +67,6 @@ interface DueShopsPage {
   take: number
 }
 
-function formatMoney(value: number) {
-  return value.toLocaleString('ru-RU') + " so'm"
-}
-
 function formatDate(value: string) {
   return uzLongDate(value)
 }
@@ -74,6 +79,7 @@ function daysUntil(value: string) {
 
 export default function AdminReportsPage() {
   const scope = useAuthenticatedQueryScope()
+  const { currency } = useAdminCurrency()
   const [duePage, setDuePage] = useState(1)
   const duePerPage = 12
   const statsQuery = useQuery({
@@ -108,10 +114,15 @@ export default function AdminReportsPage() {
       ? dueShopsQuery.error.message
       : ''
 
-  const collectionRate = stats?.expectedRevenue
-    ? Math.min(100, Math.round((stats.thisMonthRevenue / stats.expectedRevenue) * 100))
+  const receivedValue = stats ? historicalAdminMoneyValue(stats.thisMonthRevenue, currency.currency) : null
+  const expectedValue = stats ? expectedAdminMoneyValue(stats.expectedRevenue, currency) : null
+  const totalRevenueValue = stats ? historicalAdminMoneyValue(stats.totalRevenue, currency.currency) : null
+  const collectionRate = receivedValue !== null && expectedValue !== null && expectedValue > 0
+    ? Math.min(100, Math.round((receivedValue / expectedValue) * 100))
     : 0
-  const averagePayment = stats?.totalPayments ? Math.round(stats.totalRevenue / stats.totalPayments) : 0
+  const averagePayment = stats?.totalPayments && totalRevenueValue !== null
+    ? totalRevenueValue / stats.totalPayments
+    : null
   const dueRows = dueShopsQuery.data?.items ?? []
   const dueTotal = dueShopsQuery.data?.total ?? 0
   const dueTotalPages = Math.max(1, Math.ceil(dueTotal / duePerPage))
@@ -147,7 +158,7 @@ export default function AdminReportsPage() {
             <div>
               <div className="text-xs font-medium uppercase text-zinc-500">Tushgan summa</div>
               <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-900">
-                {statsLoading ? 'Yuklanmoqda...' : formatMoney(stats?.thisMonthRevenue ?? 0)}
+                {statsLoading || !stats ? 'Yuklanmoqda...' : formatHistoricalAdminMoney(stats.thisMonthRevenue, currency)}
               </div>
             </div>
             <div className="space-y-2">
@@ -157,7 +168,7 @@ export default function AdminReportsPage() {
               </div>
               <Progress value={collectionRate} />
               <div className="flex items-center justify-between text-xs text-zinc-500">
-                <span>Kutilayotgan: {formatMoney(stats?.expectedRevenue ?? 0)}</span>
+                <span>Kutilayotgan: {stats ? formatExpectedAdminMoney(stats.expectedRevenue, currency) : '—'}</span>
                 <span>Faol: {stats?.activeShops ?? 0}</span>
               </div>
             </div>
@@ -165,9 +176,19 @@ export default function AdminReportsPage() {
         </Card>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:col-span-7">
-          <MetricCard icon={ReceiptText} label="Jami tushum" value={formatMoney(stats?.totalRevenue ?? 0)} />
+          <MetricCard icon={ReceiptText} label="Jami tushum" value={stats ? formatHistoricalAdminMoney(stats.totalRevenue, currency) : '—'} />
           <MetricCard icon={Building2} label="Jami do'konlar" value={String(stats?.totalShops ?? 0)} />
-          <MetricCard icon={Percent} label="O'rtacha to'lov" value={formatMoney(averagePayment)} />
+          <MetricCard
+            icon={Percent}
+            label="O'rtacha to'lov"
+            value={averagePayment === null
+              ? 'Valyuta ma’lumoti to‘liq emas'
+              : new Intl.NumberFormat(currency.currency === 'USD' ? 'en-US' : 'uz-UZ', {
+                  style: 'currency',
+                  currency: currency.currency,
+                  maximumFractionDigits: currency.currency === 'USD' ? 2 : 0,
+                }).format(averagePayment)}
+          />
           <MetricCard icon={AlertTriangle} label="Muddati o'tgan" value={String(stats?.overdue ?? 0)} danger />
         </div>
       </div>

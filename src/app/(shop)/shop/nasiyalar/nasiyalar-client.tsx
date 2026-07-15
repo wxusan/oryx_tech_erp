@@ -209,7 +209,7 @@ export default function NasiyalarClient({
   const { can, memberKind } = useShopAccess()
   const canCreate = can('NASIYA_CREATE')
   const canImport = can('IMPORT_OLD_NASIYA')
-  const canViewResolutionHistory = memberKind === 'SHOP_OWNER' || can('NASIYA_ARCHIVE') || can('NASIYA_WRITE_OFF') || can('NASIYA_REOPEN')
+  const canViewResolutionHistory = memberKind === 'SHOP_OWNER' || can('NASIYA_ARCHIVE') || can('NASIYA_REOPEN')
   const canExport = can('EXPORT_NASIYA')
   const canReceivePayment = can('NASIYA_PAYMENT_RECEIVE')
   const canDeferNasiya = can('NASIYA_DEFER')

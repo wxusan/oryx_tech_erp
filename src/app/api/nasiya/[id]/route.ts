@@ -64,15 +64,14 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       'NASIYA_REMINDER_MANAGE',
       'NASIYA_CANCEL',
       'NASIYA_ARCHIVE',
-      'NASIYA_WRITE_OFF',
       'NASIYA_REOPEN',
     ])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const includeResolutionData = session.user.role === 'SUPER_ADMIN' ||
       guarded.principal?.memberKind === 'SHOP_OWNER' || Boolean(
-        guarded.principal && ['NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'].some((permission) => (
-          principalHasPermission(guarded.principal!, permission as 'NASIYA_ARCHIVE' | 'NASIYA_WRITE_OFF' | 'NASIYA_REOPEN')
+        guarded.principal && ['NASIYA_ARCHIVE', 'NASIYA_REOPEN'].some((permission) => (
+          principalHasPermission(guarded.principal!, permission as 'NASIYA_ARCHIVE' | 'NASIYA_REOPEN')
         )),
       )
     const includeProfileData = session.user.role === 'SUPER_ADMIN' ||
@@ -82,12 +81,11 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
           'NASIYA_EDIT',
           'NASIYA_REMINDER_MANAGE',
           'NASIYA_ARCHIVE',
-          'NASIYA_WRITE_OFF',
           'NASIYA_REOPEN',
         ].some((permission) => principalHasPermission(
           guarded.principal!,
           permission as 'NASIYA_VIEW' | 'NASIYA_EDIT' | 'NASIYA_REMINDER_MANAGE' |
-            'NASIYA_ARCHIVE' | 'NASIYA_WRITE_OFF' | 'NASIYA_REOPEN',
+            'NASIYA_ARCHIVE' | 'NASIYA_REOPEN',
         )),
       )
     const includePaymentHistory = includeProfileData || session.user.role === 'SUPER_ADMIN' || Boolean(

@@ -234,9 +234,9 @@ export const createSaleSchema = z
     salePrice: z
       .number({ error: "Sotish narxi kiritilishi shart" })
       .positive("Narx musbat son bo'lishi kerak"),
-    paymentMethod: paymentMethodSchema,
+    paymentMethod: paymentMethodSchema.optional(),
     paidFully: z.boolean({ error: "To'liq to'langan yoki yo'qligi ko'rsatilishi shart" }),
-    amountPaid: z.number().positive("To'langan summa musbat son bo'lishi kerak").optional(),
+    amountPaid: z.number().min(0, "To'langan summa manfiy bo'lishi mumkin emas").optional(),
     dueDate: z.coerce.date().optional(),
     reminderEnabled: z.boolean().optional().default(false),
     earlyReminderEnabled: earlyReminderEnabledSchema,
@@ -251,6 +251,10 @@ export const createSaleSchema = z
   .refine((data) => data.customerMode !== 'NEW' || Boolean(data.customerName && data.customerPhone), {
     message: "Yangi mijozning ismi va telefoni kiritilishi shart",
     path: ['customerName'],
+  })
+  .refine((data) => !(data.paidFully || (data.amountPaid ?? 0) > 0) || data.paymentMethod !== undefined, {
+    message: "Pul qabul qilinganda to'lov usuli kiritilishi shart",
+    path: ['paymentMethod'],
   })
   .refine(
     (data) => {
@@ -497,7 +501,7 @@ export const deferNasiyaScheduleSchema = z.object({
 export type DeferNasiyaScheduleInput = z.infer<typeof deferNasiyaScheduleSchema>
 
 export const resolveNasiyaSchema = z.object({
-  action: z.enum(['ARCHIVE', 'WRITE_OFF', 'REOPEN']),
+  action: z.enum(['ARCHIVE', 'REOPEN']),
   reason: z
     .string({ error: "Sabab kiritilishi shart" })
     .trim()
@@ -579,9 +583,9 @@ export const createOlibSotdimSchema = z
     salePrice: z
       .number({ error: "Sotish narxi kiritilishi shart" })
       .positive("Narx musbat son bo'lishi kerak"),
-    paymentMethod: paymentMethodSchema,
+    paymentMethod: paymentMethodSchema.optional(),
     paidFully: z.boolean({ error: "To'liq to'langan yoki yo'qligi ko'rsatilishi shart" }),
-    amountPaid: z.number().positive("To'langan summa musbat son bo'lishi kerak").optional(),
+    amountPaid: z.number().min(0, "To'langan summa manfiy bo'lishi mumkin emas").optional(),
     dueDate: z.coerce.date().optional(),
     customerReminderEnabled: z.boolean().optional().default(false),
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
@@ -594,6 +598,10 @@ export const createOlibSotdimSchema = z
   .refine((data) => data.customerMode !== 'NEW' || Boolean(data.customerName && data.customerPhone), {
     message: "Yangi mijozning ismi va telefoni kiritilishi shart",
     path: ['customerName'],
+  })
+  .refine((data) => !(data.paidFully || (data.amountPaid ?? 0) > 0) || data.paymentMethod !== undefined, {
+    message: "Pul qabul qilinganda to'lov usuli kiritilishi shart",
+    path: ['paymentMethod'],
   })
   .refine((data) => !data.secondaryImei || data.secondaryImei.replace(/[\s-]/g, '') !== data.imei.replace(/[\s-]/g, ''), {
     message: "Asosiy va ikkinchi IMEI bir xil bo'lishi mumkin emas",

@@ -5,6 +5,7 @@ import {
   addNasiyaPaymentSchema,
   deferNasiyaScheduleSchema,
   createShopSchema,
+  createSaleSchema,
   importNasiyaSchema,
 } from '@/lib/validations'
 
@@ -82,6 +83,27 @@ describe('validation hardening', () => {
       }).success,
     ).toBe(true)
     expect(addNasiyaPaymentSchema.safeParse({ ...base, amount: 1000, paymentMethod: 'CASH' }).success).toBe(true)
+  })
+
+  it('accepts a true zero-paid Pay Later sale without inventing a payment method', () => {
+    const base = {
+      deviceId: 'device-1',
+      customerName: 'Ali Valiyev',
+      customerPhone: '+998901234567',
+      salePrice: 1_000,
+      paidFully: false,
+      dueDate: '2026-08-15',
+    }
+
+    expect(createSaleSchema.safeParse({ ...base, amountPaid: 0, inputCurrency: 'UZS' }).success).toBe(true)
+    expect(createSaleSchema.safeParse({ ...base, amountPaid: 0, inputCurrency: 'USD' }).success).toBe(true)
+    expect(createSaleSchema.safeParse({ ...base, amountPaid: -1 }).success).toBe(false)
+    expect(createSaleSchema.safeParse({ ...base, amountPaid: 1_001, paymentMethod: 'CASH' }).success).toBe(false)
+    expect(createSaleSchema.safeParse({ ...base, amountPaid: 100 }).success).toBe(false)
+    expect(createSaleSchema.safeParse({ ...base, amountPaid: 100, paymentMethod: 'CARD' }).success).toBe(true)
+    expect(createSaleSchema.safeParse({ ...base, amountPaid: 0, dueDate: undefined }).success).toBe(false)
+    expect(createSaleSchema.safeParse({ ...base, paidFully: true, amountPaid: undefined }).success).toBe(false)
+    expect(createSaleSchema.safeParse({ ...base, paidFully: true, amountPaid: undefined, paymentMethod: 'CASH', dueDate: undefined }).success).toBe(true)
   })
 
   it('caps imported old nasiya text fields', () => {

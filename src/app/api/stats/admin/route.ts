@@ -9,6 +9,8 @@ import { requireSuperAdmin } from '@/lib/api-auth'
 import { tashkentMonthRange } from '@/lib/timezone'
 import { addDays } from 'date-fns'
 import { logger } from '@/lib/logger'
+import { adminReportingContext, summarizeShopPaymentGroups } from '@/lib/admin-money'
+import { getSuperAdminCurrencyContext } from '@/lib/server/currency'
 
 export async function GET() {
   try {
@@ -19,17 +21,20 @@ export async function GET() {
     const { start: monthStart, end: monthEnd } = tashkentMonthRange(now)
     const dueSoonCutoff = addDays(now, 7)
 
-    const [thisMonthResult, totalRevenueResult, totalShops, activeShops, suspendedShops, dueSoon, overdue, expectedRevenueRows] =
+    const [thisMonthResult, totalRevenueResult, totalShops, activeShops, suspendedShops, dueSoon, overdue, expectedRevenueRows, currency] =
       await Promise.all([
       // This month's total revenue
-      prisma.shopPayment.aggregate({
-        _sum: { amount: true },
+      prisma.shopPayment.groupBy({
+        by: ['currency'],
+        _sum: { amount: true, amountUzsSnapshot: true, amountUsdSnapshot: true },
+        _count: { id: true, amountUzsSnapshot: true, amountUsdSnapshot: true },
         where: { deletedAt: null, paidAt: { gte: monthStart, lt: monthEnd } },
       }),
 
-      prisma.shopPayment.aggregate({
-        _sum: { amount: true },
-        _count: { id: true },
+      prisma.shopPayment.groupBy({
+        by: ['currency'],
+        _sum: { amount: true, amountUzsSnapshot: true, amountUsdSnapshot: true },
+        _count: { id: true, amountUzsSnapshot: true, amountUsdSnapshot: true },
         where: { deletedAt: null },
       }),
 
@@ -63,34 +68,49 @@ export async function GET() {
         },
       }),
 
-      // Aggregate over every active shop without loading a capped shop/admin/
-      // payment payload into the function. Due-shop reporting and payment
-      // history have their own authoritative paginated projections.
-      prisma.$queryRaw<Array<{ expectedRevenue: number }>>`
-        SELECT COALESCE(
-          SUM(latest.amount / GREATEST(latest.months, 1)),
-          0
-        )::double precision AS "expectedRevenue"
+      // Expected subscription revenue comes from each active shop's current
+      // reviewed package, partitioned by its native billing currency. It is a
+      // future/current obligation and may be converted at the governed live
+      // rate by the UI; historical receipts above use frozen snapshots.
+      prisma.$queryRaw<Array<{ expected_uzs: unknown; expected_usd: unknown }>>`
+        SELECT
+          COALESCE(SUM(current_package.monthly_price) FILTER (WHERE current_package.currency = 'UZS'), 0)::numeric AS expected_uzs,
+          COALESCE(SUM(current_package.monthly_price) FILTER (WHERE current_package.currency = 'USD'), 0)::numeric AS expected_usd
         FROM "Shop" shop
         LEFT JOIN LATERAL (
-          SELECT payment.amount, payment.months
-          FROM "ShopPayment" payment
-          WHERE payment."shopId" = shop.id
-            AND payment."deletedAt" IS NULL
-          ORDER BY payment."paidAt" DESC
+          SELECT
+            package.currency,
+            GREATEST(
+              package."basePrice"
+                + COALESCE(SUM(feature."recurringPrice") FILTER (WHERE feature.enabled), 0)
+                - package."discountAmount",
+              0
+            )::numeric AS monthly_price
+          FROM "ShopPackageVersion" package
+          LEFT JOIN "ShopPackageFeature" feature ON feature."packageVersionId" = package.id
+          WHERE package."shopId" = shop.id
+            AND package."effectiveOn" <= (CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Tashkent')::date
+            AND package."pricingNeedsReview" = FALSE
+          GROUP BY package.id
+          ORDER BY package."effectiveOn" DESC, package."createdAt" DESC
           LIMIT 1
-        ) latest ON true
+        ) current_package ON true
         WHERE shop.status = 'ACTIVE'::"ShopStatus"
           AND shop."deletedAt" IS NULL
       `,
+      getSuperAdminCurrencyContext(guarded.session.user.id),
     ])
 
-    const thisMonthRevenue = Number(thisMonthResult._sum.amount ?? 0)
-    const totalRevenue = Number(totalRevenueResult._sum.amount ?? 0)
-    const totalPayments = totalRevenueResult._count.id
-    const expectedRevenue = Number(expectedRevenueRows[0]?.expectedRevenue ?? 0)
+    const thisMonthRevenue = summarizeShopPaymentGroups(thisMonthResult)
+    const totalRevenue = summarizeShopPaymentGroups(totalRevenueResult)
+    const totalPayments = totalRevenue.count
+    const expectedRevenue = {
+      uzs: Number(expectedRevenueRows[0]?.expected_uzs ?? 0),
+      usd: Number(expectedRevenueRows[0]?.expected_usd ?? 0),
+    }
 
     return ok({
+      reporting: adminReportingContext(currency),
       thisMonthRevenue,
       totalRevenue,
       totalPayments,

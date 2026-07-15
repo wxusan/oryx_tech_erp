@@ -25,8 +25,10 @@ import { navigateAfterMutation } from '@/lib/client-events'
 import type { PaymentMethod } from '@/lib/domain-types'
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 import { CustomerCombobox, type CustomerPickerOption } from '@/components/shop/customer-combobox'
+import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 
 type Device = InStockPickerDevice
+type PaymentMode = 'FULL' | 'PARTIAL' | 'LATER'
 
 function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']) {
   return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
@@ -53,6 +55,7 @@ export default function NewSotuvPage() {
 
 function AuthorizedNewSotuvPage() {
   const router = useRouter()
+  const saleCommand = useLogicalCommandIdempotency()
   const { currency } = useShopCurrency()
   const { memberKind } = useShopAccess()
   const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
@@ -70,7 +73,7 @@ function AuthorizedNewSotuvPage() {
   // suggestion); a string = the value the user typed.
   const [salePriceInput, setSalePriceInput] = useState<string | null>(null)
   const [payMethod, setPayMethod] = useState<PaymentMethod | ''>('')
-  const [fullyPaid, setFullyPaid] = useState<boolean | null>(null)
+  const [paymentMode, setPaymentMode] = useState<PaymentMode | null>(null)
   const [partialAmount, setPartialAmount] = useState('')
   const [partialDate, setPartialDate] = useState('')
   const [reminder, setReminder] = useState(false)
@@ -109,10 +112,11 @@ function AuthorizedNewSotuvPage() {
     !!selectedDevice &&
     (customerMode === 'EXISTING' ? Boolean(selectedCustomer) : customerMode === 'NEW' && customerName.trim() && customerPhone.trim()) &&
     salePrice.trim() &&
-    payMethod &&
-    fullyPaid !== null &&
-    (fullyPaid || (partialAmount.trim() && partialDate.trim())) &&
-    (fullyPaid || !earlyReminder || (Number(earlyReminderDays) >= 1 && Number(earlyReminderDays) <= 60))
+    paymentMode !== null &&
+    (paymentMode === 'LATER' || Boolean(payMethod)) &&
+    (paymentMode === 'FULL' || partialDate.trim()) &&
+    (paymentMode !== 'PARTIAL' || (partialAmount.trim() && Number(partialAmount) > 0)) &&
+    (paymentMode === 'FULL' || !earlyReminder || (Number(earlyReminderDays) >= 1 && Number(earlyReminderDays) <= 60))
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -132,31 +136,35 @@ function AuthorizedNewSotuvPage() {
     setSubmitting(true)
     setSubmitError('')
     try {
+      const paidFully = paymentMode === 'FULL'
+      const payload = {
+        deviceId: selectedDevice.id,
+        customerMode: customerMode === 'EXISTING' ? 'EXISTING' as const : 'NEW' as const,
+        customerId: selectedCustomer?.id,
+        customerName: customerMode === 'NEW' ? customerName.trim() : undefined,
+        customerPhone: customerMode === 'NEW' ? customerPhone.trim() : undefined,
+        salePrice: Number(salePrice),
+        inputCurrency: currency.currency,
+        paymentMethod: paymentMode === 'LATER' ? undefined : payMethod,
+        paidFully,
+        amountPaid: paidFully ? undefined : paymentMode === 'LATER' ? 0 : Number(partialAmount),
+        dueDate: paidFully ? undefined : partialDate,
+        reminderEnabled: paidFully ? false : reminder,
+        earlyReminderEnabled: paidFully ? false : earlyReminder,
+        earlyReminderDays: !paidFully && earlyReminder ? Number(earlyReminderDays) : undefined,
+        note: note.trim() || undefined,
+      }
       const res = await fetch(`/api/devices/${selectedDevice.id}/sell`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId: selectedDevice.id,
-          customerMode: customerMode === 'EXISTING' ? 'EXISTING' : 'NEW',
-          customerId: selectedCustomer?.id,
-          customerName: customerMode === 'NEW' ? customerName.trim() : undefined,
-          customerPhone: customerMode === 'NEW' ? customerPhone.trim() : undefined,
-          salePrice: Number(salePrice),
-          inputCurrency: currency.currency,
-          paymentMethod: payMethod,
-          paidFully: fullyPaid,
-          amountPaid: fullyPaid ? undefined : Number(partialAmount),
-          dueDate: fullyPaid ? undefined : partialDate,
-          reminderEnabled: fullyPaid ? false : reminder,
-          earlyReminderEnabled: fullyPaid ? false : earlyReminder,
-          earlyReminderDays: !fullyPaid && earlyReminder ? Number(earlyReminderDays) : undefined,
-          note: note.trim() || undefined,
-        }),
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': saleCommand.keyFor(payload) },
+        body: JSON.stringify(payload),
       })
       const json = await res.json()
       if (!res.ok || !json.success) {
+        saleCommand.rejected(res.status)
         throw new Error(json.error || 'Sotuvni saqlashda xatolik')
       }
+      saleCommand.committed()
       await navigateAfterMutation(router, `/shop/qurilmalar/${selectedDevice.id}`, {
         kind: 'sale.created',
         deviceId: selectedDevice.id,
@@ -352,7 +360,7 @@ function AuthorizedNewSotuvPage() {
                   className="h-9 text-sm font-bold border-zinc-200 rounded"
                 />
               </div>
-              <div>
+              {paymentMode !== 'LATER' && <div>
                 <label htmlFor="sale-payment-method" className="block text-xs font-medium text-zinc-700 mb-1.5">
                   To&apos;lov usuli <span className="text-red-500">*</span>
                 </label>
@@ -367,46 +375,58 @@ function AuthorizedNewSotuvPage() {
                     <SelectItem value="OTHER">Boshqa</SelectItem>
                   </SelectContent>
                 </Select>
-              </div>
+              </div>}
               </div>
             </div>
           </div>
 
-          {/* Fully paid */}
+          {/* Payment state */}
           <div className="border border-zinc-200 rounded p-4">
             <div id="sale-fully-paid-label" className="text-xs font-medium text-zinc-700 mb-2.5">
-              To&apos;liq to&apos;ladimi? <span className="text-red-500">*</span>
+              Bugun qancha to&apos;lanadi? <span className="text-red-500">*</span>
             </div>
-            <div className="flex gap-2" role="group" aria-labelledby="sale-fully-paid-label">
+            <div className="flex flex-wrap gap-2" role="group" aria-labelledby="sale-fully-paid-label">
               <button
                 type="button"
-                onClick={() => setFullyPaid(true)}
-                aria-pressed={fullyPaid === true}
+                onClick={() => setPaymentMode('FULL')}
+                aria-pressed={paymentMode === 'FULL'}
                 className={`px-4 py-2 text-sm rounded border transition-colors ${
-                  fullyPaid === true
+                  paymentMode === 'FULL'
                     ? 'bg-zinc-900 text-white border-zinc-900'
                     : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'
                 }`}
               >
-                Ha
+                To&apos;liq to&apos;laydi
               </button>
               <button
                 type="button"
-                onClick={() => setFullyPaid(false)}
-                aria-pressed={fullyPaid === false}
+                onClick={() => setPaymentMode('PARTIAL')}
+                aria-pressed={paymentMode === 'PARTIAL'}
                 className={`px-4 py-2 text-sm rounded border transition-colors ${
-                  fullyPaid === false
+                  paymentMode === 'PARTIAL'
                     ? 'bg-zinc-900 text-white border-zinc-900'
                     : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'
                 }`}
               >
-                Yo&apos;q
+                Qisman to&apos;laydi
+              </button>
+              <button
+                type="button"
+                onClick={() => { setPaymentMode('LATER'); setPartialAmount(''); setPayMethod('') }}
+                aria-pressed={paymentMode === 'LATER'}
+                className={`px-4 py-2 text-sm rounded border transition-colors ${
+                  paymentMode === 'LATER'
+                    ? 'bg-zinc-900 text-white border-zinc-900'
+                    : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'
+                }`}
+              >
+                Hammasini keyin to&apos;laydi
               </button>
             </div>
 
-            {fullyPaid === false && (
+            {(paymentMode === 'PARTIAL' || paymentMode === 'LATER') && (
               <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 pt-4 border-t border-zinc-100">
-                <div>
+                {paymentMode === 'PARTIAL' && <div>
                   <label htmlFor="sale-partial-amount" className="block text-xs font-medium text-zinc-700 mb-1.5">
                     Qancha to&apos;ladi ({currencyLabel(currency.currency)}) <span className="text-red-500">*</span>
                   </label>
@@ -419,7 +439,7 @@ function AuthorizedNewSotuvPage() {
                     placeholder={currency.currency === 'USD' ? '400.00' : '5000000'}
                     className="h-9 text-sm border-zinc-200 rounded"
                   />
-                </div>
+                </div>}
                 <div>
                   <label htmlFor="sale-partial-date" className="block text-xs font-medium text-zinc-700 mb-1.5">
                     Qachon to&apos;laydi <span className="text-red-500">*</span>

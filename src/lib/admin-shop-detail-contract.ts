@@ -21,7 +21,11 @@ export interface AdminShopPayment {
   paymentMethod: string
   note: string | null
   allocationStatus: 'PACKAGE_ALLOCATED' | 'LEGACY_UNALLOCATED'
-  currency: 'UZS' | 'USD' | null
+  currency: 'UZS' | 'USD'
+  exchangeRateAtPayment: string | number | null
+  amountUzsSnapshot: string | number | null
+  amountUsdSnapshot: string | number | null
+  currencyReconstructionStatus: 'COMPLETE' | 'PARTIAL' | 'PENDING' | 'UNRECONSTRUCTABLE'
   packageMonthlyPriceSnapshot: string | number | null
   servicePeriodStart: string | null
   servicePeriodEnd: string | null

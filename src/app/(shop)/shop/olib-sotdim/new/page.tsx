@@ -19,9 +19,12 @@ import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import { ArrowLeft, Loader2, Check } from 'lucide-react'
 import type { PaymentMethod } from '@/lib/domain-types'
+
+type CustomerPaymentMode = 'FULL' | 'PARTIAL' | 'LATER'
 import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 import { CustomerCombobox, type CustomerPickerOption } from '@/components/shop/customer-combobox'
+import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 
 export default function NewOlibSotdimPage() {
   const { can } = useShopAccess()
@@ -30,6 +33,7 @@ export default function NewOlibSotdimPage() {
 }
 
 function AuthorizedNewOlibSotdimPage() {
+  const saleCommand = useLogicalCommandIdempotency()
   const router = useRouter()
   const { currency } = useShopCurrency()
   const { can, memberKind } = useShopAccess()
@@ -81,7 +85,7 @@ function AuthorizedNewOlibSotdimPage() {
   // Section 4 — sale to the customer
   const [salePrice, setSalePrice] = useState('')
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod | ''>('')
-  const [fullyPaid, setFullyPaid] = useState<boolean | null>(null)
+  const [customerPaymentMode, setCustomerPaymentMode] = useState<CustomerPaymentMode | null>(null)
   const [partialAmount, setPartialAmount] = useState('')
   const [partialDate, setPartialDate] = useState('')
   const [customerReminderEnabled, setCustomerReminderEnabled] = useState(false)
@@ -109,9 +113,10 @@ function AuthorizedNewOlibSotdimPage() {
     (customerMode === 'EXISTING' ? Boolean(selectedCustomer) : customerMode === 'NEW' && customerName.trim().length >= 2 && isValidPhone(customerPhone)) &&
     salePrice.trim().length > 0 &&
     Number(salePrice) > 0 &&
-    !!paymentMethod &&
-    fullyPaid !== null &&
-    (fullyPaid || (partialAmount.trim().length > 0 && partialDate.trim().length > 0)) &&
+    customerPaymentMode !== null &&
+    (customerPaymentMode === 'LATER' || !!paymentMethod) &&
+    (customerPaymentMode === 'FULL' || partialDate.trim().length > 0) &&
+    (customerPaymentMode !== 'PARTIAL' || (partialAmount.trim().length > 0 && Number(partialAmount) > 0)) &&
     !imageSelection.hasBlockingErrors
 
   function handleContinue() {
@@ -137,49 +142,55 @@ function AuthorizedNewOlibSotdimPage() {
     setSubmitting(true)
     setSubmitError('')
     try {
+      const paidFully = customerPaymentMode === 'FULL'
       const imageUrls = await imageSelection.uploadAll()
+      const payload = {
+        model: model.trim(),
+        color: color.trim() || undefined,
+        storageAmount: Number(storage),
+        storageUnit,
+        batteryHealth: battery ? Number(battery) : undefined,
+        conditionCode,
+        imei: imei.trim(),
+        secondaryImei: secondaryImei.trim() || undefined,
+        deviceNote: deviceNote.trim() || undefined,
+        imageUrls,
+        supplierName: supplierName.trim(),
+        supplierPhone: supplierPhone.trim(),
+        supplierLocation: supplierLocation.trim() || undefined,
+        supplierNote: supplierNote.trim() || undefined,
+        purchasePrice: Number(purchasePrice),
+        supplierPaidNow: !!supplierPaidNow,
+        supplierPaymentMethod: supplierPaidNow ? supplierPaymentMethod : undefined,
+        supplierPaidDate: supplierPaidNow ? supplierPaidDate : undefined,
+        supplierDueDate: !supplierPaidNow ? supplierDueDate : undefined,
+        supplierReminderEnabled: !supplierPaidNow ? supplierReminderEnabled : undefined,
+        earlyReminderEnabled: !supplierPaidNow ? earlyReminder : undefined,
+        earlyReminderDays: !supplierPaidNow && earlyReminder ? Number(earlyReminderDays) : undefined,
+        customerMode: customerMode === 'EXISTING' ? 'EXISTING' as const : 'NEW' as const,
+        customerId: selectedCustomer?.id,
+        customerName: customerMode === 'NEW' ? customerName.trim() : undefined,
+        customerPhone: customerMode === 'NEW' ? customerPhone.trim() : undefined,
+        salePrice: Number(salePrice),
+        paymentMethod: customerPaymentMode === 'LATER' ? undefined : paymentMethod,
+        paidFully,
+        amountPaid: paidFully ? undefined : customerPaymentMode === 'LATER' ? 0 : Number(partialAmount),
+        dueDate: paidFully ? undefined : partialDate,
+        customerReminderEnabled: paidFully ? false : customerReminderEnabled,
+        note: note.trim() || undefined,
+        inputCurrency: currency.currency,
+      }
       const res = await fetch('/api/olib-sotdim', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: model.trim(),
-          color: color.trim() || undefined,
-          storageAmount: Number(storage),
-          storageUnit,
-          batteryHealth: battery ? Number(battery) : undefined,
-          conditionCode,
-          imei: imei.trim(),
-          secondaryImei: secondaryImei.trim() || undefined,
-          deviceNote: deviceNote.trim() || undefined,
-          imageUrls,
-          supplierName: supplierName.trim(),
-          supplierPhone: supplierPhone.trim(),
-          supplierLocation: supplierLocation.trim() || undefined,
-          supplierNote: supplierNote.trim() || undefined,
-          purchasePrice: Number(purchasePrice),
-          supplierPaidNow: !!supplierPaidNow,
-          supplierPaymentMethod: supplierPaidNow ? supplierPaymentMethod : undefined,
-          supplierPaidDate: supplierPaidNow ? supplierPaidDate : undefined,
-          supplierDueDate: !supplierPaidNow ? supplierDueDate : undefined,
-          supplierReminderEnabled: !supplierPaidNow ? supplierReminderEnabled : undefined,
-          earlyReminderEnabled: !supplierPaidNow ? earlyReminder : undefined,
-          earlyReminderDays: !supplierPaidNow && earlyReminder ? Number(earlyReminderDays) : undefined,
-          customerMode: customerMode === 'EXISTING' ? 'EXISTING' : 'NEW',
-          customerId: selectedCustomer?.id,
-          customerName: customerMode === 'NEW' ? customerName.trim() : undefined,
-          customerPhone: customerMode === 'NEW' ? customerPhone.trim() : undefined,
-          salePrice: Number(salePrice),
-          paymentMethod,
-          paidFully: fullyPaid,
-          amountPaid: fullyPaid ? undefined : Number(partialAmount),
-          dueDate: fullyPaid ? undefined : partialDate,
-          customerReminderEnabled: fullyPaid ? false : customerReminderEnabled,
-          note: note.trim() || undefined,
-          inputCurrency: currency.currency,
-        }),
+        headers: { 'Content-Type': 'application/json', 'Idempotency-Key': saleCommand.keyFor(payload) },
+        body: JSON.stringify(payload),
       })
       const json = await res.json()
-      if (!res.ok || !json.success) throw new Error(json.error || 'Saqlashda xatolik')
+      if (!res.ok || !json.success) {
+        saleCommand.rejected(res.status)
+        throw new Error(json.error || 'Saqlashda xatolik')
+      }
+      saleCommand.committed()
       await navigateAfterMutation(router, can('OLIB_VIEW') || can('SUPPLIER_PAYMENT_MARK_PAID') ? '/shop/olib-sotdim' : '/shop/yangi-operatsiya', {
         kind: 'olibSotdim.created',
         deviceId: json.data?.deviceId,
@@ -249,13 +260,13 @@ function AuthorizedNewOlibSotdimPage() {
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
               </Field>
-              <div>
+              {customerPaymentMode !== 'LATER' && <div>
                 <label htmlFor="olib-condition" className="block text-xs font-medium text-zinc-700 mb-1.5">Holati <span aria-hidden="true" className="text-red-500">*</span></label>
                 <Select value={conditionCode} onValueChange={(value) => value && setConditionCode(value as 'NEW' | 'USED')}>
                   <SelectTrigger id="olib-condition" aria-required="true" className="h-9 w-full"><SelectValue placeholder="Tanlang" /></SelectTrigger>
                   <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
                 </Select>
-              </div>
+              </div>}
               <Field
                 label="Asosiy IMEI"
                 required
@@ -550,31 +561,39 @@ function AuthorizedNewOlibSotdimPage() {
 
               <fieldset className="sm:col-span-2">
                 <legend className="block text-xs font-medium text-zinc-700 mb-2">
-                  To&apos;liq to&apos;ladimi? <span aria-hidden="true" className="text-red-500">*</span>
+                  Bugun qancha to&apos;lanadi? <span aria-hidden="true" className="text-red-500">*</span>
                 </legend>
                 <div className="flex gap-2">
                   <button
                     type="button"
-                    aria-pressed={fullyPaid === true}
-                    onClick={() => setFullyPaid(true)}
-                    className={`px-4 py-2 text-sm rounded border transition-colors ${fullyPaid === true ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
+                    aria-pressed={customerPaymentMode === 'FULL'}
+                    onClick={() => setCustomerPaymentMode('FULL')}
+                    className={`px-4 py-2 text-sm rounded border transition-colors ${customerPaymentMode === 'FULL' ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
                   >
-                    Ha
+                    To&apos;liq to&apos;laydi
                   </button>
                   <button
                     type="button"
-                    aria-pressed={fullyPaid === false}
-                    onClick={() => setFullyPaid(false)}
-                    className={`px-4 py-2 text-sm rounded border transition-colors ${fullyPaid === false ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
+                    aria-pressed={customerPaymentMode === 'PARTIAL'}
+                    onClick={() => setCustomerPaymentMode('PARTIAL')}
+                    className={`px-4 py-2 text-sm rounded border transition-colors ${customerPaymentMode === 'PARTIAL' ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
                   >
-                    Yo&apos;q
+                    Qisman to&apos;laydi
+                  </button>
+                  <button
+                    type="button"
+                    aria-pressed={customerPaymentMode === 'LATER'}
+                    onClick={() => { setCustomerPaymentMode('LATER'); setPartialAmount(''); setPaymentMethod('') }}
+                    className={`px-4 py-2 text-sm rounded border transition-colors ${customerPaymentMode === 'LATER' ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
+                  >
+                    Hammasini keyin to&apos;laydi
                   </button>
                 </div>
               </fieldset>
 
-              {fullyPaid === false && (
+              {(customerPaymentMode === 'PARTIAL' || customerPaymentMode === 'LATER') && (
                 <>
-                  <Field label={<>Qancha to&apos;ladi ({currencyLabel(currency.currency)})</>} required>
+                  {customerPaymentMode === 'PARTIAL' && <Field label={<>Qancha to&apos;ladi ({currencyLabel(currency.currency)})</>} required>
                     <MoneyInput
                       currency={currency.currency}
                       value={partialAmount}
@@ -582,7 +601,7 @@ function AuthorizedNewOlibSotdimPage() {
                       placeholder={currency.currency === 'USD' ? '200.00' : '2500000'}
                       className="h-9 text-sm border-zinc-200 rounded"
                     />
-                  </Field>
+                  </Field>}
                   <Field label={<>Qachon to&apos;laydi</>} required>
                     <DateInput
                       value={partialDate}

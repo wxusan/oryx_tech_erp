@@ -3,6 +3,8 @@ export type CurrencyCode = 'UZS' | 'USD'
 export interface CurrencyContext {
   currency: CurrencyCode
   usdUzsRate: number | null
+  usdUzsRateSource?: string | null
+  usdUzsRateFetchedAt?: string | null
 }
 
 export const BASE_CURRENCY: CurrencyCode = 'UZS'

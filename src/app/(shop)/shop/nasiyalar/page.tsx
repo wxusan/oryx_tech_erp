@@ -23,7 +23,6 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
     'NASIYA_EDIT',
     'NASIYA_REMINDER_MANAGE',
     'NASIYA_ARCHIVE',
-    'NASIYA_WRITE_OFF',
     'NASIYA_REOPEN',
   ])
   if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
@@ -39,10 +38,10 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
     ? (status as (typeof validFilters)[number])
     : 'Barchasi'
   const canViewResolutionHistory = guarded.principal?.memberKind === 'SHOP_OWNER' || Boolean(
-    guarded.principal && ['NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'].some((permission) => (
+    guarded.principal && ['NASIYA_ARCHIVE', 'NASIYA_REOPEN'].some((permission) => (
       principalHasPermission(
         guarded.principal!,
-        permission as 'NASIYA_ARCHIVE' | 'NASIYA_WRITE_OFF' | 'NASIYA_REOPEN',
+        permission as 'NASIYA_ARCHIVE' | 'NASIYA_REOPEN',
       )
     )),
   )

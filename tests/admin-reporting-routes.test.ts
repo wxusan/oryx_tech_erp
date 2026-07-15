@@ -7,7 +7,7 @@ const mocks = vi.hoisted(() => ({
   shopCount: vi.fn(),
   paymentFindMany: vi.fn(),
   paymentCount: vi.fn(),
-  paymentAggregate: vi.fn(),
+  paymentGroupBy: vi.fn(),
   loggerError: vi.fn(),
 }))
 
@@ -24,13 +24,22 @@ vi.mock('@/lib/prisma', () => ({
     shopPayment: {
       findMany: mocks.paymentFindMany,
       count: mocks.paymentCount,
-      aggregate: mocks.paymentAggregate,
+      groupBy: mocks.paymentGroupBy,
     },
   },
 }))
 
 vi.mock('@/lib/logger', () => ({
   logger: { error: mocks.loggerError },
+}))
+
+vi.mock('@/lib/server/currency', () => ({
+  getSuperAdminCurrencyContext: vi.fn().mockResolvedValue({
+    currency: 'USD',
+    usdUzsRate: 12_500,
+    usdUzsRateSource: 'CBU',
+    usdUzsRateFetchedAt: '2026-07-13T08:00:00.000Z',
+  }),
 }))
 
 import { GET as getDueShops } from '@/app/api/admin/reports/due-shops/route'
@@ -104,6 +113,11 @@ describe('GET /api/admin/payments', () => {
         id: 'payment-26',
         shopId: 'shop-3',
         amount: '125000.00',
+        currency: 'UZS',
+        exchangeRateAtPayment: '12500.0000',
+        amountUzsSnapshot: '125000.00',
+        amountUsdSnapshot: '10.00',
+        currencyReconstructionStatus: 'COMPLETE',
         months: 2,
         paymentMethod: 'CARD',
         paidAt: new Date('2026-07-10T10:00:00.000Z'),
@@ -112,10 +126,10 @@ describe('GET /api/admin/payments', () => {
       },
     ])
     mocks.paymentCount.mockResolvedValue(877)
-    mocks.paymentAggregate
-      .mockResolvedValueOnce({ _sum: { amount: '9000000.00' }, _count: { id: 90 } })
-      .mockResolvedValueOnce({ _sum: { amount: '7000000.00' }, _count: { id: 70 } })
-      .mockResolvedValueOnce({ _sum: { amount: '50000000.00' }, _count: { id: 510 } })
+    mocks.paymentGroupBy
+      .mockResolvedValueOnce([{ currency: 'UZS', _sum: { amount: '9000000.00', amountUzsSnapshot: '9000000.00', amountUsdSnapshot: '720.00' }, _count: { id: 90, amountUzsSnapshot: 90, amountUsdSnapshot: 90 } }])
+      .mockResolvedValueOnce([{ currency: 'UZS', _sum: { amount: '7000000.00', amountUzsSnapshot: '7000000.00', amountUsdSnapshot: '560.00' }, _count: { id: 70, amountUzsSnapshot: 70, amountUsdSnapshot: 70 } }])
+      .mockResolvedValueOnce([{ currency: 'UZS', _sum: { amount: '50000000.00', amountUzsSnapshot: '50000000.00', amountUsdSnapshot: '4000.00' }, _count: { id: 510, amountUzsSnapshot: 510, amountUsdSnapshot: 510 } }])
 
     const response = await getAdminPayments(new NextRequest(
       'http://localhost/api/admin/payments?skip=25&take=25',
@@ -124,6 +138,10 @@ describe('GET /api/admin/payments', () => {
 
     expect(response.status).toBe(200)
     expect(json.data).toMatchObject({
+      reporting: {
+        selectedDisplayCurrency: 'USD',
+        conversion: { usdUzsRate: 12_500, source: 'CBU', status: 'AVAILABLE' },
+      },
       total: 877,
       skip: 25,
       take: 25,
@@ -135,9 +153,9 @@ describe('GET /api/admin/payments', () => {
         paymentMethod: 'CARD',
       }],
       summary: {
-        currentMonth: { amount: 9000000, count: 90 },
-        previousMonth: { amount: 7000000, count: 70 },
-        currentYear: { amount: 50000000, count: 510 },
+        currentMonth: { native: { uzs: 9000000, usd: 0 }, snapshots: { uzs: 9000000, usd: 720 }, complete: { UZS: true, USD: true }, count: 90 },
+        previousMonth: { native: { uzs: 7000000, usd: 0 }, snapshots: { uzs: 7000000, usd: 560 }, complete: { UZS: true, USD: true }, count: 70 },
+        currentYear: { native: { uzs: 50000000, usd: 0 }, snapshots: { uzs: 50000000, usd: 4000 }, complete: { UZS: true, USD: true }, count: 510 },
         currentYearNumber: 2026,
       },
     })
@@ -148,7 +166,8 @@ describe('GET /api/admin/payments', () => {
       take: 25,
     }))
     expect(mocks.paymentCount).toHaveBeenCalledWith({ where: { deletedAt: null } })
-    expect(mocks.paymentAggregate).toHaveBeenNthCalledWith(1, expect.objectContaining({
+    expect(mocks.paymentGroupBy).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      by: ['currency'],
       where: {
         deletedAt: null,
         paidAt: {
@@ -157,7 +176,7 @@ describe('GET /api/admin/payments', () => {
         },
       },
     }))
-    expect(mocks.paymentAggregate).toHaveBeenNthCalledWith(2, expect.objectContaining({
+    expect(mocks.paymentGroupBy).toHaveBeenNthCalledWith(2, expect.objectContaining({
       where: {
         deletedAt: null,
         paidAt: {
@@ -166,7 +185,7 @@ describe('GET /api/admin/payments', () => {
         },
       },
     }))
-    expect(mocks.paymentAggregate).toHaveBeenNthCalledWith(3, expect.objectContaining({
+    expect(mocks.paymentGroupBy).toHaveBeenNthCalledWith(3, expect.objectContaining({
       where: {
         deletedAt: null,
         paidAt: {
@@ -180,7 +199,7 @@ describe('GET /api/admin/payments', () => {
   it('clamps maliciously large or negative page arguments', async () => {
     mocks.paymentFindMany.mockResolvedValue([])
     mocks.paymentCount.mockResolvedValue(0)
-    mocks.paymentAggregate.mockResolvedValue({ _sum: { amount: null }, _count: { id: 0 } })
+    mocks.paymentGroupBy.mockResolvedValue([])
 
     const response = await getAdminPayments(new NextRequest(
       'http://localhost/api/admin/payments?skip=-999&take=999999',

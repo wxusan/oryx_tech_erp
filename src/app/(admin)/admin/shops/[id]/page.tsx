@@ -26,6 +26,8 @@ import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempote
 import { ShopPackageEditor } from '@/components/admin/shop-package-editor'
 import type { ShopPackageDraft, ShopPackageDto } from '@/lib/shop-package-contract'
 import { tashkentTodayInputValue } from '@/lib/timezone'
+import { formatUserFacingMoney } from '@/lib/currency'
+import { useAdminCurrency } from '@/lib/use-admin-currency'
 
 interface PackageResponse {
   active: ShopPackageDto | null
@@ -60,6 +62,7 @@ function InfoRow({ label, value, mono }: { label: string; value: string; mono?: 
 
 export default function ShopDetailPage() {
   const paymentCommand = useLogicalCommandIdempotency()
+  const { currency: adminCurrency } = useAdminCurrency()
   const params = useParams()
   const router = useRouter()
   const id = params.id as string
@@ -162,6 +165,21 @@ export default function ShopDetailPage() {
         return { base, due }
       })()
     : null
+  const activePackageDisplay = activePackage
+    ? formatUserFacingMoney({
+        amount: activePackage.price.recurringPrice,
+        amountCurrency: activePackage.currency,
+        displayCurrency: adminCurrency.currency,
+        rate: adminCurrency.usdUzsRate,
+      })
+    : '—'
+  const activePackageNative = activePackage
+    ? formatUserFacingMoney({
+        amount: activePackage.price.recurringPrice,
+        amountCurrency: activePackage.currency,
+        displayCurrency: activePackage.currency,
+      })
+    : '—'
 
   const fetchShop = useCallback(() => {
     fetch(`/api/shops/${id}`)
@@ -651,16 +669,17 @@ export default function ShopDetailPage() {
           <div>
             <h2 className="text-sm font-semibold text-zinc-900">Paket va kirish turi</h2>
             {activePackage ? (
-              <p className="mt-1 text-sm text-zinc-500">
-                {staffAccessEnabled ? 'Egasi va xodimlar' : 'Faqat do\'kon egasi'} · {activePackage.price.recurringPrice} {activePackage.currency}/oy
-              </p>
+              <div className="mt-1 text-sm text-zinc-500">
+                <p>{staffAccessEnabled ? 'Egasi va xodimlar' : 'Faqat do\'kon egasi'} · {activePackageDisplay}/oy</p>
+                <p className="text-xs text-zinc-400">Paketning asl valyutasi: {activePackageNative}/oy</p>
+              </div>
             ) : (
               <p className="mt-1 text-sm text-amber-700">{packageError ?? 'Paket yuklanmoqda...'}</p>
             )}
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="bg-emerald-50 px-2 py-1 text-xs font-medium text-emerald-800">
-              Xodim profili: 0 {activePackage?.currency ?? 'UZS'}
+              Xodim profili: {formatUserFacingMoney({ amount: 0, amountCurrency: adminCurrency.currency, displayCurrency: adminCurrency.currency })}
             </span>
             {activePackage?.pricingNeedsReview && (
               <span className="bg-amber-100 px-2 py-1 text-xs font-medium text-amber-900">Narx tekshirilishi kerak</span>

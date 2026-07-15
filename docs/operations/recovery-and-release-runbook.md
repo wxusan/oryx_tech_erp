@@ -68,7 +68,8 @@ deliberately:
    script preserves original financial/audit rows and reports ambiguous history
    as reconstruction gaps;
 5. runs the post-migration preflight and proves every release migration is
-   recorded;
+   recorded, subscription-payment currency snapshots are not pending, native
+   snapshots exist, and the legacy write-off permission is inactive;
 6. publishes the artifact created in step 1.
 
 `vercel.json` must keep `node scripts/vercel-build.mjs` as its `buildCommand`.

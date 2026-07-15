@@ -1,8 +1,15 @@
+'use client'
+
 import { paymentMethodLabel } from '@/lib/labels'
 import type { AdminShopPayment } from '@/lib/admin-shop-detail-contract'
+import { formatAdminPaymentRow } from '@/lib/admin-money'
+import { formatUserFacingMoney } from '@/lib/currency'
+import { useAdminCurrency } from '@/lib/use-admin-currency'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 
 export function ShopPaymentsTable({ payments }: { payments: AdminShopPayment[] }) {
+  const { currency } = useAdminCurrency()
+
   return (
     <div className="border border-zinc-200 bg-white">
       <div className="border-b border-zinc-200 px-5 py-4"><h2 className="text-sm font-semibold text-zinc-900">To&apos;lov tarixi</h2></div>
@@ -16,7 +23,11 @@ export function ShopPaymentsTable({ payments }: { payments: AdminShopPayment[] }
           <TableRow key={payment.id} className="border-zinc-100 hover:bg-zinc-50">
             <TableCell className="pl-5 text-sm text-zinc-600">{payment.paidAt ? new Date(payment.paidAt).toLocaleDateString('ru-RU') : '—'}</TableCell>
             <TableCell className="text-sm font-medium text-zinc-900">
-              {Number(payment.amount).toLocaleString('ru-RU')} {payment.currency ?? 'UZS'}
+              {formatAdminPaymentRow(payment, currency)}
+              <span className="block text-[10px] font-normal text-zinc-400">
+                Asl summa: {formatUserFacingMoney({ amount: payment.amount, amountCurrency: payment.currency, displayCurrency: payment.currency })}
+                {payment.currencyReconstructionStatus !== 'COMPLETE' && ' · tarixiy kurs mavjud emas'}
+              </span>
               {payment.allocationStatus === 'LEGACY_UNALLOCATED' && <span className="ml-2 bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">Eski, paketga bog&apos;lanmagan</span>}
             </TableCell>
             <TableCell className="text-sm text-zinc-500">

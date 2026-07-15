@@ -448,6 +448,31 @@ async function cashSaleRequest(deviceId: string, phone: string) {
   }), { params: Promise.resolve({ id: deviceId }) })
 }
 
+async function payLaterSaleRequest(input: {
+  deviceId: string
+  phone: string
+  key: string
+  salePrice: number
+  inputCurrency: 'UZS' | 'USD'
+}) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/devices/[id]/sell/route')
+  return POST(new NextRequest(`http://localhost/api/devices/${input.deviceId}/sell`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': input.key },
+    body: JSON.stringify({
+      deviceId: input.deviceId,
+      customerName: 'Zero paid later customer',
+      customerPhone: input.phone,
+      salePrice: input.salePrice,
+      paidFully: false,
+      amountPaid: 0,
+      dueDate: '2026-08-15T00:00:00.000Z',
+      inputCurrency: input.inputCurrency,
+    }),
+  }), { params: Promise.resolve({ id: input.deviceId }) })
+}
+
 async function createNasiyaRequest(deviceId: string, phone: string, shopId: string) {
   const { NextRequest } = await import('next/server')
   const { POST } = await import('@/app/api/devices/[id]/nasiya/route')
@@ -1008,6 +1033,65 @@ describe('real-PostgreSQL route evidence', () => {
     expect(july.actualProfitUzs).toBe(1_000_000)
   })
 
+  it('creates an idempotent USD Pay Later sale with exactly zero paid and no fake payment', async () => {
+    const actor = await seedActor('zero_paid_sale')
+    useShopAdmin(actor)
+    await prisma.currencyRate.create({
+      data: {
+        baseCurrency: 'USD',
+        quoteCurrency: 'UZS',
+        rate: 12_500,
+        source: 'CBU',
+        fetchedAt: new Date(),
+      },
+    })
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Zero paid USD phone',
+        purchasePrice: 10_000_000,
+        purchaseCurrency: 'USD',
+        purchaseInputAmount: 800,
+        purchaseExchangeRateAtCreation: 12_500,
+        purchaseAmountUzsSnapshot: 10_000_000,
+        imei: 'ZERO-PAID-USD-SALE',
+        addedBy: actor.admin.id,
+      },
+    })
+    const command = {
+      deviceId: device.id,
+      phone: '+998901010299',
+      key: 'zero-paid-usd-sale-key',
+      salePrice: 1_000,
+      inputCurrency: 'USD' as const,
+    }
+
+    expect((await payLaterSaleRequest(command)).status).toBe(201)
+    expect((await payLaterSaleRequest(command)).status).toBe(201)
+    expect((await payLaterSaleRequest({ ...command, salePrice: 1_100 })).status).toBe(409)
+
+    const sale = await prisma.sale.findFirstOrThrow({
+      where: { deviceId: device.id },
+      include: { payments: true },
+    })
+    expect(sale.paymentMethod).toBeNull()
+    expect(sale.paidFully).toBe(false)
+    expect(Number(sale.contractAmountPaid)).toBe(0)
+    expect(Number(sale.contractRemainingAmount)).toBe(1_000)
+    expect(sale.creationIdempotencyKey).toBe(command.key)
+    expect(sale.creationCommandHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(sale.payments).toHaveLength(0)
+    expect((await prisma.device.findUniqueOrThrow({ where: { id: device.id } })).status).toBe('SOLD_DEBT')
+
+    const accounting = await getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-07-01T00:00:00.000Z'),
+      monthEnd: new Date('2026-08-01T00:00:00.000Z'),
+      adminId: null,
+    })
+    expect(accounting.actualProfitUzs).toBe(0)
+  })
+
   it('recognizes the $800/$1,000 Nasiya example only as installments are paid and attributes it to the collector', async () => {
     const actor = await seedActor('monthly_profit')
     useShopAdmin(actor)
@@ -1186,8 +1270,8 @@ describe('real-PostgreSQL route evidence', () => {
       action: 'WRITE_OFF',
       reason: 'Uncollectable after final documented review',
       key: 'monthly-profit-write-off',
-    })).status).toBe(200)
-    expect(await novemberAccounting()).toMatchObject({ expectedProfitUsd: 0, expectedInterestUsd: 0 })
+    })).status).toBe(400)
+    expect(await novemberAccounting()).toMatchObject({ expectedProfitUsd: 80, expectedInterestUsd: 40 })
   })
 
   it('reverses only Nasiya margin and interest that were actually recognized before a return', async () => {
@@ -1556,7 +1640,7 @@ describe('real-PostgreSQL route evidence', () => {
     expect((await prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } })).resolutionState).toBe('ACTIVE')
   })
 
-  it('writes off once under concurrency and never rewrites payment or schedule balances', async () => {
+  it('rejects every new write-off command without changing balances or creating events', async () => {
     const actor = await seedActor('writeoff_concurrency')
     useShopAdmin(actor)
     const contract = await seedNasiya(actor, 'writeoff_concurrency', 8_000)
@@ -1575,20 +1659,18 @@ describe('real-PostgreSQL route evidence', () => {
         key: 'writeoff-concurrency-b',
       }),
     ])
-    expect(responses.map((response) => response.status).sort()).toEqual([200, 409])
+    expect(responses.map((response) => response.status)).toEqual([400, 400])
     const [nasiya, schedule, events, paymentCount] = await Promise.all([
       prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
       prisma.nasiyaSchedule.findUniqueOrThrow({ where: { id: contract.schedule.id } }),
       prisma.nasiyaResolutionEvent.findMany({ where: { nasiyaId: contract.nasiya.id } }),
       prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } }),
     ])
-    expect(nasiya.resolutionState).toBe('WRITTEN_OFF')
+    expect(nasiya.resolutionState).toBe('ACTIVE')
     expect(Number(nasiya.contractRemainingAmount)).toBe(8_000)
     expect(Number(nasiya.contractPaidAmount)).toBe(0)
     expect(Number(schedule.contractPaidAmount)).toBe(0)
-    expect(events).toHaveLength(1)
-    expect(events[0].eventType).toBe('WRITE_OFF')
-    expect(Number(events[0].nativeRemainingAmount)).toBe(8_000)
+    expect(events).toHaveLength(0)
     expect(paymentCount).toBe(0)
   })
 
@@ -1635,7 +1717,7 @@ describe('real-PostgreSQL route evidence', () => {
     useShopAdmin(first)
     const response = await nasiyaResolutionRequest({
       nasiyaId: foreign.nasiya.id,
-      action: 'WRITE_OFF',
+      action: 'ARCHIVE',
       reason: 'Cross-tenant action must fail',
       key: 'resolution-cross-tenant',
     })

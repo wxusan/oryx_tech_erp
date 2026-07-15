@@ -28,6 +28,15 @@ import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { ShopStatusBadge } from '@/components/admin/shop-status-badge'
 import type { ShopStatus } from '@/lib/domain-types'
+import { useAdminCurrency } from '@/lib/use-admin-currency'
+import {
+  expectedAdminMoneyValue,
+  formatExpectedAdminMoney,
+  formatHistoricalAdminMoney,
+  historicalAdminMoneyValue,
+  type HistoricalAdminMoney,
+  type NativeAdminMoney,
+} from '@/lib/admin-money'
 
 interface ShopRow {
   id: string
@@ -40,19 +49,16 @@ interface ShopRow {
 }
 
 interface AdminStats {
-  thisMonthRevenue: number
-  expectedRevenue: number
+  thisMonthRevenue: HistoricalAdminMoney
+  expectedRevenue: NativeAdminMoney
   activeShops: number
   dueSoon: number
   overdue: number
 }
 
-function formatMoney(n: number) {
-  return n.toLocaleString('ru-RU') + " so'm"
-}
-
 export default function DashboardPage() {
   const scope = useAuthenticatedQueryScope()
+  const { currency } = useAdminCurrency()
   const dashboardQuery = useQuery({
     queryKey: queryKeys.list(scope, 'adminReports', { view: 'dashboard' }),
     queryFn: async ({ signal }) => {
@@ -79,8 +85,10 @@ export default function DashboardPage() {
   const loading = dashboardQuery.isPending && !dashboardQuery.data
   const error = dashboardQuery.error instanceof Error ? dashboardQuery.error.message : null
 
-  const collectionRate = stats && stats.expectedRevenue > 0
-    ? Math.min(100, Math.round((stats.thisMonthRevenue / stats.expectedRevenue) * 100))
+  const receivedValue = stats ? historicalAdminMoneyValue(stats.thisMonthRevenue, currency.currency) : null
+  const expectedValue = stats ? expectedAdminMoneyValue(stats.expectedRevenue, currency) : null
+  const collectionRate = receivedValue !== null && expectedValue !== null && expectedValue > 0
+    ? Math.min(100, Math.round((receivedValue / expectedValue) * 100))
     : 0
 
   return (
@@ -114,7 +122,7 @@ export default function DashboardPage() {
             <div>
               <div className="text-xs font-medium uppercase text-zinc-500">Tushgan summa</div>
               <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-900">
-                {stats ? formatMoney(stats.thisMonthRevenue) : 'Yuklanmoqda...'}
+                {stats ? formatHistoricalAdminMoney(stats.thisMonthRevenue, currency) : 'Yuklanmoqda...'}
               </div>
             </div>
             <div className="space-y-2">
@@ -124,7 +132,7 @@ export default function DashboardPage() {
               </div>
               <Progress value={collectionRate} />
               <div className="flex items-center justify-between text-xs text-zinc-500">
-                <span>Kutilayotgan: {stats ? formatMoney(stats.expectedRevenue) : '...'}</span>
+                <span>Kutilayotgan: {stats ? formatExpectedAdminMoney(stats.expectedRevenue, currency) : '...'}</span>
                 <span>{stats?.activeShops ?? 0} faol do'kon</span>
               </div>
             </div>
@@ -174,7 +182,7 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold text-zinc-900">
-                {stats ? formatMoney(stats.expectedRevenue) : 'Yuklanmoqda...'}
+                {stats ? formatExpectedAdminMoney(stats.expectedRevenue, currency) : 'Yuklanmoqda...'}
               </div>
               <p className="mt-2 text-xs text-zinc-500">Faol do'konlar soni bo'yicha taxmin</p>
             </CardContent>

@@ -13,7 +13,7 @@ describe('currency source guards', () => {
     expect(src).toContain('https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/')
     expect(src).toContain('latestStoredUsdRate()')
     expect(src).toContain("latestStoredUsdRate('CBU')")
-    expect(src).toContain('return Number(latest.rate)')
+    expect(src).toContain('rate: Number(latest.rate), source: latest.source, fetchedAt: latest.fetchedAt')
     expect(src).toContain('prisma.currencyRate.create')
     expect(src).toContain('prisma.opsEvent.create')
     expect(src).toContain('currency.rate_fetch_failed')

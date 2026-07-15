@@ -32,6 +32,10 @@ const updateProfileSchema = z.object({
   name: z.string().trim().min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak"),
 })
 
+const updateCurrencySchema = z.object({
+  preferredCurrency: z.enum(['UZS', 'USD']),
+})
+
 function profileSelect() {
   return {
     id: true,
@@ -40,6 +44,7 @@ function profileSelect() {
     telegramId: true,
     telegramVerifiedAt: true,
     role: true,
+    preferredCurrency: true,
     createdAt: true,
   } satisfies Prisma.SuperAdminSelect
 }
@@ -72,6 +77,42 @@ export async function PATCH(req: NextRequest) {
     if (!guarded.ok) return guarded.response
 
     const body = await readLimitedJsonBody(req)
+    if (typeof body === 'object' && body !== null && 'preferredCurrency' in body) {
+      const parsed = updateCurrencySchema.safeParse(body)
+      if (!parsed.success) {
+        const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri valyuta"
+        return badRequest(firstError)
+      }
+
+      const admin = await prisma.superAdmin.findFirst({
+        where: { id: guarded.session.user.id, deletedAt: null },
+        select: { id: true, preferredCurrency: true },
+      })
+      if (!admin) return notFound('Bosh admin topilmadi')
+
+      const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await tx.superAdmin.update({
+          where: { id: admin.id },
+          data: { preferredCurrency: parsed.data.preferredCurrency },
+        })
+        await tx.log.create({
+          data: {
+            shopId: null,
+            actorId: admin.id,
+            actorType: 'SUPER_ADMIN',
+            action: 'UPDATE',
+            targetType: 'SuperAdmin',
+            targetId: admin.id,
+            oldValue: { preferredCurrency: admin.preferredCurrency },
+            newValue: { preferredCurrency: parsed.data.preferredCurrency },
+          },
+        })
+        return tx.superAdmin.findUniqueOrThrow({ where: { id: admin.id }, select: profileSelect() })
+      })
+
+      return ok(updated, 'Hisobot valyutasi yangilandi.')
+    }
+
     if (typeof body === 'object' && body !== null && 'telegramId' in body) {
       const parsed = updateTelegramSchema.safeParse(body)
 

@@ -16,6 +16,7 @@ const RELEASE_MIGRATIONS = [
   '202607150001_staff_permissions_v2',
   '202607150002_nasiya_archive_permission_bundle',
   '202607150003_monthly_profit_recognition',
+  '202607150004_complete_accounting_redesign',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))
@@ -260,6 +261,43 @@ const erp2Checks = [
 ]
 
 const postMigrationChecks = [
+  {
+    name: 'pending_subscription_payment_currency_reconstruction',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "ShopPayment"
+      WHERE "currencyReconstructionStatus" = 'PENDING'
+    `,
+  },
+  {
+    name: 'subscription_payment_currency_review_gaps',
+    blocking: false,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "ShopPayment"
+      WHERE "currencyReconstructionStatus" IN ('PARTIAL', 'UNRECONSTRUCTABLE')
+    `,
+  },
+  {
+    name: 'subscription_payment_native_snapshot_issues',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "ShopPayment"
+      WHERE ("currency" = 'UZS' AND "amountUzsSnapshot" IS NULL)
+         OR ("currency" = 'USD' AND "amountUsdSnapshot" IS NULL)
+    `,
+  },
+  {
+    name: 'active_legacy_write_off_permission',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "PermissionDefinition"
+      WHERE "code" = 'NASIYA_WRITE_OFF' AND "isActive" = TRUE
+    `,
+  },
   {
     name: 'pending_payment_profit_reconstruction',
     blocking: true,

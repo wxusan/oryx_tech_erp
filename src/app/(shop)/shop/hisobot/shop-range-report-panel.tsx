@@ -1,6 +1,6 @@
 'use client'
 
-import { CalendarRange, CircleDollarSign, Download, FileX2, RotateCcw, TrendingUp, WalletCards } from 'lucide-react'
+import { CalendarRange, CircleDollarSign, Download, RotateCcw, TrendingUp, WalletCards } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { buttonVariants } from '@/components/ui/button'
 import { formatMoneyByCurrency, formatPartitionedMoney, type CurrencyContext } from '@/lib/currency'
@@ -92,6 +92,10 @@ export default function ShopRangeReportPanel({
     if (report.filteredByAdmin) params.set('admin', report.filteredByAdmin)
     return `/api/export/report?${params.toString()}`
   }
+  const netCash = {
+    uzs: totals.cashCollected.uzs - totals.refunds.uzs,
+    usd: totals.cashCollected.usd - totals.refunds.usd,
+  }
 
   const cards = [
     {
@@ -102,6 +106,13 @@ export default function ShopRangeReportPanel({
       color: 'text-blue-600',
     },
     {
+      label: 'Sof tushum',
+      value: partitionText(netCash, currency),
+      note: "Haqiqiy tushum minus mijozlarga haqiqatda qaytarilgan pul",
+      icon: WalletCards,
+      color: 'text-emerald-700',
+    },
+    {
       label: 'Kutilayotgan foyda',
       value: partitionText(totals.expectedProfit, currency),
       note: "Faqat tanlangan oylarda muddati kelgan, hali to'lanmagan marja va foiz; kelgusi oylar kirmaydi",
@@ -109,9 +120,9 @@ export default function ShopRangeReportPanel({
       color: 'text-violet-600',
     },
     {
-      label: 'Kutilayotgan qarz',
+      label: "To'lanishi kerak bo'lgan summa",
       value: partitionText(totals.expectedReceivables, currency),
-      note: "Tanlangan oylarda muddati keladigan joriy ochiq majburiyatlar",
+      note: "Tanlangan oylarda muddati kelgan va hali to'lanmagan summa; keyingi oylar kirmaydi",
       icon: CalendarRange,
       color: 'text-teal-700',
     },
@@ -121,13 +132,6 @@ export default function ShopRangeReportPanel({
       note: `${totals.returnCount} ta qaytarish; asl shartnoma valyutasida`,
       icon: RotateCcw,
       color: 'text-purple-600',
-    },
-    {
-      label: 'Hisobdan chiqarilgan',
-      value: partitionText(totals.writeOffs, currency),
-      note: `${totals.writeOffCount} ta chiqarish, ${totals.reopenCount} ta qayta ochish · muzlatilgan UZS: ${formatMoneyByCurrency(totals.writeOffs.frozenUzs, 'UZS', currency.usdUzsRate)}`,
-      icon: FileX2,
-      color: 'text-orange-700',
     },
     {
       label: 'Haqiqiy foyda',
@@ -181,7 +185,7 @@ export default function ShopRangeReportPanel({
           <CardDescription>Oyma-oy hisob</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
-          <table className="min-w-[1160px] w-full text-left text-xs">
+          <table className="min-w-[1020px] w-full text-left text-xs">
             <thead className="border-y border-zinc-200 bg-zinc-50 text-zinc-600">
               <tr>
                 <th scope="col" className="px-4 py-3 font-medium">Oy</th>
@@ -191,7 +195,6 @@ export default function ShopRangeReportPanel({
                 <th scope="col" className="px-4 py-3 font-medium">Foiz: olingan / kutilayotgan</th>
                 <th scope="col" className="px-4 py-3 font-medium">Muddati keladigan qarz</th>
                 <th scope="col" className="px-4 py-3 font-medium">Qaytarish</th>
-                <th scope="col" className="px-4 py-3 font-medium">Hisobdan chiqarish</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
@@ -208,13 +211,22 @@ export default function ShopRangeReportPanel({
                   </td>
                   <td className="px-4 py-3 text-zinc-700">{partitionText(month.expectedReceivables, currency)}</td>
                   <td className="px-4 py-3 text-zinc-700">{partitionText(month.refunds, currency)}</td>
-                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.writeOffs, currency)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </CardContent>
       </Card>
+
+      {(totals.writeOffCount > 0 || totals.reopenCount > 0) && (
+        <details className="rounded-lg border border-amber-200 bg-amber-50/40">
+          <summary className="cursor-pointer px-4 py-3 text-sm font-medium text-amber-900">Eski hisobdan chiqarish audit tarixi</summary>
+          <div className="border-t border-amber-200 px-4 py-3 text-xs text-amber-900/80">
+            Tarixiy summa: {partitionText(totals.writeOffs, currency)} · {totals.writeOffCount} ta eski hisobdan chiqarish, {totals.reopenCount} ta eski qayta ochish · hodisa paytidagi UZS: {formatMoneyByCurrency(totals.writeOffs.frozenUzs, 'UZS', currency.usdUzsRate)}.
+            Yangi hisobdan chiqarish yaratish imkoniyati o&apos;chirilgan; bu ma&apos;lumotlar faqat audit uchun ko&apos;rsatiladi.
+          </div>
+        </details>
+      )}
     </div>
   )
 }

@@ -38,9 +38,9 @@ function staffWithOnly(permission: ActiveShopPermissionCode): ShopPrincipalAcces
 }
 
 describe('Staff Permissions V2 behavioral authorization kernel', () => {
-  it('has exactly 57 unique active capabilities with complete operational metadata', () => {
-    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(57)
-    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(57)
+  it('has exactly 56 unique active capabilities with complete operational metadata', () => {
+    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(56)
+    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(56)
 
     for (const code of ACTIVE_SHOP_PERMISSION_CODES) {
       const definition = permissionDefinition(code)
@@ -52,6 +52,17 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
       expect(definition.group, code).toBeTruthy()
       expect(definition.risk, code).toBeTruthy()
     }
+  })
+
+  it('keeps the old write-off code retired and incapable of granting access', () => {
+    expect(RETIRED_SHOP_PERMISSION_CODES).toContain('NASIYA_WRITE_OFF')
+    expect(permissionDefinition('NASIYA_WRITE_OFF').retired).toBe(true)
+    expect(principalCan({
+      memberKind: 'SHOP_STAFF',
+      legacyFullAccess: false,
+      enabledFeatures: allFeatures,
+      grantedPermissions: new Set(['NASIYA_WRITE_OFF']),
+    }, 'NASIYA_WRITE_OFF')).toBe(false)
   })
 
   it.each(ACTIVE_SHOP_PERMISSION_CODES)('%s grants itself and no unrelated capability', (code) => {

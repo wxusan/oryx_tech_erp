@@ -95,6 +95,16 @@ describe('createOlibSotdimSchema', () => {
     expect(result.success).toBe(false)
   })
 
+  it('accepts a customer who pays the entire sale later with zero paid now', () => {
+    const result = createOlibSotdimSchema.safeParse(baseInput({
+      paidFully: false,
+      amountPaid: 0,
+      paymentMethod: undefined,
+      dueDate: new Date('2026-08-15'),
+    }))
+    expect(result.success).toBe(true)
+  })
+
   it('allows sale price lower than purchase price (warning is UI-only, not a hard block)', () => {
     const result = createOlibSotdimSchema.safeParse(baseInput({ salePrice: 5_000_000 }))
     expect(result.success).toBe(true)

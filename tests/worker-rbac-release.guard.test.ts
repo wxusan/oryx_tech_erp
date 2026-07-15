@@ -176,7 +176,7 @@ describe('worker server boundary release guard', () => {
     const nasiyaPage = source('src/app/(shop)/shop/nasiyalar/page.tsx')
     const nasiyaClient = source('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')
     expect(nasiyaDetail).toContain('const includeResolutionData =')
-    expect(nasiyaDetail).toContain("['NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN']")
+    expect(nasiyaDetail).toContain("['NASIYA_ARCHIVE', 'NASIYA_REOPEN']")
     expect(nasiyaDetail).toContain('...(includeResolutionData')
     expect(nasiyaList).toContain('if (resolutionState && !includeResolutionData)')
     expect(nasiyaPage).toContain("!canViewResolutionHistory && (requestedFilter === 'ARCHIVED' || requestedFilter === 'WRITTEN_OFF')")

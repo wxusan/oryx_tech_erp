@@ -38,14 +38,48 @@ export const getShopCurrencyContext = cache(async function getShopCurrencyContex
   }
 })
 
+export const getSuperAdminCurrencyContext = cache(async function getSuperAdminCurrencyContext(superAdminId: string): Promise<CurrencyContext> {
+  const admin = await prisma.superAdmin.findUnique({
+    where: { id: superAdminId },
+    select: { preferredCurrency: true },
+  })
+  const currency = (admin?.preferredCurrency ?? 'UZS') as CurrencyCode
+  try {
+    const snapshot = await getUsdUzsRateSnapshot()
+    return {
+      currency,
+      usdUzsRate: snapshot.rate,
+      usdUzsRateSource: snapshot.source,
+      usdUzsRateFetchedAt: snapshot.fetchedAt.toISOString(),
+    }
+  } catch {
+    return {
+      currency,
+      usdUzsRate: null,
+      usdUzsRateSource: null,
+      usdUzsRateFetchedAt: null,
+    }
+  }
+})
+
 export async function getUsdUzsRate(): Promise<number> {
+  return (await getUsdUzsRateSnapshot()).rate
+}
+
+async function getUsdUzsRateSnapshot(): Promise<{ rate: number; source: string; fetchedAt: Date }> {
   const latestCbu = await latestStoredUsdRate('CBU')
   if (latestCbu && isOperationalUsdUzsRate(latestCbu.rate) && Date.now() - latestCbu.fetchedAt.getTime() <= RATE_TTL_MS) {
-    return Number(latestCbu.rate)
+    return { rate: Number(latestCbu.rate), source: latestCbu.source, fetchedAt: latestCbu.fetchedAt }
   }
 
   try {
-    return await refreshUsdUzsRate()
+    const rate = await refreshUsdUzsRate()
+    const refreshed = await latestStoredUsdRate('CBU')
+    return {
+      rate,
+      source: refreshed?.source ?? 'CBU',
+      fetchedAt: refreshed?.fetchedAt ?? new Date(),
+    }
   } catch (err) {
     await logRateFailure(err)
     const latest = await latestStoredUsdRate()
@@ -53,7 +87,7 @@ export async function getUsdUzsRate(): Promise<number> {
       latest &&
       isOperationalUsdUzsRate(latest.rate) &&
       Date.now() - latest.fetchedAt.getTime() <= MAX_FALLBACK_RATE_AGE_MS
-    ) return Number(latest.rate)
+    ) return { rate: Number(latest.rate), source: latest.source, fetchedAt: latest.fetchedAt }
     throw new CurrencyRateUnavailableError()
   }
 }
@@ -93,7 +127,7 @@ async function latestStoredUsdRate(source?: 'CBU' | 'MANUAL') {
   return prisma.currencyRate.findFirst({
     where: { baseCurrency: 'USD', quoteCurrency: 'UZS', ...(source ? { source } : {}) },
     orderBy: { fetchedAt: 'desc' },
-    select: { rate: true, fetchedAt: true },
+    select: { rate: true, source: true, fetchedAt: true },
   })
 }
 

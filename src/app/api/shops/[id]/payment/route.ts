@@ -17,6 +17,8 @@ import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { sameMoney, sameOptionalText } from '@/lib/idempotency-replay'
 import { getActiveShopPackage, packageRecurringPrice } from '@/lib/server/shop-access'
 import { tashkentTodayInputValue } from '@/lib/timezone'
+import { getUsdUzsRate } from '@/lib/server/currency'
+import { buildShopPaymentSnapshots } from '@/lib/admin-money'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -40,6 +42,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       return badRequest(firstError)
     }
 
+    // Fetch once, before the serializable transaction. A missing rate does
+    // not block a native-currency receipt; the opposite-currency reporting
+    // snapshot is left explicitly PARTIAL instead of being guessed later.
+    const paymentTimeRate = await getUsdUzsRate().catch(() => null)
+
     const runPaymentTransaction = () =>
       prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         const shop = await tx.shop.findFirst({
@@ -54,7 +61,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           if (
             existingPayment.shopId !== id
             || existingPayment.recordedById !== session.user.id
-            || !sameMoney(existingPayment.amount, parsed.data.amount, existingPayment.currency ?? 'UZS')
+            || !sameMoney(existingPayment.amount, parsed.data.amount, existingPayment.currency)
             || existingPayment.months !== parsed.data.months
             || existingPayment.paymentMethod !== parsed.data.paymentMethod
             || !sameOptionalText(existingPayment.note, parsed.data.note)
@@ -111,6 +118,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           dueBefore: shop.subscriptionDue.toISOString(),
           dueAfter: newDue.toISOString(),
         })).digest('hex')
+        const snapshots = buildShopPaymentSnapshots(parsed.data.amount, packageVersion.currency, paymentTimeRate)
 
         await tx.shopPayment.create({
           data: {
@@ -123,6 +131,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             recordedById: session.user.id,
             allocationStatus: 'PACKAGE_ALLOCATED',
             currency: packageVersion.currency,
+            exchangeRateAtPayment: snapshots.exchangeRateAtPayment,
+            amountUzsSnapshot: snapshots.amountUzsSnapshot,
+            amountUsdSnapshot: snapshots.amountUsdSnapshot,
+            currencyReconstructionStatus: snapshots.currencyReconstructionStatus,
             packageVersionId: packageVersion.id,
             packageMonthlyPriceSnapshot: monthlyPrice,
             servicePeriodStart,

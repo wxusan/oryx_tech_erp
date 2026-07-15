@@ -16,7 +16,7 @@ export default async function ShopLandingPage() {
     { href: '/shop/yangi-operatsiya', permissions: ['DEVICE_CREATE', 'SALE_CREATE', 'NASIYA_CREATE', 'OLIB_CREATE', 'SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE'] },
     { href: '/shop/qurilmalar', permissions: ['INVENTORY_VIEW', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_RETURN_REFUND', 'NASIYA_CANCEL'] },
     { href: '/shop/sotuvlar', permissions: ['SALE_VIEW', 'SALE_EDIT', 'SALE_REMINDER_MANAGE'] },
-    { href: '/shop/nasiyalar', permissions: ['NASIYA_VIEW', 'NASIYA_EDIT', 'NASIYA_REMINDER_MANAGE', 'NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'] },
+    { href: '/shop/nasiyalar', permissions: ['NASIYA_VIEW', 'NASIYA_EDIT', 'NASIYA_REMINDER_MANAGE', 'NASIYA_ARCHIVE', 'NASIYA_REOPEN'] },
     { href: '/shop/tolovlar', permissions: ['RECEIVABLES_VIEW', 'SALE_VIEW', 'SALE_PAYMENT_RECEIVE', 'NASIYA_VIEW', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER'] },
     { href: '/shop/mijozlar', permissions: ['CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_PHOTO_VIEW', 'CUSTOMER_PASSPORT_REVEAL', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'] },
     { href: '/shop/olib-sotdim', permissions: ['OLIB_VIEW', 'SUPPLIER_PAYMENT_MARK_PAID'] },

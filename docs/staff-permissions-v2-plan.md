@@ -75,7 +75,7 @@ used by the database grant, server guard, UI, audit log, sync policy, and tests.
 | `NASIYA_REMINDER_MANAGE` | Manage nasiya reminders | Enable or disable reminders for an eligible contract. |
 | `NASIYA_CANCEL` | Cancel nasiya | Cancel and return an eligible nasiya using the safe return/refund ledger. |
 | `NASIYA_ARCHIVE` | Archive nasiya | Archive an eligible contract with a reason. |
-| `NASIYA_WRITE_OFF` | Write off nasiya debt | Write off eligible debt with a reason and immutable resolution event. |
+| `NASIYA_WRITE_OFF` | Retired legacy permission | Inactive and retained only so historical grants/events remain auditable; new write-offs are not supported. |
 | `NASIYA_REOPEN` | Reopen nasiya | Reopen an eligible archived/written-off contract with a reason. |
 
 ### Olib-sotdim
@@ -356,4 +356,3 @@ staff-creator-only staff, and Telegram-only eligibility.
 - Stats/report access is owner-assignable and does not leak other modules.
 - All automated, integration, browser, migration, CI, production health, and
   manual smoke gates pass for the exact deployed commit.
-

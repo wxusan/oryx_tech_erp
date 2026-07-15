@@ -5,6 +5,7 @@ import { usePathname } from 'next/navigation'
 import { Activity, BarChart3, LayoutDashboard, Store, CreditCard, ScrollText, Settings } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
+import { useAdminCurrency } from '@/lib/use-admin-currency'
 
 const navItems = [
   { label: 'Boshqaruv', href: '/admin', icon: LayoutDashboard, prefetch: true },
@@ -28,6 +29,7 @@ function initials(name: string) {
 export function AdminLayoutClient({ children, adminName }: { children: React.ReactNode; adminName: string }) {
   const pathname = usePathname()
   const displayName = adminName.trim() || 'Admin'
+  const { currency, saving: currencySaving, error: currencyError, setDisplayCurrency } = useAdminCurrency()
 
   return (
     <div className="flex min-h-screen flex-col bg-zinc-50 md:h-screen md:flex-row md:overflow-hidden">
@@ -74,7 +76,34 @@ export function AdminLayoutClient({ children, adminName }: { children: React.Rea
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
-        <header className="flex h-14 shrink-0 items-center justify-end gap-3 border-b border-zinc-200 bg-white/90 px-6 backdrop-blur">
+        <header className="flex h-14 shrink-0 items-center justify-end gap-3 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur sm:px-6">
+          <div className="flex items-center rounded-md border border-zinc-200 bg-zinc-50 p-0.5" aria-label="Hisobot valyutasi">
+            {(['UZS', 'USD'] as const).map((code) => (
+              <button
+                key={code}
+                type="button"
+                aria-pressed={currency.currency === code}
+                disabled={currencySaving}
+                onClick={() => void setDisplayCurrency(code)}
+                className={`h-7 rounded px-2 text-[11px] font-semibold transition-colors disabled:opacity-50 ${
+                  currency.currency === code ? 'bg-zinc-900 text-white' : 'text-zinc-500 hover:text-zinc-900'
+                }`}
+              >
+                {code}
+              </button>
+            ))}
+          </div>
+          {currencyError && <span role="alert" className="hidden text-[11px] text-red-600 lg:inline">{currencyError}</span>}
+          {currency.currency === 'USD' && !currency.usdUzsRate && (
+            <span className="hidden text-[11px] text-amber-700 lg:inline">USD kursi mavjud emas</span>
+          )}
+          {currency.usdUzsRate && (
+            <span className="hidden text-[11px] text-zinc-400 xl:inline" title="Kutilayotgan summalar uchun joriy boshqariladigan kurs">
+              1 USD = {currency.usdUzsRate.toLocaleString('ru-RU')} so&apos;m
+              {currency.usdUzsRateSource ? ` · ${currency.usdUzsRateSource}` : ''}
+              {currency.usdUzsRateFetchedAt ? ` · ${currency.usdUzsRateFetchedAt.replace('T', ' ').slice(0, 19)} UTC` : ''}
+            </span>
+          )}
           <span className="text-xs font-medium text-zinc-500">{displayName}</span>
           <div className="flex size-8 select-none items-center justify-center rounded-full bg-zinc-900 text-[11px] font-bold text-white shadow-sm">
             {initials(displayName)}

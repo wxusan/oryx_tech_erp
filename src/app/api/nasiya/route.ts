@@ -29,7 +29,6 @@ export async function GET(req: NextRequest) {
       'NASIYA_EDIT',
       'NASIYA_REMINDER_MANAGE',
       'NASIYA_ARCHIVE',
-      'NASIYA_WRITE_OFF',
       'NASIYA_REOPEN',
     ])
     if (!guarded.ok) return guarded.response
@@ -61,10 +60,10 @@ export async function GET(req: NextRequest) {
       : undefined
     const includeResolutionData = session.user.role === 'SUPER_ADMIN' ||
       guarded.principal?.memberKind === 'SHOP_OWNER' || Boolean(
-        guarded.principal && ['NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'].some((permission) => (
+        guarded.principal && ['NASIYA_ARCHIVE', 'NASIYA_REOPEN'].some((permission) => (
           principalHasPermission(
             guarded.principal!,
-            permission as 'NASIYA_ARCHIVE' | 'NASIYA_WRITE_OFF' | 'NASIYA_REOPEN',
+            permission as 'NASIYA_ARCHIVE' | 'NASIYA_REOPEN',
           )
         )),
       )

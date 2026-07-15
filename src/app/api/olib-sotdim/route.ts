@@ -14,6 +14,7 @@
  */
 
 import { NextRequest, after } from 'next/server'
+import { createHash } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireShopAnyPermission, requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
@@ -197,6 +198,11 @@ export async function POST(req: NextRequest) {
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
+    const idempotencyKey = req.headers.get('idempotency-key')?.trim()
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
+    }
+
     const body: unknown = await req.json()
     const parsed = createOlibSotdimSchema.safeParse(body)
     if (!parsed.success) {
@@ -208,6 +214,36 @@ export async function POST(req: NextRequest) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const commandHash = createHash('sha256').update(JSON.stringify({
+      shopId,
+      actorId: session.user.id,
+      command: d,
+    })).digest('hex')
+
+    const existingSale = await prisma.sale.findUnique({
+      where: { shopId_creationIdempotencyKey: { shopId, creationIdempotencyKey: idempotencyKey } },
+      select: {
+        id: true,
+        createdBy: true,
+        creationCommandHash: true,
+        device: { select: { id: true, isExternalSourced: true } },
+        supplierPayable: { select: { id: true, status: true } },
+      },
+    })
+    if (existingSale) {
+      if (
+        existingSale.createdBy !== session.user.id
+        || existingSale.creationCommandHash !== commandHash
+        || !existingSale.device.isExternalSourced
+        || !existingSale.supplierPayable
+      ) return conflict("Idempotency-Key boshqa yoki o'zgartirilgan olib-sotdim uchun ishlatilgan")
+      return ok({
+        deviceId: existingSale.device.id,
+        saleId: existingSale.id,
+        payableId: existingSale.supplierPayable.id,
+        payableStatus: existingSale.supplierPayable.status,
+      }, "Olib-sotdim allaqachon saqlangan")
+    }
 
     // Distributed when Upstash is configured; bounded in-process fallback otherwise.
     const rate = await checkRateLimitDistributed(rateLimitKey('olib-sotdim-create', shopId, session.user.id), { windowMs: 60_000, max: 20 })
@@ -253,6 +289,7 @@ export async function POST(req: NextRequest) {
     const contractPaid = d.paidFully ? contractSalePrice : contractAmountPaidInput ?? 0
     const contractRemaining = contractSalePrice - contractPaid
     const deviceStatus = contractRemaining > 0 ? 'SOLD_DEBT' : 'SOLD_CASH'
+    if (paid > 0 && !d.paymentMethod) return badRequest("Pul qabul qilinganda to'lov usuli kiritilishi shart")
     const componentPlan = buildSaleComponentPlan({
       currency: contractCurrency,
       salePrice: contractSalePrice,
@@ -326,7 +363,7 @@ export async function POST(req: NextRequest) {
           deviceId: device.id,
           customerId: customer.id,
           salePrice: salePriceUzs,
-          paymentMethod: d.paymentMethod,
+          paymentMethod: paid > 0 ? d.paymentMethod : null,
           paidFully: remaining <= 0,
           amountPaid: paid,
           remainingAmount: remaining,
@@ -334,6 +371,8 @@ export async function POST(req: NextRequest) {
           reminderEnabled: d.customerReminderEnabled ?? false,
           note: d.note,
           createdBy: session.user.id,
+          creationIdempotencyKey: idempotencyKey,
+          creationCommandHash: commandHash,
           // Informational only — see docs/currency-accounting-model.md.
           creationCurrency: saleInput.inputCurrency,
           creationExchangeRate: saleInput.exchangeRateUsed,
@@ -363,7 +402,7 @@ export async function POST(req: NextRequest) {
             saleId: sale.id,
             shopId,
             amount: paid,
-            paymentMethod: d.paymentMethod,
+            paymentMethod: d.paymentMethod!,
             paidAt: new Date(),
             note: remaining > 0 ? "Boshlang'ich to'lov" : "To'liq to'lov",
             idempotencyKey: `olib-sotdim-initial:${sale.id}`,
@@ -503,6 +542,9 @@ export async function POST(req: NextRequest) {
     if (err && typeof err === 'object' && 'code' in err && (err as { code?: string }).code === 'P2002') {
       const meta = (err as { meta?: { target?: unknown } }).meta
       const target = Array.isArray(meta?.target) ? meta.target.join(',') : String(meta?.target ?? '')
+      if (target.includes('creationIdempotencyKey')) {
+        return conflict("Olib-sotdim so'rovi allaqachon bajarilmoqda. Shu so'rovni qayta yuboring.")
+      }
       if (target.includes('Customer') || target.includes('normalizedPhone') || target.includes('passportIdentifierHash')) {
         return conflict('Bu telefon yoki pasport bilan faol mijoz mavjud. Uni qidiruvdan tanlang; mijozlar avtomatik birlashtirilmaydi.')
       }

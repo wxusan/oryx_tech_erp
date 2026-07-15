@@ -94,7 +94,6 @@ export default function ReceivablesClient({ initialData }: { initialData: Receiv
     'NASIYA_REMINDER_MANAGE',
     'NASIYA_CANCEL',
     'NASIYA_ARCHIVE',
-    'NASIYA_WRITE_OFF',
     'NASIYA_REOPEN',
   ].some((permission) => can(permission as Parameters<typeof can>[0]))
   const canOpenDetails = (item: ReceivableItem) => (

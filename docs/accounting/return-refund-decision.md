@@ -1,7 +1,6 @@
 # Return/refund accounting policy
 
-Status: **implemented in the remediation branch; production deployment and
-historic-data review are still pending**.
+Status: **implemented; production release remains gated by the guarded workflow**.
 
 This file records the policy implemented by migration
 `202607130001_immutable_return_ledger` and
@@ -45,11 +44,18 @@ version of this document. It does not authorize rewriting historic records.
 
 For every returned contract:
 
-`contract receipts - contract refund = contract retained value`
+`reversed sale value = money refunded + amount retained + unpaid debt cancelled`
+
+and, for the cash portion:
+
+`contract receipts - money refunded = amount retained`
 
 Separately, cancelled unpaid debt remains a disposition field; it is never
 invented as a receipt or refund. For a non-zero refund, the sum of immutable
 refund allocations must equal the recorded contract refund and UZS refund.
+`Sof tushum` subtracts only money actually refunded during the reporting
+period. A completely unpaid Pay Later return therefore cancels expected debt
+without inventing a refund or a recognized-profit reversal.
 
 ## Proven behavior
 

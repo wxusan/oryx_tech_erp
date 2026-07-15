@@ -14,17 +14,15 @@ import { getUsdUzsRate } from '@/lib/server/currency'
 import { logger } from '@/lib/logger'
 
 type RouteContext = { params: Promise<{ id: string }> }
-type ResolutionAction = 'ARCHIVE' | 'WRITE_OFF' | 'REOPEN'
+type ResolutionAction = 'ARCHIVE' | 'REOPEN'
 
 const targetState = {
   ARCHIVE: 'ARCHIVED',
-  WRITE_OFF: 'WRITTEN_OFF',
   REOPEN: 'ACTIVE',
 } as const
 
 const auditAction = {
   ARCHIVE: 'NASIYA_ARCHIVE',
-  WRITE_OFF: 'NASIYA_WRITE_OFF',
   REOPEN: 'NASIYA_REOPEN',
 } as const
 
@@ -34,13 +32,12 @@ function roundUzsContext(value: number) {
 
 function validTransition(action: ResolutionAction, state: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF') {
   if (action === 'ARCHIVE') return state === 'ACTIVE'
-  if (action === 'WRITE_OFF') return state === 'ACTIVE' || state === 'ARCHIVED'
-  return state === 'ARCHIVED' || state === 'WRITTEN_OFF'
+  return state === 'ARCHIVED'
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopAnyPermission(['NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'])
+    const guarded = await requireShopAnyPermission(['NASIYA_ARCHIVE', 'NASIYA_REOPEN'])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -114,9 +111,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }
 
       const nativeRemainingAmount = Number(nasiya.contractRemainingAmount)
-      if (action === 'WRITE_OFF' && nativeRemainingAmount <= 0) {
-        throw { status: 409, message: "Hisobdan chiqarish uchun ochiq qarz yo'q" }
-      }
       const reversed = action === 'REOPEN'
         ? await tx.nasiyaResolutionEvent.findFirst({
             where: { shopId, nasiyaId, newState: nasiya.resolutionState },

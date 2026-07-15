@@ -42,8 +42,9 @@ The sale month therefore has zero Nasiya interest. Each later installment contri
 
 - Paid margin and interest are attributed to `NasiyaPayment.createdBy` or `SalePayment.createdBy`, the person who recorded the receipt.
 - Expected profit is shop-wide because an unpaid obligation has no payment recorder yet.
-- Archive and write-off remove unpaid components from expected amounts without changing prior actual profit.
-- Reopen restores remaining scheduled components to expected amounts.
+- Archive removes unpaid components from expected amounts without changing prior actual profit.
+- Restore reintroduces the remaining archived schedule to expected amounts.
+- Historical written-off contracts keep their paid history and remain excluded from expected amounts; new write-offs and reopening written-off contracts are retired.
 - Returns create a current-period reversal of recognized margin/interest; future unpaid agreement interest is never reversed as if it had been earned.
 
 ## Historical reconstruction

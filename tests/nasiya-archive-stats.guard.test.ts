@@ -13,13 +13,14 @@ describe('Nasiya archive: permission and accounting boundaries', () => {
     const resolutionRoute = read('src/app/api/nasiya/[id]/resolution/route.ts')
 
     expect(access).toContain("code: 'NASIYA_ARCHIVE'")
-    expect(access).toContain("label: 'Nasiyani arxivlash mumkin'")
+    expect(access).toContain("label: 'Can archive Nasiya'")
     expect(access).toContain("staffManagerDelegable: false")
     expect(staffUi).toContain('type="checkbox"')
     expect(staffUi).toContain('staff-permission-${permission.code.toLowerCase()}')
     expect(staffUi).toContain("item.code !== 'NASIYA_REOPEN'")
     expect(staffUi).toContain('withNasiyaArchivePermissionBundle([...current.permissionCodes, \'NASIYA_ARCHIVE\'])')
-    expect(resolutionRoute).toContain("requireShopAnyPermission(['NASIYA_ARCHIVE', 'NASIYA_WRITE_OFF', 'NASIYA_REOPEN'])")
+    expect(resolutionRoute).toContain("requireShopAnyPermission(['NASIYA_ARCHIVE', 'NASIYA_REOPEN'])")
+    expect(resolutionRoute).not.toContain("action === 'WRITE_OFF'")
     expect(resolutionRoute).toContain('principalHasPermission(guarded.principal, requiredPermission)')
   })
 
@@ -52,7 +53,7 @@ describe('Nasiya archive: permission and accounting boundaries', () => {
 
   it('documents that paid cash is preserved while unpaid archived value is excluded', () => {
     const policy = read('docs/nasiya-resolution-accounting-policy.md')
-    expect(policy).toContain('Previously paid margin/interest remains in its original payment month')
-    expect(policy).toContain('Cash and paid profit remain in their payment periods')
+    expect(policy).toContain('remain in their original historical actual statistics')
+    expect(policy).toContain("unpaid principal, margin, and interest are excluded")
   })
 })

@@ -24,6 +24,7 @@ import { roundContractMoney, computeSaleContractMargin } from '@/lib/nasiya-cont
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
 import { allocateCumulativePaymentComponents, buildSaleComponentPlan, splitUzsReportingAmount } from '@/lib/payment-profit-allocation'
+import { createHash } from 'node:crypto'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -34,6 +35,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const { session } = guarded
 
     const { id: deviceId } = await ctx.params
+    const idempotencyKey = req.headers.get('idempotency-key')?.trim() || null
+    if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 120)) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
+    }
     const body: unknown = await req.json()
     const parsed = createSaleSchema.safeParse(body)
 
@@ -83,8 +88,40 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const contractPaid = paidFully ? contractSalePrice : contractAmountPaidInput ?? 0
     const contractRemaining = contractSalePrice - contractPaid
     const nextDeviceStatus = contractRemaining > 0 ? 'SOLD_DEBT' : 'SOLD_CASH'
+    if (paid > 0 && !paymentMethod) return badRequest("Pul qabul qilinganda to'lov usuli kiritilishi shart")
+    const commandHash = idempotencyKey
+      ? createHash('sha256').update(JSON.stringify({
+          deviceId,
+          customerMode,
+          customerId: customerId ?? null,
+          customerName: customerName ?? null,
+          customerPhone: customerPhone ?? null,
+          salePrice,
+          inputCurrency: parsed.data.inputCurrency ?? null,
+          paymentMethod: paid > 0 ? paymentMethod : null,
+          paidFully,
+          amountPaid: amountPaid ?? null,
+          dueDate: dueDate?.toISOString() ?? null,
+          reminderEnabled: reminderEnabled ?? false,
+          earlyReminderEnabled: earlyReminderEnabled ?? false,
+          earlyReminderDays: earlyReminderDays ?? null,
+          note: note ?? null,
+        })).digest('hex')
+      : null
 
-    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    const runTransaction = () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      if (idempotencyKey) {
+        const replay = await tx.sale.findUnique({
+          where: { shopId_creationIdempotencyKey: { shopId, creationIdempotencyKey: idempotencyKey } },
+        })
+        if (replay) {
+          if (replay.creationCommandHash !== commandHash || replay.deviceId !== deviceId || replay.createdBy !== session.user.id) {
+            throw { status: 409, message: "Idempotency-Key boshqa yoki o'zgartirilgan sotuv uchun ishlatilgan" }
+          }
+          return { sale: replay, duplicate: true }
+        }
+      }
+
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
         include: { shop: { select: { name: true, ownerAdminId: true } }, imeis: { where: { deletedAt: null } } },
@@ -140,7 +177,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           deviceId,
           customerId: customer.id,
           salePrice: salePriceUzs,
-          paymentMethod: parsed.data.paymentMethod,
+          paymentMethod: paid > 0 ? paymentMethod : null,
           paidFully: remaining <= 0,
           amountPaid: paid,
           remainingAmount: remaining,
@@ -165,6 +202,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           contractMarginPaidAmount: initialComponents?.paidAfter.margin ?? 0,
           accountingReconstructionStatus: 'COMPLETE',
           accountingReconstructedAt: new Date(),
+          creationIdempotencyKey: idempotencyKey,
+          creationCommandHash: commandHash,
         },
       })
 
@@ -179,7 +218,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             saleId: sale.id,
             shopId,
             amount: paid,
-            paymentMethod,
+            paymentMethod: paymentMethod!,
             paidAt: new Date(),
             note: remaining > 0 ? "Boshlang'ich to'lov" : "To'liq to'lov",
             paymentInputAmount: paidFully ? salePrice : amountPaid,
@@ -260,16 +299,36 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       })
 
-      return sale
+      return { sale, duplicate: false }
     })
 
-    invalidateShopSaleMutation(shopId)
+    let result: Awaited<ReturnType<typeof runTransaction>>
+    try {
+      result = await runTransaction()
+    } catch (error) {
+      if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+        const replay = await prisma.sale.findUnique({
+          where: { shopId_creationIdempotencyKey: { shopId, creationIdempotencyKey: idempotencyKey } },
+        })
+        if (replay && replay.creationCommandHash === commandHash && replay.deviceId === deviceId && replay.createdBy === session.user.id) {
+          result = { sale: replay, duplicate: true }
+        } else {
+          throw { status: 409, message: "Idempotency-Key boshqa yoki o'zgartirilgan sotuv uchun ishlatilgan" }
+        }
+      } else {
+        throw error
+      }
+    }
+
+    if (!result.duplicate) invalidateShopSaleMutation(shopId)
 
     // Flush freshly-queued notifications after the response (non-blocking).
     // The rows are already committed, so cron is the backstop if this misses.
-    after(() => processPendingNotifications().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
+    if (!result.duplicate) {
+      after(() => processPendingNotifications().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
+    }
 
-    return created(result, "Qurilma muvaffaqiyatli sotildi")
+    return created(result.sale, result.duplicate ? 'Bu sotuv avval saqlangan' : "Qurilma muvaffaqiyatli sotildi")
   } catch (err: unknown) {
     if (err instanceof CustomerSelectionError) {
       if (err.status === 404) return notFound(err.message)

@@ -57,7 +57,6 @@ function allowedDomainsForGuard(guarded: Awaited<ReturnType<typeof requireApiSes
     'NASIYA_REMINDER_MANAGE',
     'NASIYA_CANCEL',
     'NASIYA_ARCHIVE',
-    'NASIYA_WRITE_OFF',
     'NASIYA_REOPEN',
   ], ['nasiyas'], 'NASIYA')
   allow(['SALE_RETURN_REFUND', 'NASIYA_CANCEL', 'DEVICE_RESTOCK'], ['returns'])
