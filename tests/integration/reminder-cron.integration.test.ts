@@ -79,6 +79,7 @@ describe('daily reminder generation against PostgreSQL', () => {
         passwordHash: 'integration-only',
         telegramId: '820000001',
         telegramVerifiedAt: new Date('2026-07-01T00:00:00.000Z'),
+        telegramNotificationsEnabled: true,
       },
     })
     await prisma.shop.update({
