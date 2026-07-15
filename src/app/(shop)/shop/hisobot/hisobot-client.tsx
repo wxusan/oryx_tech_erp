@@ -129,8 +129,8 @@ export default function HisobotClient({
   const recoveredInventoryCost = stats.returnInventoryCostRecoveriesThisMonth ?? 0
   const retainedReturnValue = stats.returnRetainedValueThisMonth ?? 0
   const inventory = stats.inventoryPurchaseCost
-  const grossProfit = stats.accrualGrossProfitThisMonth ?? stats.realProfitThisMonth
-  const interestProfit = stats.nasiyaInterestThisMonth ?? 0
+  const grossProfit = stats.actualProfitThisMonth ?? stats.realProfitThisMonth
+  const interestProfit = stats.interestReceivedThisMonth ?? 0
   const currencyTotalsComplete = stats.expectedThisMonthComplete && stats.overdueMoneyComplete
   const expectedText = formatPartitionedMoney({
     amountUzs: stats.expectedThisMonthUzs,
@@ -141,6 +141,12 @@ export default function HisobotClient({
   const overdueText = formatPartitionedMoney({
     amountUzs: stats.overdueMoneyUzs,
     amountUsd: stats.overdueMoneyUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+  const expectedInterestText = formatPartitionedMoney({
+    amountUzs: stats.nasiyaInterestExpectedThisMonthUzs,
+    amountUsd: stats.nasiyaInterestExpectedThisMonthUsd,
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
@@ -163,15 +169,15 @@ export default function HisobotClient({
       amount: refunds,
       fill: 'var(--color-refunds)',
     },
-    { name: 'Kutilmoqda', amount: expected, fill: 'var(--color-expected)' },
+    { name: 'Kutilayotgan foyda', amount: expected, fill: 'var(--color-expected)' },
     { name: 'Kechikkan', amount: overdue, fill: 'var(--color-overdue)' },
   ]
 
   const businessData = [
     { name: 'Ombor', amount: inventory, fill: 'var(--color-inventory)' },
-    { name: 'Sotuv foydasi', amount: grossProfit, fill: 'var(--color-gross)' },
+    { name: 'Haqiqiy foyda', amount: grossProfit, fill: 'var(--color-gross)' },
     {
-      name: 'Nasiya foizi',
+      name: 'Olingan Nasiya foizi',
       amount: interestProfit,
       fill: 'var(--color-interest)',
     },
@@ -181,11 +187,11 @@ export default function HisobotClient({
     collected: { label: 'Umumiy aylanma', color: '#2563eb' },
     net: { label: 'Sof tushum', color: '#15803d' },
     refunds: { label: 'Qaytarilgan summa', color: '#9333ea' },
-    expected: { label: 'Kutilmoqda', color: '#0f766e' },
+    expected: { label: 'Kutilayotgan foyda', color: '#0f766e' },
     overdue: { label: 'Kechikkan', color: '#dc2626' },
     inventory: { label: 'Ombor', color: '#64748b' },
-    gross: { label: 'Sotuv foydasi', color: '#16a34a' },
-    interest: { label: 'Nasiya foizi', color: '#0891b2' },
+    gross: { label: 'Haqiqiy foyda', color: '#16a34a' },
+    interest: { label: 'Olingan Nasiya foizi', color: '#0891b2' },
   } satisfies ChartConfig
 
   return (
@@ -202,7 +208,7 @@ export default function HisobotClient({
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Hisobot</h1>
           <p className="mt-1 text-sm text-zinc-500">
-            Umumiy aylanma/sof tushum, qarzdorlik, ombor tannarxi va sotuv foydasi ko'rsatkichlari
+            Haqiqiy tushum va foyda, shu oy kutilayotgan foyda, qarzdorlik hamda ombor ko'rsatkichlari
           </p>
         </div>
         <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -216,7 +222,7 @@ export default function HisobotClient({
             selectedAdmin={adminId}
           />
           <div className="rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs text-zinc-500">
-            Pul tushumi va ochiq majburiyatlar alohida hisoblanadi
+            To'langan va kutilayotgan foyda alohida hisoblanadi
           </div>
           {preset === 'single' && rangeReport && can('EXPORT_REPORTS') && (
             <div className="flex gap-2">
@@ -233,9 +239,15 @@ export default function HisobotClient({
 
       {adminId && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-          Admin filtri faqat u amalga oshirgan sotuv/nasiya/to'lov/qaytarish va faoliyat jurnaliga taalluqli. Ombordagi tannarx, joriy faol
-          nasiyalar, kutilayotgan va kechikkan qarzdorlik — bularni bitta adminga bog'lab bo'lmaydi, shuning uchun ular barcha adminlar
-          bo'yicha ko'rsatiladi.
+          Admin filtri tushum, marja va Nasiya foizini to'lovni yozgan xodimga, qaytarish reversini esa qaytarishni yozgan xodimga bog'laydi.
+          Ombordagi tannarx, faol nasiyalar, kutilayotgan foyda va kechikkan qarzdorlik do'kon bo'yicha ko'rsatiladi.
+        </div>
+      )}
+
+      {stats.accountingReconstructionGapCount > 0 && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-900">
+          {stats.accountingReconstructionGapCount} ta tarixiy shartnomada foyda taqsimotini to'liq isbotlab bo'lmadi. Ularning tushumi saqlangan,
+          ammo noaniq foyda raqamlari hisobotga qo'shilmadi.
         </div>
       )}
 
@@ -290,16 +302,16 @@ export default function HisobotClient({
           </CardContent>
         </Card>
 
-        <Card className="rounded-lg">
-          <CardHeader>
-            <CardDescription>Bu oy kutilmoqda</CardDescription>
+          <Card className="rounded-lg border-emerald-200 bg-emerald-50/30">
+            <CardHeader>
+              <CardDescription className="text-emerald-800">Bu oy kutilayotgan foyda</CardDescription>
             <CardAction>
               <CalendarClock className="size-4 text-teal-700" />
             </CardAction>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-zinc-900">{expectedText}</div>
-            <p className="mt-3 text-xs text-zinc-500">Nasiya va qisman sotuvlardan qolgan oy ichidagi summa · joriy kurs bo'yicha</p>
+            <p className="mt-3 text-xs text-zinc-500">Faqat shu oy muddati kelgan, hali to'lanmagan marja va foiz · kelgusi oylar kirmaydi</p>
           </CardContent>
         </Card>
 
@@ -358,7 +370,7 @@ export default function HisobotClient({
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         <Card className="rounded-lg">
           <CardHeader>
-            <CardDescription>Sotuv foydasi</CardDescription>
+            <CardDescription>Bu oyning haqiqiy foydasi</CardDescription>
             <CardAction>
               <TrendingUp className="size-4 text-emerald-600" />
             </CardAction>
@@ -366,8 +378,7 @@ export default function HisobotClient({
           <CardContent>
             <div className="text-2xl font-bold text-zinc-900">{fmt(grossProfit, currency)}</div>
             <p className="mt-3 text-xs text-zinc-500">
-              Sotuv davridagi foyda va shu oy qaytarilgan savdolarning alohida reversali. Qaytarishda {fmt(recoveredInventoryCost, currency)}
-              {' '}tannarx omborga qaytdi; eski oyning natijasi o'zgartirilmadi.
+              Faqat shu oy amalda to'langan marja va foiz; qaytarishlarda faqat ilgari tan olingan foyda revers qilinadi. Omborga qaytgan tannarx: {fmt(recoveredInventoryCost, currency)}.
             </p>
           </CardContent>
         </Card>
@@ -379,10 +390,11 @@ export default function HisobotClient({
           <CardContent className="space-y-3">
             {[
               ["Yig'ilgan", fmtBase(collected, currency)],
-              ['Kutilayotgan', expectedText],
+              ['Kutilayotgan foyda', expectedText],
               ['Kechikkan', overdueText],
               ['Hisobdan chiqarilgan', writeOffText],
-              ['Nasiya foizi', fmt(interestProfit, currency)],
+              ['Olingan Nasiya foizi', fmt(interestProfit, currency)],
+              ['Kutilayotgan Nasiya foizi', expectedInterestText],
               ['Qaytarish reversali', fmt(reversedRevenue, currency)],
               ['Qaytgan tannarx', fmt(recoveredInventoryCost, currency)],
               ['Saqlab qolingan qiymat', fmt(retainedReturnValue, currency)],

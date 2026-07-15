@@ -30,6 +30,11 @@ import { validatePaymentBreakdown, representativePaymentMethod } from '@/lib/pay
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
 import { canonicalPaymentBreakdown, sameInstant, sameMoney, sameOptionalText } from '@/lib/idempotency-replay'
+import {
+  allocateCumulativePaymentComponents,
+  allocateUzsAcrossContractAmounts,
+  splitUzsReportingAmount,
+} from '@/lib/payment-profit-allocation'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -320,9 +325,44 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               contractCurrency,
               now: date,
             })
+            const allocationUzsAmounts = allocateUzsAcrossContractAmounts(
+              amountUzs,
+              scheduleUpdates.map((update) => update.appliedContract),
+            )
+            const profitAllocations: {
+              scheduleId: string
+              contractAmount: number
+              amountUzs: number
+              components: { principal: number; margin: number; interest: number }
+              reporting: { principal: number; margin: number; interest: number }
+            }[] = []
 
-            for (const scheduleUpdate of scheduleUpdates) {
+            for (const [allocationIndex, scheduleUpdate] of scheduleUpdates.entries()) {
               const original = allocationRows.find((s) => s.id === scheduleUpdate.scheduleId)!
+              const componentResult = ['COMPLETE', 'PARTIAL'].includes(nasiya.accountingReconstructionStatus)
+                ? allocateCumulativePaymentComponents({
+                    currency: contractCurrency,
+                    totals: {
+                      principal: Number(original.contractPrincipalAmount),
+                      margin: Number(original.contractMarginAmount),
+                      interest: Number(original.contractInterestAmount),
+                    },
+                    paid: {
+                      principal: Number(original.contractPrincipalPaidAmount),
+                      margin: Number(original.contractMarginPaidAmount),
+                      interest: Number(original.contractInterestPaidAmount),
+                    },
+                    paymentAmount: scheduleUpdate.appliedContract,
+                  })
+                : null
+              const allocationUzs = allocationUzsAmounts[allocationIndex]
+              const reportingComponents = componentResult
+                ? splitUzsReportingAmount({
+                    amountUzs: allocationUzs,
+                    contractAmount: scheduleUpdate.appliedContract,
+                    contractComponents: componentResult.allocation,
+                  })
+                : null
               const updatedSchedule = await tx.nasiyaSchedule.updateMany({
                 where: {
                   id: scheduleUpdate.scheduleId,
@@ -338,6 +378,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                   note: auditNote,
                   contractPaidAmount: scheduleUpdate.newContractPaidAmount,
                   contractRemainingAmount: scheduleUpdate.newContractRemainingAmount,
+                  ...(componentResult ? {
+                    contractPrincipalPaidAmount: componentResult.paidAfter.principal,
+                    contractMarginPaidAmount: componentResult.paidAfter.margin,
+                    contractInterestPaidAmount: componentResult.paidAfter.interest,
+                  } : {}),
                 },
               })
               if (updatedSchedule.count !== 1) {
@@ -354,9 +399,18 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 monthNumber: scheduleUpdate.monthNumber,
                 contractAmount: scheduleUpdate.appliedContract,
               })
+              if (componentResult && reportingComponents) {
+                profitAllocations.push({
+                  scheduleId: scheduleUpdate.scheduleId,
+                  contractAmount: scheduleUpdate.appliedContract,
+                  amountUzs: allocationUzs,
+                  components: componentResult.allocation,
+                  reporting: reportingComponents,
+                })
+              }
             }
 
-            await tx.nasiyaPayment.create({
+            const payment = await tx.nasiyaPayment.create({
               data: {
                 nasiyaId,
                 // Preserve the user's selected schedule even when the amount
@@ -379,6 +433,26 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 paymentExchangeRate: contractRate,
               },
             })
+            if (profitAllocations.length > 0) {
+              await tx.nasiyaPaymentAllocation.createMany({
+                data: profitAllocations.map((allocation, index) => ({
+                  shopId,
+                  nasiyaId,
+                  nasiyaPaymentId: payment.id,
+                  nasiyaScheduleId: allocation.scheduleId,
+                  sequence: index + 1,
+                  contractCurrency,
+                  contractAmount: allocation.contractAmount,
+                  contractPrincipalAmount: allocation.components.principal,
+                  contractMarginAmount: allocation.components.margin,
+                  contractInterestAmount: allocation.components.interest,
+                  amountUzs: allocation.amountUzs,
+                  principalAmountUzs: allocation.reporting.principal,
+                  marginAmountUzs: allocation.reporting.margin,
+                  interestAmountUzs: allocation.reporting.interest,
+                })),
+              })
+            }
           // Recalculate nasiya totals
           const allSchedules = await tx.nasiyaSchedule.findMany({
             where: { nasiyaId },

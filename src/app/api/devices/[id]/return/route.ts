@@ -134,7 +134,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             where: { deletedAt: null, returnedAt: null, status: { not: 'CANCELLED' } },
             orderBy: { createdAt: 'desc' },
             take: 1,
-            include: { payments: { where: { deletedAt: null }, orderBy: { paidAt: 'asc' } } },
+            include: {
+              payments: {
+                where: { deletedAt: null },
+                orderBy: { paidAt: 'asc' },
+                include: { allocations: true },
+              },
+            },
           },
         },
       })
@@ -204,6 +210,24 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         contractCurrency,
       )
       const receiptsUzs = sources.reduce((sum, source) => sum + source.amountUzs, 0)
+      const recognizedMarginAmountUzs = sale
+        ? sale.payments.reduce((sum, payment) => sum + Number(payment.marginAmountUzs), 0)
+        : nasiya!.payments.reduce(
+            (sum, payment) => sum + payment.allocations.reduce(
+              (allocationSum, allocation) => allocationSum + Number(allocation.marginAmountUzs),
+              0,
+            ),
+            0,
+          )
+      const recognizedInterestAmountUzs = nasiya
+        ? nasiya.payments.reduce(
+            (sum, payment) => sum + payment.allocations.reduce(
+              (allocationSum, allocation) => allocationSum + Number(allocation.interestAmountUzs),
+              0,
+            ),
+            0,
+          )
+        : 0
       const now = new Date()
 
       const guardedReturn = await tx.device.updateMany({
@@ -253,11 +277,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           contractRetainedAmount,
           contractCancelledDebt: Number(sale?.contractRemainingAmount ?? nasiya?.contractRemainingAmount ?? 0),
           revenueReversalAmountUzs: Number(sale?.salePrice ?? nasiya?.totalAmount ?? 0),
-          interestReversalAmountUzs: Number(nasiya?.interestAmount ?? 0),
+          // Only interest already recognized from real receipts is reversed.
+          // Future contractual interest was never profit and is not touched.
+          interestReversalAmountUzs: recognizedInterestAmountUzs,
           inventoryCostRecoveryUzs: Number(device.purchasePrice),
           retainedValueAmountUzs: Math.max(0, receiptsUzs - refundAmountUzs),
           note: parsed.data.note,
           createdBy: session.user.id,
+        },
+      })
+
+      await tx.returnProfitReversal.create({
+        data: {
+          shopId,
+          deviceReturnId: returnRecord.id,
+          saleId: sale?.id,
+          nasiyaId: nasiya?.id,
+          recognizedMarginAmountUzs,
+          recognizedInterestAmountUzs,
+          createdAt: now,
         },
       })
 

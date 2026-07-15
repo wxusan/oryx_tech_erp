@@ -32,6 +32,10 @@ if (process.env.VERCEL_ENV === 'production') {
   run('npm', ['run', 'build'])
   run('node', ['scripts/production-release-preflight.mjs', '--phase=pre'])
   run('npm', ['run', 'prisma:migrate:deploy'])
+  // The approved monthly-accounting migration is additive. Reconstruct its
+  // component ledger before the new artifact can be promoted; ambiguous rows
+  // remain explicit review gaps and are never assigned invented profit.
+  run('node', ['scripts/backfill-payment-profit-ledger.mjs', '--apply'])
   run('node', ['scripts/repair-malika-owner.mjs'])
   run('node', ['scripts/production-release-preflight.mjs', '--phase=post'])
 } else {

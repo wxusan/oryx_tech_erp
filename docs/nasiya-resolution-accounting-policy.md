@@ -32,8 +32,9 @@ Shop owners and super admins have archive and reopen access by default. A staff 
 | Payment and deferral actions | Blocked | Blocked | Allowed again when permission, entitlement, balance, and schedule state permit |
 | Dashboard active receivables | Excluded from active/due/overdue work totals | Excluded from active/due/overdue work totals | Included again |
 | Historical cash collected | Preserved | Preserved | Preserved |
-| Sales-value/accrual statistics | Excluded. Only immutable receipt rows remain in cash-collected totals; unpaid contract value, interest, and margin are not counted. | Preserved, with the closed amount separately reported as write-off | Included again after reopen |
-| Range report | Cash already received remains in the payment-period totals. The archived contract's unpaid sales value and expected debt are excluded. | Native UZS/USD and frozen-UZS write-off totals and count | Reopen subtracts the linked write-off amount and restores active receivable/stat inclusion |
+| Monthly actual profit | Previously paid margin/interest remains in its original payment month. No unpaid contract value is recognized. | Same; the closed amount is separately reported as a write-off | Historical actual profit remains unchanged |
+| Monthly expected profit | Unpaid margin/interest is excluded | Unpaid margin/interest is excluded | Remaining scheduled margin/interest is included again in its due month |
+| Range report | Cash and paid profit remain in their payment periods. The archived contract's unpaid expected profit and debt are excluded. | Native UZS/USD and frozen-UZS write-off totals and count | Reopen subtracts the linked write-off amount and restores remaining receivable/expected-profit inclusion |
 | Export | Resolution state is included; range exports include write-off/reopen columns | Same | Same |
 | Customer profile | Counted in archived history | Counted in written-off history and lifetime write-offs | Returns to active history |
 | Trust calculation | Historical paid-installment timing is retained; archived debt and unpaid schedules do not affect the live score | Written-off schedules are excluded from current-payment scoring and open receivables | Normal active rules resume |
@@ -42,7 +43,7 @@ Shop owners and super admins have archive and reopen access by default. A staff 
 
 ## Historic data and repair
 
-Migration `202607130008_nasiya_resolution_deferral` defaults existing contracts to `ACTIVE` and backfills explicit old/new dates for existing deferral events. It does not guess which historic contracts should be archived or written off, and it does not create retroactive write-offs.
+Migration `202607130008_nasiya_resolution_deferral` defaults existing contracts to `ACTIVE` and backfills explicit old/new dates for existing deferral events. Migration `202607150003_monthly_profit_recognition` adds payment-basis component ledgers; its separate reviewed backfill is documented in `docs/accounting/monthly-profit-recognition.md`. Neither process guesses which historic contracts should be archived or written off, and neither creates retroactive write-offs.
 
 Any production data repair must remain separate from deployment and requires:
 

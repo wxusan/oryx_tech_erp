@@ -72,6 +72,17 @@ enum NasiyaScheduleStatus {
   CANCELLED
 }
 
+// Whether historic payment-component facts can be used for monthly profit.
+// PENDING/PARTIAL/UNRECONSTRUCTABLE rows are deliberately excluded from
+// profit aggregates; cash receipts remain visible from the immutable payment
+// rows even when their profit split cannot be proven.
+enum AccountingReconstructionStatus {
+  PENDING
+  COMPLETE
+  PARTIAL
+  UNRECONSTRUCTABLE
+}
+
 enum NotificationStatus {
   PENDING
   PROCESSING
@@ -198,6 +209,8 @@ model Shop {
   supplierPayables  SupplierPayable[]
   packageVersions   ShopPackageVersion[]
   memberPermissions ShopMemberPermission[]
+  nasiyaPaymentAllocations NasiyaPaymentAllocation[]
+  returnProfitReversals    ReturnProfitReversal[]
 
   @@unique([ownerAdminId, id])
   @@index([status])
@@ -596,6 +609,15 @@ model Sale {
   contractSalePrice              Decimal       @default(0) @db.Decimal(12, 2)
   contractAmountPaid             Decimal       @default(0) @db.Decimal(12, 2)
   contractRemainingAmount        Decimal       @default(0) @db.Decimal(12, 2)
+  // Payment-basis profit ledger. Cost/margin are frozen in the contract's
+  // native currency and paid accumulators advance only when money is received.
+  contractCostBasisAmount         Decimal       @default(0) @db.Decimal(12, 2)
+  contractMarginAmount            Decimal       @default(0) @db.Decimal(12, 2)
+  contractPrincipalPaidAmount     Decimal       @default(0) @db.Decimal(12, 2)
+  contractMarginPaidAmount        Decimal       @default(0) @db.Decimal(12, 2)
+  accountingReconstructionStatus AccountingReconstructionStatus @default(PENDING)
+  accountingReconstructionReason String?
+  accountingReconstructedAt      DateTime?
   createdAt                      DateTime      @default(now())
   createdBy                      String
   // A physical return closes the operational debt without deleting or
@@ -614,6 +636,7 @@ model Sale {
   payments        SalePayment[]
   returns         DeviceReturn[]
   supplierPayable SupplierPayable?
+  profitReversals ReturnProfitReversal[]
 
   @@unique([id, shopId])
   @@index([shopId])
@@ -664,6 +687,12 @@ model SalePayment {
   // from an explicitly supplied one and freezes the requested next due date.
   paymentDateExplicit             Boolean       @default(false)
   requestedNextDueDate            DateTime?
+  // Frozen payment-date component split. UZS fields are the reporting facts;
+  // contract fields preserve the native-currency allocation exactly.
+  contractPrincipalAmount         Decimal       @default(0) @db.Decimal(12, 2)
+  contractMarginAmount            Decimal       @default(0) @db.Decimal(12, 2)
+  principalAmountUzs              Decimal       @default(0) @db.Decimal(12, 2)
+  marginAmountUzs                 Decimal       @default(0) @db.Decimal(12, 2)
   createdBy                       String
   createdAt                       DateTime      @default(now())
   deletedAt                       DateTime?
@@ -806,6 +835,14 @@ model Nasiya {
   contractMonthlyPayment         Decimal               @default(0) @db.Decimal(12, 2)
   contractRemainingAmount        Decimal               @default(0) @db.Decimal(12, 2)
   contractPaidAmount             Decimal               @default(0) @db.Decimal(12, 2)
+  // Frozen component budgets for payment-basis monthly recognition.
+  contractCostBasisAmount        Decimal               @default(0) @db.Decimal(12, 2)
+  contractMarginAmount           Decimal               @default(0) @db.Decimal(12, 2)
+  contractDownPaymentPrincipalAmount Decimal           @default(0) @db.Decimal(12, 2)
+  contractDownPaymentMarginAmount    Decimal           @default(0) @db.Decimal(12, 2)
+  accountingReconstructionStatus AccountingReconstructionStatus @default(PENDING)
+  accountingReconstructionReason String?
+  accountingReconstructedAt      DateTime?
   createdAt                      DateTime              @default(now())
   createdBy                      String
   updatedAt                      DateTime              @updatedAt
@@ -840,6 +877,8 @@ model Nasiya {
   schedules NasiyaSchedule[]
   payments  NasiyaPayment[]
   returns   DeviceReturn[]
+  paymentAllocations NasiyaPaymentAllocation[]
+  profitReversals    ReturnProfitReversal[]
 
   @@unique([id, shopId])
   // Supports the database-enforced schedule/parent currency invariant. The
@@ -883,11 +922,21 @@ model NasiyaSchedule {
   contractExpectedAmount  Decimal              @default(0) @db.Decimal(12, 2)
   contractPaidAmount      Decimal              @default(0) @db.Decimal(12, 2)
   contractRemainingAmount Decimal              @default(0) @db.Decimal(12, 2)
+  // Exact native-currency split of this instalment. Paid component totals are
+  // denormalized from the append-only allocation ledger for set-based expected
+  // profit/interest queries; the ledger remains the audit source of truth.
+  contractPrincipalAmount     Decimal          @default(0) @db.Decimal(12, 2)
+  contractMarginAmount        Decimal          @default(0) @db.Decimal(12, 2)
+  contractInterestAmount      Decimal          @default(0) @db.Decimal(12, 2)
+  contractPrincipalPaidAmount Decimal          @default(0) @db.Decimal(12, 2)
+  contractMarginPaidAmount    Decimal          @default(0) @db.Decimal(12, 2)
+  contractInterestPaidAmount  Decimal          @default(0) @db.Decimal(12, 2)
   createdAt               DateTime             @default(now())
 
   // Relations
   nasiya   Nasiya          @relation(fields: [nasiyaId], references: [id], onDelete: Cascade)
   payments NasiyaPayment[]
+  paymentAllocations NasiyaPaymentAllocation[]
 
   @@unique([id, shopId])
   // Lets NasiyaPayment prove that an optional schedule belongs to this exact
@@ -1005,6 +1054,7 @@ model NasiyaPayment {
   nasiya            Nasiya                   @relation(fields: [nasiyaId], references: [id])
   schedule          NasiyaSchedule?          @relation(fields: [nasiyaScheduleId], references: [id])
   returnAllocations ReturnRefundAllocation[]
+  allocations       NasiyaPaymentAllocation[]
 
   @@unique([shopId, idempotencyKey])
   @@unique([id, shopId])
@@ -1012,6 +1062,38 @@ model NasiyaPayment {
   @@index([nasiyaScheduleId])
   @@index([shopId])
   @@index([paidAt])
+}
+
+// Append-only allocation facts. One customer payment may span several
+// schedules; down payments use a null schedule. Both native contract amounts
+// and the exact payment-date UZS reporting snapshot are preserved.
+model NasiyaPaymentAllocation {
+  id                       String       @id @default(cuid())
+  shopId                   String
+  nasiyaId                 String
+  nasiyaPaymentId          String
+  nasiyaScheduleId         String?
+  sequence                 Int
+  contractCurrency         CurrencyCode
+  contractAmount           Decimal      @db.Decimal(12, 2)
+  contractPrincipalAmount  Decimal      @db.Decimal(12, 2)
+  contractMarginAmount     Decimal      @db.Decimal(12, 2)
+  contractInterestAmount   Decimal      @db.Decimal(12, 2)
+  amountUzs                Decimal      @db.Decimal(12, 2)
+  principalAmountUzs       Decimal      @db.Decimal(12, 2)
+  marginAmountUzs          Decimal      @db.Decimal(12, 2)
+  interestAmountUzs        Decimal      @db.Decimal(12, 2)
+  createdAt                DateTime     @default(now())
+
+  shop     Shop            @relation(fields: [shopId], references: [id])
+  nasiya   Nasiya          @relation(fields: [nasiyaId], references: [id])
+  payment  NasiyaPayment   @relation(fields: [nasiyaPaymentId], references: [id])
+  schedule NasiyaSchedule? @relation(fields: [nasiyaScheduleId], references: [id])
+
+  @@unique([nasiyaPaymentId, sequence])
+  @@index([shopId, createdAt])
+  @@index([nasiyaId])
+  @@index([nasiyaScheduleId])
 }
 
 // ---------------------------------------------------------------------------
@@ -1063,6 +1145,7 @@ model DeviceReturn {
   sale              Sale?                    @relation(fields: [saleId], references: [id])
   nasiya            Nasiya?                  @relation(fields: [nasiyaId], references: [id])
   refundAllocations ReturnRefundAllocation[]
+  profitReversal    ReturnProfitReversal?
 
   @@unique([shopId, idempotencyKey])
   @@unique([id, shopId])
@@ -1071,6 +1154,29 @@ model DeviceReturn {
   @@index([saleId])
   @@index([nasiyaId])
   @@index([createdAt])
+}
+
+// Return-period reversal of profit that had actually been recognized from
+// receipts. It intentionally does not reuse DeviceReturn.interestReversal...
+// because that immutable legacy field contains full-contract accrual values.
+model ReturnProfitReversal {
+  id                          String       @id @default(cuid())
+  shopId                      String
+  deviceReturnId              String       @unique
+  saleId                      String?
+  nasiyaId                    String?
+  recognizedMarginAmountUzs   Decimal      @default(0) @db.Decimal(12, 2)
+  recognizedInterestAmountUzs Decimal      @default(0) @db.Decimal(12, 2)
+  createdAt                   DateTime     @default(now())
+
+  shop         Shop         @relation(fields: [shopId], references: [id])
+  deviceReturn DeviceReturn @relation(fields: [deviceReturnId], references: [id])
+  sale         Sale?        @relation(fields: [saleId], references: [id])
+  nasiya       Nasiya?      @relation(fields: [nasiyaId], references: [id])
+
+  @@index([shopId, createdAt])
+  @@index([saleId])
+  @@index([nasiyaId])
 }
 
 // Every non-zero refund is allocated back to immutable receipt rows. Exactly

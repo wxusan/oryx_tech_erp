@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
+import { getShopMonthlyAccountingAggregate } from '@/lib/server/shop-stats-queries'
 
 const authState = vi.hoisted(() => ({ session: null as unknown }))
 
@@ -289,6 +290,7 @@ async function nasiyaPaymentRequest(input: {
   key: string
   note?: string
   date?: string
+  inputCurrency?: 'UZS' | 'USD'
 }) {
   const { NextRequest } = await import('next/server')
   const { POST } = await import('@/app/api/nasiya/[id]/payment/route')
@@ -301,7 +303,7 @@ async function nasiyaPaymentRequest(input: {
       paymentMethod: 'CASH',
       date: input.date ?? '2026-07-13T08:00:00.000Z',
       note: input.note ?? 'Audit payment reason',
-      inputCurrency: 'UZS',
+      inputCurrency: input.inputCurrency ?? 'UZS',
     }),
   })
   return POST(request, { params: Promise.resolve({ id: input.nasiyaId }) })
@@ -464,6 +466,32 @@ async function createNasiyaRequest(deviceId: string, phone: string, shopId: stri
       startDate: '2026-08-01T00:00:00.000Z',
       paymentMethod: 'CASH',
       inputCurrency: 'UZS',
+    }),
+  }), { params: Promise.resolve({ id: deviceId }) })
+}
+
+async function createMonthlyAccountingExampleRequest(
+  deviceId: string,
+  phone: string,
+  shopId: string,
+) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/devices/[id]/nasiya/route')
+  return POST(new NextRequest(`http://localhost/api/devices/${deviceId}/nasiya`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      deviceId,
+      customerName: 'Monthly accounting customer',
+      customerPhone: phone,
+      passportPhotoUrl: `shops/${shopId}/passports/monthly-accounting.jpg`,
+      totalAmount: 1_000,
+      downPayment: 200,
+      months: 4,
+      interestPercent: 20,
+      startDate: '2026-07-01T00:00:00.000Z',
+      paymentMethod: 'CASH',
+      inputCurrency: 'USD',
     }),
   }), { params: Promise.resolve({ id: deviceId }) })
 }
@@ -940,6 +968,297 @@ describe('real-PostgreSQL route evidence', () => {
     expect(Number(returned.contractReceiptsAtReturn)).toBe(paid)
     expect(Number(returned.contractCancelledDebt)).toBe(1_000 - paid)
     expect(Number(returned.contractRefundAmount)).toBe(0)
+  })
+
+  it('recognizes a fully paid cash Sale margin in full on its payment date', async () => {
+    const actor = await seedActor('cash_monthly_profit')
+    useShopAdmin(actor)
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Cash monthly profit',
+        purchasePrice: 1_000_000,
+        purchaseInputAmount: 1_000_000,
+        purchaseAmountUzsSnapshot: 1_000_000,
+        imei: 'CASH-MONTHLY-PROFIT',
+        addedBy: actor.admin.id,
+      },
+    })
+
+    const response = await cashSaleRequest(device.id, '+998901010202')
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(201)
+    const sale = await prisma.sale.findFirstOrThrow({
+      where: { deviceId: device.id },
+      include: { payments: true },
+    })
+    expect(sale.accountingReconstructionStatus).toBe('COMPLETE')
+    expect(Number(sale.contractCostBasisAmount)).toBe(1_000_000)
+    expect(Number(sale.contractMarginAmount)).toBe(1_000_000)
+    expect(sale.payments).toHaveLength(1)
+    expect(Number(sale.payments[0].principalAmountUzs)).toBe(1_000_000)
+    expect(Number(sale.payments[0].marginAmountUzs)).toBe(1_000_000)
+
+    const july = await getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-07-01T00:00:00.000Z'),
+      monthEnd: new Date('2026-08-01T00:00:00.000Z'),
+      adminId: actor.admin.id,
+    })
+    expect(july.saleMarginReceivedUzs).toBe(1_000_000)
+    expect(july.actualProfitUzs).toBe(1_000_000)
+  })
+
+  it('recognizes the $800/$1,000 Nasiya example only as installments are paid and attributes it to the collector', async () => {
+    const actor = await seedActor('monthly_profit')
+    useShopAdmin(actor)
+    await prisma.currencyRate.create({
+      data: {
+        baseCurrency: 'USD',
+        quoteCurrency: 'UZS',
+        rate: 12_500,
+        source: 'CBU',
+        fetchedAt: new Date(),
+      },
+    })
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Monthly profit example',
+        purchasePrice: 10_000_000,
+        purchaseCurrency: 'USD',
+        purchaseInputAmount: 800,
+        purchaseExchangeRateAtCreation: 12_500,
+        purchaseAmountUzsSnapshot: 10_000_000,
+        imei: 'MONTHLY-PROFIT-EXAMPLE',
+        addedBy: actor.admin.id,
+      },
+    })
+
+    const createdResponse = await createMonthlyAccountingExampleRequest(
+      device.id,
+      '+998901234567',
+      actor.shop.id,
+    )
+    expect(createdResponse.status, JSON.stringify(await createdResponse.clone().json())).toBe(201)
+
+    const nasiya = await prisma.nasiya.findFirstOrThrow({
+      where: { deviceId: device.id },
+      include: {
+        schedules: { orderBy: { monthNumber: 'asc' } },
+        paymentAllocations: { orderBy: [{ createdAt: 'asc' }, { sequence: 'asc' }] },
+      },
+    })
+    expect(nasiya.accountingReconstructionStatus).toBe('COMPLETE')
+    expect(Number(nasiya.contractCostBasisAmount)).toBe(800)
+    expect(Number(nasiya.contractMarginAmount)).toBe(200)
+    expect(Number(nasiya.contractDownPaymentPrincipalAmount)).toBe(160)
+    expect(Number(nasiya.contractDownPaymentMarginAmount)).toBe(40)
+    expect(Number(nasiya.contractInterestAmount)).toBe(160)
+    expect(nasiya.schedules).toHaveLength(4)
+    for (const schedule of nasiya.schedules) {
+      expect({
+        expected: Number(schedule.contractExpectedAmount),
+        principal: Number(schedule.contractPrincipalAmount),
+        margin: Number(schedule.contractMarginAmount),
+        interest: Number(schedule.contractInterestAmount),
+      }).toEqual({ expected: 240, principal: 160, margin: 40, interest: 40 })
+    }
+    expect(nasiya.paymentAllocations).toHaveLength(1)
+    expect(Number(nasiya.paymentAllocations[0].contractInterestAmount)).toBe(0)
+
+    const july = await getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-07-01T00:00:00.000Z'),
+      monthEnd: new Date('2026-08-01T00:00:00.000Z'),
+      adminId: null,
+    })
+    expect(july.nasiyaMarginReceivedUzs).toBe(500_000)
+    expect(july.nasiyaInterestReceivedUzs).toBe(0)
+    expect(july.actualProfitUzs).toBe(500_000)
+    expect(july.expectedProfitUsd).toBe(0)
+
+    const augustBeforePayment = await getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-08-01T00:00:00.000Z'),
+      monthEnd: new Date('2026-09-01T00:00:00.000Z'),
+      adminId: null,
+    })
+    expect(augustBeforePayment.expectedProfitUsd).toBe(80)
+    expect(augustBeforePayment.expectedInterestUsd).toBe(40)
+    expect(augustBeforePayment.actualProfitUzs).toBe(0)
+
+    const collector = await seedStaff(actor, 'monthly_profit_collector', ['NASIYA_PAYMENT_RECEIVE'])
+    useShopAdmin(collector)
+    const partialResponse = await nasiyaPaymentRequest({
+      nasiyaId: nasiya.id,
+      scheduleId: nasiya.schedules[0].id,
+      amount: 120,
+      inputCurrency: 'USD',
+      date: '2026-08-10T08:00:00.000Z',
+      key: 'monthly-profit-partial',
+    })
+    expect(partialResponse.status, JSON.stringify(await partialResponse.clone().json())).toBe(200)
+
+    const augustForCollector = await getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-08-01T00:00:00.000Z'),
+      monthEnd: new Date('2026-09-01T00:00:00.000Z'),
+      adminId: collector.admin.id,
+    })
+    expect(augustForCollector.nasiyaMarginReceivedUzs).toBe(250_000)
+    expect(augustForCollector.nasiyaInterestReceivedUzs).toBe(250_000)
+    expect(augustForCollector.actualProfitUzs).toBe(500_000)
+    expect(augustForCollector.expectedProfitUsd).toBe(40)
+    expect(augustForCollector.expectedInterestUsd).toBe(20)
+
+    const augustForCreator = await getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-08-01T00:00:00.000Z'),
+      monthEnd: new Date('2026-09-01T00:00:00.000Z'),
+      adminId: actor.admin.id,
+    })
+    expect(augustForCreator.actualProfitUzs).toBe(0)
+
+    const overflowResponse = await nasiyaPaymentRequest({
+      nasiyaId: nasiya.id,
+      scheduleId: nasiya.schedules[0].id,
+      amount: 600,
+      inputCurrency: 'USD',
+      date: '2026-09-10T08:00:00.000Z',
+      key: 'monthly-profit-late-current-early',
+    })
+    expect(overflowResponse.status, JSON.stringify(await overflowResponse.clone().json())).toBe(200)
+
+    const septemberForCollector = await getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-09-01T00:00:00.000Z'),
+      monthEnd: new Date('2026-10-01T00:00:00.000Z'),
+      adminId: collector.admin.id,
+    })
+    expect(septemberForCollector.actualProfitUzs).toBe(2_500_000)
+    expect(septemberForCollector.nasiyaInterestReceivedUzs).toBe(1_250_000)
+    expect(septemberForCollector.expectedProfitUsd).toBe(0)
+
+    const refreshed = await prisma.nasiya.findUniqueOrThrow({
+      where: { id: nasiya.id },
+      include: { schedules: { orderBy: { monthNumber: 'asc' } }, paymentAllocations: true },
+    })
+    expect(refreshed.paymentAllocations).toHaveLength(5)
+    expect(refreshed.schedules.map((schedule) => Number(schedule.contractPaidAmount)))
+      .toEqual([240, 240, 240, 0])
+    expect(refreshed.schedules.slice(0, 3).map((schedule) => ({
+      principal: Number(schedule.contractPrincipalPaidAmount),
+      margin: Number(schedule.contractMarginPaidAmount),
+      interest: Number(schedule.contractInterestPaidAmount),
+    }))).toEqual([
+      { principal: 160, margin: 40, interest: 40 },
+      { principal: 160, margin: 40, interest: 40 },
+      { principal: 160, margin: 40, interest: 40 },
+    ])
+
+    const novemberAccounting = () => getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-11-01T00:00:00.000Z'),
+      monthEnd: new Date('2026-12-01T00:00:00.000Z'),
+      adminId: null,
+    })
+    expect(await novemberAccounting()).toMatchObject({ expectedProfitUsd: 80, expectedInterestUsd: 40 })
+
+    useShopAdmin(actor)
+    expect((await nasiyaResolutionRequest({
+      nasiyaId: nasiya.id,
+      action: 'ARCHIVE',
+      reason: 'Temporarily archived after documented review',
+      key: 'monthly-profit-archive',
+    })).status).toBe(200)
+    expect(await novemberAccounting()).toMatchObject({ expectedProfitUsd: 0, expectedInterestUsd: 0 })
+
+    expect((await nasiyaResolutionRequest({
+      nasiyaId: nasiya.id,
+      action: 'REOPEN',
+      reason: 'Collection resumed after customer contact',
+      key: 'monthly-profit-reopen',
+    })).status).toBe(200)
+    expect(await novemberAccounting()).toMatchObject({ expectedProfitUsd: 80, expectedInterestUsd: 40 })
+
+    expect((await nasiyaResolutionRequest({
+      nasiyaId: nasiya.id,
+      action: 'WRITE_OFF',
+      reason: 'Uncollectable after final documented review',
+      key: 'monthly-profit-write-off',
+    })).status).toBe(200)
+    expect(await novemberAccounting()).toMatchObject({ expectedProfitUsd: 0, expectedInterestUsd: 0 })
+  })
+
+  it('reverses only Nasiya margin and interest that were actually recognized before a return', async () => {
+    const actor = await seedActor('monthly_return')
+    useShopAdmin(actor)
+    await prisma.currencyRate.create({
+      data: {
+        baseCurrency: 'USD',
+        quoteCurrency: 'UZS',
+        rate: 12_500,
+        source: 'CBU',
+        fetchedAt: new Date(),
+      },
+    })
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Monthly return example',
+        purchasePrice: 10_000_000,
+        purchaseCurrency: 'USD',
+        purchaseInputAmount: 800,
+        purchaseExchangeRateAtCreation: 12_500,
+        purchaseAmountUzsSnapshot: 10_000_000,
+        imei: 'MONTHLY-RETURN-EXAMPLE',
+        addedBy: actor.admin.id,
+      },
+    })
+    const createdResponse = await createMonthlyAccountingExampleRequest(
+      device.id,
+      '+998907654321',
+      actor.shop.id,
+    )
+    expect(createdResponse.status, JSON.stringify(await createdResponse.clone().json())).toBe(201)
+    const nasiya = await prisma.nasiya.findFirstOrThrow({
+      where: { deviceId: device.id },
+      include: { schedules: { orderBy: { monthNumber: 'asc' } } },
+    })
+    const paymentResponse = await nasiyaPaymentRequest({
+      nasiyaId: nasiya.id,
+      scheduleId: nasiya.schedules[0].id,
+      amount: 120,
+      inputCurrency: 'USD',
+      date: '2026-07-15T08:00:00.000Z',
+      key: 'monthly-return-partial',
+    })
+    expect(paymentResponse.status, JSON.stringify(await paymentResponse.clone().json())).toBe(200)
+
+    const returnResponse = await returnDeviceRequest({
+      deviceId: device.id,
+      key: 'monthly-return-recognized-only',
+      refundAmount: 0,
+    })
+    expect(returnResponse.status, JSON.stringify(await returnResponse.clone().json())).toBe(200)
+
+    const returned = await prisma.deviceReturn.findFirstOrThrow({ where: { nasiyaId: nasiya.id } })
+    const reversal = await prisma.returnProfitReversal.findUniqueOrThrow({
+      where: { deviceReturnId: returned.id },
+    })
+    expect(Number(reversal.recognizedMarginAmountUzs)).toBe(750_000)
+    expect(Number(reversal.recognizedInterestAmountUzs)).toBe(250_000)
+    expect(Number(returned.interestReversalAmountUzs)).toBe(250_000)
+    expect(Number(returned.interestReversalAmountUzs)).toBeLessThan(2_000_000)
+
+    const future = await getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-08-01T00:00:00.000Z'),
+      monthEnd: new Date('2026-09-01T00:00:00.000Z'),
+      adminId: null,
+    })
+    expect(future.expectedProfitUsd).toBe(0)
+    expect(future.expectedInterestUsd).toBe(0)
   })
 
   it('rejects both cash and nasiya sales while a legacy device is still RETURNED', async () => {

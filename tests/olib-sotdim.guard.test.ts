@@ -167,16 +167,17 @@ describe('money/currency: MoneyInput used, server converts and stores UZS', () =
 
 describe('reports: no double-counted inventory cost', () => {
   const stats = read('src/lib/server/shop-stats.ts')
-  const queries = read('src/lib/server/shop-stats-queries.ts')
+  const route = read('src/app/api/olib-sotdim/route.ts')
 
   it('inventoryPurchaseCost only sums IN_STOCK devices — SOLD_CASH olib-sotdim devices never enter it', () => {
     expect(stats).toContain("status: 'IN_STOCK'")
   })
 
-  it('the set-based sale accrual joins Sale to Device purchase cost, so olib-sotdim sales count exactly once', () => {
-    expect(stats).toContain('getShopAccrualAggregate({ shopId, monthStart, monthEnd, adminId })')
-    expect(queries).toContain('JOIN "Device" d ON d."id" = s."deviceId" AND d."shopId" = s."shopId"')
-    expect(queries).toContain('coalesce(sum(d."purchasePrice"), 0)::numeric AS sale_device_cost_uzs')
+  it('freezes the supplier cost and proportional paid margin on the Sale receipt exactly once', () => {
+    expect(route).toContain('costBasisAmount: contractPurchasePrice')
+    expect(route).toContain("accountingReconstructionStatus: 'COMPLETE'")
+    expect(route).toContain('contractMarginAmount: initialComponents!.allocation.margin')
+    expect(route).toContain('marginAmountUzs: reportingComponents.margin')
   })
 })
 

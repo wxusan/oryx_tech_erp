@@ -15,6 +15,10 @@ interface MonthlyReportRow {
   accrual_usd: unknown
   interest_uzs: unknown
   interest_usd: unknown
+  expected_profit_uzs: unknown
+  expected_profit_usd: unknown
+  expected_interest_uzs: unknown
+  expected_interest_usd: unknown
   expected_uzs: unknown
   expected_usd: unknown
   refunds_uzs: unknown
@@ -34,6 +38,8 @@ export interface ShopMonthlyReportPoint {
   cashCollected: { uzs: number; usd: number; complete: boolean }
   accrualRevenue: { uzs: number; usd: number }
   nasiyaInterest: { uzs: number; usd: number }
+  expectedProfit: { uzs: number; usd: number }
+  nasiyaInterestExpected: { uzs: number; usd: number }
   expectedReceivables: { uzs: number; usd: number }
   refunds: { uzs: number; usd: number }
   writeOffs: { uzs: number; usd: number; frozenUzs: number }
@@ -47,7 +53,7 @@ export interface ShopMonthlyReportPoint {
 export interface ShopRangeReport {
   range: Pick<ReportRange, 'preset' | 'startMonth' | 'endMonth' | 'monthKeys'>
   filteredByAdmin: string | null
-  nonAttributableFields: readonly ['expectedReceivables']
+  nonAttributableFields: readonly ['expectedReceivables', 'expectedProfit', 'nasiyaInterestExpected']
   months: ShopMonthlyReportPoint[]
   totals: Omit<ShopMonthlyReportPoint, 'monthKey'>
 }
@@ -90,12 +96,6 @@ export async function getShopRangeReport(input: {
   range: ReportRange
   adminId: string | null
 }): Promise<ShopRangeReport> {
-  const saleActor = input.adminId
-    ? Prisma.sql`AND s."createdBy" = ${input.adminId}`
-    : Prisma.empty
-  const nasiyaActor = input.adminId
-    ? Prisma.sql`AND n."createdBy" = ${input.adminId}`
-    : Prisma.empty
   const salePaymentActor = input.adminId
     ? Prisma.sql`AND p."createdBy" = ${input.adminId}`
     : Prisma.empty
@@ -178,60 +178,40 @@ export async function getShopRangeReport(input: {
         coalesce(sum(incomplete), 0)::integer AS cash_incomplete_count
       FROM payment_facts
       GROUP BY month_key
-    ), sale_accrual AS (
+    ), sale_recognition AS (
       SELECT
-        to_char(s."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
-        s."contractCurrency" AS currency,
-        CASE
-          WHEN s."contractSalePrice" > 0 THEN s."contractSalePrice"
-          WHEN s."contractCurrency" = 'UZS' THEN s."salePrice"
-          WHEN s."contractExchangeRateAtCreation" > 0 THEN s."salePrice" / s."contractExchangeRateAtCreation"
-          ELSE 0
-        END::numeric AS revenue_native,
+        to_char(p."paidAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
+        'UZS'::"CurrencyCode" AS currency,
+        p."amount"::numeric AS revenue_native,
         0::numeric AS interest_native,
         0::numeric AS interest_profit_uzs,
-        (s."salePrice" - d."purchasePrice")::numeric AS gross_profit_uzs
-      FROM "Sale" s
-      JOIN "Device" d ON d."id" = s."deviceId" AND d."shopId" = s."shopId"
-      WHERE s."shopId" = ${input.shopId}
-        AND s."deletedAt" IS NULL
-        AND s."createdAt" >= ${input.range.start}
-        AND s."createdAt" < ${input.range.end}
-        ${saleActor}
-    ), nasiya_accrual AS (
+        p."marginAmountUzs"::numeric AS gross_profit_uzs
+      FROM "SalePayment" p
+      WHERE p."shopId" = ${input.shopId}
+        AND p."deletedAt" IS NULL
+        AND p."paidAt" >= ${input.range.start}
+        AND p."paidAt" < ${input.range.end}
+        ${salePaymentActor}
+    ), nasiya_recognition AS (
       SELECT
-        to_char(n."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
-        n."contractCurrency" AS currency,
-        CASE
-          WHEN n."contractTotalAmount" > 0 THEN n."contractTotalAmount"
-          WHEN n."contractCurrency" = 'UZS' THEN n."totalAmount"
-          WHEN n."contractExchangeRateAtCreation" > 0 THEN n."totalAmount" / n."contractExchangeRateAtCreation"
-          ELSE 0
-        END::numeric AS revenue_native,
-        CASE
-          WHEN n."contractInterestAmount" > 0 THEN n."contractInterestAmount"
-          WHEN n."contractCurrency" = 'UZS' THEN n."interestAmount"
-          WHEN n."contractExchangeRateAtCreation" > 0 THEN n."interestAmount" / n."contractExchangeRateAtCreation"
-          ELSE 0
-        END::numeric AS interest_native,
-        n."interestAmount"::numeric AS interest_profit_uzs,
-        (n."totalAmount" - d."purchasePrice")::numeric AS gross_profit_uzs
-      FROM "Nasiya" n
-      JOIN "Device" d ON d."id" = n."deviceId" AND d."shopId" = n."shopId"
-      WHERE n."shopId" = ${input.shopId}
-        AND n."deletedAt" IS NULL
-        AND n."isImported" = false
-        -- An archived contract contributes only its immutable payment rows to
-        -- cash-collected. Its unpaid contractual amount is not revenue.
-        AND n."resolutionState" <> 'ARCHIVED'
-        AND n."createdAt" >= ${input.range.start}
-        AND n."createdAt" < ${input.range.end}
-        ${nasiyaActor}
-    ), accrual_facts AS (
-      SELECT * FROM sale_accrual
+        to_char(p."paidAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
+        a."contractCurrency" AS currency,
+        a."contractAmount"::numeric AS revenue_native,
+        a."contractInterestAmount"::numeric AS interest_native,
+        a."interestAmountUzs"::numeric AS interest_profit_uzs,
+        (a."marginAmountUzs" + a."interestAmountUzs")::numeric AS gross_profit_uzs
+      FROM "NasiyaPaymentAllocation" a
+      JOIN "NasiyaPayment" p ON p.id = a."nasiyaPaymentId" AND p."shopId" = a."shopId"
+      WHERE a."shopId" = ${input.shopId}
+        AND p."deletedAt" IS NULL
+        AND p."paidAt" >= ${input.range.start}
+        AND p."paidAt" < ${input.range.end}
+        ${nasiyaPaymentActor}
+    ), recognition_facts AS (
+      SELECT * FROM sale_recognition
       UNION ALL
-      SELECT * FROM nasiya_accrual
-    ), accrual_months AS (
+      SELECT * FROM nasiya_recognition
+    ), recognition_months AS (
       SELECT
         month_key,
         coalesce(sum(revenue_native) FILTER (WHERE currency = 'UZS'), 0)::numeric AS accrual_uzs,
@@ -240,7 +220,7 @@ export async function getShopRangeReport(input: {
         coalesce(sum(interest_native) FILTER (WHERE currency = 'USD'), 0)::numeric AS interest_usd,
         coalesce(sum(interest_profit_uzs), 0)::numeric AS interest_profit_uzs,
         coalesce(sum(gross_profit_uzs), 0)::numeric AS gross_profit_uzs
-      FROM accrual_facts
+      FROM recognition_facts
       GROUP BY month_key
     ), obligation_facts AS (
       SELECT
@@ -283,6 +263,49 @@ export async function getShopRangeReport(input: {
         coalesce(sum(outstanding) FILTER (WHERE currency = 'USD'), 0)::numeric AS expected_usd
       FROM obligation_facts
       GROUP BY month_key
+    ), expected_profit_facts AS (
+      SELECT
+        to_char(coalesce(s."delayedUntil", s."dueDate") AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
+        n."contractCurrency" AS currency,
+        (
+          s."contractMarginAmount" - s."contractMarginPaidAmount"
+          +s."contractInterestAmount" - s."contractInterestPaidAmount"
+        )::numeric AS expected_profit,
+        (s."contractInterestAmount" - s."contractInterestPaidAmount")::numeric AS expected_interest
+      FROM "NasiyaSchedule" s
+      JOIN "Nasiya" n ON n.id = s."nasiyaId" AND n."shopId" = s."shopId"
+      WHERE s."shopId" = ${input.shopId}
+        AND coalesce(s."delayedUntil", s."dueDate") >= ${input.range.start}
+        AND coalesce(s."delayedUntil", s."dueDate") < ${input.range.end}
+        AND s.status IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+        AND n."deletedAt" IS NULL
+        AND n."returnedAt" IS NULL
+        AND n.status <> 'CANCELLED'
+        AND n."resolutionState" = 'ACTIVE'
+        AND n."accountingReconstructionStatus" IN ('COMPLETE', 'PARTIAL')
+      UNION ALL
+      SELECT
+        to_char(s."dueDate" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM'),
+        s."contractCurrency",
+        (s."contractMarginAmount" - s."contractMarginPaidAmount")::numeric,
+        0::numeric
+      FROM "Sale" s
+      WHERE s."shopId" = ${input.shopId}
+        AND s."deletedAt" IS NULL
+        AND s."returnedAt" IS NULL
+        AND s."paidFully" = false
+        AND s."dueDate" >= ${input.range.start}
+        AND s."dueDate" < ${input.range.end}
+        AND s."accountingReconstructionStatus" IN ('COMPLETE', 'PARTIAL')
+    ), expected_profit_months AS (
+      SELECT
+        month_key,
+        coalesce(sum(expected_profit) FILTER (WHERE currency = 'UZS'), 0)::numeric AS expected_profit_uzs,
+        coalesce(sum(expected_profit) FILTER (WHERE currency = 'USD'), 0)::numeric AS expected_profit_usd,
+        coalesce(sum(expected_interest) FILTER (WHERE currency = 'UZS'), 0)::numeric AS expected_interest_uzs,
+        coalesce(sum(expected_interest) FILTER (WHERE currency = 'USD'), 0)::numeric AS expected_interest_usd
+      FROM expected_profit_facts
+      GROUP BY month_key
     ), return_months AS (
       SELECT
         to_char(r."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
@@ -295,10 +318,13 @@ export async function getShopRangeReport(input: {
           WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
           ELSE 0
         END), 0)::numeric AS refunds_usd,
-        coalesce(sum(-r."revenueReversalAmountUzs" + r."inventoryCostRecoveryUzs" + r."retainedValueAmountUzs"), 0)::numeric AS profit_adjustment_uzs,
-        coalesce(sum(r."interestReversalAmountUzs"), 0)::numeric AS interest_reversal_uzs,
+        coalesce(sum(CASE WHEN pr.id IS NOT NULL THEN
+          -pr."recognizedMarginAmountUzs" - pr."recognizedInterestAmountUzs" + r."retainedValueAmountUzs"
+          ELSE 0 END), 0)::numeric AS profit_adjustment_uzs,
+        coalesce(sum(pr."recognizedInterestAmountUzs"), 0)::numeric AS interest_reversal_uzs,
         count(*)::integer AS return_count
       FROM "DeviceReturn" r
+      LEFT JOIN "ReturnProfitReversal" pr ON pr."deviceReturnId" = r.id AND pr."shopId" = r."shopId"
       WHERE r."shopId" = ${input.shopId}
         AND r."createdAt" >= ${input.range.start}
         AND r."createdAt" < ${input.range.end}
@@ -336,10 +362,14 @@ export async function getShopRangeReport(input: {
       coalesce(p.cash_uzs, 0)::numeric AS cash_uzs,
       coalesce(p.cash_usd, 0)::numeric AS cash_usd,
       coalesce(p.cash_incomplete_count, 0)::integer AS cash_incomplete_count,
-      coalesce(a.accrual_uzs, 0)::numeric AS accrual_uzs,
-      coalesce(a.accrual_usd, 0)::numeric AS accrual_usd,
+      coalesce(p.cash_uzs, 0)::numeric AS accrual_uzs,
+      coalesce(p.cash_usd, 0)::numeric AS accrual_usd,
       coalesce(a.interest_uzs, 0)::numeric AS interest_uzs,
       coalesce(a.interest_usd, 0)::numeric AS interest_usd,
+      coalesce(ep.expected_profit_uzs, 0)::numeric AS expected_profit_uzs,
+      coalesce(ep.expected_profit_usd, 0)::numeric AS expected_profit_usd,
+      coalesce(ep.expected_interest_uzs, 0)::numeric AS expected_interest_uzs,
+      coalesce(ep.expected_interest_usd, 0)::numeric AS expected_interest_usd,
       coalesce(o.expected_uzs, 0)::numeric AS expected_uzs,
       coalesce(o.expected_usd, 0)::numeric AS expected_usd,
       coalesce(r.refunds_uzs, 0)::numeric AS refunds_uzs,
@@ -354,8 +384,9 @@ export async function getShopRangeReport(input: {
       coalesce(w.reopen_count, 0)::integer AS reopen_count
     FROM months m
     LEFT JOIN payment_months p ON p.month_key = m.month_key
-    LEFT JOIN accrual_months a ON a.month_key = m.month_key
+    LEFT JOIN recognition_months a ON a.month_key = m.month_key
     LEFT JOIN obligation_months o ON o.month_key = m.month_key
+    LEFT JOIN expected_profit_months ep ON ep.month_key = m.month_key
     LEFT JOIN return_months r ON r.month_key = m.month_key
     LEFT JOIN resolution_months w ON w.month_key = m.month_key
     ORDER BY m.ordinal ASC
@@ -370,6 +401,8 @@ export async function getShopRangeReport(input: {
     },
     accrualRevenue: { uzs: number(row.accrual_uzs), usd: number(row.accrual_usd) },
     nasiyaInterest: { uzs: number(row.interest_uzs), usd: number(row.interest_usd) },
+    expectedProfit: { uzs: number(row.expected_profit_uzs), usd: number(row.expected_profit_usd) },
+    nasiyaInterestExpected: { uzs: number(row.expected_interest_uzs), usd: number(row.expected_interest_usd) },
     expectedReceivables: { uzs: number(row.expected_uzs), usd: number(row.expected_usd) },
     refunds: { uzs: number(row.refunds_uzs), usd: number(row.refunds_usd) },
     writeOffs: {
@@ -398,6 +431,14 @@ export async function getShopRangeReport(input: {
       uzs: sum.nasiyaInterest.uzs + month.nasiyaInterest.uzs,
       usd: sum.nasiyaInterest.usd + month.nasiyaInterest.usd,
     },
+    expectedProfit: {
+      uzs: sum.expectedProfit.uzs + month.expectedProfit.uzs,
+      usd: sum.expectedProfit.usd + month.expectedProfit.usd,
+    },
+    nasiyaInterestExpected: {
+      uzs: sum.nasiyaInterestExpected.uzs + month.nasiyaInterestExpected.uzs,
+      usd: sum.nasiyaInterestExpected.usd + month.nasiyaInterestExpected.usd,
+    },
     expectedReceivables: {
       uzs: sum.expectedReceivables.uzs + month.expectedReceivables.uzs,
       usd: sum.expectedReceivables.usd + month.expectedReceivables.usd,
@@ -420,6 +461,8 @@ export async function getShopRangeReport(input: {
     cashCollected: { uzs: 0, usd: 0, complete: true },
     accrualRevenue: { uzs: 0, usd: 0 },
     nasiyaInterest: { uzs: 0, usd: 0 },
+    expectedProfit: { uzs: 0, usd: 0 },
+    nasiyaInterestExpected: { uzs: 0, usd: 0 },
     expectedReceivables: { uzs: 0, usd: 0 },
     refunds: { uzs: 0, usd: 0 },
     writeOffs: { uzs: 0, usd: 0, frozenUzs: 0 },
@@ -438,7 +481,7 @@ export async function getShopRangeReport(input: {
       monthKeys: input.range.monthKeys,
     },
     filteredByAdmin: input.adminId,
-    nonAttributableFields: ['expectedReceivables'],
+    nonAttributableFields: ['expectedReceivables', 'expectedProfit', 'nasiyaInterestExpected'],
     months,
     totals,
   }

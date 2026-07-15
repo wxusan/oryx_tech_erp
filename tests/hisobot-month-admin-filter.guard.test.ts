@@ -28,13 +28,13 @@ describe('getShopStats: month/admin filter is additive, existing callers unaffec
     expect(statsRoute).not.toContain('monthKey:')
   })
 
-  it('adminId filters only genuinely admin-attributable flows, including set-based Sale/Nasiya accrual SQL', () => {
+  it('adminId filters only genuinely admin-attributable flows, including payment-basis profit by collector', () => {
     const queries = read('src/lib/server/shop-stats-queries.ts')
     const occurrences = source.split('...attributedTo').length - 1
     expect(occurrences).toBe(4)
-    expect(source).toContain('getShopAccrualAggregate({ shopId, monthStart, monthEnd, adminId })')
-    expect(queries).toContain('Prisma.sql`AND s."createdBy" = ${input.adminId}`')
-    expect(queries).toContain('Prisma.sql`AND n."createdBy" = ${input.adminId}`')
+    expect(source).toContain('getShopMonthlyAccountingAggregate({ shopId, monthStart, monthEnd, adminId })')
+    expect(queries).toContain('Prisma.sql`AND p."createdBy" = ${input.adminId}`')
+    expect(queries).toContain('JOIN "NasiyaPayment" p ON p.id = a."nasiyaPaymentId"')
     expect(source).toContain("...(adminId ? { actorId: adminId } : {})")
   })
 
@@ -44,7 +44,7 @@ describe('getShopStats: month/admin filter is additive, existing callers unaffec
   })
 
   it('the cache key includes month + admin so filtered views never collide with the default cache entry', () => {
-    expect(source).toContain("['shop-stats:v2', shopId, role, monthKey ?? 'current', adminId ?? 'all']")
+    expect(source).toContain("['shop-stats:v3-payment-basis', shopId, role, monthKey ?? 'current', adminId ?? 'all']")
   })
 })
 
@@ -77,7 +77,8 @@ describe('hisobot page: month selector + admin filter UI', () => {
 
   it('shows an explicit non-attribution note when an admin filter is active', () => {
     expect(client).toContain('{adminId && (')
-    expect(client).toContain("bitta adminga bog'lab bo'lmaydi")
+    expect(client).toContain("to'lovni yozgan xodimga")
+    expect(client).toContain("do'kon bo'yicha ko'rsatiladi")
   })
 
   it('puts the complete range/admin contract in both the URL and React Query key', () => {
@@ -93,7 +94,7 @@ describe('hisobot page: month selector + admin filter UI', () => {
     expect(rangeQuery).toContain('WITH ORDINALITY')
     expect(rangeQuery).toContain("FILTER (WHERE currency = 'UZS')")
     expect(rangeQuery).toContain("FILTER (WHERE currency = 'USD')")
-    expect(rangeQuery).toContain('n."isImported" = false')
+    expect(rangeQuery).toContain('n."accountingReconstructionStatus" IN (\'COMPLETE\', \'PARTIAL\')')
     expect(rangeQuery).toContain('n."resolutionState" = \'ACTIVE\'')
   })
 

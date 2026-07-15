@@ -148,7 +148,7 @@ describe('item 14 — Telegram message design polish', () => {
 
   it('deviceSoldMessage shows Foyda (profit) when the sell route can compute it', () => {
     const route = read('src/app/api/devices/[id]/sell/route.ts')
-    expect(route).toContain('computeSaleContractMargin(contractSalePrice, contractCurrency, salePriceInput.exchangeRateUsed,')
+    expect(route).toContain('computeSaleContractMargin( contractSalePrice, contractCurrency, salePriceInput.exchangeRateUsed,')
     expect(templates).toContain("typeof data.profit === 'number' ? `📊 Foyda: ${money(data.profit)}` : null")
   })
 })

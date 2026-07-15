@@ -21,6 +21,173 @@ export interface ShopAccrualAggregate {
   nasiyaDeviceCostUzs: number
 }
 
+interface MonthlyAccountingRow {
+  sale_margin_received_uzs: unknown
+  nasiya_margin_received_uzs: unknown
+  nasiya_interest_received_uzs: unknown
+  return_profit_adjustment_uzs: unknown
+  actual_profit_uzs: unknown
+  expected_profit_uzs: unknown
+  expected_profit_usd: unknown
+  expected_interest_uzs: unknown
+  expected_interest_usd: unknown
+  reconstruction_gap_count: number
+}
+
+export interface ShopMonthlyAccountingAggregate {
+  saleMarginReceivedUzs: number
+  nasiyaMarginReceivedUzs: number
+  nasiyaInterestReceivedUzs: number
+  returnProfitAdjustmentUzs: number
+  actualProfitUzs: number
+  expectedProfitUzs: number
+  expectedProfitUsd: number
+  expectedInterestUzs: number
+  expectedInterestUsd: number
+  reconstructionGapCount: number
+}
+
+/**
+ * Payment-basis monthly accounting facts. Paid profit is frozen in UZS on the
+ * immutable receipt/allocation row. Expected profit remains partitioned in
+ * each contract's native currency and includes only the unpaid component due
+ * in the selected month. Future schedule rows never enter this aggregate.
+ */
+export async function getShopMonthlyAccountingAggregate(input: {
+  shopId: string
+  monthStart: Date
+  monthEnd: Date
+  adminId: string | null
+}): Promise<ShopMonthlyAccountingAggregate> {
+  const salePaymentActor = input.adminId
+    ? Prisma.sql`AND p."createdBy" = ${input.adminId}`
+    : Prisma.empty
+  const nasiyaPaymentActor = input.adminId
+    ? Prisma.sql`AND p."createdBy" = ${input.adminId}`
+    : Prisma.empty
+  const returnActor = input.adminId
+    ? Prisma.sql`AND r."createdBy" = ${input.adminId}`
+    : Prisma.empty
+
+  const [row] = await prisma.$queryRaw<MonthlyAccountingRow[]>(Prisma.sql`
+    WITH sale_paid AS (
+      SELECT coalesce(sum(p."marginAmountUzs"), 0)::numeric AS margin_uzs
+      FROM "SalePayment" p
+      WHERE p."shopId" = ${input.shopId}
+        AND p."deletedAt" IS NULL
+        AND p."paidAt" >= ${input.monthStart}
+        AND p."paidAt" < ${input.monthEnd}
+        ${salePaymentActor}
+    ), nasiya_paid AS (
+      SELECT
+        coalesce(sum(a."marginAmountUzs"), 0)::numeric AS margin_uzs,
+        coalesce(sum(a."interestAmountUzs"), 0)::numeric AS interest_uzs
+      FROM "NasiyaPaymentAllocation" a
+      JOIN "NasiyaPayment" p ON p.id = a."nasiyaPaymentId" AND p."shopId" = a."shopId"
+      WHERE a."shopId" = ${input.shopId}
+        AND p."deletedAt" IS NULL
+        AND p."paidAt" >= ${input.monthStart}
+        AND p."paidAt" < ${input.monthEnd}
+        ${nasiyaPaymentActor}
+    ), return_adjustment AS (
+      SELECT
+        coalesce(sum(
+          -pr."recognizedMarginAmountUzs"
+          -pr."recognizedInterestAmountUzs"
+          +r."retainedValueAmountUzs"
+        ), 0)::numeric AS profit_uzs,
+        coalesce(sum(pr."recognizedInterestAmountUzs"), 0)::numeric AS interest_reversal_uzs
+      FROM "ReturnProfitReversal" pr
+      JOIN "DeviceReturn" r ON r.id = pr."deviceReturnId" AND r."shopId" = pr."shopId"
+      WHERE pr."shopId" = ${input.shopId}
+        AND r."createdAt" >= ${input.monthStart}
+        AND r."createdAt" < ${input.monthEnd}
+        ${returnActor}
+    ), expected_schedule AS (
+      SELECT
+        n."contractCurrency" AS currency,
+        sum(
+          (s."contractMarginAmount" - s."contractMarginPaidAmount")
+          +(s."contractInterestAmount" - s."contractInterestPaidAmount")
+        )::numeric AS expected_profit,
+        sum(s."contractInterestAmount" - s."contractInterestPaidAmount")::numeric AS expected_interest
+      FROM "NasiyaSchedule" s
+      JOIN "Nasiya" n ON n.id = s."nasiyaId" AND n."shopId" = s."shopId"
+      WHERE s."shopId" = ${input.shopId}
+        AND coalesce(s."delayedUntil", s."dueDate") >= ${input.monthStart}
+        AND coalesce(s."delayedUntil", s."dueDate") < ${input.monthEnd}
+        AND s.status IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+        AND n."deletedAt" IS NULL
+        AND n."returnedAt" IS NULL
+        AND n.status <> 'CANCELLED'
+        AND n."resolutionState" = 'ACTIVE'
+        AND n."accountingReconstructionStatus" IN ('COMPLETE', 'PARTIAL')
+      GROUP BY n."contractCurrency"
+    ), expected_sale AS (
+      SELECT
+        s."contractCurrency" AS currency,
+        sum(s."contractMarginAmount" - s."contractMarginPaidAmount")::numeric AS expected_profit,
+        0::numeric AS expected_interest
+      FROM "Sale" s
+      WHERE s."shopId" = ${input.shopId}
+        AND s."deletedAt" IS NULL
+        AND s."returnedAt" IS NULL
+        AND s."paidFully" = false
+        AND s."dueDate" >= ${input.monthStart}
+        AND s."dueDate" < ${input.monthEnd}
+        AND s."accountingReconstructionStatus" IN ('COMPLETE', 'PARTIAL')
+      GROUP BY s."contractCurrency"
+    ), expected AS (
+      SELECT currency, sum(expected_profit)::numeric AS expected_profit, sum(expected_interest)::numeric AS expected_interest
+      FROM (
+        SELECT * FROM expected_schedule
+        UNION ALL
+        SELECT * FROM expected_sale
+      ) facts
+      GROUP BY currency
+    ), gaps AS (
+      SELECT (
+        (SELECT count(*) FROM "Sale" s WHERE s."shopId" = ${input.shopId} AND s."accountingReconstructionStatus" <> 'COMPLETE')
+        +
+        (SELECT count(*) FROM "Nasiya" n WHERE n."shopId" = ${input.shopId} AND n."accountingReconstructionStatus" <> 'COMPLETE')
+      )::integer AS gap_count
+    )
+    SELECT
+      sale_paid.margin_uzs AS sale_margin_received_uzs,
+      nasiya_paid.margin_uzs AS nasiya_margin_received_uzs,
+      (nasiya_paid.interest_uzs - return_adjustment.interest_reversal_uzs)::numeric AS nasiya_interest_received_uzs,
+      return_adjustment.profit_uzs AS return_profit_adjustment_uzs,
+      (
+        sale_paid.margin_uzs
+        +nasiya_paid.margin_uzs
+        +nasiya_paid.interest_uzs
+        +return_adjustment.profit_uzs
+      )::numeric AS actual_profit_uzs,
+      coalesce(sum(expected.expected_profit) FILTER (WHERE expected.currency = 'UZS'), 0)::numeric AS expected_profit_uzs,
+      coalesce(sum(expected.expected_profit) FILTER (WHERE expected.currency = 'USD'), 0)::numeric AS expected_profit_usd,
+      coalesce(sum(expected.expected_interest) FILTER (WHERE expected.currency = 'UZS'), 0)::numeric AS expected_interest_uzs,
+      coalesce(sum(expected.expected_interest) FILTER (WHERE expected.currency = 'USD'), 0)::numeric AS expected_interest_usd,
+      gaps.gap_count AS reconstruction_gap_count
+    FROM sale_paid CROSS JOIN nasiya_paid CROSS JOIN return_adjustment CROSS JOIN gaps
+    LEFT JOIN expected ON true
+    GROUP BY sale_paid.margin_uzs, nasiya_paid.margin_uzs, nasiya_paid.interest_uzs,
+      return_adjustment.profit_uzs, return_adjustment.interest_reversal_uzs, gaps.gap_count
+  `)
+
+  return {
+    saleMarginReceivedUzs: Number(row?.sale_margin_received_uzs ?? 0),
+    nasiyaMarginReceivedUzs: Number(row?.nasiya_margin_received_uzs ?? 0),
+    nasiyaInterestReceivedUzs: Number(row?.nasiya_interest_received_uzs ?? 0),
+    returnProfitAdjustmentUzs: Number(row?.return_profit_adjustment_uzs ?? 0),
+    actualProfitUzs: Number(row?.actual_profit_uzs ?? 0),
+    expectedProfitUzs: Number(row?.expected_profit_uzs ?? 0),
+    expectedProfitUsd: Number(row?.expected_profit_usd ?? 0),
+    expectedInterestUzs: Number(row?.expected_interest_uzs ?? 0),
+    expectedInterestUsd: Number(row?.expected_interest_usd ?? 0),
+    reconstructionGapCount: Number(row?.reconstruction_gap_count ?? 0),
+  }
+}
+
 /** Set-based current-period Sale/Nasiya accrual totals. */
 export async function getShopAccrualAggregate(input: {
   shopId: string

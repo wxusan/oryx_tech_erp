@@ -18,8 +18,10 @@ version of this document. It does not authorize rewriting historic records.
 3. `refundAmount` is the value actually returned to the customer. Both its
    submitted currency/value and its UZS accounting snapshot are frozen.
 4. The return freezes contract-native receipts, refund, retained value, and
-   cancelled debt. It also freezes UZS revenue reversal, interest reversal,
-   inventory-cost recovery, and retained-value snapshots for reporting.
+   cancelled debt. It also freezes UZS revenue reversal, inventory-cost
+   recovery, and retained-value snapshots. `ReturnProfitReversal` separately
+   freezes only the margin and interest actually recognized from payment
+   allocations before the return; future agreement interest is not reversed.
 5. A non-zero refund cannot exceed receipts and must be allocated to immutable
    original Sale/Nasiya payment rows using the same payment method. Split
    payments are allocated by their stored breakdown. There is no unrestricted
@@ -67,8 +69,10 @@ refund allocations must equal the recorded contract refund and UZS refund.
 - A completed return has no edit/delete endpoint. If an operator later needs to
   correct one, an approved compensating-adjustment workflow must be designed;
   the immutable row must not be changed in place.
-- The current ledger stores an aggregate Nasiya interest-reversal snapshot. It
-  does not allocate each refund between principal and interest components.
+- The profit-reversal ledger is aggregate per return. Receipt-level principal,
+  margin, and interest evidence remains in `NasiyaPaymentAllocation`; a refund
+  is still allocated to original payment methods, not reclassified as a new
+  principal/interest payment.
 - Production behavior is not claimed until the exact commit passes CI, preview
   browser verification, the guarded Vercel migration sequence, and post-release
   smoke checks.

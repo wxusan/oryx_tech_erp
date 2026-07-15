@@ -47,7 +47,7 @@ describe('shop stats use bounded set-based native-currency aggregates', () => {
 
   it('passes set-based and scalar aggregates through to the pure formula layer', () => {
     expect(source).toContain('const computed = computeShopStatsFromRows({')
-    expect(source).toContain('accrualAggregate,')
+    expect(source).toContain('monthlyAccountingAggregate,')
     expect(source).toContain('obligationAggregate,')
     expect(source).toContain('saleReceivedSum: saleReceivedAgg._sum.amount')
     expect(source).toContain('nasiyaReceivedSum: nasiyaReceivedAgg._sum.amount')
@@ -68,8 +68,10 @@ describe('shop-stats-formulas.ts consumes native partitions without mixing curre
 
   it('converts the aggregate USD partition once and exposes completeness/native partitions', () => {
     expect(source).toContain("convertContractAmountToUzs(partition.usd, 'USD', usdUzsRate)")
-    expect(source).toContain('expectedThisMonthUzs: expectedPartition.uzs')
-    expect(source).toContain('expectedThisMonthUsd: expectedPartition.usd')
+    expect(source).toContain('expectedThisMonthUzs: expectedProfitPartition.uzs')
+    expect(source).toContain('expectedThisMonthUsd: expectedProfitPartition.usd')
+    expect(source).toContain('expectedReceivablesThisMonthUzs: expectedPartition.uzs')
+    expect(source).toContain('expectedReceivablesThisMonthUsd: expectedPartition.usd')
     expect(source).toContain('overdueMoneyUzs: overduePartition.uzs')
     expect(source).toContain('overdueMoneyUsd: overduePartition.usd')
   })
@@ -85,9 +87,10 @@ describe('shop-stats-formulas.ts consumes native partitions without mixing curre
     expect(block).toContain('paidAmount: toUzs(payment.contractPaidAmount)')
   })
 
-  it('creation-time accruals are also set-based in production while preserving UZS ledger semantics', () => {
-    expect(source).toContain('Number(accrualAggregate.saleRevenueUzs) + Number(accrualAggregate.nasiyaRevenueUzs)')
-    expect(queries).toContain('coalesce(sum(s."salePrice"), 0)::numeric AS sale_revenue_uzs')
-    expect(queries).toContain('coalesce(sum(n."totalAmount"), 0)::numeric AS nasiya_revenue_uzs')
+  it('actual profit is set-based on frozen payment/allocation UZS components', () => {
+    expect(source).toContain('Number(monthlyAccountingAggregate.actualProfitUzs)')
+    expect(queries).toContain('sum(p."marginAmountUzs")')
+    expect(queries).toContain('sum(a."marginAmountUzs")')
+    expect(queries).toContain('sum(a."interestAmountUzs")')
   })
 })

@@ -33,6 +33,11 @@ import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
 import { deviceConditionLabel, formatDeviceStorage, normalizeImei } from '@/lib/device-specs'
 import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
+import {
+  allocateCumulativePaymentComponents,
+  buildSaleComponentPlan,
+  splitUzsReportingAmount,
+} from '@/lib/payment-profit-allocation'
 
 // ---------------------------------------------------------------------------
 // GET /api/olib-sotdim
@@ -248,6 +253,19 @@ export async function POST(req: NextRequest) {
     const contractPaid = d.paidFully ? contractSalePrice : contractAmountPaidInput ?? 0
     const contractRemaining = contractSalePrice - contractPaid
     const deviceStatus = contractRemaining > 0 ? 'SOLD_DEBT' : 'SOLD_CASH'
+    const componentPlan = buildSaleComponentPlan({
+      currency: contractCurrency,
+      salePrice: contractSalePrice,
+      costBasisAmount: contractPurchasePrice,
+    })
+    const initialComponents = contractPaid > 0
+      ? allocateCumulativePaymentComponents({
+          currency: contractCurrency,
+          totals: componentPlan,
+          paid: { principal: 0, margin: 0, interest: 0 },
+          paymentAmount: contractPaid,
+        })
+      : null
 
     const imei = normalizeImei(d.imei)!
     const secondaryImei = d.secondaryImei ? normalizeImei(d.secondaryImei) : null
@@ -325,10 +343,21 @@ export async function POST(req: NextRequest) {
           contractSalePrice,
           contractAmountPaid: contractPaid,
           contractRemainingAmount: contractRemaining,
+          contractCostBasisAmount: componentPlan.principal,
+          contractMarginAmount: componentPlan.margin,
+          contractPrincipalPaidAmount: initialComponents?.paidAfter.principal ?? 0,
+          contractMarginPaidAmount: initialComponents?.paidAfter.margin ?? 0,
+          accountingReconstructionStatus: 'COMPLETE',
+          accountingReconstructedAt: new Date(),
         },
       })
 
       if (paid > 0) {
+        const reportingComponents = splitUzsReportingAmount({
+          amountUzs: paid,
+          contractAmount: contractPaid,
+          contractComponents: initialComponents!.allocation,
+        })
         await tx.salePayment.create({
           data: {
             saleId: sale.id,
@@ -343,6 +372,10 @@ export async function POST(req: NextRequest) {
             paymentInputCurrency: saleInput.inputCurrency,
             paymentExchangeRate: saleInput.exchangeRateUsed,
             appliedAmountInContractCurrency: contractPaid,
+            contractPrincipalAmount: initialComponents!.allocation.principal,
+            contractMarginAmount: initialComponents!.allocation.margin,
+            principalAmountUzs: reportingComponents.principal,
+            marginAmountUzs: reportingComponents.margin,
           },
         })
       }

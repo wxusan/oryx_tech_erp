@@ -1,5 +1,11 @@
 # Dashboard / Hisobot stat formulas — Oryx Tech ERP
 
+> **Superseded for profit recognition on 2026-07-15.** The historical audit
+> below documents the former creation-time accrual behavior. Production code
+> now uses payment-basis actual profit and due-month expected profit as defined
+> in `docs/accounting/monthly-profit-recognition.md`; do not use the old
+> `Sale.createdAt`/`Nasiya.createdAt` profit formula for new work.
+
 Date: 2026-07-08. Ground truth for every dashboard/report card, extracted
 directly from the actual code (`src/lib/shop-stats-formulas.ts` /
 `src/lib/server/shop-stats.ts`), not assumed. Both `/shop/dashboard` and
