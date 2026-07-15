@@ -99,7 +99,7 @@ describe('CustomerCombobox', () => {
     ]))
   })
 
-  it('keeps new-customer creation a separate explicit action', async () => {
+  it('keeps new-customer creation as an immediate action beside the search field', async () => {
     const user = userEvent.setup()
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
       success: true,
@@ -107,9 +107,19 @@ describe('CustomerCombobox', () => {
     }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
     const { onCreateNew } = renderPicker()
 
+    const createNewButton = screen.getByRole('button', { name: 'Yangi mijoz yaratish' })
     await user.type(screen.getByRole('combobox'), 'Yangi mijoz')
-    await user.click(await screen.findByRole('button', { name: 'Yangi mijoz yaratish' }))
+    await user.click(createNewButton)
     expect(onCreateNew).toHaveBeenCalledWith('Yangi mijoz')
+  })
+
+  it('shows a loading state while customer search is pending', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn(() => new Promise<Response>(() => {})))
+    renderPicker()
+
+    await user.type(screen.getByRole('combobox'), 'Ali')
+    expect((await screen.findByRole('status')).textContent).toContain('Mijozlar qidirilmoqda...')
   })
 
   it('renders an unambiguous selected-customer card with a clear action', async () => {

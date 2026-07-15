@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Check, Search, UserPlus, X } from 'lucide-react'
+import { Check, Loader2, Search, UserPlus, X } from 'lucide-react'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -88,7 +88,13 @@ export function CustomerCombobox({
   })
 
   const options = useMemo(() => query.data ?? [], [query.data])
-  const optionCount = options.length + 1
+  const searchText = search.trim()
+  const searchReady = searchText.length >= 2
+  // Show feedback from the first keystroke that can trigger a search, including
+  // the debounce interval, so the picker never appears to have stalled.
+  const searchPending = searchReady && (searchText !== debouncedSearch || query.isFetching)
+  const visibleOptions = searchPending ? [] : options
+  const optionCount = visibleOptions.length
   const activeOptionIndex = activeIndex >= 0 && activeIndex < optionCount ? activeIndex : -1
 
   function choose(customer: CustomerPickerOption) {
@@ -132,56 +138,73 @@ export function CustomerCombobox({
     )
   }
 
-  const expanded = open && search.trim().length >= 2
+  const expanded = open && searchReady
 
   return (
     <div className={cn('relative', className)}>
-      <div className="relative">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" />
-        <Input
-          id={inputId}
-          role="combobox"
-          aria-autocomplete="list"
-          aria-expanded={expanded}
-          aria-controls={listboxId}
-          aria-describedby={statusId}
-          aria-activedescendant={expanded && activeOptionIndex >= 0 ? `${listboxId}-${activeOptionIndex}` : undefined}
-          autoComplete="off"
-          autoCapitalize="none"
-          spellCheck={false}
-          disabled={disabled}
-          value={search}
-          onFocus={() => setOpen(true)}
-          onChange={(event) => {
-            setSearch(event.target.value)
-            setOpen(true)
-            setActiveIndex(-1)
-          }}
-          onKeyDown={(event) => {
-            if (!expanded && event.key === 'ArrowDown') setOpen(true)
-            if (event.key === 'ArrowDown') {
-              event.preventDefault()
-              setActiveIndex((current) => (current + 1) % optionCount)
-            } else if (event.key === 'ArrowUp') {
-              event.preventDefault()
-              setActiveIndex((current) => (current <= 0 ? optionCount - 1 : current - 1))
-            } else if (event.key === 'Enter' && expanded && activeOptionIndex >= 0) {
-              event.preventDefault()
-              if (activeOptionIndex < options.length) choose(options[activeOptionIndex])
-              else createNew()
-            } else if (event.key === 'Escape') {
-              setOpen(false)
+      <div className="flex flex-col gap-2 sm:flex-row">
+        <div className="relative min-w-0 flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-zinc-400" aria-hidden="true" />
+          <Input
+            id={inputId}
+            role="combobox"
+            aria-autocomplete="list"
+            aria-expanded={expanded}
+            aria-controls={listboxId}
+            aria-describedby={statusId}
+            aria-activedescendant={expanded && activeOptionIndex >= 0 ? `${listboxId}-${activeOptionIndex}` : undefined}
+            autoComplete="off"
+            autoCapitalize="none"
+            spellCheck={false}
+            disabled={disabled}
+            value={search}
+            onFocus={() => setOpen(true)}
+            onChange={(event) => {
+              setSearch(event.target.value)
+              setOpen(true)
               setActiveIndex(-1)
-            }
-          }}
-          placeholder="Ism, telefon yoki pasport bo'yicha qidiring"
-          className="pl-9"
-        />
+            }}
+            onKeyDown={(event) => {
+              if (!expanded && event.key === 'ArrowDown') setOpen(true)
+              if (event.key === 'ArrowDown' && optionCount > 0) {
+                event.preventDefault()
+                setActiveIndex((current) => (current + 1) % optionCount)
+              } else if (event.key === 'ArrowUp' && optionCount > 0) {
+                event.preventDefault()
+                setActiveIndex((current) => (current <= 0 ? optionCount - 1 : current - 1))
+              } else if (event.key === 'Enter' && expanded && activeOptionIndex >= 0) {
+                event.preventDefault()
+                choose(visibleOptions[activeOptionIndex])
+              } else if (event.key === 'Escape') {
+                setOpen(false)
+                setActiveIndex(-1)
+              }
+            }}
+            placeholder="Ism, telefon yoki pasport bo'yicha qidiring"
+            className="pl-9 pr-9"
+          />
+          {searchPending && (
+            <Loader2
+              className="pointer-events-none absolute right-3 top-1/2 size-4 -translate-y-1/2 animate-spin text-zinc-400"
+              aria-hidden="true"
+            />
+          )}
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          disabled={disabled}
+          onClick={createNew}
+          className="w-full shrink-0 sm:w-auto"
+        >
+          <UserPlus className="size-4" aria-hidden="true" />
+          Yangi mijoz yaratish
+        </Button>
       </div>
 
-      <p id={statusId} aria-live="polite" className="mt-1 text-xs text-zinc-500">
-        {query.isFetching
-          ? 'Qidirilmoqda...'
+      <p id={statusId} role="status" aria-live="polite" className="mt-1 text-xs text-zinc-500">
+        {searchPending
+          ? <span className="inline-flex items-center gap-1.5"><Loader2 className="size-3 animate-spin" aria-hidden="true" /> Mijozlar qidirilmoqda...</span>
           : query.isError
             ? (query.error instanceof Error ? query.error.message : 'Qidiruvda xatolik')
             : debouncedSearch.length >= 2
@@ -196,7 +219,12 @@ export function CustomerCombobox({
           aria-label="Mijoz qidiruv natijalari"
           className="absolute z-40 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-zinc-200 bg-white p-1 shadow-lg"
         >
-          {options.map((customer, index) => (
+          {searchPending ? (
+            <li aria-hidden="true" className="flex items-center gap-2 px-3 py-3 text-sm text-zinc-500">
+              <Loader2 className="size-4 animate-spin" />
+              Mijozlar qidirilmoqda...
+            </li>
+          ) : visibleOptions.length > 0 ? visibleOptions.map((customer, index) => (
             <li
               id={`${listboxId}-${index}`}
               key={customer.id}
@@ -219,26 +247,9 @@ export function CustomerCombobox({
                 </span>
               </button>
             </li>
-          ))}
-          <li
-            id={`${listboxId}-${options.length}`}
-            role="option"
-            aria-selected={activeOptionIndex === options.length}
-            className="border-t border-zinc-100 pt-1"
-          >
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={createNew}
-              className={cn(
-                'flex w-full items-center gap-2 rounded px-3 py-2 text-left text-sm font-medium text-zinc-900 hover:bg-zinc-50',
-                activeOptionIndex === options.length && 'bg-zinc-100',
-              )}
-            >
-              <UserPlus className="size-4" aria-hidden="true" />
-              Yangi mijoz yaratish
-            </button>
-          </li>
+          )) : (
+            <li role="status" className="px-3 py-3 text-sm text-zinc-500">Mos mijoz topilmadi.</li>
+          )}
         </ul>
       )}
     </div>
