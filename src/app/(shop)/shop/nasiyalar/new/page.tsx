@@ -10,6 +10,13 @@ import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
 import { Field } from '@/components/ui/field'
 import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -23,7 +30,7 @@ import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
-import { navigateAfterMutation } from '@/lib/client-events'
+import { commitNavigationMutation, navigateAfterMutation } from '@/lib/client-events'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import type { PaymentMethod } from '@/lib/domain-types'
 import { NasiyaSchedulePreview } from '@/components/shop/nasiya-schedule-preview'
@@ -32,6 +39,12 @@ import { CustomerCombobox, type CustomerPickerOption } from '@/components/shop/c
 import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
 
 type Device = InStockPickerDevice
+
+interface CustomerUpdateResponse {
+  success: boolean
+  data?: Pick<CustomerPickerOption, 'id' | 'name' | 'phone'>
+  error?: string
+}
 
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
   if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
@@ -64,8 +77,9 @@ export default function NewNasiyaPage() {
 function AuthorizedNewNasiyaPage() {
   const router = useRouter()
   const { currency } = useShopCurrency()
-  const { memberKind } = useShopAccess()
+  const { memberKind, can } = useShopAccess()
   const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
+  const canEditCustomer = can('CUSTOMER_EDIT')
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
 
@@ -74,6 +88,13 @@ function AuthorizedNewNasiyaPage() {
   const [customerPhone, setCustomerPhone] = useState('')
   const [customerMode, setCustomerMode] = useState<'PICK' | 'EXISTING' | 'NEW'>('PICK')
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerPickerOption | null>(null)
+  const [customerEditOpen, setCustomerEditOpen] = useState(false)
+  const [editedCustomerName, setEditedCustomerName] = useState('')
+  const [editedCustomerPhone, setEditedCustomerPhone] = useState('')
+  const [customerEditNameError, setCustomerEditNameError] = useState('')
+  const [customerEditPhoneError, setCustomerEditPhoneError] = useState('')
+  const [customerEditSaveError, setCustomerEditSaveError] = useState('')
+  const [savingCustomerEdit, setSavingCustomerEdit] = useState(false)
   const passportSelection = useImageSelection({
     mode: 'single',
     uploadEndpoint: '/api/uploads/passport',
@@ -150,6 +171,58 @@ function AuthorizedNewNasiyaPage() {
       return
     }
     setStep(3)
+  }
+
+  function openCustomerEdit(customer: CustomerPickerOption) {
+    setEditedCustomerName(customer.name)
+    setEditedCustomerPhone(customer.phone)
+    setCustomerEditNameError('')
+    setCustomerEditPhoneError('')
+    setCustomerEditSaveError('')
+    setCustomerEditOpen(true)
+  }
+
+  async function saveCustomerEdit() {
+    if (!selectedCustomer || savingCustomerEdit) return
+
+    const name = editedCustomerName.trim()
+    let valid = true
+    if (name.length < 2) {
+      setCustomerEditNameError("Ism kamida 2 ta harfdan iborat bo'lishi kerak")
+      valid = false
+    }
+    if (!isValidPhone(editedCustomerPhone)) {
+      setCustomerEditPhoneError(PHONE_ERROR)
+      valid = false
+    }
+    if (!valid) return
+
+    setSavingCustomerEdit(true)
+    setCustomerEditSaveError('')
+    try {
+      const response = await fetch(`/api/customers/${selectedCustomer.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, phone: editedCustomerPhone }),
+      })
+      const json = await response.json() as CustomerUpdateResponse
+      if (!response.ok || !json.success || !json.data) {
+        throw new Error(json.error || "Mijoz ma'lumotlarini saqlashda xatolik")
+      }
+
+      const updated = json.data
+      setSelectedCustomer((current) => current?.id === updated.id
+        ? { ...current, name: updated.name, phone: updated.phone }
+        : current)
+      setCustomerName(updated.name)
+      setCustomerPhone(updated.phone)
+      setCustomerEditOpen(false)
+      void commitNavigationMutation({ kind: 'customer.updated' }).catch(() => undefined)
+    } catch (error) {
+      setCustomerEditSaveError(error instanceof Error ? error.message : "Mijoz ma'lumotlarini saqlashda xatolik")
+    } finally {
+      setSavingCustomerEdit(false)
+    }
   }
 
   const totalPriceUzs = currency.currency === 'USD' && currency.usdUzsRate
@@ -394,6 +467,7 @@ function AuthorizedNewNasiyaPage() {
                     setPhoneError('')
                     passportSelection.clear()
                   }}
+                  onEdit={canEditCustomer ? openCustomerEdit : undefined}
                   onClear={() => {
                     setSelectedCustomer(null)
                     setCustomerMode('PICK')
@@ -437,7 +511,7 @@ function AuthorizedNewNasiyaPage() {
               </>}
               {customerMode === 'EXISTING' && selectedCustomer?.hasPassportPhoto && (
                 <p className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                  Tanlangan mijozning private pasport rasmi mavjud; qayta yuklash shart emas.
+                  Tanlangan mijozning pasport rasmi mavjud; qayta yuklash shart emas.
                 </p>
               )}
               {needsPassportPhoto && (
@@ -685,6 +759,72 @@ function AuthorizedNewNasiyaPage() {
           </div>
         </form>
       )}
+
+      <Dialog
+        open={customerEditOpen}
+        onOpenChange={(open) => {
+          if (!open && !savingCustomerEdit) setCustomerEditOpen(false)
+        }}
+      >
+        <DialogContent className="max-w-md rounded" showCloseButton={!savingCustomerEdit}>
+          <DialogHeader>
+            <DialogTitle>Mijozni tahrirlash</DialogTitle>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void saveCustomerEdit()
+            }}
+          >
+            {customerEditSaveError && (
+              <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+                {customerEditSaveError}
+              </div>
+            )}
+            <Field label="Mijoz ismi" required error={customerEditNameError || undefined}>
+              <Input
+                id="nasiya-edit-customer-name"
+                value={editedCustomerName}
+                onChange={(event) => {
+                  setEditedCustomerName(event.target.value)
+                  if (customerEditNameError) setCustomerEditNameError('')
+                }}
+                disabled={savingCustomerEdit}
+                className="h-9 text-sm border-zinc-200 rounded"
+              />
+            </Field>
+            <Field label="Mijoz tel raqami" required error={customerEditPhoneError || undefined}>
+              <PhoneInput
+                id="nasiya-edit-customer-phone"
+                value={editedCustomerPhone}
+                onChange={(value) => {
+                  setEditedCustomerPhone(value)
+                  if (customerEditPhoneError) setCustomerEditPhoneError('')
+                }}
+                disabled={savingCustomerEdit}
+                className="h-9 text-sm border-zinc-200 rounded"
+              />
+            </Field>
+            <DialogFooter>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={savingCustomerEdit}
+                onClick={() => setCustomerEditOpen(false)}
+              >
+                Bekor qilish
+              </Button>
+              <Button
+                type="submit"
+                disabled={savingCustomerEdit || editedCustomerName.trim().length < 2 || !isValidPhone(editedCustomerPhone)}
+              >
+                {savingCustomerEdit ? 'Saqlanmoqda...' : 'Saqlash'}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

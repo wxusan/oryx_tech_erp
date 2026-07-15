@@ -126,6 +126,18 @@ describe('nasiya creation form: explicit existing-customer trust preview', () =>
     expect(picker).toContain('customerSearchWhere(resolved.shopId, parsed.data.search)')
     expect(picker).toContain('trust: { tier: trust.tier, label: trust.label, color: trust.color }')
   })
+
+  it('lets permitted staff edit the selected customer without leaving the Nasiya flow', () => {
+    expect(source).toContain("const canEditCustomer = can('CUSTOMER_EDIT')")
+    expect(source).toContain('onEdit={canEditCustomer ? openCustomerEdit : undefined}')
+    expect(source).toContain("method: 'PATCH'")
+    expect(source).toContain("kind: 'customer.updated'")
+  })
+
+  it('uses the concise passport-photo wording for an existing customer', () => {
+    expect(source).toContain('Tanlangan mijozning pasport rasmi mavjud; qayta yuklash shart emas.')
+    expect(source).not.toContain('Tanlangan mijozning private pasport rasmi mavjud; qayta yuklash shart emas.')
+  })
 })
 
 describe('mijozlar list: badge column + admin override in the edit dialog', () => {

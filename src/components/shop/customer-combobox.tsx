@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { Check, Loader2, Search, UserPlus, X } from 'lucide-react'
+import { Check, Loader2, Pencil, Search, UserPlus, X } from 'lucide-react'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
@@ -25,6 +25,7 @@ interface CustomerComboboxProps {
   inputId: string
   selected: CustomerPickerOption | null
   onSelect: (customer: CustomerPickerOption) => void
+  onEdit?: (customer: CustomerPickerOption) => void
   onClear?: () => void
   onCreateNew: (searchText: string) => void
   disabled?: boolean
@@ -45,6 +46,7 @@ export function CustomerCombobox({
   inputId,
   selected,
   onSelect,
+  onEdit,
   onClear,
   onCreateNew,
   disabled = false,
@@ -121,18 +123,37 @@ export function CustomerCombobox({
           <p className="mt-0.5 text-xs text-emerald-800">{formatUzPhoneDisplay(selected.phone)}</p>
           {selected.trust?.label && <p className="mt-1 text-xs text-emerald-700">{selected.trust.label}</p>}
         </div>
-        {onClear && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            disabled={disabled}
-            onClick={onClear}
-            aria-label={`${selected.name} tanlovini bekor qilish`}
-            className="shrink-0 text-emerald-900"
-          >
-            <X className="size-4" />
-          </Button>
+        {(onEdit || onClear) && (
+          <div className="flex shrink-0 items-center gap-1">
+            {onEdit && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={disabled}
+                onClick={() => onEdit(selected)}
+                aria-label={`${selected.name} ma'lumotlarini tahrirlash`}
+                title="Mijozni tahrirlash"
+                className="text-emerald-900 hover:bg-emerald-100"
+              >
+                <Pencil className="size-3.5" />
+              </Button>
+            )}
+            {onClear && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon-sm"
+                disabled={disabled}
+                onClick={onClear}
+                aria-label={`${selected.name} tanlovini bekor qilish`}
+                title="Mijoz tanlovini bekor qilish"
+                className="text-emerald-900 hover:bg-emerald-100"
+              >
+                <X className="size-4" />
+              </Button>
+            )}
+          </div>
         )}
       </div>
     )

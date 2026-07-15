@@ -133,4 +133,16 @@ describe('CustomerCombobox', () => {
     await user.click(screen.getByRole('button', { name: /tanlovini bekor qilish/ }))
     expect(onClear).toHaveBeenCalledTimes(1)
   })
+
+  it('offers an optional in-place edit action for a selected customer', async () => {
+    const user = userEvent.setup()
+    const onEdit = vi.fn()
+    renderPicker({
+      selected: { id: 'customer-1', name: 'Ali Valiyev', phone: '+998901234567' },
+      onEdit,
+    })
+
+    await user.click(screen.getByRole('button', { name: /ma'lumotlarini tahrirlash/ }))
+    expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'customer-1' }))
+  })
 })
