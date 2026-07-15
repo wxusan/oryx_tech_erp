@@ -373,11 +373,11 @@ function AuthorizedNewNasiyaPage() {
             </div>
           )}
 
-          <div className="border border-zinc-200 rounded overflow-hidden">
-            <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
+          <div className="relative z-10 rounded border border-zinc-200">
+            <div className="rounded-t border-b border-zinc-200 bg-zinc-50 px-4 py-3">
               <span className="text-sm font-semibold text-zinc-900">Mijoz ma&apos;lumotlari</span>
             </div>
-            <div className="p-4 space-y-4">
+            <div className="rounded-b p-4 space-y-4">
               <div>
                 <label htmlFor="nasiya-customer-picker" className="mb-1.5 block text-xs font-medium text-zinc-700">
                   Mavjud mijozni tanlang yoki yangisini yarating <span aria-hidden="true" className="text-red-500">*</span>
