@@ -19,6 +19,7 @@ const RELEASE_MIGRATIONS = [
   '202607150004_complete_accounting_redesign',
   '202607150005_reset_super_admin_subscription_reporting',
   '202607150006_ops_alert_acknowledgement',
+  '202607150007_reset_current_ops_alerts',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))
