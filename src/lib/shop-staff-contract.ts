@@ -56,6 +56,9 @@ export function legacyStaffPermissionCodes(
     .map((permission) => permission.code)
 }
 
+const loginSchema = z.string().trim().min(3).max(64)
+  .regex(/^[a-zA-Z0-9_]+$/, "Login faqat lotin harflari, raqamlar va _ belgisidan iborat bo'lishi kerak")
+
 const memberFields = {
   name: z.string().trim().min(2, "Ism kamida 2 ta harfdan iborat bo'lishi kerak").max(100),
   phone: phoneSchema,
@@ -68,8 +71,7 @@ const memberFields = {
 export const createShopStaffSchema = z.object({
   ...memberFields,
   isActive: z.boolean().default(true),
-  login: z.string().trim().min(3).max(64)
-    .regex(/^[a-zA-Z0-9_]+$/, "Login faqat lotin harflari, raqamlar va _ belgisidan iborat bo'lishi kerak"),
+  login: loginSchema,
   password: passwordSchema,
 })
 
@@ -77,6 +79,7 @@ export const updateShopStaffSchema = z.object({
   staffId: z.string().min(1).max(100),
   name: memberFields.name.optional(),
   phone: phoneSchema.optional(),
+  login: loginSchema.optional(),
   password: passwordSchema.optional(),
   telegramNotificationsEnabled: z.boolean().optional(),
   logsViewEnabled: z.boolean().optional(),
@@ -85,7 +88,7 @@ export const updateShopStaffSchema = z.object({
   note: z.string().trim().min(5, "Sabab kamida 5 ta belgidan iborat bo'lishi kerak").max(1000),
 }).refine(
   (value) => value.name !== undefined || value.phone !== undefined ||
-    value.password !== undefined ||
+    value.login !== undefined || value.password !== undefined ||
     value.telegramNotificationsEnabled !== undefined || value.permissionCodes !== undefined ||
     value.logsViewEnabled !== undefined ||
     value.isActive !== undefined,

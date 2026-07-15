@@ -112,7 +112,7 @@ describe('Staff Permissions V2 live-boundary source guard', () => {
   it('prevents the signed-in owner credentials from autofilling the new-staff form', () => {
     const staffUi = readFileSync(resolve(process.cwd(), 'src/components/shop/staff-management.tsx'), 'utf8')
     expect(staffUi).toContain('autoComplete="off" noValidate')
-    expect(staffUi).toContain('<Input autoComplete="off" disabled={Boolean(editing)}')
+    expect(staffUi).toContain('<Input autoComplete="off" disabled={Boolean(editing) && !isOwner}')
     expect(staffUi).toContain('<Input autoComplete="new-password"')
   })
 
@@ -132,6 +132,21 @@ describe('Staff Permissions V2 live-boundary source guard', () => {
     expect(staffUi).toContain("canManageNotifications && enabledFeatures.has('TELEGRAM')")
     expect(staffUi).toContain("disabled={!enabledFeatures.has('TELEGRAM')}")
     expect(staffUi).toContain("member.telegramNotificationsEnabled && enabledFeatures.has('TELEGRAM')")
+  })
+
+  it('limits staff login changes to the shop owner and revokes the affected session', () => {
+    const contract = readFileSync(resolve(process.cwd(), 'src/lib/shop-staff-contract.ts'), 'utf8')
+    const staffUi = readFileSync(resolve(process.cwd(), 'src/components/shop/staff-management.tsx'), 'utf8')
+    const updateRoute = readFileSync(resolve(process.cwd(), 'src/app/api/shop/staff/[id]/route.ts'), 'utf8')
+    expect(contract).toContain('login: loginSchema.optional()')
+    expect(staffUi).toContain('disabled={Boolean(editing) && !isOwner}')
+    expect(staffUi).toContain('if (loginChanged) Object.assign(updateBody, { login: form.login.trim() })')
+    expect(updateRoute).toContain("parsed.data.login !== undefined && principal.memberKind !== 'SHOP_OWNER'")
+    expect(updateRoute).toContain("parsed.data.login !== undefined && livePrincipal.memberKind !== 'SHOP_OWNER'")
+    expect(updateRoute).toContain("where: { login: parsed.data.login }")
+    expect(updateRoute).toContain('passwordHash !== undefined || loginChanged || permissionSnapshotChanged')
+    expect(updateRoute).toContain('login: target.login')
+    expect(updateRoute).toContain('login: parsed.data.login')
   })
 
   it('keeps sale return and nasiya cancellation independently authorized', () => {

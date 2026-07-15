@@ -16,6 +16,7 @@ import {
   createShopStaffSchema,
   legacyStaffPermissionCodes,
   STAFF_LOGS_PERMISSION,
+  updateShopStaffSchema,
 } from '@/lib/shop-staff-contract'
 import {
   projectShopStaff,
@@ -109,6 +110,12 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
     expect(createShopStaffSchema.safeParse({ ...base, permissionCodes: ['CASH_SALE_CREATE'] }).success).toBe(false)
     expect(createShopStaffSchema.safeParse({ ...base, permissionCodes: [STAFF_LOGS_PERMISSION] }).success).toBe(false)
     expect(createShopStaffSchema.safeParse({ ...base, logsViewEnabled: true }).success).toBe(true)
+  })
+
+  it('validates a staff login change through the same contract as staff creation', () => {
+    const base = { staffId: 'staff-1', note: 'Login typo tuzatildi' }
+    expect(updateShopStaffSchema.parse({ ...base, login: 'dilshod_kassir' }).login).toBe('dilshod_kassir')
+    expect(updateShopStaffSchema.safeParse({ ...base, login: 'not allowed' }).success).toBe(false)
   })
 
   it('expands every retired alias only to its documented exact V2 targets', () => {

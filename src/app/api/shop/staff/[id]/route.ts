@@ -75,6 +75,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const parsed = updateShopStaffSchema.safeParse({ ...(body as object), staffId: id })
     if (!parsed.success) return badRequest(parsed.error.issues[0]?.message ?? "Xodim ma'lumoti noto'g'ri")
     if (parsed.data.staffId === principal.actorId) return conflict("O'z profilingizni xodim boshqaruvi orqali o'zgartirib bo'lmaydi")
+    if (parsed.data.login !== undefined && principal.memberKind !== 'SHOP_OWNER') {
+      return forbidden("Xodim loginini faqat do'kon egasi o'zgartira oladi")
+    }
 
     const requiredPermissions: Array<[boolean, ShopPermissionCode]> = [
       [parsed.data.name !== undefined || parsed.data.phone !== undefined, 'STAFF_EDIT_PROFILE'],
@@ -128,6 +131,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         where: { id, shopId, deletedAt: null },
         select: {
           id: true,
+          login: true,
           isActive: true,
           name: true,
           legacyFullAccess: true,
@@ -136,6 +140,20 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       })
       if (!target) throw Object.assign(new Error('STAFF_NOT_FOUND'), { code: 'STAFF_NOT_FOUND' })
       if (shop?.ownerAdminId === id) throw Object.assign(new Error('OWNER_TARGET'), { code: 'OWNER_TARGET' })
+      if (parsed.data.login !== undefined && livePrincipal.memberKind !== 'SHOP_OWNER') {
+        throw Object.assign(new Error('LOGIN_OWNER_ONLY'), { code: 'LOGIN_OWNER_ONLY' })
+      }
+
+      const loginChanged = parsed.data.login !== undefined && parsed.data.login !== target.login
+      if (loginChanged) {
+        const existingLogin = await tx.shopAdmin.findUnique({
+          where: { login: parsed.data.login },
+          select: { id: true },
+        })
+        if (existingLogin && existingLogin.id !== id) {
+          throw Object.assign(new Error('LOGIN_TAKEN'), { code: 'LOGIN_TAKEN' })
+        }
+      }
 
       const activeFeatures = livePrincipal.enabledFeatures
       if (parsed.data.permissionCodes) {
@@ -177,7 +195,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
             ))),
           ]
       const sessionAffectingChange = parsed.data.isActive !== undefined ||
-        passwordHash !== undefined || permissionSnapshotChanged ||
+        passwordHash !== undefined || loginChanged || permissionSnapshotChanged ||
         parsed.data.telegramNotificationsEnabled !== undefined
 
       await tx.shopAdmin.update({
@@ -185,6 +203,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         data: {
           name: parsed.data.name,
           phone: parsed.data.phone,
+          login: parsed.data.login,
           isActive: parsed.data.isActive,
           telegramNotificationsEnabled: parsed.data.telegramNotificationsEnabled,
           passwordHash,
@@ -226,6 +245,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           targetId: id,
           oldValue: {
             name: target.name,
+            login: target.login,
             isActive: target.isActive,
             legacyFullAccess: target.legacyFullAccess,
             permissionCodes: target.permissions.map((item) => item.permissionCode),
@@ -233,6 +253,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           },
           newValue: {
             name: parsed.data.name,
+            login: parsed.data.login,
             isActive: parsed.data.isActive,
             permissionCodes: nextPermissionCodes,
             logsViewEnabled: nextPermissionCodes.includes(STAFF_LOGS_PERMISSION),
@@ -259,6 +280,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       if (error.code === 'PERMISSION_INVALID') return badRequest(error instanceof Error ? error.message : "Ruxsat noto'g'ri")
       if (error.code === 'DELEGATION_FORBIDDEN') return forbidden("Xodim boshqaruvchisi bu ruxsatni bera olmaydi")
       if (error.code === 'LOGS_OWNER_ONLY') return forbidden("Log ruxsatini faqat do'kon egasi boshqaradi")
+      if (error.code === 'LOGIN_OWNER_ONLY') return forbidden("Xodim loginini faqat do'kon egasi o'zgartira oladi")
+      if (error.code === 'LOGIN_TAKEN') return conflict('Bu login allaqachon mavjud')
       if (error.code === 'TELEGRAM_DISABLED') return badRequest("Telegram moduli yoqilmagan")
       if (error.code === 'P2002') return conflict('Bu telefon yoki login allaqachon mavjud')
     }

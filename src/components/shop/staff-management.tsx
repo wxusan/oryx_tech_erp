@@ -51,6 +51,8 @@ const riskLabels = {
   ADMINISTRATIVE: 'Admin',
 } as const
 
+const loginPattern = /^[a-zA-Z0-9_]+$/
+
 interface StaffForm {
   name: string
   phone: string
@@ -156,11 +158,13 @@ export function StaffManagement() {
 
   const valid = useMemo(() => {
     if ((!editing || canEditProfile) && (form.name.trim().length < 2 || !isValidPhone(form.phone))) return false
-    if (!editing && (form.login.trim().length < 3 || form.password.length < 10)) return false
+    const loginChanged = Boolean(editing && isOwner && form.login.trim() !== editing.login)
+    if ((!editing || loginChanged) && (form.login.trim().length < 3 || !loginPattern.test(form.login.trim()))) return false
+    if (!editing && form.password.length < 10) return false
     if (editing && canResetPassword && form.password && form.password.length < 10) return false
     if (editing && form.note.trim().length < 5) return false
     return true
-  }, [canEditProfile, canResetPassword, editing, form])
+  }, [canEditProfile, canResetPassword, editing, form, isOwner])
 
   function openCreate() {
     setEditing(null)
@@ -229,11 +233,16 @@ export function StaffManagement() {
       requestAnimationFrame(() => document.querySelector<HTMLElement>('[aria-invalid="true"]')?.focus())
       return
     }
+    const loginChanged = Boolean(editing && isOwner && form.login.trim() !== editing.login)
+    if (loginChanged && !window.confirm(`Login ${editing?.login} dan ${form.login.trim()} ga o'zgartiriladi. Xodim qayta kirishi kerak bo'ladi. Davom etasizmi?`)) {
+      return
+    }
     setSaving(true)
     setFormError('')
     try {
       const updateBody: Record<string, unknown> = { note: form.note.trim() }
       if (canEditProfile) Object.assign(updateBody, { name: form.name.trim(), phone: form.phone })
+      if (loginChanged) Object.assign(updateBody, { login: form.login.trim() })
       if (canResetPassword && form.password) updateBody.password = form.password
       if (canManageStatus) updateBody.isActive = form.isActive
       if (canManagePermissions) {
@@ -363,7 +372,7 @@ export function StaffManagement() {
           <div className="grid gap-3 sm:grid-cols-2">
             <Field controlId="staff-name" label="Ism" required error={submitted && form.name.trim().length < 2 ? "Ism kamida 2 ta belgidan iborat bo'lishi kerak" : undefined}><Input disabled={Boolean(editing) && !canEditProfile} value={form.name} onChange={(event) => setForm((current) => ({ ...current, name: event.target.value }))} /></Field>
             <Field controlId="staff-phone" label="Telefon" required error={submitted && !isValidPhone(form.phone) ? "Telefon raqami noto'g'ri" : undefined}><PhoneInput disabled={Boolean(editing) && !canEditProfile} value={form.phone} onChange={(phone) => setForm((current) => ({ ...current, phone }))} /></Field>
-            <Field controlId="staff-login" label="Login" required={!editing} error={submitted && !editing && form.login.trim().length < 3 ? "Login kamida 3 ta belgidan iborat bo'lishi kerak" : undefined}><Input autoComplete="off" disabled={Boolean(editing)} value={form.login} onChange={(event) => setForm((current) => ({ ...current, login: event.target.value }))} /></Field>
+            <Field controlId="staff-login" label="Login" required={!editing} help={editing && isOwner ? "Faqat do'kon egasi loginni o'zgartira oladi. Saqlangandan keyin xodim qayta kiradi." : undefined} error={submitted && ((!editing || (isOwner && form.login.trim() !== editing?.login)) && (form.login.trim().length < 3 || !loginPattern.test(form.login.trim()))) ? "Login 3-64 ta lotin harfi, raqam yoki _ belgisidan iborat bo'lishi kerak" : undefined}><Input autoComplete="off" disabled={Boolean(editing) && !isOwner} value={form.login} onChange={(event) => setForm((current) => ({ ...current, login: event.target.value }))} /></Field>
             <Field controlId="staff-password" label={editing ? 'Yangi parol (ixtiyoriy)' : 'Parol'} required={!editing} error={submitted && ((!editing && form.password.length < 10) || (Boolean(editing) && Boolean(form.password) && form.password.length < 10)) ? "Parol kamida 10 ta belgidan iborat bo'lishi kerak" : undefined}><Input autoComplete="new-password" disabled={Boolean(editing) && !canResetPassword} type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="Kamida 10 ta belgi" /></Field>
             {!editing && <Field label="Telegram ID"><Input inputMode="numeric" value={form.telegramId} onChange={(event) => setForm((current) => ({ ...current, telegramId: event.target.value.replace(/\D/g, '') }))} /></Field>}
           </div>
