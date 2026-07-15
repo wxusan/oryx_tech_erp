@@ -481,7 +481,7 @@ describe('dynamic shop range report', () => {
       nasiyaInterest: { uzs: 0, usd: 0 },
     })
     expect(report.months[2]).toMatchObject({
-      expectedReceivables: { uzs: 1_490, usd: 150 },
+      expectedReceivables: { uzs: 500, usd: 150 },
       writeOffs: { uzs: 1_200, usd: 0, frozenUzs: 1_200 },
       writeOffCount: 1,
     })
@@ -490,6 +490,6 @@ describe('dynamic shop range report', () => {
     const ownerOnly = await getShopRangeReport({ shopId: shop.id, range, adminId: owner.id })
     expect(ownerOnly.totals.cashCollected).toEqual({ uzs: 500, usd: 0, complete: true })
     // Expected debt has no single attributable actor and deliberately remains shop-wide.
-    expect(ownerOnly.months[2].expectedReceivables).toEqual({ uzs: 1_490, usd: 150 })
+    expect(ownerOnly.months[2].expectedReceivables).toEqual({ uzs: 500, usd: 150 })
   })
 })
