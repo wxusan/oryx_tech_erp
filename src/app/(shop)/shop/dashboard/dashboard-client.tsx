@@ -144,7 +144,7 @@ export default function DashboardClient({ initialStats, financialView }: { initi
         <Card className="rounded-lg lg:col-span-5">
           <CardHeader className="border-b border-zinc-100">
             <CardTitle>Bu oy pul oqimi</CardTitle>
-            <CardDescription>Umumiy aylanma, sof tushum va kutilayotgan to'lov</CardDescription>
+            <CardDescription>Sof tushum va kutilayotgan to'lov</CardDescription>
             <CardAction>
               <WalletCards className="size-5 text-zinc-400" />
             </CardAction>
@@ -153,13 +153,13 @@ export default function DashboardClient({ initialStats, financialView }: { initi
             <div>
               <div
                 className="text-xs font-medium uppercase text-zinc-500"
-                title="Faqat haqiqatda qabul qilingan to'lovlar (naqd sotuv va nasiya to'lovlari) — hali to'lanmagan sotuvlar bu yerga kirmaydi"
+                title="Qaytarishlar ayirilgandan keyin bu oy haqiqatda qabul qilingan pul"
               >
-                Umumiy aylanma
+                Sof tushum
               </div>
-              <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-900">{fmt(grossCashIn, currency)}</div>
+              <div className="mt-1 text-3xl font-bold tracking-tight text-zinc-900">{fmtBase(netCashFlow, currency)}</div>
               <div className="mt-1 text-xs text-zinc-500">
-                Sof tushum: {fmtBase(netCashFlow, currency)} · qaytarishlar ayirilgan, qabul qilingan pul
+                Umumiy aylanma: {fmt(grossCashIn, currency)} · qaytarishlardan oldin
               </div>
             </div>
             <div className="rounded-md bg-zinc-50 px-3 py-2">
@@ -167,9 +167,6 @@ export default function DashboardClient({ initialStats, financialView }: { initi
                 <span>Shu oy hali kutilmoqda</span>
                 <span className="font-semibold text-zinc-800">{expectedText}</span>
               </div>
-              <p className="mt-1 text-xs text-zinc-500">
-                Qabul qilingan pul va ochiq majburiyatlar alohida ko'rsatiladi; ular turli shartnoma davrlaridan bo'lishi mumkin.
-              </p>
             </div>
             <KoLink href="/shop/hisobot" enabled={canViewReports} />
           </CardContent>
