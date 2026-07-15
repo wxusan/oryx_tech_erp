@@ -77,8 +77,10 @@ failed transaction record from the legacy `ShopPayment` constraint conflict,
 rerun the workflow with `resolve_failed_accounting_migration=true`. The
 one-time resolver first proves that exactly one unresolved failure exists and
 that none of the migration's columns or index survived the transaction. It
-then uses `prisma migrate resolve --rolled-back`; it never edits Prisma's
-migration table directly. Leave this input off for every normal release.
+then uses `prisma migrate resolve --rolled-back` inside the guarded remote
+production builder, after compile and read-only preflight; it never edits
+Prisma's migration table directly. Leave this input off for every normal
+release.
 
 `vercel.json` must keep `node scripts/vercel-build.mjs` as its `buildCommand`.
 Replacing it with bare `next build`, `npm run build`, or an unguarded migration

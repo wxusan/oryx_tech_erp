@@ -27,6 +27,12 @@ describe('production release guard', () => {
     expect(buildScript.indexOf("['scripts/production-release-preflight.mjs', '--phase=pre']")).toBeLessThan(
       buildScript.indexOf("['run', 'prisma:migrate:deploy']"),
     )
+    expect(buildScript.indexOf("['scripts/production-release-preflight.mjs', '--phase=pre']")).toBeLessThan(
+      buildScript.indexOf("['scripts/resolve-failed-accounting-migration.mjs']"),
+    )
+    expect(buildScript.indexOf("['scripts/resolve-failed-accounting-migration.mjs']")).toBeLessThan(
+      buildScript.indexOf("['run', 'prisma:migrate:deploy']"),
+    )
     expect(buildScript.indexOf("['run', 'prisma:migrate:deploy']")).toBeLessThan(
       buildScript.indexOf("['scripts/backfill-payment-profit-ledger.mjs', '--apply']"),
     )
@@ -77,9 +83,11 @@ describe('production release guard', () => {
 
   it('can resolve only the known fully rolled-back accounting migration under explicit release approval', () => {
     expect(releaseWorkflow).toContain('resolve_failed_accounting_migration')
-    expect(releaseWorkflow).toContain('if: inputs.resolve_failed_accounting_migration == true')
-    expect(releaseWorkflow).toContain('scripts/resolve-failed-accounting-migration.mjs')
-    expect(failedMigrationResolver).toContain("process.env.GITHUB_ACTIONS !== 'true'")
+    expect(releaseWorkflow).toContain('--build-env ORYX_FAILED_MIGRATION_RESOLUTION=resolve-failed-202607150004_complete_accounting_redesign')
+    expect(buildScript).toContain("if (process.env.ORYX_FAILED_MIGRATION_RESOLUTION)")
+    expect(buildScript).toContain("['scripts/resolve-failed-accounting-migration.mjs']")
+    expect(failedMigrationResolver).toContain("process.env.VERCEL_ENV !== 'production'")
+    expect(failedMigrationResolver).toContain("process.env.ORYX_GUARDED_RELEASE !== 'github-actions'")
     expect(failedMigrationResolver).toContain('Expected exactly one active failed')
     expect(failedMigrationResolver).toContain('releaseArtifactCount !== 0')
     expect(failedMigrationResolver).toContain("'--rolled-back'")

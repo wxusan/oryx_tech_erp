@@ -55,21 +55,18 @@ jobs:
           jq -e --arg sha "$GITHUB_SHA" 'any(.[]; .conclusion == "success" and .event == "push" and .headBranch == "main" and .headSha == $sha)' <<< "$ci_runs"
       - name: Pull production configuration
         run: npx vercel@51.7.0 pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}"
-      - name: Resolve the known rolled-back accounting migration
-        if: inputs.resolve_failed_accounting_migration == true
-        run: |
-          set -a
-          source .vercel/.env.production.local
-          set +a
-          ORYX_FAILED_MIGRATION_RESOLUTION=resolve-failed-202607150004_complete_accounting_redesign node scripts/resolve-failed-accounting-migration.mjs
       - name: Build, migrate, and create an unaliased production deployment
         id: deploy
         run: |
+          resolve_args=()
+          if [[ "${{ inputs.resolve_failed_accounting_migration }}" == "true" ]]; then
+            resolve_args+=(--build-env ORYX_FAILED_MIGRATION_RESOLUTION=resolve-failed-202607150004_complete_accounting_redesign)
+          fi
           if [[ "${{ inputs.repair_malika_owner }}" == "true" ]]; then
             test -n "$MALIKA_OWNER_REPAIR_PASSWORD"
-            deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions --build-env ORYX_MALIKA_OWNER_REPAIR=1 --build-env "ORYX_MALIKA_OWNER_REPAIR_PASSWORD=$MALIKA_OWNER_REPAIR_PASSWORD" --meta "releaseCommit=$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
+            deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions "${resolve_args[@]}" --build-env ORYX_MALIKA_OWNER_REPAIR=1 --build-env "ORYX_MALIKA_OWNER_REPAIR_PASSWORD=$MALIKA_OWNER_REPAIR_PASSWORD" --meta "releaseCommit=$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
           else
-            deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions --meta "releaseCommit=$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
+            deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions "${resolve_args[@]}" --meta "releaseCommit=$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
           fi
           echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
       - name: Inspect and smoke the exact production artifact

@@ -31,6 +31,9 @@ if (process.env.VERCEL_ENV === 'production') {
   // still leave production data untouched.
   run('npm', ['run', 'build'])
   run('node', ['scripts/production-release-preflight.mjs', '--phase=pre'])
+  if (process.env.ORYX_FAILED_MIGRATION_RESOLUTION) {
+    run('node', ['scripts/resolve-failed-accounting-migration.mjs'])
+  }
   run('npm', ['run', 'prisma:migrate:deploy'])
   // The approved monthly-accounting migration is additive. Reconstruct its
   // component ledger before the new artifact can be promoted; ambiguous rows

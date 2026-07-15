@@ -11,8 +11,8 @@ function fail(message) {
   process.exit(1)
 }
 
-if (process.env.GITHUB_ACTIONS !== 'true') {
-  fail('This one-time resolver may run only inside the guarded GitHub Actions release environment')
+if (process.env.VERCEL_ENV !== 'production' || process.env.ORYX_GUARDED_RELEASE !== 'github-actions') {
+  fail('This one-time resolver may run only inside the guarded remote production builder')
 }
 if (process.env.ORYX_FAILED_MIGRATION_RESOLUTION !== CONFIRMATION) {
   fail(`Explicit confirmation ${CONFIRMATION} is required`)
