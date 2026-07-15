@@ -22,7 +22,7 @@ import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
 import { cleanupExpiredChangeEvents } from '@/lib/server/change-events'
 import { cleanupRetainedOperationalData } from '@/lib/server/data-retention'
-import { transitionNasiyaToOverdue } from '@/lib/server/overdue-transition'
+import { hasValidNasiyaScheduleNativeLedger, transitionNasiyaToOverdue } from '@/lib/server/overdue-transition'
 import { presentDeviceSpecs } from '@/lib/device-specs'
 import { initializeRequestAuditContext } from '@/lib/server/request-context'
 import { activeShopIdsForFeature } from '@/lib/server/shop-access'
@@ -121,6 +121,7 @@ export async function GET(request: NextRequest): Promise<Response> {
       supplierPayableReminders: 0,
       supplierPayableOverdue: 0,
       supplierPayableEarlyReminders: 0,
+      invalidNasiyaSchedulesSkipped: 0,
     }
     const transitionedShopIds = new Set<string>()
 
@@ -272,6 +273,13 @@ export async function GET(request: NextRequest): Promise<Response> {
           ...pageAfter(cursor),
         }),
         async (schedule) => {
+          // This is a quarantine, not a financial repair. Updating an
+          // invalid legacy row would make PostgreSQL reject the whole cron
+          // transaction, preventing valid shops from receiving reminders.
+          if (!hasValidNasiyaScheduleNativeLedger(schedule)) {
+            summary.invalidNasiyaSchedulesSkipped++
+            return
+          }
           summary.overdue++
           const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
           const daysLate = Math.floor((today.getTime() - effectiveDue.getTime()) / DAY_MS)

@@ -2,6 +2,28 @@ import 'server-only'
 
 import { prisma } from '@/lib/prisma'
 
+/**
+ * The financial-invariants migration protects new writes, but historic rows
+ * may still have been created before their native remaining amount was stored.
+ * Cron must never attempt to update such a row: PostgreSQL quite rightly
+ * validates the entire row on status change and would otherwise abort the
+ * whole reminder run. This is deliberately a quarantine check, not a repair.
+ */
+export function hasValidNasiyaScheduleNativeLedger(input: {
+  contractExpectedAmount: number | string | { toString(): string }
+  contractPaidAmount: number | string | { toString(): string }
+  contractRemainingAmount: number | string | { toString(): string }
+  status: string
+}): boolean {
+  const expected = Number(input.contractExpectedAmount)
+  const paid = Number(input.contractPaidAmount)
+  const remaining = Number(input.contractRemainingAmount)
+  if (!Number.isFinite(expected) || !Number.isFinite(paid) || !Number.isFinite(remaining)) return false
+  if (expected <= 0 || paid < 0 || paid > expected) return false
+  if (Math.abs(remaining - (expected - paid)) > 0.000001) return false
+  return input.status === 'CANCELLED' || (input.status === 'PAID') === (remaining === 0)
+}
+
 /** Shared by the reminders cron and database integration tests. */
 export function transitionNasiyaToOverdue(input: {
   scheduleId: string

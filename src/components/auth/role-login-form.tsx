@@ -8,7 +8,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 
 type LoginMode = 'admin' | 'shop'
-type AuthSession = { user?: { role?: string } }
+type ValidatedSession = { role?: string }
 
 function LoginFormInner({ mode }: { mode: LoginMode }) {
   const searchParams = useSearchParams()
@@ -32,13 +32,17 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
 
     async function redirectIfSignedIn() {
       try {
-        const response = await fetch('/api/auth/session', { cache: 'no-store' })
+        // `/api/auth/session` only verifies that the JWT can be decoded. A
+        // JWT can outlive the durable session after idle expiry, a password
+        // reset, or a permission change; redirecting on it would bounce the
+        // user between this page and the protected route forever.
+        const response = await fetch('/api/auth/validate-session', { cache: 'no-store' })
         if (!response.ok) return
-        const session = (await response.json()) as AuthSession
+        const session = (await response.json()) as ValidatedSession
         if (cancelled) return
 
         const expectedRole = isAdmin ? 'SUPER_ADMIN' : 'SHOP_ADMIN'
-        if (session.user?.role === expectedRole) {
+        if (session.role === expectedRole) {
           window.location.replace(safeCallbackUrl)
         }
       } catch {
