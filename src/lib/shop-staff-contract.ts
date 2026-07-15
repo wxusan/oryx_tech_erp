@@ -16,6 +16,13 @@ import { passwordSchema, phoneSchema } from '@/lib/validations'
  */
 export const STAFF_LOGS_PERMISSION: ShopPermissionCode = 'LOG_VIEW'
 
+/**
+ * Archive and restore are one staff-facing capability. They remain distinct
+ * backend permissions so each action is enforced independently by its route,
+ * but the owner grants/revokes them together through one checkbox.
+ */
+export const NASIYA_ARCHIVE_PERMISSION_BUNDLE = ['NASIYA_ARCHIVE', 'NASIYA_REOPEN'] as const satisfies readonly ShopPermissionCode[]
+
 export const staffAssignablePermissionCodes: readonly ShopPermissionCode[] = SHOP_PERMISSION_CATALOG
   .filter((permission) => !permission.ownerOnly && !permission.retired)
   .map((permission) => permission.code)
@@ -38,6 +45,20 @@ export function withStaffLogsPermission(
 ): ShopPermissionCode[] {
   const withoutLogs = permissionCodes.filter((code) => code !== STAFF_LOGS_PERMISSION)
   return logsViewEnabled ? [...withoutLogs, STAFF_LOGS_PERMISSION] : withoutLogs
+}
+
+export function withNasiyaArchivePermissionBundle(
+  permissionCodes: readonly ShopPermissionCode[],
+): ShopPermissionCode[] {
+  const withoutArchiveBundle = permissionCodes.filter(
+    (code) => !NASIYA_ARCHIVE_PERMISSION_BUNDLE.includes(code as typeof NASIYA_ARCHIVE_PERMISSION_BUNDLE[number]),
+  )
+  const archiveEnabled = permissionCodes.some(
+    (code) => NASIYA_ARCHIVE_PERMISSION_BUNDLE.includes(code as typeof NASIYA_ARCHIVE_PERMISSION_BUNDLE[number]),
+  )
+  return archiveEnabled
+    ? [...withoutArchiveBundle, ...NASIYA_ARCHIVE_PERMISSION_BUNDLE]
+    : withoutArchiveBundle
 }
 
 /**

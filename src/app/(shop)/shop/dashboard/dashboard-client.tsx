@@ -164,7 +164,7 @@ export default function DashboardClient({ initialStats, financialView }: { initi
             </div>
             <div className="rounded-md bg-zinc-50 px-3 py-2">
               <div className="flex items-center justify-between gap-3 text-xs text-zinc-500">
-                <span>Shu oy hali kutilmoqda</span>
+                  <span>Shu oy hali kutilmoqda (ochiq majburiyatlar)</span>
                 <span className="font-semibold text-zinc-800">{expectedText}</span>
               </div>
             </div>

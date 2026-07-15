@@ -148,7 +148,9 @@ export async function POST(req: NextRequest) {
         deletedAt: null,
         isImported: true,
         status: { not: 'CANCELLED' },
-        resolutionState: { not: 'WRITTEN_OFF' },
+        // Archived imports no longer represent an active receivable, so they
+        // must not block importing a current replacement contract.
+        resolutionState: 'ACTIVE',
         remainingAtImport: Math.round(remainingDebtInput.amountUzs),
         monthlyPayment: Math.round(monthlyPaymentInput.amountUzs),
         ...(data.originalSaleDate ? { originalSaleDate: data.originalSaleDate } : {}),

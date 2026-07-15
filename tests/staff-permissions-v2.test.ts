@@ -15,8 +15,10 @@ import {
 import {
   createShopStaffSchema,
   legacyStaffPermissionCodes,
+  NASIYA_ARCHIVE_PERMISSION_BUNDLE,
   STAFF_LOGS_PERMISSION,
   updateShopStaffSchema,
+  withNasiyaArchivePermissionBundle,
 } from '@/lib/shop-staff-contract'
 import {
   projectShopStaff,
@@ -110,6 +112,23 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
     expect(createShopStaffSchema.safeParse({ ...base, permissionCodes: ['CASH_SALE_CREATE'] }).success).toBe(false)
     expect(createShopStaffSchema.safeParse({ ...base, permissionCodes: [STAFF_LOGS_PERMISSION] }).success).toBe(false)
     expect(createShopStaffSchema.safeParse({ ...base, logsViewEnabled: true }).success).toBe(true)
+  })
+
+  it('bundles archive and restore into the one staff-facing archive checkbox capability', () => {
+    expect(withNasiyaArchivePermissionBundle(['NASIYA_ARCHIVE'])).toEqual(NASIYA_ARCHIVE_PERMISSION_BUNDLE)
+    expect(withNasiyaArchivePermissionBundle(['NASIYA_REOPEN'])).toEqual(NASIYA_ARCHIVE_PERMISSION_BUNDLE)
+    expect(withNasiyaArchivePermissionBundle(['SALE_CREATE'])).toEqual(['SALE_CREATE'])
+  })
+
+  it('gives the shop owner archive and restore access by default', () => {
+    const owner: ShopPrincipalAccess = {
+      memberKind: 'SHOP_OWNER',
+      legacyFullAccess: false,
+      enabledFeatures: allFeatures,
+      grantedPermissions: new Set(),
+    }
+    expect(principalCan(owner, 'NASIYA_ARCHIVE')).toBe(true)
+    expect(principalCan(owner, 'NASIYA_REOPEN')).toBe(true)
   })
 
   it('validates a staff login change through the same contract as staff creation', () => {

@@ -221,6 +221,9 @@ export async function getShopRangeReport(input: {
       WHERE n."shopId" = ${input.shopId}
         AND n."deletedAt" IS NULL
         AND n."isImported" = false
+        -- An archived contract contributes only its immutable payment rows to
+        -- cash-collected. Its unpaid contractual amount is not revenue.
+        AND n."resolutionState" <> 'ARCHIVED'
         AND n."createdAt" >= ${input.range.start}
         AND n."createdAt" < ${input.range.end}
         ${nasiyaActor}
@@ -253,7 +256,9 @@ export async function getShopRangeReport(input: {
         AND n."deletedAt" IS NULL
         AND n."returnedAt" IS NULL
         AND n."status" <> 'CANCELLED'
-        AND n."resolutionState" <> 'WRITTEN_OFF'
+        -- Archived and written-off contracts are not open receivables. Cash
+        -- payments are queried separately above and remain in the report.
+        AND n."resolutionState" = 'ACTIVE'
         AND (
           (n."contractCurrency" = 'USD' AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01)
           OR (n."contractCurrency" = 'UZS' AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1)

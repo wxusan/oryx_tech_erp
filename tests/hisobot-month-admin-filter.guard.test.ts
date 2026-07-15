@@ -94,7 +94,7 @@ describe('hisobot page: month selector + admin filter UI', () => {
     expect(rangeQuery).toContain("FILTER (WHERE currency = 'UZS')")
     expect(rangeQuery).toContain("FILTER (WHERE currency = 'USD')")
     expect(rangeQuery).toContain('n."isImported" = false')
-    expect(rangeQuery).toContain('n."resolutionState" <> \'WRITTEN_OFF\'')
+    expect(rangeQuery).toContain('n."resolutionState" = \'ACTIVE\'')
   })
 
   it('exports the identical URL range/admin contract with separate UZS and USD columns', () => {

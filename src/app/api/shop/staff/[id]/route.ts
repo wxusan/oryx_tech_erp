@@ -17,6 +17,7 @@ import {
   legacyStaffPermissionCodes,
   STAFF_LOGS_PERMISSION,
   updateShopStaffSchema,
+  withNasiyaArchivePermissionBundle,
   withStaffLogsPermission,
 } from '@/lib/shop-staff-contract'
 import { projectShopStaff, shopStaffProjectionSelect } from '@/lib/server/shop-staff-projection'
@@ -74,6 +75,9 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     const body = await readLimitedJsonBody(request)
     const parsed = updateShopStaffSchema.safeParse({ ...(body as object), staffId: id })
     if (!parsed.success) return badRequest(parsed.error.issues[0]?.message ?? "Xodim ma'lumoti noto'g'ri")
+    const requestedPermissionCodes = parsed.data.permissionCodes === undefined
+      ? undefined
+      : withNasiyaArchivePermissionBundle(parsed.data.permissionCodes)
     if (parsed.data.staffId === principal.actorId) return conflict("O'z profilingizni xodim boshqaruvi orqali o'zgartirib bo'lmaydi")
     if (parsed.data.login !== undefined && principal.memberKind !== 'SHOP_OWNER') {
       return forbidden("Xodim loginini faqat do'kon egasi o'zgartira oladi")
@@ -92,12 +96,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
     }
 
-    if (parsed.data.permissionCodes) {
-      const permissionMessage = validatePermissions(parsed.data.permissionCodes, principal.enabledFeatures)
+    if (requestedPermissionCodes) {
+      const permissionMessage = validatePermissions(requestedPermissionCodes, principal.enabledFeatures)
       if (permissionMessage) return badRequest(permissionMessage)
       if (
         principal.memberKind === 'SHOP_STAFF' &&
-        parsed.data.permissionCodes.some((code) => (
+        requestedPermissionCodes.some((code) => (
           !SHOP_PERMISSION_CATALOG.find((item) => item.code === code)?.staffManagerDelegable
         ))
       ) {
@@ -156,14 +160,14 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       }
 
       const activeFeatures = livePrincipal.enabledFeatures
-      if (parsed.data.permissionCodes) {
-        const livePermissionMessage = validatePermissions(parsed.data.permissionCodes, activeFeatures)
+      if (requestedPermissionCodes) {
+        const livePermissionMessage = validatePermissions(requestedPermissionCodes, activeFeatures)
         if (livePermissionMessage) {
           throw Object.assign(new Error(livePermissionMessage), { code: 'PERMISSION_INVALID' })
         }
         if (
           livePrincipal.memberKind === 'SHOP_STAFF' &&
-          parsed.data.permissionCodes.some((code) => (
+          requestedPermissionCodes.some((code) => (
             !SHOP_PERMISSION_CATALOG.find((item) => item.code === code)?.staffManagerDelegable
           ))
         ) {
@@ -177,23 +181,25 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
       }
       const permissionSnapshotChanged = parsed.data.permissionCodes !== undefined || parsed.data.logsViewEnabled !== undefined
-      const existingPermissionCodes = target.legacyFullAccess
+      const existingPermissionCodes = withNasiyaArchivePermissionBundle(target.legacyFullAccess
         ? legacyStaffPermissionCodes(activeFeatures)
         : [...expandShopPermissionCodes(target.permissions.map((item) => item.permissionCode))]
-            .filter(isActiveShopPermissionCode)
-      const nextPermissionCodes = livePrincipal.memberKind === 'SHOP_OWNER'
-        ? withStaffLogsPermission(
-            parsed.data.permissionCodes ?? existingPermissionCodes.filter((code) => code !== STAFF_LOGS_PERMISSION),
-            parsed.data.logsViewEnabled ?? existingPermissionCodes.includes(STAFF_LOGS_PERMISSION),
-          )
-        : [
+            .filter(isActiveShopPermissionCode))
+      const nextPermissionCodes = withNasiyaArchivePermissionBundle(
+        livePrincipal.memberKind === 'SHOP_OWNER'
+          ? withStaffLogsPermission(
+              requestedPermissionCodes ?? existingPermissionCodes.filter((code) => code !== STAFF_LOGS_PERMISSION),
+              parsed.data.logsViewEnabled ?? existingPermissionCodes.includes(STAFF_LOGS_PERMISSION),
+            )
+          : [
             ...existingPermissionCodes.filter((code) => (
               !SHOP_PERMISSION_CATALOG.find((item) => item.code === code)?.staffManagerDelegable
             )),
-            ...(parsed.data.permissionCodes ?? existingPermissionCodes.filter((code) => (
+            ...(requestedPermissionCodes ?? existingPermissionCodes.filter((code) => (
               SHOP_PERMISSION_CATALOG.find((item) => item.code === code)?.staffManagerDelegable
             ))),
-          ]
+          ],
+      )
       const sessionAffectingChange = parsed.data.isActive !== undefined ||
         passwordHash !== undefined || loginChanged || permissionSnapshotChanged ||
         parsed.data.telegramNotificationsEnabled !== undefined

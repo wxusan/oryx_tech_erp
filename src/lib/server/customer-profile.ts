@@ -177,9 +177,15 @@ export async function getCustomerProfileOverview(input: {
       )
       SELECT
         (coalesce((SELECT sum("contractSalePrice") FROM sale_base WHERE "contractCurrency" = 'UZS'), 0)
-          + coalesce((SELECT sum("contractDownPayment" + "contractFinalAmount") FROM nasiya_base WHERE "contractCurrency" = 'UZS'), 0))::numeric AS contract_uzs,
+          + coalesce((SELECT sum(CASE
+              WHEN "resolutionState" = 'ARCHIVED' THEN "contractDownPayment" + "contractPaidAmount"
+              ELSE "contractDownPayment" + "contractFinalAmount"
+            END) FROM nasiya_base WHERE "contractCurrency" = 'UZS'), 0))::numeric AS contract_uzs,
         (coalesce((SELECT sum("contractSalePrice") FROM sale_base WHERE "contractCurrency" = 'USD'), 0)
-          + coalesce((SELECT sum("contractDownPayment" + "contractFinalAmount") FROM nasiya_base WHERE "contractCurrency" = 'USD'), 0))::numeric AS contract_usd,
+          + coalesce((SELECT sum(CASE
+              WHEN "resolutionState" = 'ARCHIVED' THEN "contractDownPayment" + "contractPaidAmount"
+              ELSE "contractDownPayment" + "contractFinalAmount"
+            END) FROM nasiya_base WHERE "contractCurrency" = 'USD'), 0))::numeric AS contract_usd,
         coalesce((SELECT sum(amount) FROM payments WHERE currency = 'UZS'), 0)::numeric AS collected_uzs,
         coalesce((SELECT sum(amount) FROM payments WHERE currency = 'USD'), 0)::numeric AS collected_usd,
         coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'UZS' AND due_at >= ${day.start} AND due_at < ${day.end}), 0)::numeric AS due_today_uzs,
@@ -191,11 +197,13 @@ export async function getCustomerProfileOverview(input: {
         coalesce((SELECT sum(amount) FROM resolution_movement WHERE currency = 'UZS'), 0)::numeric AS writeoffs_uzs,
         coalesce((SELECT sum(amount) FROM resolution_movement WHERE currency = 'USD'), 0)::numeric AS writeoffs_usd,
         ((coalesce((SELECT sum("salePrice" - purchase_price) FROM sale_base), 0)
-          + coalesce((SELECT sum("totalAmount" - purchase_price) FROM nasiya_base WHERE "isImported" = FALSE), 0))
+          + coalesce((SELECT sum("totalAmount" - purchase_price) FROM nasiya_base
+              WHERE "isImported" = FALSE AND "resolutionState" <> 'ARCHIVED'), 0))
           - (SELECT revenue_reversal FROM return_accounting)
           + (SELECT cost_recovery FROM return_accounting)
           + (SELECT retained_value FROM return_accounting))::numeric AS accrual_profit_uzs,
-        coalesce((SELECT sum("interestAmount") FROM nasiya_base WHERE "isImported" = FALSE), 0)::numeric AS nasiya_interest_uzs,
+        coalesce((SELECT sum("interestAmount") FROM nasiya_base
+            WHERE "isImported" = FALSE AND "resolutionState" <> 'ARCHIVED'), 0)::numeric AS nasiya_interest_uzs,
         coalesce((SELECT count(*) FROM payments WHERE legacy_usd), 0)::integer AS legacy_usd_payment_count,
         (SELECT count(DISTINCT device_id) FROM (
           SELECT "deviceId" AS device_id FROM sale_base UNION SELECT "deviceId" FROM nasiya_base

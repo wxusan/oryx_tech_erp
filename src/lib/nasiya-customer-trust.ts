@@ -80,7 +80,7 @@ export function computeCustomerTrustRating(
   const totalNasiyaCount = nasiyas.length
   const completedNasiyaCount = nasiyas.filter((n) => n.status === 'COMPLETED').length
   const activeNasiyaCount = nasiyas.filter(
-    (n) => n.resolutionState !== 'WRITTEN_OFF' && (n.status === 'ACTIVE' || n.status === 'OVERDUE'),
+    (n) => (n.resolutionState ?? 'ACTIVE') === 'ACTIVE' && (n.status === 'ACTIVE' || n.status === 'OVERDUE'),
   ).length
   const cancelledNasiyaCount = nasiyas.filter((n) => n.status === 'CANCELLED').length
 
@@ -94,9 +94,10 @@ export function computeCustomerTrustRating(
     // A cancelled deal's schedule rows carry no meaningful payment-timing
     // signal (the deal was voided, not paid off or defaulted on).
     if (nasiya.status === 'CANCELLED') continue
-    // A write-off stops future collection/overdue pressure, but already-paid
-    // installment timing remains valid historical trust evidence.
-    const scoreSchedules = nasiya.resolutionState === 'WRITTEN_OFF'
+    // A non-active contract stops contributing new collection/overdue pressure,
+    // while any already-paid instalment remains valid historical evidence.
+    const resolutionState = nasiya.resolutionState ?? 'ACTIVE'
+    const scoreSchedules = resolutionState !== 'ACTIVE'
       ? nasiya.schedules.filter((schedule) => schedule.status === 'PAID')
       : nasiya.schedules
     const score = computeNasiyaPaymentScore({ schedules: scoreSchedules }, now, undefined, nasiya.contractCurrency)

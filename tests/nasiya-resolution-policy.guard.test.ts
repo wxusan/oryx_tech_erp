@@ -29,7 +29,7 @@ describe('Nasiya resolution accounting surface contract', () => {
     expect(source('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')).toContain("value: 'WRITTEN_OFF'")
     expect(source('src/app/api/export/[entity]/route.ts')).toContain("'resolutionState'")
     expect(source('src/lib/server/customer-profile.ts')).toContain('written_off_nasiya_count')
-    expect(source('src/lib/nasiya-customer-trust.ts')).toContain("nasiya.resolutionState === 'WRITTEN_OFF'")
+    expect(source('src/lib/nasiya-customer-trust.ts')).toContain("resolutionState !== 'ACTIVE'")
   })
 
   it('has a durable policy document that explicitly separates archive from write-off', () => {

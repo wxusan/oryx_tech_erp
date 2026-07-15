@@ -12,6 +12,8 @@ This document is the accounting and operational contract for Oryx ERP 2.0. It de
 
 Only an active Nasiya may receive a payment or deferral. Archive, write-off, and reopen require a reason, an idempotency key, an authorized actor, and a serializable transaction. The command records an immutable `NasiyaResolutionEvent`; it never deletes or edits a contract, schedule, or payment row.
 
+Shop owners and super admins have archive and reopen access by default. A staff member receives both actions only when the owner enables the **Nasiyani arxivlash mumkin** checkbox while creating or editing that staff profile. This checkbox does not grant write-off access.
+
 ## Amount policy
 
 - Previously collected cash remains collected cash.
@@ -30,11 +32,11 @@ Only an active Nasiya may receive a payment or deferral. Archive, write-off, and
 | Payment and deferral actions | Blocked | Blocked | Allowed again when permission, entitlement, balance, and schedule state permit |
 | Dashboard active receivables | Excluded from active/due/overdue work totals | Excluded from active/due/overdue work totals | Included again |
 | Historical cash collected | Preserved | Preserved | Preserved |
-| Accrual/contract history | Preserved | Preserved, with the closed amount separately reported as write-off | Preserved, with a compensating reopen amount |
-| Range report | No write-off amount | Native UZS/USD and frozen-UZS write-off totals and count | Reopen subtracts the linked write-off amount and increments reopen count |
+| Sales-value/accrual statistics | Excluded. Only immutable receipt rows remain in cash-collected totals; unpaid contract value, interest, and margin are not counted. | Preserved, with the closed amount separately reported as write-off | Included again after reopen |
+| Range report | Cash already received remains in the payment-period totals. The archived contract's unpaid sales value and expected debt are excluded. | Native UZS/USD and frozen-UZS write-off totals and count | Reopen subtracts the linked write-off amount and restores active receivable/stat inclusion |
 | Export | Resolution state is included; range exports include write-off/reopen columns | Same | Same |
 | Customer profile | Counted in archived history | Counted in written-off history and lifetime write-offs | Returns to active history |
-| Trust calculation | Historical payment timeliness is retained; archived open debt is still not falsely marked paid | Written-off schedules are excluded from current-payment scoring and open receivables | Normal active rules resume |
+| Trust calculation | Historical paid-installment timing is retained; archived debt and unpaid schedules do not affect the live score | Written-off schedules are excluded from current-payment scoring and open receivables | Normal active rules resume |
 | Reminder generation | No new reminders | No new reminders | Eligible reminders may be generated again |
 | Already queued Telegram reminder | Cancelled at delivery revalidation | Cancelled at delivery revalidation | A stale pre-reopen message is still revalidated; a fresh eligible reminder may be generated |
 
@@ -50,4 +52,3 @@ Any production data repair must remain separate from deployment and requires:
 4. explicit approval of each business rule;
 5. immutable audit evidence for applied changes;
 6. post-repair reconciliation by native currency.
-

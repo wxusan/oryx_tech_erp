@@ -58,6 +58,10 @@ export async function getShopAccrualAggregate(input: {
       WHERE n."shopId" = ${input.shopId}
         AND n."deletedAt" IS NULL
         AND n."isImported" = false
+        -- Sales-value/accrual is deliberately limited to live contracts.
+        -- Payments already received on archived contracts are counted by the
+        -- cash aggregate in shop-stats.ts, not by this unpaid contract total.
+        AND n."resolutionState" <> 'ARCHIVED'
         AND n."createdAt" >= ${input.monthStart}
         AND n."createdAt" < ${input.monthEnd}
         ${nasiyaAdmin}
@@ -127,7 +131,10 @@ export async function getShopObligationAggregate(input: {
         AND n."deletedAt" IS NULL
         AND n."returnedAt" IS NULL
         AND n."status" <> 'CANCELLED'
-        AND n."resolutionState" <> 'WRITTEN_OFF'
+        -- An archive removes the uncollected balance from every operational
+        -- debt/expected-income figure. Receipt rows remain independently in
+        -- cash statistics, so previously paid money is never lost.
+        AND n."resolutionState" = 'ACTIVE'
     ), schedule_agg AS (
       SELECT
         coalesce(sum(outstanding) FILTER (

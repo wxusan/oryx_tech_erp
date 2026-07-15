@@ -37,7 +37,7 @@ export async function getCustomerTrustFactorsForList(input: {
       count(DISTINCT n."id")::integer AS total_nasiya_count,
       count(DISTINCT n."id") FILTER (WHERE n."status" = 'COMPLETED')::integer AS completed_nasiya_count,
       count(DISTINCT n."id") FILTER (
-        WHERE n."status" IN ('ACTIVE', 'OVERDUE') AND n."resolutionState" <> 'WRITTEN_OFF'
+        WHERE n."status" IN ('ACTIVE', 'OVERDUE') AND n."resolutionState" = 'ACTIVE'
       )::integer AS active_nasiya_count,
       count(DISTINCT n."id") FILTER (WHERE n."status" = 'CANCELLED')::integer AS cancelled_nasiya_count,
       count(s."id") FILTER (
@@ -45,7 +45,6 @@ export async function getCustomerTrustFactorsForList(input: {
       )::integer AS paid_installment_count,
       count(s."id") FILTER (
         WHERE n."status" <> 'CANCELLED'
-          AND n."resolutionState" <> 'WRITTEN_OFF'
           AND s."status" = 'PAID'
           AND s."paidAt" IS NOT NULL
           AND s."paidAt" <= coalesce(s."delayedUntil", s."dueDate") + interval '1 day'
@@ -68,6 +67,7 @@ export async function getCustomerTrustFactorsForList(input: {
       ), 0)::numeric AS max_days_late,
       count(s."id") FILTER (
         WHERE n."status" <> 'CANCELLED'
+          AND n."resolutionState" = 'ACTIVE'
           AND coalesce(s."delayedUntil", s."dueDate") < ${todayStart}
           AND (
             (n."contractCurrency" = 'USD'

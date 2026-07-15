@@ -92,6 +92,26 @@ describe('written-off debt stops current collection pressure without erasing pai
   })
 })
 
+describe('archived debt stays out of live trust pressure without erasing paid history', () => {
+  it('does not count an unpaid archived schedule as current overdue or active', () => {
+    const rating = computeCustomerTrustRating([{
+      status: 'OVERDUE',
+      resolutionState: 'ARCHIVED',
+      contractCurrency: 'UZS',
+      schedules: [
+        paidLate(new Date('2026-01-01'), 3),
+        overdueUnpaid(new Date('2026-02-01')),
+      ],
+    }], now)
+    expect(rating.factors.totalNasiyaCount).toBe(1)
+    expect(rating.factors.activeNasiyaCount).toBe(0)
+    expect(rating.factors.paidInstallmentCount).toBe(1)
+    expect(rating.factors.lateInstallmentCount).toBe(1)
+    expect(rating.factors.currentOverdueScheduleCount).toBe(0)
+    expect(rating.factors.hasCurrentOverdue).toBe(false)
+  })
+})
+
 describe('multiple fully-completed, all-on-time nasiyas -> VERY_HIGH', () => {
   it('requires zero late payments and zero cancellations', () => {
     const nasiyas: CustomerNasiyaInput[] = [

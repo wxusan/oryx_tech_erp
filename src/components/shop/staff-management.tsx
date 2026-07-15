@@ -10,7 +10,12 @@ import {
   type ShopPermissionGroup,
   type ShopPermissionCode,
 } from '@/lib/access-control'
-import { STAFF_LOGS_PERMISSION, type ShopStaffDto } from '@/lib/shop-staff-contract'
+import {
+  NASIYA_ARCHIVE_PERMISSION_BUNDLE,
+  STAFF_LOGS_PERMISSION,
+  withNasiyaArchivePermissionBundle,
+  type ShopStaffDto,
+} from '@/lib/shop-staff-contract'
 import { formatUzPhoneDisplay, isValidPhone } from '@/lib/phone'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -28,7 +33,8 @@ import {
 } from '@/components/ui/dialog'
 
 const assignablePermissions = SHOP_PERMISSION_CATALOG.filter(
-  (item) => !item.ownerOnly && !item.retired && item.code !== STAFF_LOGS_PERMISSION,
+  (item) => !item.ownerOnly && !item.retired &&
+    item.code !== STAFF_LOGS_PERMISSION && item.code !== 'NASIYA_REOPEN',
 )
 
 const groupLabels: Record<ShopPermissionGroup, string> = {
@@ -186,7 +192,7 @@ export function StaffManagement() {
         member.telegramNotificationsEnabled && enabledFeatures.has('TELEGRAM'),
       ),
       logsViewEnabled: member.logsViewEnabled ?? false,
-      permissionCodes: member.permissionCodes ?? [],
+      permissionCodes: withNasiyaArchivePermissionBundle(member.permissionCodes ?? []),
       isActive: member.isActive ?? true,
       note: '',
     })
@@ -197,7 +203,10 @@ export function StaffManagement() {
 
   function togglePermission(code: ShopPermissionCode) {
     const definition = SHOP_PERMISSION_CATALOG.find((item) => item.code === code)
-    const enabling = !form.permissionCodes.includes(code)
+    const isArchiveBundle = code === 'NASIYA_ARCHIVE'
+    const enabling = isArchiveBundle
+      ? !NASIYA_ARCHIVE_PERMISSION_BUNDLE.every((permission) => form.permissionCodes.includes(permission))
+      : !form.permissionCodes.includes(code)
     if (
       enabling &&
       isOwner &&
@@ -207,9 +216,13 @@ export function StaffManagement() {
     ) return
     setForm((current) => ({
       ...current,
-      permissionCodes: current.permissionCodes.includes(code)
-        ? current.permissionCodes.filter((item) => item !== code)
-        : [...current.permissionCodes, code],
+      permissionCodes: isArchiveBundle
+        ? enabling
+          ? withNasiyaArchivePermissionBundle([...current.permissionCodes, 'NASIYA_ARCHIVE'])
+          : current.permissionCodes.filter((item) => !NASIYA_ARCHIVE_PERMISSION_BUNDLE.includes(item as typeof NASIYA_ARCHIVE_PERMISSION_BUNDLE[number]))
+        : current.permissionCodes.includes(code)
+          ? current.permissionCodes.filter((item) => item !== code)
+          : [...current.permissionCodes, code],
     }))
   }
 
@@ -402,7 +415,7 @@ export function StaffManagement() {
                   const packageEnabled = permissionRequiredFeatures(permission.code).every((feature) => enabledFeatures.has(feature))
                   return (
                     <label key={permission.code} htmlFor={`staff-permission-${permission.code.toLowerCase()}`} className={`flex items-start gap-2 border border-zinc-200 p-2 text-sm ${packageEnabled ? 'cursor-pointer hover:bg-zinc-50' : 'cursor-not-allowed bg-zinc-50 opacity-60'}`}>
-                      <input id={`staff-permission-${permission.code.toLowerCase()}`} type="checkbox" disabled={!packageEnabled} checked={form.permissionCodes.includes(permission.code)} onChange={() => togglePermission(permission.code)} className="mt-0.5" />
+                      <input id={`staff-permission-${permission.code.toLowerCase()}`} type="checkbox" disabled={!packageEnabled} checked={permission.code === 'NASIYA_ARCHIVE' ? NASIYA_ARCHIVE_PERMISSION_BUNDLE.every((code) => form.permissionCodes.includes(code)) : form.permissionCodes.includes(permission.code)} onChange={() => togglePermission(permission.code)} className="mt-0.5" />
                       <span className="min-w-0"><span className="block font-medium text-zinc-800">{permission.label}</span><span className="block text-xs text-zinc-500">{permission.description} · {riskLabels[permission.risk]}{packageEnabled ? '' : ' · Paketda yoqilmagan'}</span></span>
                     </label>
                   )

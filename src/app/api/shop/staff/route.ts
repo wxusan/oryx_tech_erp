@@ -15,6 +15,7 @@ import {
 } from '@/lib/server/shop-access'
 import {
   createShopStaffSchema,
+  withNasiyaArchivePermissionBundle,
   withStaffLogsPermission,
 } from '@/lib/shop-staff-contract'
 import {
@@ -102,9 +103,11 @@ export async function POST(request: NextRequest) {
     const parsed = createShopStaffSchema.safeParse(await readLimitedJsonBody(request))
     if (!parsed.success) return badRequest(parsed.error.issues[0]?.message ?? "Xodim ma'lumoti noto'g'ri")
 
-    const permissionCodes = withStaffLogsPermission(
-      parsed.data.permissionCodes,
-      parsed.data.logsViewEnabled,
+    const permissionCodes = withNasiyaArchivePermissionBundle(
+      withStaffLogsPermission(
+        parsed.data.permissionCodes,
+        parsed.data.logsViewEnabled,
+      ),
     )
     if (
       principal.memberKind === 'SHOP_STAFF' &&
