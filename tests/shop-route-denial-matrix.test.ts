@@ -39,6 +39,7 @@ type RouteModule = Partial<Record<'GET' | 'POST' | 'PATCH' | 'DELETE', (...args:
 
 const routes: Array<{ path: string; load: () => Promise<RouteModule> }> = [
   { path: 'src/app/api/admin/currency-rate/route.ts', load: () => import('@/app/api/admin/currency-rate/route') },
+  { path: 'src/app/api/admin/ops/acknowledge/route.ts', load: () => import('@/app/api/admin/ops/acknowledge/route') },
   { path: 'src/app/api/admin/ops/route.ts', load: () => import('@/app/api/admin/ops/route') },
   { path: 'src/app/api/admin/payments/route.ts', load: () => import('@/app/api/admin/payments/route') },
   { path: 'src/app/api/admin/profile/route.ts', load: () => import('@/app/api/admin/profile/route') },

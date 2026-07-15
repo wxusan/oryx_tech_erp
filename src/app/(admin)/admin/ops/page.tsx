@@ -1,7 +1,8 @@
 'use client'
 
+import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Activity, AlertTriangle, Loader2, RefreshCw } from 'lucide-react'
+import { Activity, AlertTriangle, CheckCircle2, Loader2, RefreshCw } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { uzDateTime } from '@/lib/dates'
 import type { ApiResponse } from '@/types'
@@ -33,6 +34,10 @@ interface FailedNotification {
 
 interface OpsPayload {
   windowDays: number
+  alertWindow: {
+    startsAt: string | null
+    acknowledgedAt: string | null
+  }
   levelCounts: Record<string, number>
   notificationCounts: Record<string, number>
   notificationWarnings: string[]
@@ -70,6 +75,8 @@ function queueAge(seconds: number) {
 
 export default function AdminOpsPage() {
   const scope = useAuthenticatedQueryScope()
+  const [acknowledging, setAcknowledging] = useState(false)
+  const [acknowledgeError, setAcknowledgeError] = useState('')
   const opsQuery = useQuery({
     queryKey: queryKeys.domain(scope, 'adminOps'),
     queryFn: async ({ signal }) => {
@@ -84,6 +91,24 @@ export default function AdminOpsPage() {
   const loading = opsQuery.isPending || opsQuery.isFetching
   const error = opsQuery.error instanceof Error ? opsQuery.error.message : ''
   const refresh = () => { void opsQuery.refetch() }
+  const acknowledgeResolvedAlerts = async () => {
+    if (!window.confirm(
+      "Joriy ogohlantirishlar hal qilinganini tasdiqlaysizmi? Oldingi hodisalar o'chirilmaydi; faqat yangi xatoliklar uchun kuzatuv davri boshlanadi.",
+    )) return
+
+    setAcknowledging(true)
+    setAcknowledgeError('')
+    try {
+      const response = await fetch('/api/admin/ops/acknowledge', { method: 'POST' })
+      const json: ApiResponse<{ acknowledgedAt: string }> = await response.json()
+      if (!response.ok || !json.success) throw new Error(json.error || 'Ogohlantirishlarni tozalab bo\'lmadi')
+      await opsQuery.refetch()
+    } catch (acknowledgeErr) {
+      setAcknowledgeError(acknowledgeErr instanceof Error ? acknowledgeErr.message : 'Ogohlantirishlarni tozalab bo\'lmadi')
+    } finally {
+      setAcknowledging(false)
+    }
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -97,19 +122,33 @@ export default function AdminOpsPage() {
             Cron, bildirishnoma navbati va tizim xatoliklari{data ? ` · so'nggi ${data.windowDays} kun` : ''}
           </p>
         </div>
-        <Button
-          variant="outline"
-          onClick={refresh}
-          disabled={loading}
-          className="h-9 w-fit rounded-md border-zinc-200 text-zinc-700"
-        >
-          {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
-          Yangilash
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => { void acknowledgeResolvedAlerts() }}
+            disabled={acknowledging || loading}
+            className="h-9 w-fit rounded-md border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+          >
+            {acknowledging ? <Loader2 className="size-4 animate-spin" /> : <CheckCircle2 className="size-4" />}
+            Yangi kuzatuv davri
+          </Button>
+          <Button
+            variant="outline"
+            onClick={refresh}
+            disabled={loading || acknowledging}
+            className="h-9 w-fit rounded-md border-zinc-200 text-zinc-700"
+          >
+            {loading ? <Loader2 className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            Yangilash
+          </Button>
+        </div>
       </div>
 
       {error && (
         <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{error}</div>
+      )}
+      {acknowledgeError && (
+        <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">{acknowledgeError}</div>
       )}
 
       {loading && !data ? (
@@ -118,6 +157,14 @@ export default function AdminOpsPage() {
         </div>
       ) : data ? (
         <>
+          {data.alertWindow.startsAt && (
+            <div className="flex items-start gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0" />
+              <span>
+                Yangi kuzatuv davri {uzDateTime(data.alertWindow.startsAt)} dan boshlandi. Oldingi hodisalar audit tarixida saqlangan.
+              </span>
+            </div>
+          )}
           {data.notificationWarnings.length > 0 && (
             <div className="space-y-2">
               {data.notificationWarnings.map((warning) => (
@@ -237,6 +284,8 @@ function Stat({ label, value, tone }: { label: string; value: number; tone?: str
       ? 'text-red-700'
       : tone === 'WARN' && value > 0
         ? 'text-amber-700'
+        : (tone === 'ERROR' || tone === 'WARN') && value === 0
+          ? 'text-emerald-700'
         : 'text-zinc-900'
   return (
     <div className="rounded-lg border border-zinc-200 bg-white p-3">

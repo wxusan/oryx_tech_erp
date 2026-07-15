@@ -28,12 +28,20 @@ export async function GET(req: NextRequest) {
     const now = new Date()
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
     const staleProcessingBefore = new Date(now.getTime() - 5 * 60 * 1000)
+    const alertState = await prisma.opsAlertState.findUnique({
+      where: { id: 'platform' },
+      select: { alertWindowStartsAt: true, acknowledgedAt: true },
+    })
+    const activeSince = new Date(Math.max(
+      since.getTime(),
+      alertState?.alertWindowStartsAt.getTime() ?? since.getTime(),
+    ))
 
     const [events, levelGroups, notifGroups, recentFailedNotifications, lastCron, lastCronFailure, oldestActionableNotification] =
       await Promise.all([
         prisma.opsEvent.findMany({
           where: {
-            createdAt: { gte: since },
+            createdAt: { gte: activeSince },
             ...(level === 'INFO' || level === 'WARN' || level === 'ERROR' ? { level } : {}),
           },
           orderBy: { createdAt: 'desc' },
@@ -52,7 +60,7 @@ export async function GET(req: NextRequest) {
         }),
         prisma.opsEvent.groupBy({
           by: ['level'],
-          where: { createdAt: { gte: since } },
+          where: { createdAt: { gte: activeSince } },
           _count: { _all: true },
         }),
         prisma.notification.groupBy({
@@ -60,7 +68,12 @@ export async function GET(req: NextRequest) {
           _count: { _all: true },
         }),
         prisma.notification.findMany({
-          where: { status: { in: ['FAILED', 'CANCELLED'] } },
+          where: {
+            OR: [
+              { status: 'FAILED' },
+              { status: 'CANCELLED', createdAt: { gte: activeSince } },
+            ],
+          },
           orderBy: { lastAttemptAt: 'desc' },
           take: 20,
           select: {
@@ -80,7 +93,7 @@ export async function GET(req: NextRequest) {
           select: { id: true, event: true, level: true, message: true, metadata: true, createdAt: true },
         }),
         prisma.opsEvent.findFirst({
-          where: { event: 'cron.reminders.failed' },
+          where: { event: 'cron.reminders.failed', createdAt: { gte: activeSince } },
           orderBy: { createdAt: 'desc' },
           select: { id: true, event: true, message: true, metadata: true, createdAt: true },
         }),
@@ -120,6 +133,9 @@ export async function GET(req: NextRequest) {
       CANCELLED: 0,
     }
     for (const group of notifGroups) notificationCounts[group.status] = group._count._all
+    notificationCounts.CANCELLED = await prisma.notification.count({
+      where: { status: 'CANCELLED', createdAt: { gte: activeSince } },
+    })
     const oldestActionableAgeSeconds = oldestActionableNotification
       ? Math.max(0, Math.floor((now.getTime() - oldestActionableNotification.createdAt.getTime()) / 1000))
       : 0
@@ -140,6 +156,10 @@ export async function GET(req: NextRequest) {
 
     return ok({
       windowDays: 7,
+      alertWindow: {
+        startsAt: alertState?.alertWindowStartsAt ?? null,
+        acknowledgedAt: alertState?.acknowledgedAt ?? null,
+      },
       levelCounts,
       notificationCounts,
       notificationWarnings,
