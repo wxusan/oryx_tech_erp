@@ -64,9 +64,12 @@ deliberately:
 2. runs `scripts/production-release-preflight.mjs --phase=pre` using count-only,
    read-only queries and aborts on a migration-blocking identity conflict;
 3. applies only reviewed backward-compatible migrations;
-4. runs the post-migration preflight and proves every release migration is
+4. runs the explicitly approved payment-profit backfill after migration; the
+   script preserves original financial/audit rows and reports ambiguous history
+   as reconstruction gaps;
+5. runs the post-migration preflight and proves every release migration is
    recorded;
-5. publishes the artifact created in step 1.
+6. publishes the artifact created in step 1.
 
 `vercel.json` must keep `node scripts/vercel-build.mjs` as its `buildCommand`.
 Replacing it with bare `next build`, `npm run build`, or an unguarded migration
@@ -82,7 +85,9 @@ perform a repair.
 - Migration is backward-compatible with the currently deployed version.
 - Production preflight reports zero blocking issues.
 - Forward-fix and stop conditions documented.
-- No unapproved historic data repair bundled into the schema release.
+- No unapproved historic data repair bundled into the schema release. The
+  payment-profit reconstruction is approved only for the release documented in
+  `docs/accounting/monthly-profit-recognition.md`; every other repair remains separate.
 
 ## Post-release smoke gate
 

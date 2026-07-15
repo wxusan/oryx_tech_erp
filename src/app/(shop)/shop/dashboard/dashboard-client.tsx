@@ -115,6 +115,12 @@ export default function DashboardClient({ initialStats, financialView }: { initi
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
+  const interestExpectedText = formatPartitionedMoney({
+    amountUzs: stats.nasiyaInterestExpectedThisMonthUzs,
+    amountUsd: stats.nasiyaInterestExpectedThisMonthUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
   const overdueCard = (
     <Card className="rounded-lg border-red-200 bg-red-50/40 transition-colors hover:border-red-300 hover:bg-red-50">
       <CardHeader>
@@ -164,7 +170,7 @@ export default function DashboardClient({ initialStats, financialView }: { initi
             </div>
             <div className="rounded-md bg-zinc-50 px-3 py-2">
               <div className="flex items-center justify-between gap-3 text-xs text-zinc-500">
-                <span>Shu oy hali kutilmoqda (ochiq majburiyatlar)</span>
+                <span>Shu oy kutilayotgan foyda</span>
                 <span className="font-semibold text-zinc-800">{expectedText}</span>
               </div>
             </div>
@@ -175,16 +181,15 @@ export default function DashboardClient({ initialStats, financialView }: { initi
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:col-span-7">
           <Card className="rounded-lg">
             <CardHeader>
-              <CardDescription>Sotuv foydasi</CardDescription>
+              <CardDescription>Bu oyning haqiqiy foydasi</CardDescription>
               <CardAction>
                 <TrendingUp className="size-4 text-zinc-400" />
               </CardAction>
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-zinc-900">{fmt(stats.accrualGrossProfitThisMonth, currency)}</div>
+              <div className="text-2xl font-bold text-zinc-900">{fmt(stats.actualProfitThisMonth, currency)}</div>
               <p className="mt-2 text-xs text-zinc-500">
-                Sotuv narxidan tannarx ayiriladi
-                {stats.nasiyaInterestThisMonth > 0 ? ` · Nasiya foizi: ${fmt(stats.nasiyaInterestThisMonth, currency)}` : ''}
+                Faqat shu oy tushgan pul ulushi · olingan foiz: {fmt(stats.interestReceivedThisMonth, currency)} · kutilayotgan foiz: {interestExpectedText}
               </p>
               <KoLink href="/shop/hisobot" enabled={canViewReports} />
             </CardContent>
@@ -251,7 +256,7 @@ export default function DashboardClient({ initialStats, financialView }: { initi
           <CardContent>
             <div className="flex items-center justify-between gap-3">
               <div>
-                <div className="text-xs text-zinc-500">{financialView ? 'Bu oy kutilmoqda' : "Muddati o'tgan"}</div>
+                <div className="text-xs text-zinc-500">{financialView ? 'Kutilayotgan foyda' : "Muddati o'tgan"}</div>
                 <div className="mt-1 text-xl font-bold text-zinc-900">{financialView ? expectedText : stats.overdueCount}</div>
               </div>
               <CalendarClock className="size-5 text-zinc-400" />

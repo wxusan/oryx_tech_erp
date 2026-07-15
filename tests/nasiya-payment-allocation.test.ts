@@ -104,7 +104,7 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
   it('delegates the per-schedule allocation loop to the pure, unit-tested allocateNasiyaPayment (item 4 rate-drift fix)', () => {
     expect(source).toContain("import { allocateNasiyaPayment, totalContractOutstanding } from '@/lib/nasiya-payment-allocation'")
     expect(source).toContain('const scheduleUpdates = allocateNasiyaPayment({')
-    expect(source).toContain('for (const scheduleUpdate of scheduleUpdates)')
+    expect(source).toContain('for (const [allocationIndex, scheduleUpdate] of scheduleUpdates.entries())')
   })
 
   it('marks a schedule PAID (with paidAt) only when fully covered per the CONTRACT ledger (item 4 fix — never the legacy UZS ledger alone)', () => {

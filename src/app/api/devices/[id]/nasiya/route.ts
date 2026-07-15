@@ -25,6 +25,8 @@ import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
 import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
+import { computeSaleContractMargin } from '@/lib/nasiya-contract'
+import { buildNasiyaComponentPlan, splitUzsReportingAmount } from '@/lib/payment-profit-allocation'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -152,6 +154,28 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (!device) throw { status: 404, message: "Qurilma topilmadi" }
       if (device.status !== 'IN_STOCK') throw { status: 409, message: "Qurilma nasiyaga sotishga tayyor emas" }
 
+      const contractMarginAmount = computeSaleContractMargin(
+        contractAmounts.totalAmount,
+        totalInput.inputCurrency,
+        totalInput.exchangeRateUsed,
+        {
+          purchaseCurrency: device.purchaseCurrency,
+          purchaseInputAmount: Number(device.purchaseInputAmount),
+          purchaseAmountUzsSnapshot: Number(device.purchaseAmountUzsSnapshot),
+        },
+      )
+      if (contractMarginAmount === null) {
+        throw { status: 409, message: "Qurilma tannarxini shartnoma valyutasida aniq ajratib bo'lmadi" }
+      }
+      const componentPlan = buildNasiyaComponentPlan({
+        currency: totalInput.inputCurrency,
+        totalAmount: contractAmounts.totalAmount,
+        downPayment: contractAmounts.downPayment,
+        interestAmount: contractAmounts.interestAmount,
+        costBasisAmount: contractAmounts.totalAmount - contractMarginAmount,
+        scheduleExpectedAmounts: contractScheduleItems.map((item) => item.expectedAmount),
+      })
+
       const reserved = await tx.device.updateMany({
         where: { id: deviceId, shopId, deletedAt: null, status: 'IN_STOCK' },
         data: { status: 'SOLD_NASIYA', updatedAt: new Date() },
@@ -203,6 +227,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           contractMonthlyPayment: contractAmounts.monthlyPayment,
           contractRemainingAmount: contractAmounts.finalNasiyaAmount,
           contractPaidAmount: 0,
+          contractCostBasisAmount: componentPlan.costBasisAmount,
+          contractMarginAmount: componentPlan.marginAmount,
+          contractDownPaymentPrincipalAmount: componentPlan.downPayment.principal,
+          contractDownPaymentMarginAmount: componentPlan.downPayment.margin,
+          accountingReconstructionStatus: 'COMPLETE',
+          accountingReconstructedAt: new Date(),
         },
       })
 
@@ -217,11 +247,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           contractCurrency: totalInput.inputCurrency,
           contractExpectedAmount: contractScheduleItems[index].expectedAmount,
           contractRemainingAmount: contractScheduleItems[index].expectedAmount,
+          contractPrincipalAmount: componentPlan.schedules[index].principal,
+          contractMarginAmount: componentPlan.schedules[index].margin,
+          contractInterestAmount: componentPlan.schedules[index].interest,
         })),
       })
 
       if (amounts.downPayment > 0) {
-        await tx.nasiyaPayment.create({
+        const initialPayment = await tx.nasiyaPayment.create({
           data: {
             nasiyaId: nasiya.id,
             nasiyaScheduleId: null,
@@ -235,6 +268,29 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             paymentInputCurrency: downPaymentInput.inputCurrency,
             paymentExchangeRate: downPaymentInput.exchangeRateUsed,
             appliedAmountInContractCurrency: contractAmounts.downPayment,
+          },
+        })
+        const reportingComponents = splitUzsReportingAmount({
+          amountUzs: amounts.downPayment,
+          contractAmount: contractAmounts.downPayment,
+          contractComponents: componentPlan.downPayment,
+        })
+        await tx.nasiyaPaymentAllocation.create({
+          data: {
+            shopId,
+            nasiyaId: nasiya.id,
+            nasiyaPaymentId: initialPayment.id,
+            nasiyaScheduleId: null,
+            sequence: 1,
+            contractCurrency: totalInput.inputCurrency,
+            contractAmount: contractAmounts.downPayment,
+            contractPrincipalAmount: componentPlan.downPayment.principal,
+            contractMarginAmount: componentPlan.downPayment.margin,
+            contractInterestAmount: 0,
+            amountUzs: amounts.downPayment,
+            principalAmountUzs: reportingComponents.principal,
+            marginAmountUzs: reportingComponents.margin,
+            interestAmountUzs: 0,
           },
         })
       }

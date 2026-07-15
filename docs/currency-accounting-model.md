@@ -184,11 +184,14 @@ summing frozen snapshots and converting the total once).
 
 ## 11. Reports/dashboard
 
-- **Creation-time aggregates** (`accrualRevenueThisMonth`, sold-device
-  profit) keep summing the legacy UZS snapshot fields, unchanged — each is
-  a frozen historical fact, and summing many frozen UZS facts from
-  different dates is ordinary, correct accounting (no reconversion
-  involved).
+- **Payment-time profit aggregates** freeze the principal/margin/interest
+  split on `SalePayment` and `NasiyaPaymentAllocation`. Actual profit uses
+  the payment's UZS snapshot and `paidAt`; it never recognizes a future
+  Nasiya contract at creation. See
+  `docs/accounting/monthly-profit-recognition.md`.
+- **Expected-profit aggregates** retain native UZS/USD partitions and include
+  only unpaid margin/interest whose effective due date is in the selected
+  month. Full contract interest remains reference-only on Nasiya detail.
 - **Live aggregates** (`expectedThisMonth`, `overdueMoney`,
   `upcomingPayments`) now convert each nasiya's own contract-currency
   balance through today's rate before summing — see §10.
@@ -517,12 +520,11 @@ payments on different days, the legacy snapshot's implicit "rate" is not
 even well-defined, and summing it across many sales would silently mix
 however many different day-rates happened to apply. Converting from the
 single, always-correct `contractRemainingAmount` through one consistent
-current rate avoids that entirely. **Creation-time aggregates**
-(`accrualRevenueThisMonth`, sold-device profit, `inventoryPurchaseCost`)
-remain untouched — each device/sale/nasiya contributes a single,
-frozen-at-its-own-creation-rate UZS number, and summing many independently-
-frozen numbers is ordinary, correct accounting with no reconversion
-involved (see §11).
+current rate avoids that entirely. Creation-time profit aggregates were
+replaced by the payment-time component ledger in §11.
+`inventoryPurchaseCost` remains a frozen UZS stock snapshot; gross live
+receivables continue to use the contract-currency balance conversion
+described here.
 
 The dashboard and hisobot pages now also carry a small "joriy kurs bo'yicha"
 (at today's rate) label/tooltip next to `expectedThisMonth`/`overdueMoney`,

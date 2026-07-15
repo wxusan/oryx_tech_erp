@@ -23,19 +23,19 @@ describe('P1 money/report clarity guard', () => {
     expect(formulas).toContain('netCashFlowThisMonth')
   })
 
-  it('dashboard/report labels distinguish gross turnover, net cash, refunds and sales profit', () => {
+  it('dashboard/report labels distinguish gross turnover, net cash, refunds and actual profit', () => {
     const dashboard = read('src/app/(shop)/shop/dashboard/dashboard-client.tsx')
     const report = read('src/app/(shop)/shop/hisobot/hisobot-client.tsx')
 
     // "Umumiy aylanma" = gross turnover, "Sof tushum" = net cash after refunds,
-    // "Sotuv foydasi" = sale price minus purchase cost (not full net profit).
+    // and actual profit includes only margin/interest recognized on receipts.
     expect(dashboard).toContain('Umumiy aylanma')
     expect(dashboard).toContain('Sof tushum')
-    expect(dashboard).toContain('Sotuv foydasi')
+    expect(dashboard).toContain('haqiqiy foydasi')
     expect(report).toContain('Umumiy aylanma')
     expect(report).toContain('Sof tushum')
     expect(report).toContain('Qaytarilgan summa')
-    expect(report).toContain('Sotuv foydasi')
+    expect(report).toContain('Haqiqiy foyda')
   })
 
   it('does not present a percentage made from unrelated receipt and obligation cohorts', () => {
@@ -46,7 +46,7 @@ describe('P1 money/report clarity guard', () => {
       expect(source).not.toContain('collectionRate')
       expect(source).not.toContain("Yig'ish darajasi")
       expect(source).not.toContain('Kutilgan pulga nisbatan')
-      expect(source).toContain("ochiq majburiyatlar")
+      expect(source).toContain('kutilayotgan foyda')
     }
     expect(dashboard).toContain('>Sotuvlar</div>')
     expect(dashboard).not.toContain('>Naqd sotuvlar</div>')

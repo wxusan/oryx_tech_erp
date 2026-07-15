@@ -51,6 +51,44 @@ function baseRows(overrides: Partial<ShopStatsRows> = {}): ShopStatsRows {
   }
 }
 
+describe('production payment-basis monthly accounting aggregate', () => {
+  it('uses paid profit, keeps due-month expected profit separate, and leaves gross receivables explicit', () => {
+    const stats = computeShopStatsFromRows(baseRows({
+      saleReceivedSum: 2_000_000,
+      nasiyaReceivedSum: 1_500_000,
+      obligationAggregate: {
+        expectedUzs: 900_000,
+        expectedUsd: 240,
+        overdueUzs: 0,
+        overdueUsd: 0,
+        overdueCount: 0,
+      },
+      monthlyAccountingAggregate: {
+        saleMarginReceivedUzs: 300_000,
+        nasiyaMarginReceivedUzs: 250_000,
+        nasiyaInterestReceivedUzs: 250_000,
+        returnProfitAdjustmentUzs: -100_000,
+        actualProfitUzs: 700_000,
+        expectedProfitUzs: 100_000,
+        expectedProfitUsd: 80,
+        expectedInterestUzs: 0,
+        expectedInterestUsd: 40,
+        reconstructionGapCount: 2,
+      },
+    }))
+
+    expect(stats.grossCashInThisMonth).toBe(3_500_000)
+    expect(stats.actualProfitThisMonth).toBe(700_000)
+    expect(stats.accrualGrossProfitThisMonth).toBe(700_000)
+    expect(stats.expectedProfitThisMonth).toBe(1_100_000)
+    expect(stats.expectedThisMonth).toBe(1_100_000)
+    expect(stats.expectedReceivablesThisMonth).toBe(3_900_000)
+    expect(stats.interestReceivedThisMonth).toBe(250_000)
+    expect(stats.nasiyaInterestExpectedThisMonth).toBe(500_000)
+    expect(stats.accountingReconstructionGapCount).toBe(2)
+  })
+})
+
 describe('worked example: a fully-paid cash sale moves profit AND turnover together', () => {
   it('device bought for 5,000,000 so\'m, sold for 6,250,000 so\'m, fully paid immediately this month', () => {
     const stats = computeShopStatsFromRows(

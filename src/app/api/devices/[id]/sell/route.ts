@@ -23,6 +23,7 @@ import { getShopCurrencyContext } from '@/lib/server/currency'
 import { roundContractMoney, computeSaleContractMargin } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
+import { allocateCumulativePaymentComponents, buildSaleComponentPlan, splitUzsReportingAmount } from '@/lib/payment-profit-allocation'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -92,6 +93,33 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (!device) throw { status: 404, message: "Qurilma topilmadi" }
       if (device.status !== 'IN_STOCK') throw { status: 409, message: "Qurilma sotishga tayyor emas" }
 
+      const contractMarginAmount = computeSaleContractMargin(
+        contractSalePrice,
+        contractCurrency,
+        salePriceInput.exchangeRateUsed,
+        {
+          purchaseCurrency: device.purchaseCurrency,
+          purchaseInputAmount: Number(device.purchaseInputAmount),
+          purchaseAmountUzsSnapshot: Number(device.purchaseAmountUzsSnapshot),
+        },
+      )
+      if (contractMarginAmount === null) {
+        throw { status: 409, message: "Qurilma tannarxini shartnoma valyutasida aniq ajratib bo'lmadi" }
+      }
+      const componentPlan = buildSaleComponentPlan({
+        currency: contractCurrency,
+        salePrice: contractSalePrice,
+        costBasisAmount: contractSalePrice - contractMarginAmount,
+      })
+      const initialComponents = contractPaid > 0
+        ? allocateCumulativePaymentComponents({
+            currency: contractCurrency,
+            totals: componentPlan,
+            paid: { principal: 0, margin: 0, interest: 0 },
+            paymentAmount: contractPaid,
+          })
+        : null
+
       const reserved = await tx.device.updateMany({
         where: { id: deviceId, shopId, deletedAt: null, status: 'IN_STOCK' },
         data: { status: nextDeviceStatus, updatedAt: new Date() },
@@ -131,10 +159,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           contractSalePrice,
           contractAmountPaid: contractPaid,
           contractRemainingAmount: contractRemaining,
+          contractCostBasisAmount: componentPlan.principal,
+          contractMarginAmount: componentPlan.margin,
+          contractPrincipalPaidAmount: initialComponents?.paidAfter.principal ?? 0,
+          contractMarginPaidAmount: initialComponents?.paidAfter.margin ?? 0,
+          accountingReconstructionStatus: 'COMPLETE',
+          accountingReconstructedAt: new Date(),
         },
       })
 
       if (paid > 0) {
+        const reportingComponents = splitUzsReportingAmount({
+          amountUzs: paid,
+          contractAmount: contractPaid,
+          contractComponents: initialComponents!.allocation,
+        })
         await tx.salePayment.create({
           data: {
             saleId: sale.id,
@@ -147,6 +186,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             paymentInputCurrency: salePriceInput.inputCurrency,
             paymentExchangeRate: salePriceInput.exchangeRateUsed,
             appliedAmountInContractCurrency: contractPaid,
+            contractPrincipalAmount: initialComponents!.allocation.principal,
+            contractMarginAmount: initialComponents!.allocation.margin,
+            principalAmountUzs: reportingComponents.principal,
+            marginAmountUzs: reportingComponents.margin,
             idempotencyKey: `sale-initial:${sale.id}`,
             createdBy: session.user.id,
           },
@@ -182,11 +225,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               adminName: session.user.name,
               currency,
               // Item 14 — sale margin, shown when computable (never guessed).
-              profit: computeSaleContractMargin(contractSalePrice, contractCurrency, salePriceInput.exchangeRateUsed, {
-                purchaseCurrency: device.purchaseCurrency,
-                purchaseInputAmount: Number(device.purchaseInputAmount),
-                purchaseAmountUzsSnapshot: Number(device.purchaseAmountUzsSnapshot),
-              }),
+              profit: contractMarginAmount,
             }),
             telegramId: admin.telegramId!,
             recipientShopAdminId: admin.id,

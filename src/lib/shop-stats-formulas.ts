@@ -32,6 +32,19 @@ export interface ShopStatsRows {
     nasiyaInterestUzs: unknown
     nasiyaDeviceCostUzs: unknown
   }
+  /** Production payment-basis recognition aggregate. */
+  monthlyAccountingAggregate?: {
+    saleMarginReceivedUzs: unknown
+    nasiyaMarginReceivedUzs: unknown
+    nasiyaInterestReceivedUzs: unknown
+    returnProfitAdjustmentUzs: unknown
+    actualProfitUzs: unknown
+    expectedProfitUzs: unknown
+    expectedProfitUsd: unknown
+    expectedInterestUzs: unknown
+    expectedInterestUsd: unknown
+    reconstructionGapCount: number
+  }
   /** Sum of SalePayment.amount (legacy UZS) with paidAt this month — CASH basis. */
   saleReceivedSum: unknown
   /** Every Nasiya created this month (excluding imports) — ACCRUAL basis. */
@@ -86,6 +99,7 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
     totalDevices,
     cashSalesThisMonth,
     accrualAggregate,
+    monthlyAccountingAggregate,
     saleReceivedSum,
     nasiyaSoldThisMonth,
     nasiyaReceivedSum,
@@ -112,11 +126,9 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
   const nasiyaReceived = Number(nasiyaReceivedSum ?? 0)
   const cashReceivedThisMonth = cashReceived + nasiyaReceived
 
-  // ACCRUAL basis: every deal CREATED this month counts at its full value the
-  // instant the sale/nasiya happens, regardless of payment status — matches
-  // standard retail practice (margin is realized when goods change hands) and
-  // is the same recognition Nasiya already used before Sale existed. See
-  // "Sotuv foydasi" / "Sof foyda" in docs/audits/dashboard-stat-formulas.md.
+  // Legacy row-derived values remain only as a compatibility fallback for old
+  // pure callers. Production supplies monthlyAccountingAggregate below, which
+  // replaces creation-time accrual with payment-date recognition.
   const soldDeviceCost = accrualAggregate
     ? Number(accrualAggregate.saleDeviceCostUzs)
     : cashSalesThisMonth.reduce((sum, sale) => sum + Number(sale.device.purchasePrice), 0)
@@ -171,6 +183,20 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
     }
   }
   const expectedThisMonth = partitionTotalUzs(expectedPartition)
+  const expectedProfitPartition: MoneyPartition = monthlyAccountingAggregate
+    ? {
+        uzs: Number(monthlyAccountingAggregate.expectedProfitUzs),
+        usd: Number(monthlyAccountingAggregate.expectedProfitUsd),
+      }
+    : expectedPartition
+  const expectedProfitThisMonth = partitionTotalUzs(expectedProfitPartition)
+  const expectedInterestPartition: MoneyPartition = monthlyAccountingAggregate
+    ? {
+        uzs: Number(monthlyAccountingAggregate.expectedInterestUzs),
+        usd: Number(monthlyAccountingAggregate.expectedInterestUsd),
+      }
+    : { uzs: 0, usd: 0 }
+  const nasiyaInterestExpectedThisMonth = partitionTotalUzs(expectedInterestPartition)
   const overdueSchedules = obligationAggregate
     ? []
     : nasiyaSchedulesForStats.filter((schedule) => {
@@ -206,6 +232,18 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
     returnInventoryCostRecoveriesThisMonth +
     returnRetainedValueThisMonth
   const netNasiyaInterestThisMonth = nasiyaInterestThisMonth - returnInterestReversalsThisMonth
+  const actualProfitThisMonth = monthlyAccountingAggregate
+    ? Number(monthlyAccountingAggregate.actualProfitUzs)
+    : cashBasisProfitThisMonth
+  const interestReceivedThisMonth = monthlyAccountingAggregate
+    ? Number(monthlyAccountingAggregate.nasiyaInterestReceivedUzs)
+    : netNasiyaInterestThisMonth
+  const reportedRevenueThisMonth = monthlyAccountingAggregate ? cashReceivedThisMonth : netAccrualRevenueThisMonth
+  const reportedRevenueBeforeReturnsThisMonth = monthlyAccountingAggregate ? cashReceivedThisMonth : accrualRevenueThisMonth
+  const reportedGrossProfitThisMonth = monthlyAccountingAggregate ? actualProfitThisMonth : accrualGrossProfitThisMonth
+  const reportedGrossProfitBeforeReturnsThisMonth = monthlyAccountingAggregate
+    ? actualProfitThisMonth - Number(monthlyAccountingAggregate.returnProfitAdjustmentUzs)
+    : accrualGrossProfitBeforeReturnsThisMonth
   const overdueCount = obligationAggregate?.overdueCount ?? overdueSchedules.length + overdueSales.length
 
   return {
@@ -213,23 +251,40 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
     cashReceivedThisMonth,
     soldThisMonth: accrualAggregate?.saleCount ?? cashSalesThisMonth.length,
     activeNasiyalar,
-    expectedThisMonth,
-    expectedThisMonthUzs: expectedPartition.uzs,
-    expectedThisMonthUsd: expectedPartition.usd,
-    expectedThisMonthComplete: expectedPartition.usd === 0 || Boolean(usdUzsRate),
+    // Historical field names now point at expected PROFIT, not the full
+    // receivable. Gross due amounts remain available under explicit names.
+    expectedThisMonth: expectedProfitThisMonth,
+    expectedThisMonthUzs: expectedProfitPartition.uzs,
+    expectedThisMonthUsd: expectedProfitPartition.usd,
+    expectedThisMonthComplete: expectedProfitPartition.usd === 0 || Boolean(usdUzsRate),
+    expectedProfitThisMonth,
+    expectedProfitThisMonthUzs: expectedProfitPartition.uzs,
+    expectedProfitThisMonthUsd: expectedProfitPartition.usd,
+    expectedProfitThisMonthComplete: expectedProfitPartition.usd === 0 || Boolean(usdUzsRate),
+    expectedReceivablesThisMonth: expectedThisMonth,
+    expectedReceivablesThisMonthUzs: expectedPartition.uzs,
+    expectedReceivablesThisMonthUsd: expectedPartition.usd,
+    expectedReceivablesThisMonthComplete: expectedPartition.usd === 0 || Boolean(usdUzsRate),
     overdueMoney,
     overdueMoneyUzs: overduePartition.uzs,
     overdueMoneyUsd: overduePartition.usd,
     overdueMoneyComplete: overduePartition.usd === 0 || Boolean(usdUzsRate),
     inventoryPurchaseCost,
-    realProfitThisMonth: cashBasisProfitThisMonth,
-    accrualRevenueThisMonth: netAccrualRevenueThisMonth,
-    accrualRevenueBeforeReturnsThisMonth: accrualRevenueThisMonth,
-    accrualGrossProfitThisMonth,
-    accrualGrossProfitBeforeReturnsThisMonth,
-    nasiyaInterestThisMonth: netNasiyaInterestThisMonth,
-    nasiyaInterestBeforeReturnsThisMonth: nasiyaInterestThisMonth,
-    expectedProfitWithInterestThisMonth: accrualGrossProfitThisMonth + netNasiyaInterestThisMonth,
+    actualProfitThisMonth,
+    realProfitThisMonth: actualProfitThisMonth,
+    accrualRevenueThisMonth: reportedRevenueThisMonth,
+    accrualRevenueBeforeReturnsThisMonth: reportedRevenueBeforeReturnsThisMonth,
+    accrualGrossProfitThisMonth: reportedGrossProfitThisMonth,
+    accrualGrossProfitBeforeReturnsThisMonth: reportedGrossProfitBeforeReturnsThisMonth,
+    interestReceivedThisMonth,
+    nasiyaInterestThisMonth: interestReceivedThisMonth,
+    nasiyaInterestBeforeReturnsThisMonth: interestReceivedThisMonth,
+    nasiyaInterestExpectedThisMonth,
+    nasiyaInterestExpectedThisMonthUzs: expectedInterestPartition.uzs,
+    nasiyaInterestExpectedThisMonthUsd: expectedInterestPartition.usd,
+    nasiyaInterestExpectedThisMonthComplete: expectedInterestPartition.usd === 0 || Boolean(usdUzsRate),
+    expectedProfitWithInterestThisMonth: expectedProfitThisMonth,
+    accountingReconstructionGapCount: monthlyAccountingAggregate?.reconstructionGapCount ?? 0,
     grossCashInThisMonth: cashReceivedThisMonth,
     cashCollectedThisMonth: cashReceivedThisMonth,
     returnRefundsThisMonth,

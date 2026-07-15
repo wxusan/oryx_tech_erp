@@ -38,9 +38,7 @@ describe('Nasiya archive: permission and accounting boundaries', () => {
     const rangeReport = read('src/lib/server/shop-report-range.ts')
     const customerProfile = read('src/lib/server/customer-profile.ts')
 
-    expect(dashboard).toContain('AND n."resolutionState" <> \'ARCHIVED\'')
     expect(dashboard).toContain('AND n."resolutionState" = \'ACTIVE\'')
-    expect(rangeReport).toContain('AND n."resolutionState" <> \'ARCHIVED\'')
     expect(rangeReport).toContain('AND n."resolutionState" = \'ACTIVE\'')
     expect(customerProfile).toContain('WHEN "resolutionState" = \'ARCHIVED\' THEN "contractDownPayment" + "contractPaidAmount"')
     expect(customerProfile).toContain('"resolutionState" <> \'ARCHIVED\'')
@@ -54,7 +52,7 @@ describe('Nasiya archive: permission and accounting boundaries', () => {
 
   it('documents that paid cash is preserved while unpaid archived value is excluded', () => {
     const policy = read('docs/nasiya-resolution-accounting-policy.md')
-    expect(policy).toContain('Only immutable receipt rows remain in cash-collected totals')
-    expect(policy).toContain('Cash already received remains in the payment-period totals')
+    expect(policy).toContain('Previously paid margin/interest remains in its original payment month')
+    expect(policy).toContain('Cash and paid profit remain in their payment periods')
   })
 })

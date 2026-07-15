@@ -595,7 +595,7 @@ function AuthorizedNasiyaDetailPage() {
           // rate legacy UZS snapshot, which would drift from the true
           // contract value as the rate moves (see
           // docs/currency-accounting-model.md).
-          { label: 'Sotilish narxi', value: dfmt(nasiya.contractTotalAmount) },
+          { label: 'Shartnomadagi qurilma narxi', value: dfmt(nasiya.contractTotalAmount) },
           {
             label: "Boshlang'ich to'lov",
             value: dfmt(nasiya.contractDownPayment),
@@ -607,12 +607,13 @@ function AuthorizedNasiyaDetailPage() {
                   value: `${fmt(nasiya.interestPercent)}%`,
                 },
                 {
-                  label: 'Foiz summasi',
+                  label: 'Shartnoma bo\'yicha jami foiz',
                   value: dfmt(nasiya.contractInterestAmount),
                 },
               ]
             : []),
-          { label: 'Nasiya jami', value: dfmt(nasiya.contractFinalAmount) },
+          { label: "Bo'lib to'lash jami (boshlang'ichsiz)", value: dfmt(nasiya.contractFinalAmount) },
+          { label: 'Jami shartnoma qiymati', value: dfmt(nasiya.contractDownPayment + nasiya.contractFinalAmount) },
           { label: "To'langan", value: dfmt(nasiya.contractPaidAmount) },
           {
             label: "Qarz qoldig'i",
@@ -958,8 +959,10 @@ function AuthorizedNasiyaDetailPage() {
               </div>
               <dl className="grid grid-cols-2 gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm sm:grid-cols-3">
                 {[
-                  { label: 'Sotilish narxi', value: dfmt(nasiya.contractTotalAmount) },
-                  { label: 'Nasiya jami', value: dfmt(nasiya.contractFinalAmount) },
+                  { label: 'Qurilma narxi', value: dfmt(nasiya.contractTotalAmount) },
+                  { label: 'Jami shartnoma foizi', value: dfmt(nasiya.contractInterestAmount) },
+                  { label: "Bo'lib to'lash jami", value: dfmt(nasiya.contractFinalAmount) },
+                  { label: 'Jami shartnoma qiymati', value: dfmt(nasiya.contractDownPayment + nasiya.contractFinalAmount) },
                   { label: "To'langan", value: dfmt(nasiya.contractPaidAmount) },
                   { label: 'Qarz qoldig\'i', value: dfmt(nasiya.contractRemainingAmount) },
                   { label: "Oylik to'lov", value: dfmt(contractMonthlyPayment) },

@@ -16,11 +16,11 @@ describe('accounting isolation: stats exclude imported nasiyas', () => {
   const src = readFlat('src/lib/server/shop-stats.ts')
   const queries = readFlat('src/lib/server/shop-stats-queries.ts')
 
-  it('the set-based accrual aggregate excludes imported nasiya revenue, interest, and cost', () => {
-    expect(src).toContain('getShopAccrualAggregate({ shopId, monthStart, monthEnd, adminId })')
-    expect(queries).toContain('AND n."isImported" = false')
-    expect(queries).toContain('coalesce(sum(n."totalAmount"), 0)')
-    expect(queries).toContain('coalesce(sum(n."interestAmount"), 0)')
+  it('the payment-basis aggregate excludes unknown imported margin and interest', () => {
+    expect(src).toContain('getShopMonthlyAccountingAggregate({ shopId, monthStart, monthEnd, adminId })')
+    expect(queries).toContain('n."accountingReconstructionStatus" IN (\'COMPLETE\', \'PARTIAL\')')
+    expect(queries).toContain('sum(a."marginAmountUzs")')
+    expect(queries).toContain('sum(a."interestAmountUzs")')
   })
 
   it('imported devices are excluded from the device count', () => {
@@ -49,6 +49,7 @@ describe('import route safety', () => {
     expect(src).toContain("importSource: 'MANUAL'")
     expect(src).toContain('importedById: session.user.id')
     expect(src).toContain('remainingAtImport')
+    expect(src).toContain("accountingReconstructionStatus: 'UNRECONSTRUCTABLE'")
   })
 
   it('does NOT create a Sale row or a NasiyaPayment for already-paid money', () => {

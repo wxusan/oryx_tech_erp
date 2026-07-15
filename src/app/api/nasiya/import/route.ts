@@ -272,6 +272,11 @@ export async function POST(req: NextRequest) {
           contractMonthlyPayment,
           contractRemainingAmount: contractRemainingDebt,
           contractPaidAmount: 0,
+          // The pre-Oryx device cost and historic margin are unknown. Keep the
+          // receivable operational, but explicitly exclude invented profit.
+          accountingReconstructionStatus: 'UNRECONSTRUCTABLE',
+          accountingReconstructionReason: 'Pre-Oryx import has no reliable historic cost/margin evidence',
+          accountingReconstructedAt: new Date(),
         },
       })
 

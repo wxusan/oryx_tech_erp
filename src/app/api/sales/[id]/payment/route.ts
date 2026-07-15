@@ -19,6 +19,7 @@ import { validatePaymentBreakdown, representativePaymentMethod } from '@/lib/pay
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
 import { canonicalPaymentBreakdown, sameInstant, sameMoney, sameOptionalText } from '@/lib/idempotency-replay'
+import { allocateCumulativePaymentComponents, splitUzsReportingAmount } from '@/lib/payment-profit-allocation'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -205,6 +206,29 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           const nextRemaining = Math.max(0, oldRemaining - amount)
           const nextAmountPaid = Number(sale.amountPaid) + amount
           const remainingToStore = contractPayment.isFullyPaid ? 0 : nextRemaining
+          const componentResult = ['COMPLETE', 'PARTIAL'].includes(sale.accountingReconstructionStatus)
+            ? allocateCumulativePaymentComponents({
+                currency: sale.contractCurrency,
+                totals: {
+                  principal: Number(sale.contractCostBasisAmount),
+                  margin: Number(sale.contractMarginAmount),
+                  interest: 0,
+                },
+                paid: {
+                  principal: Number(sale.contractPrincipalPaidAmount),
+                  margin: Number(sale.contractMarginPaidAmount),
+                  interest: 0,
+                },
+                paymentAmount: contractPayment.appliedAmountInContractCurrency,
+              })
+            : null
+          const reportingComponents = componentResult
+            ? splitUzsReportingAmount({
+                amountUzs: amount,
+                contractAmount: contractPayment.appliedAmountInContractCurrency,
+                contractComponents: componentResult.allocation,
+              })
+            : null
           const payment = await tx.salePayment.create({
             data: {
               saleId,
@@ -224,6 +248,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               appliedAmountInContractCurrency: contractPayment.appliedAmountInContractCurrency,
               paymentDateExplicit: parsed.data.paidAt !== undefined,
               requestedNextDueDate: parsed.data.nextDueDate,
+              contractPrincipalAmount: componentResult?.allocation.principal ?? 0,
+              contractMarginAmount: componentResult?.allocation.margin ?? 0,
+              principalAmountUzs: reportingComponents?.principal ?? 0,
+              marginAmountUzs: reportingComponents?.margin ?? 0,
             },
           })
 
@@ -237,6 +265,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               reminderEnabled: contractPayment.isFullyPaid ? false : sale.reminderEnabled,
               contractAmountPaid: contractPayment.newContractAmountPaid,
               contractRemainingAmount: contractPayment.newContractRemainingAmount,
+              ...(componentResult ? {
+                contractPrincipalPaidAmount: componentResult.paidAfter.principal,
+                contractMarginPaidAmount: componentResult.paidAfter.margin,
+              } : {}),
             },
           })
 

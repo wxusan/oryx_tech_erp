@@ -16,6 +16,7 @@
     "benchmark:shop-stats": "node scripts/benchmark-shop-stats.mjs",
     "env:validate:production": "node scripts/validate-production-env.mjs",
     "release:preflight": "node scripts/production-release-preflight.mjs",
+    "accounting:backfill": "node scripts/backfill-payment-profit-ledger.mjs",
     "test:watch": "vitest",
     "prisma:generate": "prisma generate",
     "prisma:validate": "prisma validate",

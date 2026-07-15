@@ -38,11 +38,11 @@ describe('nasiya creation: selling price starts empty, purchase price shown read
   })
 })
 
-describe('nasiya detail page: summary card also uses "Sotilish narxi"', () => {
+describe('nasiya detail page: agreement totals are explicitly labelled', () => {
   it('no longer labels the read-only summary card "Jami narx"', () => {
     const source = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
     expect(source).not.toContain("label: 'Jami narx'")
-    expect(source).toContain("label: 'Sotilish narxi'")
+    expect(source).toContain("label: 'Shartnomadagi qurilma narxi'")
   })
 })
 

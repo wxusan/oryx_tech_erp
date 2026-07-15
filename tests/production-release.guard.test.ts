@@ -18,12 +18,19 @@ describe('production release guard', () => {
     expect(buildScript).toContain("['scripts/production-release-preflight.mjs', '--phase=pre']")
     expect(buildScript).toContain("['run', 'prisma:migrate:deploy']")
     expect(buildScript).toContain("['scripts/production-release-preflight.mjs', '--phase=post']")
+    expect(buildScript).toContain("['scripts/backfill-payment-profit-ledger.mjs', '--apply']")
     expect(buildScript).toContain("['run', 'build']")
     expect(buildScript.indexOf("['run', 'build']")).toBeLessThan(
       buildScript.indexOf("['scripts/production-release-preflight.mjs', '--phase=pre']"),
     )
     expect(buildScript.indexOf("['scripts/production-release-preflight.mjs', '--phase=pre']")).toBeLessThan(
       buildScript.indexOf("['run', 'prisma:migrate:deploy']"),
+    )
+    expect(buildScript.indexOf("['run', 'prisma:migrate:deploy']")).toBeLessThan(
+      buildScript.indexOf("['scripts/backfill-payment-profit-ledger.mjs', '--apply']"),
+    )
+    expect(buildScript.indexOf("['scripts/backfill-payment-profit-ledger.mjs', '--apply']")).toBeLessThan(
+      buildScript.indexOf("['scripts/production-release-preflight.mjs', '--phase=post']"),
     )
   })
 
@@ -38,6 +45,8 @@ describe('production release guard', () => {
     expect(preflightScript).toContain('blockingIssueCount')
     expect(preflightScript).toContain('pending_notifications_without_intended_recipient')
     expect(preflightScript).toContain('pending_notification_recipient_identity_mismatch')
+    expect(preflightScript).toContain('pending_payment_profit_reconstruction')
+    expect(preflightScript).toContain('complete_nasiya_payments_without_allocations')
     expect(preflightScript).toContain("phase === 'post'")
     expect(preflightScript).toContain('appliedMigrations.length !== RELEASE_MIGRATIONS.length')
     expect(preflightScript).not.toContain('SELECT *')

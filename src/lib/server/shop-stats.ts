@@ -8,7 +8,7 @@ import { tashkentDayRange, tashkentMonthRangeFromKey } from '@/lib/timezone'
 import { getUsdUzsRate } from '@/lib/server/currency'
 import { computeShopStatsFromRows } from '@/lib/shop-stats-formulas'
 import {
-  getShopAccrualAggregate,
+  getShopMonthlyAccountingAggregate,
   getNasiyaWriteOffAggregate,
   getShopObligationAggregate,
   getUpcomingScheduleIds,
@@ -43,7 +43,7 @@ export async function getShopStats(session: Session, shopId: string, options: Sh
 
   return unstable_cache(
     () => getShopStatsFresh(role, shopId, monthKey, adminId),
-    ['shop-stats:v2', shopId, role, monthKey ?? 'current', adminId ?? 'all'],
+    ['shop-stats:v3-payment-basis', shopId, role, monthKey ?? 'current', adminId ?? 'all'],
     {
       // Money/overdue figures are high-churn. Keep the TTL short and expire
       // these tags immediately after sale/payment/return mutations.
@@ -225,12 +225,23 @@ export function redactFinancialShopStats(stats: ShopStatsResult): ShopStatsResul
     overdueMoneyUsd: 0,
     inventoryPurchaseCost: 0,
     realProfitThisMonth: 0,
+    actualProfitThisMonth: 0,
+    expectedProfitThisMonth: 0,
+    expectedProfitThisMonthUzs: 0,
+    expectedProfitThisMonthUsd: 0,
+    expectedReceivablesThisMonth: 0,
+    expectedReceivablesThisMonthUzs: 0,
+    expectedReceivablesThisMonthUsd: 0,
     accrualRevenueThisMonth: 0,
     accrualRevenueBeforeReturnsThisMonth: 0,
     accrualGrossProfitThisMonth: 0,
     accrualGrossProfitBeforeReturnsThisMonth: 0,
     nasiyaInterestThisMonth: 0,
     nasiyaInterestBeforeReturnsThisMonth: 0,
+    interestReceivedThisMonth: 0,
+    nasiyaInterestExpectedThisMonth: 0,
+    nasiyaInterestExpectedThisMonthUzs: 0,
+    nasiyaInterestExpectedThisMonthUsd: 0,
     expectedProfitWithInterestThisMonth: 0,
     grossCashInThisMonth: 0,
     cashCollectedThisMonth: 0,
@@ -265,13 +276,15 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
 
   const [
     totalDevices,
-    accrualAggregate,
+    soldThisMonth,
+    monthlyAccountingAggregate,
     saleReceivedAgg,
     nasiyaReceivedAgg,
     activeNasiyalar,
     obligationAggregate,
     inventoryAgg,
     returnAccountingAgg,
+    returnProfitReversalAgg,
     returnsThisMonth,
     recentActivity,
     upcomingScheduleIds,
@@ -283,7 +296,16 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
       where: { shopId, deletedAt: null, isImported: false },
     }),
 
-    getShopAccrualAggregate({ shopId, monthStart, monthEnd, adminId }),
+    prisma.sale.count({
+      where: {
+        shopId,
+        deletedAt: null,
+        createdAt: { gte: monthStart, lt: monthEnd },
+        ...(adminId ? { createdBy: adminId } : {}),
+      },
+    }),
+
+    getShopMonthlyAccountingAggregate({ shopId, monthStart, monthEnd, adminId }),
 
     prisma.salePayment.aggregate({
       _sum: { amount: true },
@@ -332,6 +354,18 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
         shopId,
         createdAt: { gte: monthStart, lt: monthEnd },
         ...attributedTo,
+      },
+    }),
+
+    prisma.returnProfitReversal.aggregate({
+      _sum: {
+        recognizedMarginAmountUzs: true,
+        recognizedInterestAmountUzs: true,
+      },
+      where: {
+        shopId,
+        createdAt: { gte: monthStart, lt: monthEnd },
+        ...(adminId ? { deviceReturn: { createdBy: adminId } } : {}),
       },
     }),
 
@@ -399,7 +433,15 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     usdUzsRate,
     totalDevices,
     cashSalesThisMonth: [],
-    accrualAggregate,
+    accrualAggregate: {
+      saleCount: soldThisMonth,
+      saleRevenueUzs: 0,
+      saleDeviceCostUzs: 0,
+      nasiyaRevenueUzs: 0,
+      nasiyaInterestUzs: 0,
+      nasiyaDeviceCostUzs: 0,
+    },
+    monthlyAccountingAggregate,
     saleReceivedSum: saleReceivedAgg._sum.amount,
     nasiyaSoldThisMonth: [],
     nasiyaReceivedSum: nasiyaReceivedAgg._sum.amount,
@@ -409,8 +451,8 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     obligationAggregate,
     inventoryPurchaseCostSum: inventoryAgg._sum.purchasePrice,
     returnRefundSum: returnAccountingAgg._sum.refundAmount,
-    returnRevenueReversalSum: returnAccountingAgg._sum.revenueReversalAmountUzs,
-    returnInterestReversalSum: returnAccountingAgg._sum.interestReversalAmountUzs,
+    returnRevenueReversalSum: returnProfitReversalAgg._sum.recognizedMarginAmountUzs,
+    returnInterestReversalSum: returnProfitReversalAgg._sum.recognizedInterestAmountUzs,
     returnInventoryCostRecoverySum: returnAccountingAgg._sum.inventoryCostRecoveryUzs,
     returnRetainedValueSum: returnAccountingAgg._sum.retainedValueAmountUzs,
     returnsThisMonth,

@@ -472,12 +472,12 @@ describe('dynamic shop range report', () => {
     expect(report.months.map((month) => month.monthKey)).toEqual(['2026-01', '2026-02', '2026-03'])
     expect(report.months[0]).toMatchObject({
       cashCollected: { uzs: 500, usd: 0, complete: true },
-      accrualRevenue: { uzs: 1_000, usd: 0 },
-      grossProfitUzs: 400,
+      accrualRevenue: { uzs: 500, usd: 0 },
+      grossProfitUzs: 0,
     })
     expect(report.months[1]).toMatchObject({
       cashCollected: { uzs: 0, usd: 50, complete: true },
-      accrualRevenue: { uzs: 1_200, usd: 200 },
+      accrualRevenue: { uzs: 0, usd: 50 },
       nasiyaInterest: { uzs: 0, usd: 0 },
     })
     expect(report.months[2]).toMatchObject({
@@ -485,7 +485,7 @@ describe('dynamic shop range report', () => {
       writeOffs: { uzs: 1_200, usd: 0, frozenUzs: 1_200 },
       writeOffCount: 1,
     })
-    expect(report.totals.accrualRevenue).toEqual({ uzs: 2_200, usd: 200 })
+    expect(report.totals.accrualRevenue).toEqual({ uzs: 500, usd: 50 })
 
     const ownerOnly = await getShopRangeReport({ shopId: shop.id, range, adminId: owner.id })
     expect(ownerOnly.totals.cashCollected).toEqual({ uzs: 500, usd: 0, complete: true })

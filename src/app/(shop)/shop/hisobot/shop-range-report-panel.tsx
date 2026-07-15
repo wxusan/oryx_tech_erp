@@ -34,7 +34,7 @@ function TrendBars({ report, currency }: { report: ShopRangeReport; currency: Cu
       </CardHeader>
       <CardContent className="space-y-5">
         <div className="space-y-3" aria-label="UZS bo'yicha oylik tushum va foyda trendi">
-          <div className="text-xs font-medium text-zinc-600">UZS — tushum / sotuv foydasi</div>
+            <div className="text-xs font-medium text-zinc-600">UZS — tushum / haqiqiy foyda</div>
           {report.months.map((month) => (
             <div key={`uzs-${month.monthKey}`} className="grid grid-cols-[88px_1fr] items-center gap-3">
               <span className="text-xs text-zinc-500">{monthLabel(month.monthKey)}</span>
@@ -102,9 +102,9 @@ export default function ShopRangeReportPanel({
       color: 'text-blue-600',
     },
     {
-      label: 'Sotuv qiymati',
-      value: partitionText(totals.accrualRevenue, currency),
-      note: "Oraliqda tuzilgan sotuv va nasiya shartnomalari; import qarzlar kirmaydi",
+      label: 'Kutilayotgan foyda',
+      value: partitionText(totals.expectedProfit, currency),
+      note: "Faqat tanlangan oylarda muddati kelgan, hali to'lanmagan marja va foiz; kelgusi oylar kirmaydi",
       icon: WalletCards,
       color: 'text-violet-600',
     },
@@ -130,9 +130,9 @@ export default function ShopRangeReportPanel({
       color: 'text-orange-700',
     },
     {
-      label: 'Sotuv foydasi',
+      label: 'Haqiqiy foyda',
       value: formatMoneyByCurrency(totals.grossProfitUzs, currency.currency, currency.usdUzsRate),
-      note: `Nasiya foizi alohida: ${formatMoneyByCurrency(totals.interestProfitUzs, currency.currency, currency.usdUzsRate)}`,
+      note: `Olingan Nasiya foizi: ${formatMoneyByCurrency(totals.interestProfitUzs, currency.currency, currency.usdUzsRate)} · kutilayotgan: ${partitionText(totals.nasiyaInterestExpected, currency)}`,
       icon: TrendingUp,
       color: totals.grossProfitUzs < 0 ? 'text-red-600' : 'text-emerald-600',
     },
@@ -181,16 +181,17 @@ export default function ShopRangeReportPanel({
           <CardDescription>Oyma-oy hisob</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
-          <table className="min-w-[920px] w-full text-left text-xs">
+          <table className="min-w-[1160px] w-full text-left text-xs">
             <thead className="border-y border-zinc-200 bg-zinc-50 text-zinc-600">
               <tr>
                 <th scope="col" className="px-4 py-3 font-medium">Oy</th>
                 <th scope="col" className="px-4 py-3 font-medium">Tushum</th>
-                <th scope="col" className="px-4 py-3 font-medium">Sotuv qiymati</th>
-                <th scope="col" className="px-4 py-3 font-medium">Kutilmoqda</th>
+                <th scope="col" className="px-4 py-3 font-medium">Haqiqiy foyda</th>
+                <th scope="col" className="px-4 py-3 font-medium">Kutilayotgan foyda</th>
+                <th scope="col" className="px-4 py-3 font-medium">Foiz: olingan / kutilayotgan</th>
+                <th scope="col" className="px-4 py-3 font-medium">Muddati keladigan qarz</th>
                 <th scope="col" className="px-4 py-3 font-medium">Qaytarish</th>
                 <th scope="col" className="px-4 py-3 font-medium">Hisobdan chiqarish</th>
-                <th scope="col" className="px-4 py-3 font-medium">Foyda</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-100">
@@ -198,13 +199,16 @@ export default function ShopRangeReportPanel({
                 <tr key={month.monthKey}>
                   <th scope="row" className="whitespace-nowrap px-4 py-3 font-medium text-zinc-900">{monthLabel(month.monthKey)}</th>
                   <td className="px-4 py-3 text-zinc-700">{partitionText(month.cashCollected, currency)}</td>
-                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.accrualRevenue, currency)}</td>
-                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.expectedReceivables, currency)}</td>
-                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.refunds, currency)}</td>
-                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.writeOffs, currency)}</td>
                   <td className={month.grossProfitUzs < 0 ? 'px-4 py-3 text-red-700' : 'px-4 py-3 text-emerald-700'}>
                     {formatMoneyByCurrency(month.grossProfitUzs, currency.currency, currency.usdUzsRate)}
                   </td>
+                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.expectedProfit, currency)}</td>
+                  <td className="px-4 py-3 text-zinc-700">
+                    {formatMoneyByCurrency(month.interestProfitUzs, currency.currency, currency.usdUzsRate)} / {partitionText(month.nasiyaInterestExpected, currency)}
+                  </td>
+                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.expectedReceivables, currency)}</td>
+                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.refunds, currency)}</td>
+                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.writeOffs, currency)}</td>
                 </tr>
               ))}
             </tbody>

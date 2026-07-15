@@ -15,6 +15,7 @@ const RELEASE_MIGRATIONS = [
   '202607130010_customer_crm_passport',
   '202607150001_staff_permissions_v2',
   '202607150002_nasiya_archive_permission_bundle',
+  '202607150003_monthly_profit_recognition',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))
@@ -259,6 +260,102 @@ const erp2Checks = [
 ]
 
 const postMigrationChecks = [
+  {
+    name: 'pending_payment_profit_reconstruction',
+    blocking: true,
+    sql: `
+      SELECT (
+        (SELECT COUNT(*) FROM "Sale" WHERE "accountingReconstructionStatus" = 'PENDING')
+        +
+        (SELECT COUNT(*) FROM "Nasiya" WHERE "accountingReconstructionStatus" = 'PENDING')
+      )::integer AS count
+    `,
+  },
+  {
+    name: 'payment_profit_reconstruction_review_gaps',
+    blocking: false,
+    sql: `
+      SELECT (
+        (SELECT COUNT(*) FROM "Sale" WHERE "accountingReconstructionStatus" IN ('PARTIAL', 'UNRECONSTRUCTABLE'))
+        +
+        (SELECT COUNT(*) FROM "Nasiya" WHERE "accountingReconstructionStatus" IN ('PARTIAL', 'UNRECONSTRUCTABLE'))
+      )::integer AS count
+    `,
+  },
+  {
+    name: 'reconstructed_sale_component_issues',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "Sale"
+      WHERE "accountingReconstructionStatus" IN ('COMPLETE', 'PARTIAL')
+        AND (
+          "contractCostBasisAmount" + "contractMarginAmount" <> "contractSalePrice"
+          OR "contractPrincipalPaidAmount" + "contractMarginPaidAmount" <> "contractAmountPaid"
+        )
+    `,
+  },
+  {
+    name: 'reconstructed_nasiya_component_issues',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "Nasiya" n
+      WHERE n."accountingReconstructionStatus" IN ('COMPLETE', 'PARTIAL')
+        AND (
+          n."contractCostBasisAmount" + n."contractMarginAmount" <> n."contractTotalAmount"
+          OR n."contractDownPaymentPrincipalAmount" + n."contractDownPaymentMarginAmount" <> n."contractDownPayment"
+          OR EXISTS (
+            SELECT 1 FROM "NasiyaSchedule" s
+            WHERE s."nasiyaId" = n.id
+              AND (
+                s."contractPrincipalAmount" + s."contractMarginAmount" + s."contractInterestAmount" <> s."contractExpectedAmount"
+                OR s."contractPrincipalPaidAmount" + s."contractMarginPaidAmount" + s."contractInterestPaidAmount" <> s."contractPaidAmount"
+              )
+          )
+        )
+    `,
+  },
+  {
+    name: 'payment_allocation_component_issues',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "NasiyaPaymentAllocation"
+      WHERE "contractPrincipalAmount" + "contractMarginAmount" + "contractInterestAmount" <> "contractAmount"
+         OR "principalAmountUzs" + "marginAmountUzs" + "interestAmountUzs" <> "amountUzs"
+    `,
+  },
+  {
+    name: 'complete_nasiya_payments_without_allocations',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM (
+        SELECT p.id
+        FROM "NasiyaPayment" p
+        JOIN "Nasiya" n ON n.id = p."nasiyaId" AND n."shopId" = p."shopId"
+        LEFT JOIN "NasiyaPaymentAllocation" a ON a."nasiyaPaymentId" = p.id
+        WHERE p."deletedAt" IS NULL
+          AND n."accountingReconstructionStatus" = 'COMPLETE'
+        GROUP BY p.id
+        HAVING COUNT(a.id) = 0
+      ) gaps
+    `,
+  },
+  {
+    name: 'complete_returns_without_profit_reversal',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "DeviceReturn" r
+      LEFT JOIN "Sale" s ON s.id = r."saleId"
+      LEFT JOIN "Nasiya" n ON n.id = r."nasiyaId"
+      LEFT JOIN "ReturnProfitReversal" pr ON pr."deviceReturnId" = r.id
+      WHERE coalesce(s."accountingReconstructionStatus", n."accountingReconstructionStatus") = 'COMPLETE'
+        AND pr.id IS NULL
+    `,
+  },
   {
     name: 'shop_sessions_without_package_binding',
     blocking: true,
