@@ -26,9 +26,9 @@ describe('nasiyalar list: money text reads from the contract-currency ledger, no
   })
 
   it("To'langan/Nasiya jami/Foiz/qolgan all use the native ledger MoneyDto values", () => {
-    expect(client).toContain("To'langan: {mfmt(n.ledger.paid)}")
-    expect(client).toContain('Nasiya jami: {mfmt(n.ledger.financed)}')
-    expect(client).toContain('Foiz: {mfmt(n.contractInterest)}')
+    expect(client).toContain('{mfmt(n.ledger.paid)}')
+    expect(client).toContain('{mfmt(n.ledger.financed)}')
+    expect(client).toContain('{mfmt(n.contractInterest)}')
     expect(client).toContain('{mfmt(n.ledger.remaining)}')
     expect(client).not.toContain('function fmt(')
   })

@@ -374,7 +374,7 @@ export default function NasiyalarClient({
                           <span className="font-medium text-sm text-zinc-900">{n.customer.name}</span>
                           {collectionWorkItem ? <CollectionCohortBadge cohort={collectionWorkItem.cohort} /> : <StatusBadge status={n.displayStatus} />}
                           {collectionWorkItem?.cohort === 'DUE_TODAY' && n.isOverdue && (
-                            <span className="inline-block rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">Eski qarz bor</span>
+                            <span className="inline-block rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">Shartnomada eski qarz bor</span>
                           )}
                           {n.resolutionState !== 'ACTIVE' && <ResolutionBadge state={n.resolutionState} />}
                           <PaymentScoreBadge score={n.paymentScore} />
