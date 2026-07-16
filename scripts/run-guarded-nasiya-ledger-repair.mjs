@@ -40,12 +40,13 @@ function runNode(args, extraEnv = {}) {
   })
   if (result.error) throw result.error
   if (result.status !== 0) {
-    throw new Error(`Guarded Nasiya ledger command failed: ${args[1] ?? args[0]}`)
+    const diagnostic = result.stderr.trim()
+    throw new Error(`Guarded Nasiya ledger command failed: ${args[0]}${diagnostic ? `: ${diagnostic}` : ''}`)
   }
   try {
     return JSON.parse(result.stdout)
   } catch {
-    throw new Error(`Guarded Nasiya ledger command returned invalid JSON: ${args[1] ?? args[0]}`)
+    throw new Error(`Guarded Nasiya ledger command returned invalid JSON: ${args[0]}`)
   }
 }
 
