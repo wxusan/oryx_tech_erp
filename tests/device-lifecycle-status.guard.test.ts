@@ -17,10 +17,11 @@ describe('device lifecycle status model', () => {
     expect(migration).not.toMatch(/UPDATE\s+"Device"|DROP TYPE|DELETE FROM/i)
   })
 
-  it('returns sold, debt, and nasiya devices directly to IN_STOCK while keeping a DeviceReturn and audit log', () => {
+  it('returns cash and debt sales directly to IN_STOCK while keeping a DeviceReturn and audit log', () => {
     const route = read('src/app/api/devices/[id]/return/route.ts')
 
-    expect(route).toContain("['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA']")
+    expect(route).toContain("['SOLD_CASH', 'SOLD_DEBT']")
+    expect(route).toContain('Nasiya shartnomasini bekor qilish')
     expect(route).toContain("data: { status: 'IN_STOCK'")
     expect(route).toContain('tx.deviceReturn.create')
     expect(route).toContain("action: 'RETURN'")

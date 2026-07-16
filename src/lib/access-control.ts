@@ -69,7 +69,6 @@ export const ACTIVE_SHOP_PERMISSION_CODES = [
   'NASIYA_PAYMENT_RECEIVE',
   'NASIYA_DEFER',
   'NASIYA_REMINDER_MANAGE',
-  'NASIYA_CANCEL',
   'NASIYA_ARCHIVE',
   'NASIYA_REOPEN',
   'OLIB_VIEW',
@@ -110,7 +109,6 @@ export const ACTIVE_SHOP_PERMISSION_CODES = [
 ] as const
 
 export const RETIRED_SHOP_PERMISSION_CODES = [
-  'NASIYA_WRITE_OFF',
   'INVENTORY_MANAGE',
   'CASH_SALE_CREATE',
   'CASH_SALE_MANAGE',
@@ -181,9 +179,7 @@ export const SHOP_PERMISSION_CATALOG: readonly ShopPermissionCatalogItem[] = [
   { code: 'NASIYA_PAYMENT_RECEIVE', label: "Nasiya to'lovini qabul qilish", description: "Nasiya jadvali bo'yicha kirim to'lovini yozish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'FINANCIAL', staffManagerDelegable: true, legacyOperational: true },
   { code: 'NASIYA_DEFER', label: "Nasiya to'lovini kechiktirish", description: "Bitta jadval sanasini idempotent tarzda ko'chirish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'FINANCIAL', staffManagerDelegable: true, legacyOperational: true },
   { code: 'NASIYA_REMINDER_MANAGE', label: 'Nasiya eslatmalarini boshqarish', description: "Nasiya eslatmasini yoqish yoki o'chirish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
-  { code: 'NASIYA_CANCEL', label: 'Nasiyani bekor qilish', description: "Mos nasiyani xavfsiz qaytarish/refund hisobi bilan bekor qilish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'NASIYA_ARCHIVE', label: 'Can archive Nasiya', description: 'Xodimga nasiyani arxivlash va qayta ochish ruxsatini beradi', featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
-  { code: 'NASIYA_WRITE_OFF', label: 'Nasiya qarzini hisobdan chiqarish (eski)', description: "Faqat tarixiy yozuvlar uchun saqlanadi; yangi hisobdan chiqarish yaratib bo'lmaydi", featureCode: 'NASIYA', ownerOnly: false, retired: true, group: 'NASIYA', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'NASIYA_REOPEN', label: 'Nasiyani qayta ochish', description: 'Arxivlangan yoki yopilgan nasiyani qayta ochish', featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'OLIB_VIEW', label: "Olib-sotdimni ko'rish", description: "Olib-sotdim ro'yxati va tafsilotlari", featureCode: 'OLIB_SOTDIM', ownerOnly: false, retired: false, group: 'OLIB', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
   { code: 'OLIB_CREATE', label: 'Olib-sotdim qilish', description: "Tashqi qurilma, yetkazuvchi va mijoz sotuvini yozish", featureCode: 'OLIB_SOTDIM', ownerOnly: false, retired: false, group: 'OLIB', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
@@ -267,7 +263,6 @@ export function permissionRequiredFeatures(code: ShopPermissionCode): readonly S
 }
 
 export const LEGACY_PERMISSION_EXPANSIONS: Readonly<Record<RetiredShopPermissionCode, readonly ActiveShopPermissionCode[]>> = {
-  NASIYA_WRITE_OFF: [],
   INVENTORY_MANAGE: ['DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE'],
   CASH_SALE_CREATE: ['SALE_CREATE'],
   CASH_SALE_MANAGE: ['SALE_EDIT', 'SALE_REMINDER_MANAGE'],
@@ -276,7 +271,7 @@ export const LEGACY_PERMISSION_EXPANSIONS: Readonly<Record<RetiredShopPermission
   PAYMENT_RECEIVE: ['SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE', 'SUPPLIER_PAYMENT_MARK_PAID'],
   CUSTOMER_MANAGE: ['CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'],
   CUSTOMER_PII_REVEAL: ['CUSTOMER_PASSPORT_REVEAL'],
-  RETURN_MANAGE: ['SALE_RETURN_REFUND', 'NASIYA_CANCEL', 'DEVICE_RESTOCK'],
+  RETURN_MANAGE: ['SALE_RETURN_REFUND', 'DEVICE_RESTOCK'],
   WRITEOFF_MANAGE: ['NASIYA_ARCHIVE', 'NASIYA_REOPEN'],
   EXPORT_DATA: ['EXPORT_DEVICES', 'EXPORT_CUSTOMERS', 'EXPORT_SALES', 'EXPORT_NASIYA', 'EXPORT_OLIB', 'EXPORT_RETURNS', 'EXPORT_LOGS', 'EXPORT_REPORTS'],
   IMPORT_DATA: ['IMPORT_CUSTOMERS', 'IMPORT_OLD_NASIYA'],

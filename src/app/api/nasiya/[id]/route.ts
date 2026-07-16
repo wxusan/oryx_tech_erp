@@ -79,7 +79,6 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       'NASIYA_PAYMENT_RECEIVE',
       'NASIYA_DEFER',
       'NASIYA_REMINDER_MANAGE',
-      'NASIYA_CANCEL',
       'NASIYA_ARCHIVE',
       'NASIYA_REOPEN',
     ])
@@ -240,10 +239,14 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       },
     })
 
-    if (!nasiya) return notFound('Nasiya topilmadi')
+    if (!nasiya || nasiya.status === 'CANCELLED' || nasiya.resolutionState === 'WRITTEN_OFF') {
+      // Keep immutable legacy ledger rows in the database, but do not expose
+      // cancelled/write-off contracts through the active Nasiya surface.
+      return notFound('Nasiya topilmadi')
+    }
 
-    // Resolution events contain write-off/archive amounts and immutable
-    // financial/audit context. Staff may operate active Nasiyas but must not
+    // Resolution events contain immutable archive financial/audit context.
+    // Staff may operate active Nasiyas but must not
     // receive this owner-only ledger payload even through a direct URL.
     const resolutionEvents = includeResolutionEvents
       ? await prisma.nasiyaResolutionEvent.findMany({

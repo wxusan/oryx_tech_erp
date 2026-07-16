@@ -37,9 +37,9 @@ import type {
 } from '@/lib/nasiya-operation-context'
 
 type NasiyaPayment = NasiyaPaymentDisplayRecord
-type ResolutionState = 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
+type ResolutionState = 'ACTIVE' | 'ARCHIVED'
 type ResolutionAction = 'ARCHIVE' | 'REOPEN'
-type ResolutionEventType = ResolutionAction | 'WRITE_OFF'
+type ResolutionEventType = ResolutionAction
 
 interface NasiyaEditPatch {
   note: string | null
@@ -81,7 +81,7 @@ interface Nasiya {
   status: string
   resolutionState: ResolutionState
   resolutionUpdatedAt: string | null
-  /** Omitted from the server DTO for staff because it contains owner-only write-off/archive amounts. */
+  /** Omitted from the server DTO for staff because it contains owner-only archive amounts. */
   resolutionEvents?: ResolutionEvent[]
   displayStatus?: 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
   reminderEnabled?: boolean
@@ -156,7 +156,6 @@ export default function NasiyaDetailPage() {
     'NASIYA_PAYMENT_RECEIVE',
     'NASIYA_DEFER',
     'NASIYA_REMINDER_MANAGE',
-    'NASIYA_CANCEL',
     'NASIYA_ARCHIVE',
     'NASIYA_REOPEN',
   ].some((permission) => can(permission as Parameters<typeof can>[0]))
@@ -240,7 +239,7 @@ function AuthorizedNasiyaDetailPage() {
   }, [fetchNasiya])
 
   function patchOperationLedger(current: Nasiya, update: NasiyaPaymentMutationResult['ledger'] | NasiyaDeferMutationResult['ledger']) {
-    const nextStatus = update?.status
+    const nextStatus = update?.status as 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | undefined
     return {
       ...current,
       ledger: {
@@ -540,7 +539,7 @@ function AuthorizedNasiyaDetailPage() {
   // can never disagree with the nasiyalar list about completed/overdue state
   // — falls back to the raw stored status only if an older API response
   // didn't include it yet.
-  const displayStatus = nasiya.displayStatus ?? (nasiya.status as 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED')
+  const displayStatus = nasiya.displayStatus ?? (nasiya.status as 'ACTIVE' | 'OVERDUE' | 'COMPLETED')
   const isCompleted = displayStatus === 'COMPLETED'
   const isOperationallyActive = nasiya.resolutionState === 'ACTIVE'
   const ledgerQuarantined = ledger.health === 'QUARANTINED'
@@ -561,13 +560,11 @@ function AuthorizedNasiyaDetailPage() {
     ACTIVE: 'bg-zinc-100 text-zinc-700',
     OVERDUE: 'bg-red-100 text-red-700',
     COMPLETED: 'bg-emerald-100 text-emerald-700',
-    CANCELLED: 'bg-zinc-200 text-zinc-500',
   }
   const statusBadgeLabels: Record<string, string> = {
     ACTIVE: 'Faol',
     OVERDUE: "Muddati o'tgan",
     COMPLETED: 'Yakunlangan',
-    CANCELLED: 'Bekor qilingan',
   }
 
   return (
@@ -584,13 +581,9 @@ function AuthorizedNasiyaDetailPage() {
             <span className={`inline-block px-2.5 py-1 rounded text-xs font-medium ${statusBadgeStyles[displayStatus]}`}>
               {statusBadgeLabels[displayStatus]}
             </span>
-            {nasiya.resolutionState !== 'ACTIVE' && (
-              <span className={`inline-block rounded px-2.5 py-1 text-xs font-medium ${
-                nasiya.resolutionState === 'WRITTEN_OFF'
-                  ? 'bg-red-100 text-red-800'
-                  : 'bg-blue-100 text-blue-800'
-              }`}>
-                {nasiya.resolutionState === 'WRITTEN_OFF' ? 'Hisobdan chiqarilgan' : 'Arxivlangan'}
+            {nasiya.resolutionState === 'ARCHIVED' && (
+              <span className="inline-block rounded bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-800">
+                Arxivlangan
               </span>
             )}
             {nasiya.customerTrust && <TrustBadge trust={nasiya.customerTrust} />}
@@ -609,17 +602,17 @@ function AuthorizedNasiyaDetailPage() {
               Tahrirlash
             </Button>
           )}
-          {canDeferNasiya && !ledgerQuarantined && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (
+          {canDeferNasiya && !ledgerQuarantined && isOperationallyActive && !isCompleted && (
             <Button variant="outline" onClick={() => setDeferModalOpen(true)} className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded">
               Muddatni uzaytirish
             </Button>
           )}
-          {canReceivePayment && !ledgerQuarantined && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (
+          {canReceivePayment && !ledgerQuarantined && isOperationallyActive && !isCompleted && (
             <Button onClick={() => setPaymentModalOpen(true)} className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">
               To'lov qabul qilish
             </Button>
           )}
-          {canResolveNasiya && displayStatus !== 'CANCELLED' && (
+          {canResolveNasiya && (
             <>
               {canArchiveNasiya && nasiya.resolutionState === 'ACTIVE' && (
                 <Button variant="outline" onClick={() => openResolution('ARCHIVE')} className="h-9 px-3 text-sm border-zinc-200 rounded">
@@ -639,11 +632,6 @@ function AuthorizedNasiyaDetailPage() {
       {nasiya.resolutionState === 'ARCHIVED' && (
         <div className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900">
           Bu nasiya ish navbatidan arxivlangan. Moliyaviy qoldiq o'zgarmagan; qayta ochilmaguncha to'lov va muddat uzaytirish yopiq.
-        </div>
-      )}
-      {nasiya.resolutionState === 'WRITTEN_OFF' && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
-          Bu eski qarz avvalgi tizimda hisobdan chiqarilgan. Tarix va qoldiq dalillari faqat audit uchun saqlanadi; yangi hisobdan chiqarish yoki qayta ochish amali mavjud emas.
         </div>
       )}
 
@@ -806,7 +794,7 @@ function AuthorizedNasiyaDetailPage() {
           <div className="text-sm font-semibold text-zinc-900">To'lov eslatmasi</div>
           <div className="text-xs text-zinc-500 mt-0.5">
             {!isOperationallyActive
-              ? "Arxiv yoki eski hisobdan chiqarish holatida eslatmalar yuborilmaydi"
+              ? "Arxiv holatida eslatmalar yuborilmaydi"
               : nasiya.reminderEnabled ? 'Eslatma yoqilgan' : "Eslatma o'chirilgan"}
           </div>
         </div>
@@ -830,18 +818,14 @@ function AuthorizedNasiyaDetailPage() {
         <Card className="rounded-lg">
           <CardHeader>
             <CardTitle>Undirish holati tarixi</CardTitle>
-            <CardDescription>Arxiv/qayta ochish amallari va eski hisobdan chiqarish audit dalillari</CardDescription>
+            <CardDescription>Arxivlash va qayta ochish amallari</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
             {resolutionEvents.map((event) => (
               <div key={event.id} className="rounded-lg border border-zinc-200 p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-medium text-zinc-900">
-                    {event.eventType === 'WRITE_OFF'
-                      ? 'Hisobdan chiqarildi'
-                      : event.eventType === 'ARCHIVE'
-                        ? 'Arxivlandi'
-                        : 'Qayta ochildi'}
+                    {event.eventType === 'ARCHIVE' ? 'Arxivlandi' : 'Qayta ochildi'}
                   </span>
                   <span className="text-xs text-zinc-500">{uzDate(event.createdAt)}</span>
                 </div>

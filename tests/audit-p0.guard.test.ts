@@ -11,7 +11,7 @@ describe('P0 refund cap guard', () => {
 
   it('caps the contract-currency refund to immutable receipt rows before returning stock', () => {
     expect(src).toContain("sale.payments.map((payment) => paymentSource('SALE', payment))")
-    expect(src).toContain("nasiya!.payments.map((payment) => paymentSource('NASIYA', payment))")
+    expect(src).not.toContain("paymentSource('NASIYA'")
     expect(src).toContain('resolveAppliedContractAmount(source, contractCurrency, frozenRate)')
     expect(src).toContain('contractRefundAmount > contractReceiptsAtReturn')
     expect(src).toContain('Qaytariladigan summa mijozdan amalda olingan summadan oshmasligi kerak.')

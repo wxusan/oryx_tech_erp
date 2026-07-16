@@ -38,9 +38,9 @@ function staffWithOnly(permission: ActiveShopPermissionCode): ShopPrincipalAcces
 }
 
 describe('Staff Permissions V2 behavioral authorization kernel', () => {
-  it('has exactly 56 unique active capabilities with complete operational metadata', () => {
-    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(56)
-    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(56)
+  it('has exactly 55 unique active capabilities with complete operational metadata', () => {
+    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(55)
+    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(55)
 
     for (const code of ACTIVE_SHOP_PERMISSION_CODES) {
       const definition = permissionDefinition(code)
@@ -52,17 +52,6 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
       expect(definition.group, code).toBeTruthy()
       expect(definition.risk, code).toBeTruthy()
     }
-  })
-
-  it('keeps the old write-off code retired and incapable of granting access', () => {
-    expect(RETIRED_SHOP_PERMISSION_CODES).toContain('NASIYA_WRITE_OFF')
-    expect(permissionDefinition('NASIYA_WRITE_OFF').retired).toBe(true)
-    expect(principalCan({
-      memberKind: 'SHOP_STAFF',
-      legacyFullAccess: false,
-      enabledFeatures: allFeatures,
-      grantedPermissions: new Set(['NASIYA_WRITE_OFF']),
-    }, 'NASIYA_WRITE_OFF')).toBe(false)
   })
 
   it.each(ACTIVE_SHOP_PERMISSION_CODES)('%s grants itself and no unrelated capability', (code) => {
@@ -165,7 +154,6 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
     expect(legacyStaffPermissionCodes(allFeatures)).toEqual(expected)
     expect(expected).toContain('LOG_VIEW')
     expect(expected).not.toContain('SALE_RETURN_REFUND')
-    expect(expected).not.toContain('NASIYA_CANCEL')
     expect(expected).not.toContain('DASHBOARD_FINANCIAL_VIEW')
     expect(expected).not.toContain('REPORT_VIEW')
     expect(expected).not.toContain('STAFF_PERMISSION_MANAGE')

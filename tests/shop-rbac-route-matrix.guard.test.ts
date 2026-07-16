@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest'
 import { RETIRED_SHOP_PERMISSION_CODES } from '@/lib/access-control'
 
 const routeMatrix = [
-  ['src/app/api/devices/route.ts', 'INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_VIEW', 'SALE_CREATE', 'SALE_EDIT', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND', 'NASIYA_CREATE', 'NASIYA_CANCEL'],
+  ['src/app/api/devices/route.ts', 'INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_VIEW', 'SALE_CREATE', 'SALE_EDIT', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND', 'NASIYA_CREATE'],
   ['src/app/api/devices/[id]/route.ts', 'INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_VIEW', 'SALE_CREATE', 'SALE_EDIT', 'SALE_PAYMENT_RECEIVE', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND', 'NASIYA_CREATE'],
   ['src/app/api/devices/[id]/sell/route.ts', 'SALE_CREATE'],
   ['src/app/api/devices/[id]/nasiya/route.ts', 'NASIYA_CREATE'],
-  ['src/app/api/devices/[id]/return/route.ts', 'SALE_RETURN_REFUND', 'NASIYA_CANCEL'],
+  ['src/app/api/devices/[id]/return/route.ts', 'SALE_RETURN_REFUND'],
   ['src/app/api/devices/[id]/restock/route.ts', 'DEVICE_RESTOCK'],
   ['src/app/api/customers/route.ts', 'CUSTOMER_VIEW', 'CUSTOMER_CREATE'],
   ['src/app/api/customers/search/route.ts', 'CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_PHOTO_VIEW', 'CUSTOMER_PASSPORT_REVEAL', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'],
@@ -15,7 +15,7 @@ const routeMatrix = [
   ['src/app/api/customers/[id]/passport/image/route.ts', 'CUSTOMER_PASSPORT_PHOTO_VIEW'],
   ['src/app/api/customers/[id]/passport/reveal/route.ts', 'CUSTOMER_PASSPORT_REVEAL'],
   ['src/app/api/nasiya/route.ts', 'NASIYA_VIEW', 'NASIYA_EDIT', 'NASIYA_REMINDER_MANAGE', 'NASIYA_ARCHIVE', 'NASIYA_REOPEN'],
-  ['src/app/api/nasiya/[id]/route.ts', 'NASIYA_VIEW', 'NASIYA_CREATE', 'NASIYA_EDIT', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER', 'NASIYA_REMINDER_MANAGE', 'NASIYA_CANCEL', 'NASIYA_ARCHIVE', 'NASIYA_REOPEN'],
+  ['src/app/api/nasiya/[id]/route.ts', 'NASIYA_VIEW', 'NASIYA_CREATE', 'NASIYA_EDIT', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER', 'NASIYA_REMINDER_MANAGE', 'NASIYA_ARCHIVE', 'NASIYA_REOPEN'],
   ['src/app/api/nasiya/[id]/payment/route.ts', 'NASIYA_PAYMENT_RECEIVE'],
   ['src/app/api/nasiya/[id]/defer/route.ts', 'NASIYA_DEFER'],
   ['src/app/api/nasiya/[id]/reminder/route.ts', 'NASIYA_REMINDER_MANAGE'],

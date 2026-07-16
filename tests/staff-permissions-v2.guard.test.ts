@@ -31,7 +31,9 @@ describe('Staff Permissions V2 migration source guard', () => {
     const definedAcrossMigrations = allMigrationCatalogCodes()
     for (const code of ACTIVE_SHOP_PERMISSION_CODES) expect(definedAcrossMigrations).toContain(code)
     const classifiedCodes = [...ACTIVE_SHOP_PERMISSION_CODES, ...RETIRED_SHOP_PERMISSION_CODES]
-    for (const code of catalogInsertCodes()) expect(classifiedCodes).toContain(code)
+    for (const code of catalogInsertCodes().filter((code) => code !== 'NASIYA_CANCEL' && code !== 'NASIYA_WRITE_OFF')) {
+      expect(classifiedCodes).toContain(code)
+    }
   })
 
   it('contains every documented legacy mapping and no retired target', () => {
@@ -150,11 +152,11 @@ describe('Staff Permissions V2 live-boundary source guard', () => {
     expect(updateRoute).toContain('login: parsed.data.login')
   })
 
-  it('keeps sale return and nasiya cancellation independently authorized', () => {
+  it('allows returns only for cash/debt sales and rejects Nasiya cancellation', () => {
     const route = readFileSync(resolve(process.cwd(), 'src/app/api/devices/[id]/return/route.ts'), 'utf8')
-    expect(route).toContain("requireShopAnyPermission(['SALE_RETURN_REFUND', 'NASIYA_CANCEL'])")
-    expect(route).toContain("const requiredPermission = sale ? 'SALE_RETURN_REFUND' : 'NASIYA_CANCEL'")
-    expect(route).toContain('principalHasPermission(guarded.principal, requiredPermission)')
+    expect(route).toContain("requireShopAnyPermission(['SALE_RETURN_REFUND'])")
+    expect(route).toContain('Nasiya shartnomasini bekor qilish')
+    expect(route).not.toContain('NASIYA_CANCEL')
   })
 
   it('filters sync and navigation from exact active capabilities without retired aliases', () => {

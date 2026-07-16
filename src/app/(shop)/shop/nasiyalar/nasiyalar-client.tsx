@@ -19,11 +19,12 @@ import type { NasiyaStatus } from '@/lib/domain-types'
 import { useShopAccess } from '@/components/shop/shop-access-context'
 import type { NasiyaLedgerDto } from '@/lib/nasiya-ledger'
 
-type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan' | 'Bekor qilingan'
-type ResolutionState = 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
+type VisibleNasiyaStatus = Exclude<NasiyaStatus, 'CANCELLED'>
+type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan'
+type ResolutionState = 'ACTIVE' | 'ARCHIVED'
 /** `DUE_TODAY` and `UPCOMING` are schedule-derived work-queue tabs. */
 type NasiyaCohortTab = 'DUE_TODAY' | 'UPCOMING'
-type ListFilter = NasiyaStatus | NasiyaCohortTab | Exclude<ResolutionState, 'ACTIVE'> | 'Barchasi'
+type ListFilter = VisibleNasiyaStatus | NasiyaCohortTab | Exclude<ResolutionState, 'ACTIVE'> | 'Barchasi'
 
 interface NasiyaSchedule {
   id: string
@@ -52,14 +53,14 @@ interface Nasiya {
   contractCurrency: 'UZS' | 'USD'
   contractInterest: MoneyDto
   ledger: NasiyaLedgerDto
-  status: NasiyaStatus
+  status: VisibleNasiyaStatus
   resolutionState: ResolutionState
   resolutionUpdatedAt: string | null
   isImported: boolean
   createdAt: string
   note: string | null
   /** Live display status derived server-side from schedules (matches dashboard). */
-  displayStatus: NasiyaStatus
+  displayStatus: VisibleNasiyaStatus
   isOverdue: boolean
   overdueAmount: MoneyDto
   overdueCount: number
@@ -83,32 +84,28 @@ interface NasiyalarPayload {
   total: number
 }
 
-const statusMap: Record<NasiyaStatus, DisplayStatus> = {
+const statusMap: Record<VisibleNasiyaStatus, DisplayStatus> = {
   ACTIVE: 'Faol',
   OVERDUE: "Muddati o'tgan",
   COMPLETED: 'Yakunlangan',
-  CANCELLED: 'Bekor qilingan',
 }
 
 const filterTabs: { label: string; value: ListFilter }[] = [
-  { label: 'Barchasi', value: 'Barchasi' },
   { label: 'Barcha faol', value: 'ACTIVE' },
   { label: "Muddati o'tgan", value: 'OVERDUE' },
   { label: "Bugun to'lanadi", value: 'DUE_TODAY' },
   { label: 'Kutilmoqda', value: 'UPCOMING' },
   { label: 'Yakunlangan', value: 'COMPLETED' },
-  { label: 'Bekor qilingan', value: 'CANCELLED' },
   { label: 'Arxivlangan', value: 'ARCHIVED' },
-  { label: 'Hisobdan chiqarilgan', value: 'WRITTEN_OFF' },
+  { label: 'Barchasi', value: 'Barchasi' },
 ]
 
-function StatusBadge({ status }: { status: NasiyaStatus }) {
+function StatusBadge({ status }: { status: VisibleNasiyaStatus }) {
   const label = statusMap[status]
   const styles: Record<DisplayStatus, string> = {
     'Faol': 'bg-zinc-100 text-zinc-700',
     "Muddati o'tgan": 'bg-red-100 text-red-700',
     'Yakunlangan': 'bg-zinc-900 text-white',
-    'Bekor qilingan': 'bg-zinc-200 text-zinc-500',
   }
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${styles[label]}`}>
@@ -136,14 +133,10 @@ function CollectionCohortBadge({ cohort }: { cohort: CollectionWorkItem['cohort'
   )
 }
 
-function ResolutionBadge({ state }: { state: Exclude<ResolutionState, 'ACTIVE'> }) {
+function ResolutionBadge() {
   return (
-    <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${
-      state === 'WRITTEN_OFF'
-        ? 'bg-red-100 text-red-800'
-        : 'bg-blue-100 text-blue-800'
-    }`}>
-      {state === 'WRITTEN_OFF' ? 'Hisobdan chiqarilgan' : 'Arxivlangan'}
+    <span className="inline-block rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+      Arxivlangan
     </span>
   )
 }
@@ -297,7 +290,7 @@ export default function NasiyalarClient({
       {/* Filter tabs */}
       <div className="flex gap-1 overflow-x-auto border-b border-zinc-200">
         {filterTabs
-          .filter((tab) => canViewResolutionHistory || (tab.value !== 'ARCHIVED' && tab.value !== 'WRITTEN_OFF'))
+          .filter((tab) => canViewResolutionHistory || tab.value !== 'ARCHIVED')
           .map((tab) => (
           <button
             key={tab.value}
@@ -376,7 +369,7 @@ export default function NasiyalarClient({
                           {collectionWorkItem?.cohort === 'DUE_TODAY' && n.isOverdue && (
                             <span className="inline-block rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">Shartnomada eski qarz bor</span>
                           )}
-                          {n.resolutionState !== 'ACTIVE' && <ResolutionBadge state={n.resolutionState} />}
+                          {n.resolutionState !== 'ACTIVE' && <ResolutionBadge />}
                           <PaymentScoreBadge score={n.paymentScore} />
                           {ledgerQuarantined && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Hisob tekshiruvi kerak</span>}
                           {n.isImported && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Eski nasiya</span>}
@@ -478,7 +471,7 @@ export default function NasiyalarClient({
                         Eski nasiya
                       </span>
                     )}
-                    {n.resolutionState !== 'ACTIVE' && <ResolutionBadge state={n.resolutionState} />}
+                    {n.resolutionState !== 'ACTIVE' && <ResolutionBadge />}
                     {isOverdue && !collectionWorkItem && (
                       <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-red-100 text-red-700">
                         Muddati o&apos;tgan

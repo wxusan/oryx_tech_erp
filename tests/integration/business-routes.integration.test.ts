@@ -814,7 +814,7 @@ describe('real-PostgreSQL route evidence', () => {
     })).toEqual([{ telegramId: '800000001' }])
   })
 
-  it('cancels Nasiya operational debt without deleting its contract or payments', async () => {
+  it('rejects Nasiya cancellation without changing its contract or payments', async () => {
     const actor = await seedActor('nasiya_return')
     useShopAdmin(actor)
     const contract = await seedNasiya(actor, 'nasiya_return', 1_000)
@@ -845,21 +845,21 @@ describe('real-PostgreSQL route evidence', () => {
       refundAmount: 400,
       refundMethod: 'CARD',
     })
-    expect(response.status).toBe(200)
+    expect(response.status).toBe(409)
 
     const [nasiya, schedule, paymentCount, returned] = await Promise.all([
       prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
       prisma.nasiyaSchedule.findUniqueOrThrow({ where: { id: contract.schedule.id } }),
       prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } }),
-      prisma.deviceReturn.findFirstOrThrow({ where: { nasiyaId: contract.nasiya.id } }),
+      prisma.deviceReturn.findFirst({ where: { nasiyaId: contract.nasiya.id } }),
     ])
-    expect(nasiya.status).toBe('CANCELLED')
+    expect(nasiya.status).toBe('ACTIVE')
     expect(nasiya.deletedAt).toBeNull()
-    expect(nasiya.returnedAt).not.toBeNull()
+    expect(nasiya.returnedAt).toBeNull()
     expect(Number(nasiya.contractRemainingAmount)).toBe(600)
-    expect(schedule.status).toBe('CANCELLED')
+    expect(schedule.status).toBe('PARTIAL')
     expect(paymentCount).toBe(1)
-    expect(Number(returned.contractCancelledDebt)).toBe(600)
+    expect(returned).toBeNull()
   })
 
   it('rejects a refund method that cannot be reconciled to original receipts', async () => {
@@ -966,7 +966,7 @@ describe('real-PostgreSQL route evidence', () => {
     expect(returned.refundAllocations).toHaveLength(0)
   })
 
-  it('serializes a Nasiya payment racing a return without losing receipts or cancelled debt', async () => {
+  it('rejects a Nasiya return while a payment is being recorded', async () => {
     const actor = await seedActor('payment_return_race')
     useShopAdmin(actor)
     const contract = await seedNasiya(actor, 'payment_return_race', 1_000)
@@ -985,23 +985,21 @@ describe('real-PostgreSQL route evidence', () => {
       }),
     ])
 
-    expect(returnResponse.status).toBe(200)
-    expect([200, 404, 409]).toContain(paymentResponse.status)
+    expect(returnResponse.status).toBe(409)
+    expect([200, 409]).toContain(paymentResponse.status)
     const [nasiya, returned, payments] = await Promise.all([
       prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
-      prisma.deviceReturn.findFirstOrThrow({ where: { nasiyaId: contract.nasiya.id } }),
+      prisma.deviceReturn.findFirst({ where: { nasiyaId: contract.nasiya.id } }),
       prisma.nasiyaPayment.findMany({ where: { nasiyaId: contract.nasiya.id } }),
     ])
     const paid = payments.reduce(
       (sum, payment) => sum + Number(payment.appliedAmountInContractCurrency),
       0,
     )
-    expect(nasiya.status).toBe('CANCELLED')
-    expect(nasiya.returnedAt).not.toBeNull()
+    expect(nasiya.status).not.toBe('CANCELLED')
+    expect(nasiya.returnedAt).toBeNull()
     expect(paid).toBe(paymentResponse.status === 200 ? 400 : 0)
-    expect(Number(returned.contractReceiptsAtReturn)).toBe(paid)
-    expect(Number(returned.contractCancelledDebt)).toBe(1_000 - paid)
-    expect(Number(returned.contractRefundAmount)).toBe(0)
+    expect(returned).toBeNull()
   })
 
   it('recognizes a fully paid cash Sale margin in full on its payment date', async () => {
@@ -1333,25 +1331,8 @@ describe('real-PostgreSQL route evidence', () => {
       key: 'monthly-return-recognized-only',
       refundAmount: 0,
     })
-    expect(returnResponse.status, JSON.stringify(await returnResponse.clone().json())).toBe(200)
-
-    const returned = await prisma.deviceReturn.findFirstOrThrow({ where: { nasiyaId: nasiya.id } })
-    const reversal = await prisma.returnProfitReversal.findUniqueOrThrow({
-      where: { deviceReturnId: returned.id },
-    })
-    expect(Number(reversal.recognizedMarginAmountUzs)).toBe(750_000)
-    expect(Number(reversal.recognizedInterestAmountUzs)).toBe(250_000)
-    expect(Number(returned.interestReversalAmountUzs)).toBe(250_000)
-    expect(Number(returned.interestReversalAmountUzs)).toBeLessThan(2_000_000)
-
-    const future = await getShopMonthlyAccountingAggregate({
-      shopId: actor.shop.id,
-      monthStart: new Date('2026-08-01T00:00:00.000Z'),
-      monthEnd: new Date('2026-09-01T00:00:00.000Z'),
-      adminId: null,
-    })
-    expect(future.expectedProfitUsd).toBe(0)
-    expect(future.expectedInterestUsd).toBe(0)
+    expect(returnResponse.status, JSON.stringify(await returnResponse.clone().json())).toBe(409)
+    expect(await prisma.deviceReturn.findFirst({ where: { nasiyaId: nasiya.id } })).toBeNull()
   })
 
   it('rejects both cash and nasiya sales while a legacy device is still RETURNED', async () => {

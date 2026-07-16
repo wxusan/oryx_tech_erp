@@ -25,19 +25,19 @@ describe('Nasiya resolution accounting surface contract', () => {
     expect(migration).toContain('immutable nasiya command events cannot be updated or deleted')
   })
 
-  it('retires new write-off commands while preserving legacy event types', () => {
+  it('keeps only archive/reopen as Nasiya resolution commands', () => {
     const route = source('src/app/api/nasiya/[id]/resolution/route.ts')
     const validation = source('src/lib/validations.ts')
-    const access = source('src/lib/access-control.ts')
 
     expect(route).toContain("type ResolutionAction = 'ARCHIVE' | 'REOPEN'")
     expect(route).not.toContain("action === 'WRITE_OFF'")
     expect(validation).toContain("action: z.enum(['ARCHIVE', 'REOPEN'])")
-    expect(access).toContain("'NASIYA_WRITE_OFF',\n  'INVENTORY_MANAGE'")
+    expect(source('src/lib/access-control.ts')).not.toContain('NASIYA_WRITE_OFF')
   })
 
-  it('keeps resolution visible in list, export, customer profile, and trust behavior', () => {
-    expect(source('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')).toContain("value: 'WRITTEN_OFF'")
+  it('keeps archive visible while removing the write-off list state', () => {
+    expect(source('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')).toContain("value: 'ARCHIVED'")
+    expect(source('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')).not.toContain('WRITTEN_OFF')
     expect(source('src/app/api/export/[entity]/route.ts')).toContain("'resolutionState'")
     expect(source('src/lib/server/customer-profile.ts')).toContain('written_off_nasiya_count')
     expect(source('src/lib/nasiya-customer-trust.ts')).toContain("resolutionState !== 'ACTIVE'")

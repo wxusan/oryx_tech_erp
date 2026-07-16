@@ -18,8 +18,8 @@ import { logger } from '@/lib/logger'
 import { getShopNasiyalarList, type NasiyaCohortFilter, type NasiyaStatusFilter } from '@/lib/server/shop-lists'
 import { principalHasPermission } from '@/lib/server/shop-access'
 
-const nasiyaStatuses = ['ACTIVE', 'COMPLETED', 'OVERDUE', 'CANCELLED'] as const
-const resolutionFilters = ['ARCHIVED', 'WRITTEN_OFF'] as const
+const nasiyaStatuses = ['ACTIVE', 'COMPLETED', 'OVERDUE'] as const
+const resolutionFilters = ['ARCHIVED'] as const
 const cohortFilters = ['ACTIVE', 'OVERDUE', 'DUE_TODAY', 'UPCOMING'] as const
 
 export async function GET(req: NextRequest) {
@@ -68,7 +68,7 @@ export async function GET(req: NextRequest) {
         )),
       )
     if (resolutionState && !includeResolutionData) {
-      return forbidden("Arxivlangan va hisobdan chiqarilgan nasiyalar uchun ruxsat berilmagan")
+      return forbidden("Arxivlangan nasiyalar uchun ruxsat berilmagan")
     }
     const status = resolutionState || cohort ? undefined : statusParam as NasiyaStatusFilter | undefined
     const search = searchParams.get('search')?.trim()

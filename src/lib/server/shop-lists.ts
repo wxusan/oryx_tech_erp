@@ -96,14 +96,14 @@ export interface ShopNasiyaListItem {
   contractInterest: MoneyDto
   ledger: NasiyaLedgerDto
   /** Stored parent status (kept for reference / debugging). */
-  status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
+  status: Exclude<NasiyaStatus, 'CANCELLED'>
   /** Operational collection state; separate from the immutable financial ledger. */
-  resolutionState: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
+  resolutionState: 'ACTIVE' | 'ARCHIVED'
   resolutionUpdatedAt: string | null
   /** True for imported (pre-Oryx) nasiyas — shown with an "Eski nasiya" badge. */
   isImported: boolean
   /** Live display status derived from schedules (matches the dashboard). */
-  displayStatus: NasiyaDisplayStatus
+  displayStatus: Exclude<NasiyaDisplayStatus, 'CANCELLED'>
   isOverdue: boolean
   overdueAmount: MoneyDto
   overdueCount: number
@@ -567,7 +567,7 @@ export async function getShopDeviceListItemsByIds(
   })
 }
 
-export type NasiyaStatusFilter = NasiyaStatus
+export type NasiyaStatusFilter = Exclude<NasiyaStatus, 'CANCELLED'>
 export type NasiyaCohortFilter = 'ACTIVE' | NasiyaCollectionCohort
 
 export interface ShopNasiyalarQuery {
@@ -584,7 +584,7 @@ export interface ShopNasiyalarQuery {
    */
   cohort?: NasiyaCohortFilter
   /** Defaults to ACTIVE so normal collection lists are operational work queues. */
-  resolutionState?: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
+  resolutionState?: 'ACTIVE' | 'ARCHIVED'
   skip?: number
   take?: number
   /** Internal clock injection keeps derived page selection and DTO labels aligned in tests. */
@@ -602,6 +602,9 @@ export function buildShopNasiyalarWhere(
   return {
     shopId,
     deletedAt: null,
+    // Cancelled contracts are legacy records. Nasiya cancellation is no
+    // longer supported, so they are intentionally outside every live list.
+    status: { not: 'CANCELLED' },
     resolutionState: query.resolutionState ?? 'ACTIVE',
     ...(search
       ? {
@@ -1066,11 +1069,11 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
         contractCurrency: nasiya.contractCurrency,
         contractInterest: createMoneyDto(nasiya.contractCurrency, nasiya.contractInterestAmount.toString()),
         ledger,
-        status: nasiya.status,
-        resolutionState: nasiya.resolutionState,
+        status: nasiya.status as Exclude<NasiyaStatus, 'CANCELLED'>,
+        resolutionState: nasiya.resolutionState as 'ACTIVE' | 'ARCHIVED',
         resolutionUpdatedAt: nasiya.resolutionUpdatedAt?.toISOString() ?? null,
         isImported: nasiya.isImported,
-        displayStatus: ledger.status,
+        displayStatus: ledger.status as Exclude<NasiyaDisplayStatus, 'CANCELLED'>,
         isOverdue: ledger.isOverdue,
         overdueAmount: ledger.overdue,
         overdueCount: ledger.overdueCount,

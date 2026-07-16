@@ -4,7 +4,6 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireShopAnyPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, forbidden, serverError } from '@/lib/api-helpers'
-import { principalHasPermission } from '@/lib/server/shop-access'
 import { invalidateShopReturnMutation } from '@/lib/server/cache-tags'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { logger } from '@/lib/logger'
@@ -34,7 +33,7 @@ const returnDeviceSchema = z.object({
 })
 
 function paymentSource(
-  kind: 'SALE' | 'NASIYA',
+  kind: 'SALE',
   payment: {
     id: string
     paidAt: Date
@@ -63,7 +62,7 @@ function paymentSource(
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopAnyPermission(['SALE_RETURN_REFUND', 'NASIYA_CANCEL'])
+    const guarded = await requireShopAnyPermission(['SALE_RETURN_REFUND'])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -96,13 +95,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
       })
       if (replay) {
-        const requiredPermission = replay.saleId ? 'SALE_RETURN_REFUND' : 'NASIYA_CANCEL'
-        if (
-          session.user.role !== 'SUPER_ADMIN' &&
-          (!guarded.principal || !principalHasPermission(guarded.principal, requiredPermission))
-        ) {
-          throw { status: 403, message: 'Bu turdagi qaytarish uchun ruxsat berilmagan' }
-        }
+        if (!replay.saleId) throw { status: 409, message: 'Nasiya shartnomasini bekor qilish qo\'llab-quvvatlanmaydi' }
         const samePayload = (
           replay.deviceId === deviceId &&
           Number(replay.refundInputAmount ?? replay.refundAmount) === parsed.data.refundAmount &&
@@ -131,39 +124,29 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             include: { payments: { where: { deletedAt: null }, orderBy: { paidAt: 'asc' } } },
           },
           nasiya: {
-            where: { deletedAt: null, returnedAt: null, status: { not: 'CANCELLED' } },
+            where: { deletedAt: null, returnedAt: null },
             orderBy: { createdAt: 'desc' },
             take: 1,
-            include: {
-              payments: {
-                where: { deletedAt: null },
-                orderBy: { paidAt: 'asc' },
-                include: { allocations: true },
-              },
-            },
+            select: { id: true },
           },
         },
       })
       if (!device) throw { status: 404, message: 'Qurilma topilmadi' }
-      if (!['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(device.status)) {
+      if (!['SOLD_CASH', 'SOLD_DEBT'].includes(device.status)) {
         throw { status: 409, message: 'Faqat sotilgan qurilmani qaytarish mumkin' }
       }
 
       const sale = device.sales[0]
       const nasiya = device.nasiya[0]
-      if ((sale ? 1 : 0) + (nasiya ? 1 : 0) !== 1) {
+      if (nasiya) {
+        throw { status: 409, message: 'Nasiya shartnomasini bekor qilish qo\'llab-quvvatlanmaydi' }
+      }
+      if (!sale) {
         throw { status: 409, message: 'Qurilmaning faol sotuv shartnomasi yagona emas. Avval ma\'lumotni tekshiring.' }
       }
-      const requiredPermission = sale ? 'SALE_RETURN_REFUND' : 'NASIYA_CANCEL'
-      if (
-        session.user.role !== 'SUPER_ADMIN' &&
-        (!guarded.principal || !principalHasPermission(guarded.principal, requiredPermission))
-      ) {
-        throw { status: 403, message: 'Bu turdagi qaytarish uchun ruxsat berilmagan' }
-      }
 
-      const contractCurrency: CurrencyCode = sale?.contractCurrency ?? nasiya!.contractCurrency
-      const frozenRate = Number(sale?.contractExchangeRateAtCreation ?? nasiya?.contractExchangeRateAtCreation ?? 0) || null
+      const contractCurrency: CurrencyCode = sale.contractCurrency
+      const frozenRate = Number(sale.contractExchangeRateAtCreation ?? 0) || null
       const settlementCurrency = parsed.data.inputCurrency ?? contractCurrency
       if (parsed.data.refundAmount > 0 && (settlementCurrency === 'USD' || contractCurrency === 'USD') && !liveUsdUzsRate) {
         throw { status: 400, message: 'USD kursi mavjud emas. Qaytarish summasini hozir hisoblab bo\'lmaydi.' }
@@ -181,9 +164,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             : roundContractMoney(convertUzsToUsd(refundAmountUzs, liveUsdUzsRate!), 'USD')
       }
 
-      const sources = sale
-        ? sale.payments.map((payment) => paymentSource('SALE', payment))
-        : nasiya!.payments.map((payment) => paymentSource('NASIYA', payment))
+      const sources = sale.payments.map((payment) => paymentSource('SALE', payment))
       const contractReceiptsAtReturn = roundContractMoney(
         sources.reduce(
           (sum, source) => sum + resolveAppliedContractAmount(source, contractCurrency, frozenRate),
@@ -210,57 +191,28 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         contractCurrency,
       )
       const receiptsUzs = sources.reduce((sum, source) => sum + source.amountUzs, 0)
-      const recognizedMarginAmountUzs = sale
-        ? sale.payments.reduce((sum, payment) => sum + Number(payment.marginAmountUzs), 0)
-        : nasiya!.payments.reduce(
-            (sum, payment) => sum + payment.allocations.reduce(
-              (allocationSum, allocation) => allocationSum + Number(allocation.marginAmountUzs),
-              0,
-            ),
-            0,
-          )
-      const recognizedInterestAmountUzs = nasiya
-        ? nasiya.payments.reduce(
-            (sum, payment) => sum + payment.allocations.reduce(
-              (allocationSum, allocation) => allocationSum + Number(allocation.interestAmountUzs),
-              0,
-            ),
-            0,
-          )
-        : 0
+      const recognizedMarginAmountUzs = sale.payments.reduce((sum, payment) => sum + Number(payment.marginAmountUzs), 0)
+      const recognizedInterestAmountUzs = 0
       const now = new Date()
 
       const guardedReturn = await tx.device.updateMany({
-        where: { id: deviceId, shopId, deletedAt: null, status: { in: ['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'] } },
+        where: { id: deviceId, shopId, deletedAt: null, status: { in: ['SOLD_CASH', 'SOLD_DEBT'] } },
         data: { status: 'IN_STOCK', updatedAt: now, note: parsed.data.note },
       })
       if (guardedReturn.count !== 1) {
         throw { status: 409, message: 'Qurilma qaytarish amali allaqachon bajarilgan' }
       }
 
-      if (sale) {
-        await tx.sale.update({
-          where: { id: sale.id },
-          data: { returnedAt: now, returnedBy: session.user.id },
-        })
-      }
-      if (nasiya) {
-        await tx.nasiya.update({
-          where: { id: nasiya.id },
-          data: { status: 'CANCELLED', returnedAt: now, returnedBy: session.user.id },
-        })
-        await tx.nasiyaSchedule.updateMany({
-          where: { nasiyaId: nasiya.id, shopId, status: { not: 'PAID' } },
-          data: { status: 'CANCELLED', note: `Qurilma qaytarildi: ${parsed.data.note}` },
-        })
-      }
+      await tx.sale.update({
+        where: { id: sale.id },
+        data: { returnedAt: now, returnedBy: session.user.id },
+      })
 
       const returnRecord = await tx.deviceReturn.create({
         data: {
           shopId,
           deviceId,
-          saleId: sale?.id,
-          nasiyaId: nasiya?.id,
+          saleId: sale.id,
           idempotencyKey,
           ledgerVersion: 2,
           refundAmount: refundAmountUzs,
@@ -269,14 +221,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           refundExchangeRateAtCreation: settlementCurrency === 'USD' || contractCurrency === 'USD' ? liveUsdUzsRate : null,
           refundMethod: refundAmountUzs > 0 ? parsed.data.refundMethod : undefined,
           contractCurrency,
-          contractAmount: sale
-            ? Number(sale.contractSalePrice)
-            : Number(nasiya!.contractDownPayment) + Number(nasiya!.contractFinalAmount),
+          contractAmount: Number(sale.contractSalePrice),
           contractReceiptsAtReturn,
           contractRefundAmount,
           contractRetainedAmount,
-          contractCancelledDebt: Number(sale?.contractRemainingAmount ?? nasiya?.contractRemainingAmount ?? 0),
-          revenueReversalAmountUzs: Number(sale?.salePrice ?? nasiya?.totalAmount ?? 0),
+          contractCancelledDebt: Number(sale.contractRemainingAmount),
+          revenueReversalAmountUzs: Number(sale.salePrice),
           // Only interest already recognized from real receipts is reversed.
           // Future contractual interest was never profit and is not touched.
           interestReversalAmountUzs: recognizedInterestAmountUzs,
@@ -291,8 +241,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         data: {
           shopId,
           deviceReturnId: returnRecord.id,
-          saleId: sale?.id,
-          nasiyaId: nasiya?.id,
+          saleId: sale.id,
           recognizedMarginAmountUzs,
           recognizedInterestAmountUzs,
           createdAt: now,
@@ -313,7 +262,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           action: 'RETURN',
           targetType: 'Device',
           targetId: deviceId,
-          oldValue: { status: device.status, saleId: sale?.id, nasiyaId: nasiya?.id },
+          oldValue: { status: device.status, saleId: sale.id },
           newValue: {
             status: 'IN_STOCK',
             returnId: returnRecord.id,
@@ -324,7 +273,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             contractReceiptsAtReturn,
             contractRefundAmount,
             contractRetainedAmount,
-            contractCancelledDebt: Number(sale?.contractRemainingAmount ?? nasiya?.contractRemainingAmount ?? 0),
+            contractCancelledDebt: Number(sale.contractRemainingAmount),
             refundMethod: parsed.data.refundMethod,
             allocationCount: allocations.length,
           },

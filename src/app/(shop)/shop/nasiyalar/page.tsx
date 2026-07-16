@@ -32,8 +32,8 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
   const status = tab ?? (Array.isArray(params?.status) ? params?.status[0] : params?.status)
   const initialSearch = scalarParam(params?.q).slice(0, 100)
   const initialPage = positivePage(params?.page)
-  const statusFilters = ['ACTIVE', 'OVERDUE', 'COMPLETED', 'CANCELLED'] as const
-  const validFilters = [...statusFilters, 'DUE_TODAY', 'UPCOMING', 'ARCHIVED', 'WRITTEN_OFF'] as const
+  const statusFilters = ['ACTIVE', 'OVERDUE', 'COMPLETED'] as const
+  const validFilters = [...statusFilters, 'DUE_TODAY', 'UPCOMING', 'ARCHIVED'] as const
   const requestedFilter = validFilters.includes(status as (typeof validFilters)[number])
     ? (status as (typeof validFilters)[number])
     : 'Barchasi'
@@ -45,7 +45,7 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
       )
     )),
   )
-  if (!canViewResolutionHistory && (requestedFilter === 'ARCHIVED' || requestedFilter === 'WRITTEN_OFF')) {
+  if (!canViewResolutionHistory && requestedFilter === 'ARCHIVED') {
     redirect('/shop/nasiyalar')
   }
   const initialFilter = requestedFilter
@@ -60,7 +60,7 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
     getShopNasiyalarList(guarded.shopId, {
       status: initialStatus,
       cohort: initialCohort,
-      resolutionState: initialFilter === 'ARCHIVED' || initialFilter === 'WRITTEN_OFF'
+      resolutionState: initialFilter === 'ARCHIVED'
         ? initialFilter
         : undefined,
       search: initialSearch || undefined,

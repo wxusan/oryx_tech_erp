@@ -39,8 +39,8 @@ describe('nasiya detail: completed profile', () => {
     expect(source).toContain('nasiya.displayStatus ?? (nasiya.status as')
   })
 
-  it('hides the "To\'lov qabul qilish" button once completed/cancelled', () => {
-    expect(source).toContain("{canReceivePayment && !ledgerQuarantined && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (")
+  it('hides the "To\'lov qabul qilish" button once completed', () => {
+    expect(source).toContain('{canReceivePayment && !ledgerQuarantined && isOperationallyActive && !isCompleted && (')
   })
 
   it('shows a clear completed banner text', () => {

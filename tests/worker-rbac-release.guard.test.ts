@@ -179,8 +179,8 @@ describe('worker server boundary release guard', () => {
     expect(nasiyaDetail).toContain("['NASIYA_ARCHIVE', 'NASIYA_REOPEN']")
     expect(nasiyaDetail).toContain('...(includeResolutionData')
     expect(nasiyaList).toContain('if (resolutionState && !includeResolutionData)')
-    expect(nasiyaPage).toContain("!canViewResolutionHistory && (requestedFilter === 'ARCHIVED' || requestedFilter === 'WRITTEN_OFF')")
-    expect(nasiyaClient).toContain("canViewResolutionHistory || (tab.value !== 'ARCHIVED' && tab.value !== 'WRITTEN_OFF')")
+    expect(nasiyaPage).toContain("!canViewResolutionHistory && requestedFilter === 'ARCHIVED'")
+    expect(nasiyaClient).toContain("canViewResolutionHistory || tab.value !== 'ARCHIVED'")
   })
 
   it('limits cost/margin Telegram templates to the shop owner recipient', () => {

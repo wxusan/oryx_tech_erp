@@ -30,7 +30,7 @@ function roundUzsContext(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100
 }
 
-function validTransition(action: ResolutionAction, state: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF') {
+function validTransition(action: ResolutionAction, state: 'ACTIVE' | 'ARCHIVED') {
   if (action === 'ARCHIVE') return state === 'ACTIVE'
   return state === 'ARCHIVED'
 }
@@ -104,8 +104,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const nasiya = await tx.nasiya.findFirst({
         where: { id: nasiyaId, shopId, deletedAt: null },
       })
-      if (!nasiya) throw { status: 404, message: 'Nasiya topilmadi' }
-      if (nasiya.status === 'CANCELLED') throw { status: 409, message: 'Bekor qilingan nasiya holati o\'zgartirilmaydi' }
+      if (!nasiya || nasiya.status === 'CANCELLED' || nasiya.resolutionState === 'WRITTEN_OFF') {
+        throw { status: 404, message: 'Nasiya topilmadi' }
+      }
       if (!validTransition(action, nasiya.resolutionState)) {
         throw { status: 409, message: "Nasiya hozirgi holatidan bu amalga o'tkazilmaydi" }
       }

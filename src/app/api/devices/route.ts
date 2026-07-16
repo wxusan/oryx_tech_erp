@@ -45,7 +45,7 @@ export async function GET(req: NextRequest) {
       return badRequest("Amal tanlash maqsadi noto'g'ri")
     }
     const guarded = isReturnPicker
-      ? await requireShopAnyPermission(['SALE_RETURN_REFUND', 'NASIYA_CANCEL'])
+      ? await requireShopAnyPermission(['SALE_RETURN_REFUND'])
       : actionPickerPurpose === 'device'
         ? await requireShopAnyPermission(['DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK'])
         : actionPickerPurpose === 'sale'
@@ -182,12 +182,8 @@ export async function GET(req: NextRequest) {
       const canReturnSale = session.user.role === 'SUPER_ADMIN' || Boolean(
         guarded.principal && principalHasPermission(guarded.principal, 'SALE_RETURN_REFUND'),
       )
-      const canCancelNasiya = session.user.role === 'SUPER_ADMIN' || Boolean(
-        guarded.principal && principalHasPermission(guarded.principal, 'NASIYA_CANCEL'),
-      )
       const eligibleStatuses = [
         ...(canReturnSale ? ['SOLD_CASH', 'SOLD_DEBT'] as const : []),
-        ...(canCancelNasiya ? ['SOLD_NASIYA'] as const : []),
       ]
       const requestedTake = Number(searchParams.get('take') ?? 25)
       const requestedSkip = Number(searchParams.get('skip') ?? 0)

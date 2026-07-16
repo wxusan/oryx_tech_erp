@@ -18,7 +18,7 @@ interface QurilmalarPageProps {
 const PER_PAGE = 25
 
 export default async function QurilmalarPage({ searchParams }: QurilmalarPageProps) {
-  const guarded = await requireCurrentShopAnyPermission(['INVENTORY_VIEW', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_RETURN_REFUND', 'NASIYA_CANCEL'])
+  const guarded = await requireCurrentShopAnyPermission(['INVENTORY_VIEW', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_RETURN_REFUND'])
   if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
   if (!guarded.principal || !principalHasPermission(guarded.principal, 'INVENTORY_VIEW')) {
     return <DeviceActionQueue />

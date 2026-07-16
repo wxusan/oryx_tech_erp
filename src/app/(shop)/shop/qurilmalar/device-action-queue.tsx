@@ -45,7 +45,6 @@ export default function DeviceActionQueue() {
     ...(can('DEVICE_DELETE') ? [{ icon: Trash2, label: "O'chirish" }] : []),
     ...(can('DEVICE_RESTOCK') ? [{ icon: Undo2, label: 'Omborga qaytarish' }] : []),
     ...(can('SALE_RETURN_REFUND') ? [{ icon: Undo2, label: 'Sotuvni qaytarish' }] : []),
-    ...(can('NASIYA_CANCEL') ? [{ icon: Undo2, label: 'Nasiyani bekor qilish' }] : []),
   ]
 
   return (

@@ -119,13 +119,12 @@ describe('owner and staff authorization', () => {
     expect(principalCan(principal({ legacyFullAccess: true }), 'LOG_VIEW')).toBe(true)
     expect(principalCan(principal({ legacyFullAccess: true }), 'REPORT_VIEW')).toBe(false)
     expect(principalCan(principal({ legacyFullAccess: true }), 'EXPORT_SALES')).toBe(false)
-    expect(principalCan(principal({ legacyFullAccess: true }), 'NASIYA_WRITE_OFF')).toBe(false)
     expect(principalCan(principal({ legacyFullAccess: true }), 'STAFF_VIEW')).toBe(false)
   })
 
   it('enforces the complete typed permission matrix for staff', () => {
-    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(56)
-    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(56)
+    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(55)
+    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(55)
     for (const permission of SHOP_PERMISSION_CATALOG) {
       const granted = principal({ grantedPermissions: new Set([permission.code]) })
       expect(principalCan(granted, permission.code), permission.code).toBe(!permission.ownerOnly && !permission.retired)

@@ -204,7 +204,6 @@ function AuthorizedQurilmaDetailPage() {
   const canReceiveSalePayment = can('SALE_PAYMENT_RECEIVE')
   const canReceiveNasiyaPayment = can('NASIYA_PAYMENT_RECEIVE')
   const canReturnSale = can('SALE_RETURN_REFUND')
-  const canCancelNasiya = can('NASIYA_CANCEL')
   const canViewLogs = can('LOG_VIEW')
   const detailPurpose = canViewInventory
     ? null
@@ -213,7 +212,7 @@ function AuthorizedQurilmaDetailPage() {
       : 'sale'
   const backHref = canViewInventory || detailPurpose === 'device'
     ? '/shop/qurilmalar'
-    : (canReturnSale || canCancelNasiya)
+    : canReturnSale
       ? '/shop/qurilmalar'
     : (can('SALE_VIEW') || canEditCashSale || canManageSaleReminder)
       ? '/shop/sotuvlar'
@@ -596,7 +595,7 @@ function AuthorizedQurilmaDetailPage() {
 
   async function handleReturnDevice() {
     const refundAmount = Number(returnRefundAmount || 0)
-    const returnCurrency = device?.sales?.[0]?.contractCurrency ?? device?.nasiya?.[0]?.contractCurrency ?? currency.currency
+  const returnCurrency = device?.sales?.[0]?.contractCurrency ?? currency.currency
     if (returnNote.trim().length < 5) {
       setReturnError("Qaytarish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
       requestAnimationFrame(() => document.getElementById('return-note')?.focus())
@@ -639,7 +638,6 @@ function AuthorizedQurilmaDetailPage() {
       await navigateAfterMutation(router, '/shop/qurilmalar', {
         kind: 'return.created',
         deviceId: id,
-        nasiyaId: latestNasiya?.id,
       })
     } catch (err) {
       setReturnError(err instanceof Error ? err.message : 'Qaytarishda xatolik')
@@ -840,8 +838,7 @@ function AuthorizedQurilmaDetailPage() {
               <Trash2 size={15} />
             </Button>
           )}
-          {((canReturnSale && ['SOLD_CASH', 'SOLD_DEBT'].includes(device.status)) ||
-            (canCancelNasiya && device.status === 'SOLD_NASIYA')) && (
+          {(canReturnSale && ['SOLD_CASH', 'SOLD_DEBT'].includes(device.status)) && (
             <Button
               variant="outline"
               onClick={() => setReturnModalOpen(true)}
