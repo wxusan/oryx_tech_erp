@@ -415,6 +415,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               }
             }
 
+            // Payment dates are audit evidence and may be backdated. Derived
+            // overdue/partial status must instead use one server-clock instant
+            // throughout this transaction; otherwise a backdated payment can
+            // write a status that the immediately following reconciliation
+            // quite correctly considers inconsistent.
+            const ledgerNow = new Date()
             const scheduleUpdates = allocateNasiyaPayment({
               schedules: allocationRows.map((schedule) => ({
                 id: schedule.id,
@@ -429,7 +435,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               amountUzs,
               appliedAmountInContractCurrency,
               contractCurrency,
-              now: date,
+              now: ledgerNow,
             })
             const allocationUzsAmounts = allocateUzsAcrossContractAmounts(
               amountUzs,
@@ -617,7 +623,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               contractCurrency: allocation.contractCurrency,
               contractAmount: allocation.contractAmount.toString(),
             })),
-          })
+          }, ledgerNow)
           if (postPaymentLedger.health === 'QUARANTINED') {
             throw { status: 409, message: "To'lovdan keyin nasiya jadvali mos kelmadi; amaliyot bekor qilindi" }
           }

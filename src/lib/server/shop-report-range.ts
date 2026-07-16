@@ -240,6 +240,10 @@ export async function getShopRangeReport(input: {
         AND n."deletedAt" IS NULL
         AND n."returnedAt" IS NULL
         AND n."status" <> 'CANCELLED'
+        -- Imported contracts carry pre-Oryx debt. They are not current-period
+        -- ERP receivables, even though ledger enforcement requires them to
+        -- retain an authoritative schedule.
+        AND n."isImported" = false
         -- Archived and written-off contracts are not open receivables. Cash
         -- payments are queried separately above and remain in the report.
         AND n."resolutionState" = 'ACTIVE'

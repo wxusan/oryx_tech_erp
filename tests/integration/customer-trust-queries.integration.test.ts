@@ -64,6 +64,12 @@ describe('bounded customer trust aggregate', () => {
       }),
     ])
 
+    const completedSchedules = [
+      { dueDate: new Date('2026-07-01T00:00:00.000Z'), paidAt: new Date('2026-06-30T00:00:00.000Z') },
+      { dueDate: new Date('2026-07-02T00:00:00.000Z'), paidAt: new Date('2026-07-03T00:00:00.000Z') },
+      { dueDate: new Date('2026-07-03T00:00:00.000Z'), paidAt: new Date('2026-07-06T00:00:00.000Z') },
+    ]
+
     async function createContract(input: {
       suffix: string
       status: 'ACTIVE' | 'COMPLETED' | 'CANCELLED'
@@ -83,7 +89,26 @@ describe('bounded customer trust aggregate', () => {
           addedBy: owner.id,
         },
       })
-      return prisma.nasiya.create({
+      const schedules = input.status === 'COMPLETED'
+        ? completedSchedules.map((schedule, index) => ({
+            monthNumber: index + 1,
+            dueDate: schedule.dueDate,
+            paidAt: schedule.paidAt,
+            expectedAmount: 100,
+            paidAmount: 100,
+            status: 'PAID' as const,
+            contractExpectedAmount: 100,
+            contractPaidAmount: 100,
+            contractRemainingAmount: 0,
+          }))
+        : input.status === 'ACTIVE'
+          ? [
+              { monthNumber: 1, dueDate: new Date('2026-07-10T00:00:00.000Z'), expectedAmount: 100, status: 'PENDING' as const, contractExpectedAmount: 100, contractRemainingAmount: 100 },
+              { monthNumber: 2, dueDate: new Date('2026-07-11T00:00:00.000Z'), delayedUntil: new Date('2026-07-20T00:00:00.000Z'), expectedAmount: 100, status: 'DEFERRED' as const, contractExpectedAmount: 100, contractRemainingAmount: 100 },
+            ]
+          : [{ monthNumber: 1, dueDate: new Date('2026-07-01T00:00:00.000Z'), expectedAmount: 100, paidAmount: 100, paidAt: new Date('2026-07-10T00:00:00.000Z'), status: 'PAID' as const, contractExpectedAmount: 100, contractPaidAmount: 100, contractRemainingAmount: 0 }]
+      return prisma.$transaction(async (tx) => {
+        const nasiya = await tx.nasiya.create({
         data: {
           shopId: shop.id,
           deviceId: device.id,
@@ -107,103 +132,34 @@ describe('bounded customer trust aggregate', () => {
           contractRemainingAmount: input.remaining,
           createdBy: owner.id,
         },
+        })
+        await tx.nasiyaSchedule.createMany({
+          data: schedules.map((schedule) => ({ nasiyaId: nasiya.id, shopId: shop.id, contractCurrency: 'UZS' as const, ...schedule })),
+        })
+        return nasiya
       })
     }
 
-    const completed = await createContract({
+    await createContract({
       suffix: 'COMPLETED',
       status: 'COMPLETED',
       final: 300,
       paid: 300,
       remaining: 0,
     })
-    const active = await createContract({
+    await createContract({
       suffix: 'ACTIVE',
       status: 'ACTIVE',
       final: 200,
       paid: 0,
       remaining: 200,
     })
-    const cancelled = await createContract({
+    await createContract({
       suffix: 'CANCELLED',
       status: 'CANCELLED',
       final: 100,
-      paid: 0,
-      remaining: 100,
-    })
-
-    const completedSchedules = [
-      {
-        dueDate: new Date('2026-07-01T00:00:00.000Z'),
-        paidAt: new Date('2026-06-30T00:00:00.000Z'),
-      },
-      {
-        dueDate: new Date('2026-07-02T00:00:00.000Z'),
-        paidAt: new Date('2026-07-03T00:00:00.000Z'),
-      },
-      {
-        dueDate: new Date('2026-07-03T00:00:00.000Z'),
-        paidAt: new Date('2026-07-06T00:00:00.000Z'),
-      },
-    ]
-    for (const [index, schedule] of completedSchedules.entries()) {
-      await prisma.nasiyaSchedule.create({
-        data: {
-          nasiyaId: completed.id,
-          shopId: shop.id,
-          monthNumber: index + 1,
-          dueDate: schedule.dueDate,
-          expectedAmount: 100,
-          paidAmount: 100,
-          paidAt: schedule.paidAt,
-          status: 'PAID',
-          contractCurrency: 'UZS',
-          contractExpectedAmount: 100,
-          contractPaidAmount: 100,
-          contractRemainingAmount: 0,
-        },
-      })
-    }
-    await prisma.nasiyaSchedule.createMany({
-      data: [
-        {
-          nasiyaId: active.id,
-          shopId: shop.id,
-          monthNumber: 1,
-          dueDate: new Date('2026-07-10T00:00:00.000Z'),
-          expectedAmount: 100,
-          status: 'PENDING',
-          contractCurrency: 'UZS',
-          contractExpectedAmount: 100,
-          contractRemainingAmount: 100,
-        },
-        {
-          nasiyaId: active.id,
-          shopId: shop.id,
-          monthNumber: 2,
-          dueDate: new Date('2026-07-11T00:00:00.000Z'),
-          delayedUntil: new Date('2026-07-20T00:00:00.000Z'),
-          expectedAmount: 100,
-          status: 'DEFERRED',
-          contractCurrency: 'UZS',
-          contractExpectedAmount: 100,
-          contractRemainingAmount: 100,
-        },
-        {
-          nasiyaId: cancelled.id,
-          shopId: shop.id,
-          monthNumber: 1,
-          dueDate: new Date('2026-07-01T00:00:00.000Z'),
-          expectedAmount: 100,
-          paidAmount: 100,
-          paidAt: new Date('2026-07-10T00:00:00.000Z'),
-          status: 'PAID',
-          contractCurrency: 'UZS',
-          contractExpectedAmount: 100,
-          contractPaidAmount: 100,
-          contractRemainingAmount: 0,
-        },
-      ],
+      paid: 100,
+      remaining: 0,
     })
 
     const nested: CustomerNasiyaInput[] = [

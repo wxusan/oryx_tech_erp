@@ -126,7 +126,8 @@ describe('adversarial monetary database invariants', () => {
   it('requires a schedule remainder and currency that match its parent contract', async () => {
     const { owner, shop } = await seedShop('schedule_checks')
     const { customer, device } = await seedSale('schedule_parent', shop.id, owner.id, 'SOLD_NASIYA')
-    const nasiya = await prisma.nasiya.create({
+    const { nasiya, schedule } = await prisma.$transaction(async (tx) => {
+      const nasiya = await tx.nasiya.create({
       data: {
         shopId: shop.id,
         deviceId: device.id,
@@ -147,6 +148,20 @@ describe('adversarial monetary database invariants', () => {
         contractRemainingAmount: 1_000,
         createdBy: owner.id,
       },
+      })
+      const schedule = await tx.nasiyaSchedule.create({
+        data: {
+          nasiyaId: nasiya.id,
+          shopId: shop.id,
+          monthNumber: 1,
+          dueDate: new Date('2026-08-01T00:00:00.000Z'),
+          expectedAmount: 1_000,
+          contractCurrency: 'UZS',
+          contractExpectedAmount: 1_000,
+          contractRemainingAmount: 1_000,
+        },
+      })
+      return { nasiya, schedule }
     })
     await expect(prisma.nasiyaSchedule.create({
       data: {
@@ -173,18 +188,6 @@ describe('adversarial monetary database invariants', () => {
       },
     })).rejects.toThrow()
 
-    const schedule = await prisma.nasiyaSchedule.create({
-      data: {
-        nasiyaId: nasiya.id,
-        shopId: shop.id,
-        monthNumber: 1,
-        dueDate: new Date('2026-08-01T00:00:00.000Z'),
-        expectedAmount: 1_000,
-        contractCurrency: 'UZS',
-        contractExpectedAmount: 1_000,
-        contractRemainingAmount: 1_000,
-      },
-    })
     expect(schedule.contractCurrency).toBe('UZS')
     expect(Number(schedule.contractRemainingAmount)).toBe(1_000)
   })
@@ -199,7 +202,8 @@ describe('adversarial monetary database invariants', () => {
       const device = await prisma.device.create({
         data: { shopId: shop.id, model: `Phone ${suffix}`, purchasePrice: 100, imei: `AUDIT-ALLOC-${suffix}`, addedBy: owner.id, status: 'SOLD_NASIYA' },
       })
-      const nasiya = await prisma.nasiya.create({
+      const { nasiya, schedule } = await prisma.$transaction(async (tx) => {
+        const nasiya = await tx.nasiya.create({
         data: {
           shopId: shop.id,
           deviceId: device.id,
@@ -219,8 +223,8 @@ describe('adversarial monetary database invariants', () => {
           contractRemainingAmount: 100,
           createdBy: owner.id,
         },
-      })
-      const schedule = await prisma.nasiyaSchedule.create({
+        })
+        const schedule = await tx.nasiyaSchedule.create({
         data: {
           nasiyaId: nasiya.id,
           shopId: shop.id,
@@ -230,6 +234,8 @@ describe('adversarial monetary database invariants', () => {
           contractExpectedAmount: 100,
           contractRemainingAmount: 100,
         },
+        })
+        return { nasiya, schedule }
       })
       return { nasiya, schedule }
     }

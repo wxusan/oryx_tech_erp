@@ -127,7 +127,8 @@ describe('dynamic shop range report', () => {
     })
 
     const nasiyaDevice = await device(700, 'SOLD_NASIYA')
-    const nasiya = await prisma.nasiya.create({
+    await prisma.$transaction(async (tx) => {
+      const nasiya = await tx.nasiya.create({
       data: {
         shopId: shop.id,
         deviceId: nasiyaDevice.id,
@@ -150,7 +151,7 @@ describe('dynamic shop range report', () => {
         createdBy: owner.id,
       },
     })
-    await prisma.nasiyaSchedule.create({
+      await tx.nasiyaSchedule.create({
       data: {
         shopId: shop.id,
         nasiyaId: nasiya.id,
@@ -162,6 +163,7 @@ describe('dynamic shop range report', () => {
         contractRemainingAmount: 1_200,
         status: 'DEFERRED',
       },
+      })
     })
 
     await expect(getShopReportDataMonths(shop.id, new Date('2026-06-14T12:00:00.000Z')))
@@ -206,7 +208,8 @@ describe('dynamic shop range report', () => {
         })
       } else {
         const sold = await device(625_000, 'SOLD_NASIYA')
-        const nasiya = await prisma.nasiya.create({
+        const { nasiya, schedule } = await prisma.$transaction(async (tx) => {
+          const nasiya = await tx.nasiya.create({
           data: {
             shopId: shop.id,
             deviceId: sold.id,
@@ -231,8 +234,8 @@ describe('dynamic shop range report', () => {
             createdAt: new Date('2026-03-06T00:00:00.000Z'),
             createdBy: owner.id,
           },
-        })
-        const schedule = await prisma.nasiyaSchedule.create({
+          })
+          const schedule = await tx.nasiyaSchedule.create({
           data: {
             shopId: shop.id,
             nasiyaId: nasiya.id,
@@ -246,6 +249,8 @@ describe('dynamic shop range report', () => {
             contractPaidAmount: 50,
             contractRemainingAmount: 50,
           },
+          })
+          return { nasiya, schedule }
         })
         await prisma.nasiyaPayment.create({
           data: {
@@ -340,7 +345,8 @@ describe('dynamic shop range report', () => {
     })
 
     const archivedDevice = await device(300, 'SOLD_NASIYA')
-    const archived = await prisma.nasiya.create({
+    await prisma.$transaction(async (tx) => {
+      const archived = await tx.nasiya.create({
       data: {
         shopId: shop.id,
         deviceId: archivedDevice.id,
@@ -365,7 +371,7 @@ describe('dynamic shop range report', () => {
         createdBy: owner.id,
       },
     })
-    await prisma.nasiyaSchedule.create({
+      await tx.nasiyaSchedule.create({
       data: {
         shopId: shop.id,
         nasiyaId: archived.id,
@@ -375,10 +381,12 @@ describe('dynamic shop range report', () => {
         contractExpectedAmount: 990,
         contractRemainingAmount: 990,
       },
+      })
     })
 
     const writtenDevice = await device(400, 'SOLD_NASIYA')
-    const written = await prisma.nasiya.create({
+    const written = await prisma.$transaction(async (tx) => {
+      const written = await tx.nasiya.create({
       data: {
         shopId: shop.id,
         deviceId: writtenDevice.id,
@@ -402,7 +410,7 @@ describe('dynamic shop range report', () => {
         createdBy: owner.id,
       },
     })
-    await prisma.nasiyaSchedule.create({
+      await tx.nasiyaSchedule.create({
       data: {
         shopId: shop.id,
         nasiyaId: written.id,
@@ -412,6 +420,8 @@ describe('dynamic shop range report', () => {
         contractExpectedAmount: 1_200,
         contractRemainingAmount: 1_200,
       },
+      })
+      return written
     })
     await prisma.nasiyaResolutionEvent.create({
       data: {
@@ -433,7 +443,8 @@ describe('dynamic shop range report', () => {
     })
 
     const importedDevice = await device(1, 'SOLD_NASIYA')
-    await prisma.nasiya.create({
+    await prisma.$transaction(async (tx) => {
+      const imported = await tx.nasiya.create({
       data: {
         shopId: shop.id,
         deviceId: importedDevice.id,
@@ -459,6 +470,18 @@ describe('dynamic shop range report', () => {
         createdAt: new Date('2026-02-18T00:00:00.000Z'),
         createdBy: owner.id,
       },
+      })
+      await tx.nasiyaSchedule.create({
+        data: {
+          shopId: shop.id,
+          nasiyaId: imported.id,
+          monthNumber: 1,
+          dueDate: new Date('2026-03-01T00:00:00.000Z'),
+          expectedAmount: 10_000,
+          contractExpectedAmount: 10_000,
+          contractRemainingAmount: 10_000,
+        },
+      })
     })
 
     const range = resolveReportRange({

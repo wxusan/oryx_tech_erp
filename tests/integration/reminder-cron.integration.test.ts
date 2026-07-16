@@ -130,7 +130,8 @@ describe('daily reminder generation against PostgreSQL', () => {
           addedBy: owner.id,
         },
       })
-      const nasiya = await prisma.nasiya.create({
+      return prisma.$transaction(async (tx) => {
+        const nasiya = await tx.nasiya.create({
         data: {
           shopId: shop.id,
           deviceId: device.id,
@@ -156,8 +157,8 @@ describe('daily reminder generation against PostgreSQL', () => {
           returnedBy: returnedAt ? owner.id : null,
           createdBy: owner.id,
         },
-      })
-      return prisma.nasiyaSchedule.create({
+        })
+        return tx.nasiyaSchedule.create({
         data: {
           nasiyaId: nasiya.id,
           shopId: shop.id,
@@ -168,6 +169,7 @@ describe('daily reminder generation against PostgreSQL', () => {
           contractRemainingAmount: 1_000,
           status: 'OVERDUE',
         },
+        })
       })
     }
 

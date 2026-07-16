@@ -87,7 +87,8 @@ describe('authoritative due-today and overdue receivable cohorts', () => {
     await sale({ customerId: customerB.id, dueDate: tomorrowStart, amount: 777 })
 
     const nasiyaDevice = await device('SOLD_NASIYA')
-    const nasiya = await prisma.nasiya.create({
+    const nasiya = await prisma.$transaction(async (tx) => {
+      const nasiya = await tx.nasiya.create({
       data: {
         shopId: shop.id,
         deviceId: nasiyaDevice.id,
@@ -109,7 +110,7 @@ describe('authoritative due-today and overdue receivable cohorts', () => {
         createdBy: actor.id,
       },
     })
-    await prisma.nasiyaSchedule.createMany({
+      await tx.nasiyaSchedule.createMany({
       data: [
         {
           shopId: shop.id,
@@ -132,10 +133,13 @@ describe('authoritative due-today and overdue receivable cohorts', () => {
           status: 'PENDING',
         },
       ],
+      })
+      return nasiya
     })
 
     const archivedDevice = await device('SOLD_NASIYA')
-    const archived = await prisma.nasiya.create({
+    await prisma.$transaction(async (tx) => {
+      const archived = await tx.nasiya.create({
       data: {
         shopId: shop.id,
         deviceId: archivedDevice.id,
@@ -158,7 +162,7 @@ describe('authoritative due-today and overdue receivable cohorts', () => {
         createdBy: actor.id,
       },
     })
-    await prisma.nasiyaSchedule.create({
+      await tx.nasiyaSchedule.create({
       data: {
         shopId: shop.id,
         nasiyaId: archived.id,
@@ -168,6 +172,7 @@ describe('authoritative due-today and overdue receivable cohorts', () => {
         contractExpectedAmount: 999,
         contractRemainingAmount: 999,
       },
+      })
     })
 
     const input = {
@@ -221,7 +226,7 @@ describe('authoritative due-today and overdue receivable cohorts', () => {
     expect(overdueNasiyaListItem).toMatchObject({
       collectionWorkItem: {
         cohort: 'OVERDUE',
-        outstanding: 200,
+        outstanding: { currency: 'UZS', minorUnits: 200 },
         effectiveDue: '2026-07-12T18:59:59.999Z',
         preferredScheduleId: expect.any(String),
       },
@@ -229,7 +234,7 @@ describe('authoritative due-today and overdue receivable cohorts', () => {
     expect(dueTodayNasiyaListItem).toMatchObject({
       collectionWorkItem: {
         cohort: 'DUE_TODAY',
-        outstanding: 300,
+        outstanding: { currency: 'UZS', minorUnits: 300 },
         effectiveDue: todayStart.toISOString(),
         preferredScheduleId: expect.any(String),
       },

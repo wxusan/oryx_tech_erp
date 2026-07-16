@@ -245,7 +245,8 @@ async function seedNasiya(actor: Awaited<ReturnType<typeof seedActor>>, suffix: 
       status: 'SOLD_NASIYA',
     },
   })
-  const nasiya = await prisma.nasiya.create({
+  const { nasiya, schedule } = await prisma.$transaction(async (tx) => {
+    const nasiya = await tx.nasiya.create({
     data: {
       shopId: actor.shop.id,
       deviceId: device.id,
@@ -268,7 +269,7 @@ async function seedNasiya(actor: Awaited<ReturnType<typeof seedActor>>, suffix: 
       createdBy: actor.admin.id,
     },
   })
-  const schedule = await prisma.nasiyaSchedule.create({
+    const schedule = await tx.nasiyaSchedule.create({
     data: {
       nasiyaId: nasiya.id,
       shopId: actor.shop.id,
@@ -279,6 +280,8 @@ async function seedNasiya(actor: Awaited<ReturnType<typeof seedActor>>, suffix: 
       contractExpectedAmount: amount,
       contractRemainingAmount: amount,
     },
+  })
+    return { nasiya, schedule }
   })
   return { customer, device, nasiya, schedule }
 }
@@ -825,10 +828,16 @@ describe('real-PostgreSQL route evidence', () => {
         createdBy: actor.admin.id,
       },
     })
-    await prisma.nasiya.update({
-      where: { id: contract.nasiya.id },
-      data: { contractPaidAmount: 400, contractRemainingAmount: 600, remainingAmount: 600 },
-    })
+    await prisma.$transaction([
+      prisma.nasiya.update({
+        where: { id: contract.nasiya.id },
+        data: { contractPaidAmount: 400, contractRemainingAmount: 600, remainingAmount: 600 },
+      }),
+      prisma.nasiyaSchedule.update({
+        where: { id: contract.schedule.id },
+        data: { paidAmount: 400, contractPaidAmount: 400, contractRemainingAmount: 600, status: 'PARTIAL' },
+      }),
+    ])
 
     const response = await returnDeviceRequest({
       deviceId: contract.device.id,
@@ -1436,10 +1445,21 @@ describe('real-PostgreSQL route evidence', () => {
       amount: 1_000,
       key: 'final-payment-retry-key',
     })
-    const retryBody = await retry.json() as { success: boolean; data: { amount: number; remaining: number; duplicate: boolean } }
+    const retryBody = await retry.json() as {
+      success: boolean
+      data: {
+        receipt: { recordedUzs: { minorUnits: number } }
+        ledger: { remaining: { minorUnits: number } }
+        duplicate: boolean
+      }
+    }
     expect(retry.status).toBe(200)
     expect(retryBody.success).toBe(true)
-    expect(retryBody.data).toMatchObject({ amount: 1_000, remaining: 0, duplicate: true })
+    expect(retryBody.data).toMatchObject({
+      receipt: { recordedUzs: { minorUnits: 1_000 } },
+      ledger: { remaining: { minorUnits: 0 } },
+      duplicate: true,
+    })
     expect(await prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(1)
     expect(await prisma.log.count({ where: { targetType: 'NasiyaSchedule', targetId: contract.schedule.id } })).toBe(1)
   })
@@ -1448,37 +1468,40 @@ describe('real-PostgreSQL route evidence', () => {
     const actor = await seedActor('selected_month')
     useShopAdmin(actor)
     const contract = await seedNasiya(actor, 'selected_month', 3_000_000)
-    await prisma.nasiyaSchedule.update({
-      where: { id: contract.schedule.id },
-      data: {
-        expectedAmount: 1_000_000,
-        contractExpectedAmount: 1_000_000,
-        contractRemainingAmount: 1_000_000,
-      },
-    })
-    const selected = await prisma.nasiyaSchedule.create({
-      data: {
-        nasiyaId: contract.nasiya.id,
-        shopId: actor.shop.id,
-        monthNumber: 2,
-        dueDate: new Date('2026-09-01T00:00:00.000Z'),
-        expectedAmount: 1_000_000,
-        contractCurrency: 'UZS',
-        contractExpectedAmount: 1_000_000,
-        contractRemainingAmount: 1_000_000,
-      },
-    })
-    const third = await prisma.nasiyaSchedule.create({
-      data: {
-        nasiyaId: contract.nasiya.id,
-        shopId: actor.shop.id,
-        monthNumber: 3,
-        dueDate: new Date('2026-10-01T00:00:00.000Z'),
-        expectedAmount: 1_000_000,
-        contractCurrency: 'UZS',
-        contractExpectedAmount: 1_000_000,
-        contractRemainingAmount: 1_000_000,
-      },
+    const { selected, third } = await prisma.$transaction(async (tx) => {
+      await tx.nasiyaSchedule.update({
+        where: { id: contract.schedule.id },
+        data: {
+          expectedAmount: 1_000_000,
+          contractExpectedAmount: 1_000_000,
+          contractRemainingAmount: 1_000_000,
+        },
+      })
+      const selected = await tx.nasiyaSchedule.create({
+        data: {
+          nasiyaId: contract.nasiya.id,
+          shopId: actor.shop.id,
+          monthNumber: 2,
+          dueDate: new Date('2026-09-01T00:00:00.000Z'),
+          expectedAmount: 1_000_000,
+          contractCurrency: 'UZS',
+          contractExpectedAmount: 1_000_000,
+          contractRemainingAmount: 1_000_000,
+        },
+      })
+      const third = await tx.nasiyaSchedule.create({
+        data: {
+          nasiyaId: contract.nasiya.id,
+          shopId: actor.shop.id,
+          monthNumber: 3,
+          dueDate: new Date('2026-10-01T00:00:00.000Z'),
+          expectedAmount: 1_000_000,
+          contractCurrency: 'UZS',
+          contractExpectedAmount: 1_000_000,
+          contractRemainingAmount: 1_000_000,
+        },
+      })
+      return { selected, third }
     })
 
     const response = await nasiyaPaymentRequest({
@@ -2085,7 +2108,8 @@ describe('real-PostgreSQL route evidence', () => {
         status: 'SOLD_NASIYA',
       },
     })
-    const nasiya = await prisma.nasiya.create({
+    await prisma.$transaction(async (tx) => {
+      const nasiya = await tx.nasiya.create({
       data: {
         shopId: actor.shop.id,
         deviceId: device.id,
@@ -2112,7 +2136,7 @@ describe('real-PostgreSQL route evidence', () => {
         createdBy: actor.admin.id,
       },
     })
-    await prisma.nasiyaSchedule.create({
+      await tx.nasiyaSchedule.create({
       data: {
         nasiyaId: nasiya.id,
         shopId: actor.shop.id,
@@ -2126,6 +2150,7 @@ describe('real-PostgreSQL route evidence', () => {
         contractRemainingAmount: 80,
         status: 'PARTIAL',
       },
+      })
     })
 
     const { NextRequest } = await import('next/server')

@@ -106,7 +106,8 @@ async function seedMixedCurrencyObligations() {
   })
 
   const uzsDevice = await device('uzs-nasiya', 300, 'SOLD_NASIYA')
-  const uzsNasiya = await prisma.nasiya.create({
+  const { uzsNasiya, uzsSchedules } = await prisma.$transaction(async (tx) => {
+    const uzsNasiya = await tx.nasiya.create({
     data: {
       shopId: shop.id,
       deviceId: uzsDevice.id,
@@ -132,8 +133,8 @@ async function seedMixedCurrencyObligations() {
       createdBy: owner.id,
     },
   })
-  const uzsSchedules = await Promise.all([
-    prisma.nasiyaSchedule.create({
+    const uzsSchedules = await Promise.all([
+      tx.nasiyaSchedule.create({
       data: {
         nasiyaId: uzsNasiya.id,
         shopId: shop.id,
@@ -145,7 +146,7 @@ async function seedMixedCurrencyObligations() {
         status: 'OVERDUE',
       },
     }),
-    prisma.nasiyaSchedule.create({
+      tx.nasiyaSchedule.create({
       data: {
         nasiyaId: uzsNasiya.id,
         shopId: shop.id,
@@ -157,10 +158,13 @@ async function seedMixedCurrencyObligations() {
         status: 'OVERDUE',
       },
     }),
-  ])
+    ])
+    return { uzsNasiya, uzsSchedules }
+  })
 
   const usdDevice = await device('usd-nasiya', 400_000, 'SOLD_NASIYA')
-  const usdNasiya = await prisma.nasiya.create({
+  const { usdNasiya, usdSchedule } = await prisma.$transaction(async (tx) => {
+    const usdNasiya = await tx.nasiya.create({
     data: {
       shopId: shop.id,
       deviceId: usdDevice.id,
@@ -188,7 +192,7 @@ async function seedMixedCurrencyObligations() {
       createdBy: owner.id,
     },
   })
-  const usdSchedule = await prisma.nasiyaSchedule.create({
+    const usdSchedule = await tx.nasiyaSchedule.create({
     data: {
       nasiyaId: usdNasiya.id,
       shopId: shop.id,
@@ -200,6 +204,8 @@ async function seedMixedCurrencyObligations() {
       contractRemainingAmount: 100,
       status: 'OVERDUE',
     },
+    })
+    return { usdNasiya, usdSchedule }
   })
 
   return { owner, shop, customer, debtSale, uzsNasiya, usdNasiya, uzsSchedules, usdSchedule }
@@ -265,7 +271,8 @@ describe('set-based shop statistics', () => {
           addedBy: owner.id,
         },
       })
-      const nasiya = await prisma.nasiya.create({
+      const { nasiya, schedule } = await prisma.$transaction(async (tx) => {
+        const nasiya = await tx.nasiya.create({
         data: {
           shopId: shop.id,
           deviceId: device.id,
@@ -288,8 +295,8 @@ describe('set-based shop statistics', () => {
           contractRemainingAmount: 1_000,
           createdBy: owner.id,
         },
-      })
-      const schedule = await prisma.nasiyaSchedule.create({
+        })
+        const schedule = await tx.nasiyaSchedule.create({
         data: {
           shopId: shop.id,
           nasiyaId: nasiya.id,
@@ -300,6 +307,8 @@ describe('set-based shop statistics', () => {
           contractRemainingAmount: 1_000,
           status: 'OVERDUE',
         },
+        })
+        return { nasiya, schedule }
       })
       specialScheduleIds.push(schedule.id)
       contracts.push({ id: nasiya.id, state })
@@ -357,7 +366,8 @@ describe('set-based shop statistics', () => {
           addedBy: owner.id,
         },
       })
-      const nasiya = await prisma.nasiya.create({
+      const { schedule } = await prisma.$transaction(async (tx) => {
+        const nasiya = await tx.nasiya.create({
         data: {
           shopId: shop.id,
           deviceId: device.id,
@@ -380,8 +390,8 @@ describe('set-based shop statistics', () => {
           returnedBy: state.returnedAt ? owner.id : null,
           createdBy: owner.id,
         },
-      })
-      const schedule = await prisma.nasiyaSchedule.create({
+        })
+        const schedule = await tx.nasiyaSchedule.create({
         data: {
           nasiyaId: nasiya.id,
           shopId: shop.id,
@@ -392,6 +402,8 @@ describe('set-based shop statistics', () => {
           contractRemainingAmount: 1_000,
           status: 'OVERDUE',
         },
+        })
+        return { schedule }
       })
       excludedScheduleIds.push(schedule.id)
     }
@@ -471,9 +483,16 @@ describe('set-based shop statistics', () => {
       currency: 'UZS' | 'USD'
       amount: number
       exchangeRate?: number
+      schedule: {
+        dueDate: Date
+        delayedUntil?: Date
+        expectedAmount: number
+        status: 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
+      }
     }) {
       const device = await createDevice(input.suffix, 'SOLD_NASIYA')
-      return prisma.nasiya.create({
+      return prisma.$transaction(async (tx) => {
+        const nasiya = await tx.nasiya.create({
         data: {
           shopId: shop.id,
           deviceId: device.id,
@@ -495,60 +514,67 @@ describe('set-based shop statistics', () => {
           contractRemainingAmount: input.amount,
           createdBy: owner.id,
         },
+        })
+        const schedule = await tx.nasiyaSchedule.create({
+          data: {
+            nasiyaId: nasiya.id,
+            shopId: shop.id,
+            monthNumber: 1,
+            dueDate: input.schedule.dueDate,
+            delayedUntil: input.schedule.delayedUntil,
+            expectedAmount: input.schedule.expectedAmount,
+            contractCurrency: input.currency,
+            contractExpectedAmount: input.amount,
+            contractRemainingAmount: input.amount,
+            status: input.schedule.status,
+          },
+        })
+        return { nasiya, schedule }
       })
     }
 
-    const usdNasiya = await createNasiya({
+    const { schedule: usdSchedule } = await createNasiya({
       suffix: 'USD-CENT',
       currency: 'USD',
       amount: 0.01,
       exchangeRate: 12_500,
-    })
-    const usdSchedule = await prisma.nasiyaSchedule.create({
-      data: {
-        nasiyaId: usdNasiya.id,
-        shopId: shop.id,
-        monthNumber: 1,
+      schedule: {
         dueDate: new Date('2026-07-10T00:00:00.000Z'),
         expectedAmount: 125,
-        contractCurrency: 'USD',
-        contractExpectedAmount: 0.01,
-        contractRemainingAmount: 0.01,
         status: 'OVERDUE',
       },
     })
-    const delayedNasiya = await createNasiya({ suffix: 'UZS-DELAYED', currency: 'UZS', amount: 1 })
-    const delayedSchedule = await prisma.nasiyaSchedule.create({
-      data: {
-        nasiyaId: delayedNasiya.id,
-        shopId: shop.id,
-        monthNumber: 1,
+    const { schedule: delayedSchedule } = await createNasiya({
+      suffix: 'UZS-DELAYED',
+      currency: 'UZS',
+      amount: 1,
+      schedule: {
         dueDate: new Date('2026-07-10T00:00:00.000Z'),
         delayedUntil: new Date('2026-07-20T00:00:00.000Z'),
         expectedAmount: 1,
-        contractExpectedAmount: 1,
-        contractRemainingAmount: 1,
         status: 'DEFERRED',
       },
     })
-    const cancelledScheduleNasiya = await createNasiya({
+    await createNasiya({
       suffix: 'CANCELLED-SCHEDULE',
       currency: 'UZS',
       amount: 100,
-    })
-    await prisma.nasiyaSchedule.create({
-      data: {
-        nasiyaId: cancelledScheduleNasiya.id,
-        shopId: shop.id,
-        monthNumber: 1,
+      schedule: {
         dueDate: new Date('2026-07-01T00:00:00.000Z'),
         expectedAmount: 100,
-        contractExpectedAmount: 100,
-        contractRemainingAmount: 100,
         status: 'CANCELLED',
       },
     })
-    await createNasiya({ suffix: 'NO-SCHEDULE', currency: 'UZS', amount: 100 })
+    await createNasiya({
+      suffix: 'NO-SCHEDULE',
+      currency: 'UZS',
+      amount: 100,
+      schedule: {
+        dueDate: new Date('2026-07-01T00:00:00.000Z'),
+        expectedAmount: 100,
+        status: 'CANCELLED',
+      },
+    })
 
     const now = new Date('2026-07-13T12:00:00.000Z')
     const todayStart = new Date('2026-07-12T19:00:00.000Z')

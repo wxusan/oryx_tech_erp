@@ -163,7 +163,8 @@ describe('customer CRM database privacy and set-based metrics', () => {
       },
     })
 
-    const activeNasiya = await prisma.nasiya.create({
+    const { activeNasiya, schedule } = await prisma.$transaction(async (tx) => {
+      const activeNasiya = await tx.nasiya.create({
       data: {
         shopId: shop.id, deviceId: activeNasiyaDevice.id, customerId: customer.id,
         totalAmount: 5_000_000, downPayment: 1_000_000, baseRemainingAmount: 4_000_000,
@@ -174,14 +175,16 @@ describe('customer CRM database privacy and set-based metrics', () => {
         contractInterestAmount: 30, contractFinalAmount: 330, contractMonthlyPayment: 330,
         contractRemainingAmount: 280, contractPaidAmount: 50, createdBy: owner.id,
       },
-    })
-    const schedule = await prisma.nasiyaSchedule.create({
+      })
+      const schedule = await tx.nasiyaSchedule.create({
       data: {
         shopId: shop.id, nasiyaId: activeNasiya.id, monthNumber: 1,
         dueDate: new Date('2026-07-12T08:00:00.000Z'), expectedAmount: 4_400_000, paidAmount: 625_000,
         status: 'PARTIAL', contractCurrency: 'USD', contractExpectedAmount: 330,
         contractPaidAmount: 50, contractRemainingAmount: 280,
       },
+      })
+      return { activeNasiya, schedule }
     })
     await prisma.nasiyaPayment.createMany({
       data: [
@@ -197,7 +200,8 @@ describe('customer CRM database privacy and set-based metrics', () => {
       },
     })
 
-    const writtenOff = await prisma.nasiya.create({
+    const writtenOff = await prisma.$transaction(async (tx) => {
+      const writtenOff = await tx.nasiya.create({
       data: {
         shopId: shop.id, deviceId: writeOffDevice.id, customerId: customer.id,
         totalAmount: 500, downPayment: 0, baseRemainingAmount: 500, finalNasiyaAmount: 500,
@@ -207,6 +211,19 @@ describe('customer CRM database privacy and set-based metrics', () => {
         contractFinalAmount: 500, contractMonthlyPayment: 500, contractRemainingAmount: 500,
         createdBy: owner.id,
       },
+      })
+      await tx.nasiyaSchedule.create({
+        data: {
+          shopId: shop.id,
+          nasiyaId: writtenOff.id,
+          monthNumber: 1,
+          dueDate: new Date('2026-07-01T00:00:00.000Z'),
+          expectedAmount: 500,
+          contractExpectedAmount: 500,
+          contractRemainingAmount: 500,
+        },
+      })
+      return writtenOff
     })
     await prisma.nasiyaResolutionEvent.create({
       data: {

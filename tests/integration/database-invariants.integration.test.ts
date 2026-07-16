@@ -66,7 +66,8 @@ async function seedInvariantNasiya(
       status: 'SOLD_NASIYA',
     },
   })
-  const nasiya = await prisma.nasiya.create({
+  const { nasiya, schedule } = await prisma.$transaction(async (tx) => {
+    const nasiya = await tx.nasiya.create({
     data: {
       shopId: actor.shop.id,
       deviceId: device.id,
@@ -88,7 +89,7 @@ async function seedInvariantNasiya(
       createdBy: actor.owner.id,
     },
   })
-  const schedule = await prisma.nasiyaSchedule.create({
+    const schedule = await tx.nasiyaSchedule.create({
     data: {
       shopId: actor.shop.id,
       nasiyaId: nasiya.id,
@@ -99,6 +100,8 @@ async function seedInvariantNasiya(
       contractExpectedAmount: 1_000,
       contractRemainingAmount: 1_000,
     },
+  })
+    return { nasiya, schedule }
   })
   return { nasiya, schedule }
 }
@@ -765,7 +768,8 @@ describe('transactional incremental change events', () => {
         status: 'SOLD_NASIYA',
       },
     })
-    const nasiya = await prisma.nasiya.create({
+    const nasiya = await prisma.$transaction(async (tx) => {
+      const nasiya = await tx.nasiya.create({
       data: {
         shopId: shop.id,
         deviceId: device.id,
@@ -789,16 +793,38 @@ describe('transactional incremental change events', () => {
         createdBy: owner.id,
       },
     })
-    await prisma.nasiyaSchedule.create({
-      data: {
-        nasiyaId: nasiya.id,
-        shopId: shop.id,
-        monthNumber: 1,
-        dueDate: new Date('2026-01-10T00:00:00.000Z'),
-        expectedAmount: 300_000,
-        contractExpectedAmount: 300_000,
-        contractRemainingAmount: 300_000,
-      },
+      await tx.nasiyaSchedule.createMany({
+        data: [
+          {
+            nasiyaId: nasiya.id,
+            shopId: shop.id,
+            monthNumber: 1,
+            dueDate: new Date('2026-01-10T00:00:00.000Z'),
+            expectedAmount: 300_000,
+            contractExpectedAmount: 300_000,
+            contractRemainingAmount: 300_000,
+          },
+          {
+            nasiyaId: nasiya.id,
+            shopId: shop.id,
+            monthNumber: 2,
+            dueDate: new Date('2026-02-10T00:00:00.000Z'),
+            expectedAmount: 300_000,
+            contractExpectedAmount: 300_000,
+            contractRemainingAmount: 300_000,
+          },
+          {
+            nasiyaId: nasiya.id,
+            shopId: shop.id,
+            monthNumber: 3,
+            dueDate: new Date('2026-03-10T00:00:00.000Z'),
+            expectedAmount: 300_000,
+            contractExpectedAmount: 300_000,
+            contractRemainingAmount: 300_000,
+          },
+        ],
+      })
+      return nasiya
     })
 
     const scheduleId = (await prisma.nasiyaSchedule.findFirstOrThrow({ where: { nasiyaId: nasiya.id } })).id
@@ -933,7 +959,8 @@ describe('bounded derived nasiya status projection', () => {
         data: { shopId: shop.id, model: `Status phone ${index}`, purchasePrice: 50, imei: `76666666666666${index}`, addedBy: owner.id, status: 'SOLD_NASIYA' },
       })
       const remaining = 100 - paid
-      const nasiya = await prisma.nasiya.create({
+      return prisma.$transaction(async (tx) => {
+        const nasiya = await tx.nasiya.create({
         data: {
           shopId: shop.id,
           deviceId: device.id,
@@ -956,8 +983,8 @@ describe('bounded derived nasiya status projection', () => {
           status: paid === 100 ? 'COMPLETED' : 'ACTIVE',
           createdBy: owner.id,
         },
-      })
-      await prisma.nasiyaSchedule.create({
+        })
+        await tx.nasiyaSchedule.create({
         data: {
           nasiyaId: nasiya.id,
           shopId: shop.id,
@@ -971,14 +998,15 @@ describe('bounded derived nasiya status projection', () => {
           contractRemainingAmount: remaining,
           status: scheduleStatus,
         },
+        })
+        return nasiya.id
       })
-      return nasiya.id
     }
 
     const today = await createContract(1, new Date('2026-07-12T00:00:00.000Z'), 0)
     const overdue = await createContract(2, new Date('2026-07-11T00:00:00.000Z'), 0)
     const completed = await createContract(3, new Date('2026-07-11T00:00:00.000Z'), 100)
-    const cancelledSchedule = await createContract(4, new Date('2026-07-01T00:00:00.000Z'), 0, 'CANCELLED')
+    const cancelledSchedule = await createContract(4, new Date('2026-07-01T00:00:00.000Z'), 100, 'CANCELLED')
     const now = new Date('2026-07-12T12:00:00.000Z')
 
     await expect(findShopNasiyaIdsByDerivedStatus({ shopId: shop.id, status: 'ACTIVE', skip: 0, take: 25, now }))

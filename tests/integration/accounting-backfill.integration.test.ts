@@ -60,7 +60,8 @@ describe('historical payment-profit backfill', () => {
         addedBy: owner.id,
       },
     })
-    const nasiya = await prisma.nasiya.create({
+    const { nasiya, schedules } = await prisma.$transaction(async (tx) => {
+      const nasiya = await tx.nasiya.create({
       data: {
         shopId: shop.id,
         deviceId: device.id,
@@ -88,9 +89,9 @@ describe('historical payment-profit backfill', () => {
         createdBy: owner.id,
       },
     })
-    const schedules = []
-    for (let monthNumber = 1; monthNumber <= 4; monthNumber += 1) {
-      schedules.push(await prisma.nasiyaSchedule.create({
+      const schedules = []
+      for (let monthNumber = 1; monthNumber <= 4; monthNumber += 1) {
+        schedules.push(await tx.nasiyaSchedule.create({
         data: {
           shopId: shop.id,
           nasiyaId: nasiya.id,
@@ -105,8 +106,10 @@ describe('historical payment-profit backfill', () => {
           contractPaidAmount: monthNumber === 1 ? 240 : 0,
           contractRemainingAmount: monthNumber === 1 ? 0 : 240,
         },
-      }))
-    }
+        }))
+      }
+      return { nasiya, schedules }
+    })
     const downPayment = await prisma.nasiyaPayment.create({
       data: {
         shopId: shop.id,
@@ -147,7 +150,8 @@ describe('historical payment-profit backfill', () => {
         addedBy: owner.id,
       },
     })
-    const imported = await prisma.nasiya.create({
+    const imported = await prisma.$transaction(async (tx) => {
+      const imported = await tx.nasiya.create({
       data: {
         shopId: shop.id,
         deviceId: importedDevice.id,
@@ -171,6 +175,19 @@ describe('historical payment-profit backfill', () => {
         remainingAtImport: 500,
         createdBy: owner.id,
       },
+      })
+      await tx.nasiyaSchedule.create({
+        data: {
+          nasiyaId: imported.id,
+          shopId: shop.id,
+          monthNumber: 1,
+          dueDate: new Date('2026-08-01T00:00:00.000Z'),
+          expectedAmount: 500,
+          contractExpectedAmount: 500,
+          contractRemainingAmount: 500,
+        },
+      })
+      return imported
     })
 
     const runBackfill = () => execFileSync(process.execPath, [
