@@ -16,6 +16,11 @@ on:
         required: false
         type: boolean
         default: false
+      repair_nasiya_ledger:
+        description: Archive and repair the one reviewed Nasiya parent-ledger cache mismatch
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -66,7 +71,11 @@ jobs:
             test -n "$MALIKA_OWNER_REPAIR_PASSWORD"
             deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions "${resolve_args[@]}" --build-env ORYX_MALIKA_OWNER_REPAIR=1 --build-env "ORYX_MALIKA_OWNER_REPAIR_PASSWORD=$MALIKA_OWNER_REPAIR_PASSWORD" --meta "releaseCommit=$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
           else
-            deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions "${resolve_args[@]}" --meta "releaseCommit=$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
+            repair_args=()
+            if [[ "${{ inputs.repair_nasiya_ledger }}" == "true" ]]; then
+              repair_args+=(--build-env ORYX_NASIYA_LEDGER_REPAIR=1 --build-env ORYX_NASIYA_LEDGER_REPAIR_APPROVER_LOGIN=wxusan)
+            fi
+            deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions "${resolve_args[@]}" "${repair_args[@]}" --meta "releaseCommit=$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
           fi
           echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
       - name: Inspect and smoke the exact production artifact

@@ -30,6 +30,7 @@ if (process.env.VERCEL_ENV === 'production') {
   // migrations are additive/backward-compatible, but a compile failure must
   // still leave production data untouched.
   run('npm', ['run', 'build'])
+  run('node', ['scripts/run-guarded-nasiya-ledger-repair.mjs'])
   run('node', ['scripts/production-release-preflight.mjs', '--phase=pre'])
   if (process.env.ORYX_FAILED_MIGRATION_RESOLUTION) {
     run('node', ['scripts/resolve-failed-accounting-migration.mjs'])
