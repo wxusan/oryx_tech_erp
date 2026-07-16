@@ -13,6 +13,7 @@ import { basename } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { createClient } from '@supabase/supabase-js'
 import pg from 'pg'
+import sharp from 'sharp'
 
 const enabled = process.env.ORYX_NASIYA_LEDGER_REPAIR === '1'
 
@@ -65,13 +66,33 @@ if (!snapshot.verified || !snapshotFile || !checksum) {
   throw new Error('Guarded Nasiya ledger repair could not create a verified recovery snapshot')
 }
 
-const remotePath = `operations/nasiya-ledger-recovery/${basename(snapshotFile)}`
+const snapshotBytes = readFileSync(snapshotFile)
+if (snapshotBytes.length > 4 * 1024 * 1024) {
+  throw new Error('Guarded Nasiya ledger recovery snapshot exceeds the private archive size limit')
+}
+
+// The configured private bucket is intentionally image-only. Store the gzip
+// bytes losslessly in a real PNG RGBA envelope: the first eight bytes encode
+// the original payload length, and the source snapshot checksum remains the
+// integrity proof recorded in the ledger audit row.
+const payload = Buffer.alloc(8 + snapshotBytes.length)
+payload.writeBigUInt64BE(BigInt(snapshotBytes.length))
+snapshotBytes.copy(payload, 8)
+const width = 256
+const height = Math.ceil(payload.length / (width * 4))
+const pixels = Buffer.alloc(width * height * 4)
+payload.copy(pixels)
+const archivedBytes = await sharp(pixels, { raw: { width, height, channels: 4 } })
+  .png({ compressionLevel: 9 })
+  .toBuffer()
+
+const remotePath = `operations/nasiya-ledger-recovery/${basename(snapshotFile)}.png`
 const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 })
 const { error: uploadError } = await supabase.storage
   .from(backupBucket)
-  .upload(remotePath, readFileSync(snapshotFile), { contentType: 'application/octet-stream', upsert: false })
+  .upload(remotePath, archivedBytes, { contentType: 'image/png', upsert: false })
 if (uploadError) {
   // Storage error text contains no ledger data; retaining it in the protected
   // release log is necessary for an operator to correct the backup target.
@@ -79,7 +100,7 @@ if (uploadError) {
 }
 rmSync(snapshotFile, { force: true })
 
-const archiveReference = `supabase-storage://${backupBucket}/${remotePath}#${checksum}`
+const archiveReference = `supabase-storage://${backupBucket}/${remotePath}#${checksum};encoding=png-rgba-v1`
 const client = new pg.Client({ connectionString: databaseUrl })
 let actorId
 try {

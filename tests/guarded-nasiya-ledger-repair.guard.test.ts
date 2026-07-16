@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 
 const repair = readFileSync('scripts/run-guarded-nasiya-ledger-repair.mjs', 'utf8')
+const restore = readFileSync('scripts/restore-nasiya-ledger-recovery-snapshot.mjs', 'utf8')
 const build = readFileSync('scripts/vercel-build.mjs', 'utf8')
 const workflow = readFileSync('.github/workflows/release-production.yml', 'utf8')
 
@@ -18,6 +19,9 @@ describe('guarded Nasiya ledger production repair', () => {
     expect(repair).toContain('create-nasiya-ledger-recovery-snapshot.mjs')
     expect(repair).toContain('snapshot.verified')
     expect(repair).toContain('supabase-storage://')
+    expect(repair).toContain("contentType: 'image/png'")
+    expect(repair).toContain('png-rgba-v1')
+    expect(restore).toContain('readBigUInt64BE')
     expect(repair).toContain("'--apply'")
     expect(repair).toContain('remainingRepairable')
     expect(repair).not.toContain('UPDATE "NasiyaSchedule"')
