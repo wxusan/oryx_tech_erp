@@ -33,6 +33,8 @@ describe('Nasiya ledger rollout safety', () => {
     expect(repair).toContain('--backup-reference')
     expect(repair).toContain('if (!apply) continue')
     expect(repair).toContain("'RECONCILE_NASIYA_LEDGER_CACHE'")
+    expect(repair).toContain('logHasShopId')
+    expect(repair).toContain("column_name = 'shopId'")
     expect(repair).not.toContain('DELETE FROM "NasiyaPayment"')
     expect(repair).not.toContain('UPDATE "NasiyaSchedule"')
   })

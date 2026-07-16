@@ -252,6 +252,22 @@ const summary = {
 await client.connect()
 try {
   await assertActor()
+  // Some pre-release production databases have the historic Log shape without
+  // shopId. Keep the cache repair auditable there as well; the Nasiya target
+  // and before/after values remain fully recorded, and the normal schema
+  // migration will restore tenant-scoped Log rows afterward.
+  const logColumnResult = apply
+    ? await client.query(`
+        SELECT EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'Log'
+            AND column_name = 'shopId'
+        ) AS "hasShopId"
+      `)
+    : null
+  const logHasShopId = logColumnResult?.rows[0]?.hasShopId === true
   const today = tashkentDate(new Date())
   const nasiyas = await loadNasiyas()
   summary.total = nasiyas.length
@@ -327,14 +343,25 @@ try {
         status: result.repair.status,
         backupReference,
       }
-      await client.query(`
-        INSERT INTO "Log" (id, "shopId", "actorId", "actorType", action, "targetType", "targetId", "oldValue", "newValue", note)
-        VALUES ($1, $2, $3, $4::"ActorType", 'RECONCILE_NASIYA_LEDGER_CACHE', 'Nasiya', $5, $6::jsonb, $7::jsonb, $8)
-      `, [
-        randomUUID(), nasiya.shopId, actorId, actorType, nasiya.id,
-        JSON.stringify(oldValue), JSON.stringify(newValue),
-        `Nasiya ledger cache repair run ${runId}`,
-      ])
+      if (logHasShopId) {
+        await client.query(`
+          INSERT INTO "Log" (id, "shopId", "actorId", "actorType", action, "targetType", "targetId", "oldValue", "newValue", note)
+          VALUES ($1, $2, $3, $4::"ActorType", 'RECONCILE_NASIYA_LEDGER_CACHE', 'Nasiya', $5, $6::jsonb, $7::jsonb, $8)
+        `, [
+          randomUUID(), nasiya.shopId, actorId, actorType, nasiya.id,
+          JSON.stringify(oldValue), JSON.stringify(newValue),
+          `Nasiya ledger cache repair run ${runId}`,
+        ])
+      } else {
+        await client.query(`
+          INSERT INTO "Log" (id, "actorId", "actorType", action, "targetType", "targetId", "oldValue", "newValue", note)
+          VALUES ($1, $2, $3::"ActorType", 'RECONCILE_NASIYA_LEDGER_CACHE', 'Nasiya', $4, $5::jsonb, $6::jsonb, $7)
+        `, [
+          randomUUID(), actorId, actorType, nasiya.id,
+          JSON.stringify(oldValue), JSON.stringify(newValue),
+          `Nasiya ledger cache repair run ${runId}`,
+        ])
+      }
       await client.query('COMMIT')
       summary.applied += 1
     } catch (error) {
