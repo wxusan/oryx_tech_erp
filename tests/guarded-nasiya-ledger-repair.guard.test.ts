@@ -11,6 +11,8 @@ describe('guarded Nasiya ledger production repair', () => {
     expect(repair).toContain("process.env.ORYX_NASIYA_LEDGER_REPAIR === '1'")
     expect(repair).toContain("process.env.VERCEL_ENV !== 'production'")
     expect(repair).toContain("process.env.ORYX_GUARDED_RELEASE !== 'github-actions'")
+    expect(repair).toContain('audit.repairable === 0 && audit.ambiguous === 0')
+    expect(repair).toContain('alreadyClean: true')
     expect(repair).toContain('exactly one repairable and no ambiguous ledgers')
     expect(repair).toContain("'--actor-type=SUPER_ADMIN'")
   })
