@@ -211,6 +211,7 @@ export default function ReceivablesClient({ initialData }: { initialData: Receiv
           <div className="flex gap-2">
             <Button
               render={<Link href={`/shop/tolovlar?cohort=${data.cohort}&skip=${Math.max(0, data.skip - data.take)}`} />}
+              nativeButton={false}
               variant="outline"
               disabled={data.skip === 0}
             >
@@ -218,6 +219,7 @@ export default function ReceivablesClient({ initialData }: { initialData: Receiv
             </Button>
             <Button
               render={<Link href={`/shop/tolovlar?cohort=${data.cohort}&skip=${data.skip + data.take}`} />}
+              nativeButton={false}
               variant="outline"
               disabled={data.skip + data.take >= data.total}
             >

@@ -1,6 +1,4 @@
-import type { CurrencyContext } from '@/lib/currency'
-import { formatUserFacingMoney } from '@/lib/currency'
-import { deriveContractScheduleStatus } from '@/lib/nasiya-contract-status'
+import { formatMoneyDto, type MoneyDto } from '@/lib/currency'
 import { paymentMethodLabel } from '@/lib/labels'
 import { paymentAmountDisplay, type NasiyaPaymentDisplayRecord } from '@/lib/payment-history-display'
 import { uzDate, uzDateTime } from '@/lib/dates'
@@ -10,11 +8,12 @@ export interface NasiyaScheduleRow {
   monthNumber: number
   dueDate: string
   delayedUntil: string | null
-  expectedAmount: number
-  paidAmount: number
   status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
-  contractExpectedAmount: number
-  contractPaidAmount: number
+  expected: MoneyDto
+  paid: MoneyDto
+  remaining: MoneyDto
+  legacyExpected: MoneyDto
+  legacyPaid: MoneyDto
 }
 
 export interface NasiyaActionLog {
@@ -41,6 +40,14 @@ const schedulePresentation: Record<RowStatus, { label: string; className: string
 function RowBadge({ status }: { status: RowStatus }) {
   const presentation = schedulePresentation[status]
   return <span className={`inline-block rounded px-2 py-0.5 text-xs font-medium ${presentation.className}`}>{presentation.label}</span>
+}
+
+function rowStatus(row: NasiyaScheduleRow): RowStatus {
+  if (row.status === 'CANCELLED') return 'CANCELLED'
+  if (row.remaining.minorUnits === 0) return 'PAID'
+  if (row.status === 'OVERDUE') return 'OVERDUE'
+  if (row.status === 'DEFERRED') return 'DEFERRED'
+  return row.paid.minorUnits > 0 ? 'PARTIAL' : 'PENDING'
 }
 
 function logLabel(log: NasiyaActionLog): string {
@@ -71,16 +78,12 @@ export function NasiyaHistorySections({
   schedules,
   payments,
   logs,
-  contractCurrency,
-  currency,
-  formatContractAmount,
+  formatMoney,
 }: {
   schedules: NasiyaScheduleRow[]
   payments: NasiyaPaymentDisplayRecord[]
   logs: NasiyaActionLog[]
-  contractCurrency: 'UZS' | 'USD'
-  currency: CurrencyContext
-  formatContractAmount: (amount: number) => string
+  formatMoney: (amount: MoneyDto) => string
 }) {
   const sortedSchedules = schedules.toSorted((a, b) => a.monthNumber - b.monthNumber)
 
@@ -93,10 +96,10 @@ export function NasiyaHistorySections({
             <caption className="sr-only">Nasiya bo&apos;yicha oylik to&apos;lov jadvali</caption>
             <thead className="border-b border-zinc-200"><tr>{['#', 'Sana', 'Miqdor', "To'langan", 'Status'].map((heading) => <th key={heading} className="bg-zinc-50 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">{heading}</th>)}</tr></thead>
             <tbody>{sortedSchedules.map((row) => {
-              const status = deriveContractScheduleStatus(row, contractCurrency).displayStatus
+              const status = rowStatus(row)
               return <tr key={row.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                 <td className="px-4 py-3 text-zinc-500">{row.monthNumber}</td><td className="px-4 py-3 text-zinc-700">{uzDate(row.dueDate)}</td>
-                <td className="px-4 py-3 font-medium text-zinc-900">{formatContractAmount(row.contractExpectedAmount)}</td><td className="px-4 py-3 text-zinc-700">{formatContractAmount(row.contractPaidAmount)}</td>
+                <td className="px-4 py-3 font-medium text-zinc-900">{formatMoney(row.expected)}</td><td className="px-4 py-3 text-zinc-700">{formatMoney(row.paid)}</td>
                 <td className="px-4 py-3"><RowBadge status={status} /></td>
               </tr>
             })}</tbody>
@@ -109,11 +112,14 @@ export function NasiyaHistorySections({
         {payments.length ? <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm">
           <caption className="sr-only">Nasiya bo&apos;yicha qabul qilingan to&apos;lovlar</caption>
           <thead className="border-b border-zinc-200"><tr>{['Sana', 'Miqdor', 'Usul', 'Izoh'].map((heading) => <th key={heading} className="bg-zinc-50 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">{heading}</th>)}</tr></thead>
-          <tbody>{payments.map((payment) => <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
-            <td className="px-4 py-3 text-zinc-700">{uzDate(payment.paidAt)}</td><td className="px-4 py-3 font-medium text-zinc-900">{paymentAmountDisplay(payment, contractCurrency, currency)}</td>
-            <td className="px-4 py-3 text-zinc-700">{payment.paymentBreakdown?.length ? <div className="space-y-0.5">{payment.paymentBreakdown.map((part, index) => <div key={index}>{paymentMethodLabel(part.method)}: <span className="font-medium text-zinc-900">{formatUserFacingMoney({ amount: part.amount, amountCurrency: payment.paymentInputCurrency ?? 'UZS', displayCurrency: currency.currency, rate: payment.paymentExchangeRate ?? currency.usdUzsRate })}</span></div>)}</div> : paymentMethodLabel(payment.paymentMethod)}</td>
+          <tbody>{payments.map((payment) => {
+            const amount = paymentAmountDisplay(payment)
+            return <tr key={payment.id} className="border-b border-zinc-100 last:border-0">
+            <td className="px-4 py-3 text-zinc-700">{uzDate(payment.paidAt)}</td><td className="px-4 py-3 font-medium text-zinc-900"><div>{amount.primary}</div>{amount.secondary && <div className="mt-0.5 text-xs font-normal text-zinc-500">{amount.secondary}</div>}</td>
+            <td className="px-4 py-3 text-zinc-700">{payment.paymentBreakdown?.length ? <div className="space-y-0.5">{payment.paymentBreakdown.map((part, index) => <div key={index}>{paymentMethodLabel(part.method)}: <span className="font-medium text-zinc-900">{formatMoneyDto(part.amount)}</span></div>)}</div> : paymentMethodLabel(payment.paymentMethod)}</td>
             <td className="px-4 py-3 text-zinc-500">{payment.note ?? '—'}</td>
-          </tr>)}</tbody>
+          </tr>
+          })}</tbody>
         </table></div> : <div className="px-4 py-6 text-sm text-zinc-500">To&apos;lov tarixi hali yo&apos;q</div>}
       </section>
 

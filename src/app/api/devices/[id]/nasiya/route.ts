@@ -12,7 +12,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { createNasiyaSchema } from '@/lib/validations'
 import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
-import { created, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
+import { created, badRequest, forbidden, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaCreatedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
@@ -20,6 +20,8 @@ import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { CustomerSelectionError, resolveCustomerSelection } from '@/lib/server/customer-selection'
+import { CustomerPassportConfigurationError } from '@/lib/customer-passport'
+import { principalHasPermission } from '@/lib/server/shop-access'
 import { createMoneyInputConverter, moneyInputMeta, type MoneyInputResult } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
@@ -27,6 +29,10 @@ import { presentDeviceSpecs } from '@/lib/device-specs'
 import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 import { computeSaleContractMargin } from '@/lib/nasiya-contract'
 import { buildNasiyaComponentPlan, splitUzsReportingAmount } from '@/lib/payment-profit-allocation'
+import {
+  hasNasiyaPaymentFxQuoteColumns,
+  nasiyaPaymentFxSourceForPersistence,
+} from '@/lib/server/nasiya-payment-schema'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -46,7 +52,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
 
     const {
-      customerMode, customerId, customerName, customerPhone, passportPhotoUrl,
+      customerMode, customerId, customerName, customerPhone,
+      customerAdditionalPhones, customerNote, customerPassportIdentifier, customerTrustOverride,
+      passportPhotoUrl,
       totalAmount, downPayment, months, interestPercent,
       monthlyPayment: monthlyPaymentOverrideInput, useMonthlyPaymentOverride,
       startDate, paymentMethod, note,
@@ -57,11 +65,27 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
+    const canManagePassport = session.user.role === 'SUPER_ADMIN' ||
+      Boolean(guarded.principal && principalHasPermission(guarded.principal, 'CUSTOMER_PASSPORT_MANAGE'))
+    const canOverrideTrust = session.user.role === 'SUPER_ADMIN' ||
+      Boolean(guarded.principal && principalHasPermission(guarded.principal, 'CUSTOMER_TRUST_OVERRIDE'))
+    if (customerMode === 'NEW' && customerPassportIdentifier && !canManagePassport) {
+      return forbidden("Pasport ma'lumotlarini qo'shish ruxsati berilmagan")
+    }
+    if (customerMode === 'NEW' && customerTrustOverride !== undefined && !canOverrideTrust) {
+      return forbidden("Ishonch darajasini o'zgartirish ruxsati berilmagan")
+    }
+
     // Distributed when Upstash is configured; bounded in-process fallback otherwise.
     const rate = await checkRateLimitDistributed(rateLimitKey('nasiya-create', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currency = await getShopCurrencyContext(shopId)
+    // The quote provenance columns are an additive migration stage. Keep
+    // local development readable before that migration exists; the base
+    // receipt values remain valid and the detailed quote is written as soon
+    // as the stage is applied.
+    const paymentFxQuoteColumnsAvailable = await hasNasiyaPaymentFxQuoteColumns()
     const passportPhotoKey = passportPhotoUrl
       ? resolvePrivateUploadReference({
           value: passportPhotoUrl,
@@ -86,6 +110,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
+    const downPaymentFxSource = nasiyaPaymentFxSourceForPersistence(downPaymentInput.exchangeRateSource)
 
     let amounts: ReturnType<typeof calculateNasiyaAmounts>
     let contractAmounts: ReturnType<typeof calculateNasiyaAmounts>
@@ -188,6 +213,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         customerId,
         customerName,
         customerPhone,
+        customerAdditionalPhones,
+        customerNote,
+        customerPassportIdentifier,
+        customerTrustOverride,
         passportPhotoUrl: passportPhotoKey,
         requirePassportPhoto: true,
       })
@@ -267,6 +296,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             paymentInputAmount: downPayment,
             paymentInputCurrency: downPaymentInput.inputCurrency,
             paymentExchangeRate: downPaymentInput.exchangeRateUsed,
+            ...(paymentFxQuoteColumnsAvailable ? {
+              paymentExchangeRateSource: downPaymentFxSource,
+              paymentExchangeRateEffectiveAt: downPaymentInput.exchangeRateEffectiveAt,
+              paymentExchangeRateFetchedAt: downPaymentInput.exchangeRateFetchedAt,
+            } : {}),
             appliedAmountInContractCurrency: contractAmounts.downPayment,
           },
         })
@@ -355,7 +389,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       })
 
-      return nasiya
+      // This mutation's caller only needs the identifier to navigate to the
+      // detail endpoint. Keeping its response identifier-only guarantees no
+      // Prisma Decimal values bypass the MoneyDto boundary into React.
+      return { id: nasiya.id }
     })
 
     invalidateShopNasiyaMutation(shopId)
@@ -366,6 +403,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     return created(result, "Nasiya muvaffaqiyatli yaratildi")
   } catch (err: unknown) {
+    if (err instanceof CustomerPassportConfigurationError) {
+      return serverError("Pasport ma'lumotlarini saqlash sozlanmagan. CUSTOMER_PII_ENCRYPTION_KEY va CUSTOMER_PII_SEARCH_KEY ni sozlang.")
+    }
     if (err instanceof CustomerSelectionError) {
       if (err.status === 404) return notFound(err.message)
       if (err.status === 409) return conflict(err.message)
@@ -377,7 +417,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (e.status === 409) return conflict(e.message)
     }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      return conflict('Bu telefon bilan faol mijoz mavjud. Uni qidiruvdan tanlang; mijozlar avtomatik birlashtirilmaydi.')
+      return conflict('Bu telefon yoki pasport bilan faol mijoz mavjud. Uni qidiruvdan tanlang; mijozlar avtomatik birlashtirilmaydi.')
     }
     logger.error('[POST /api/devices/[id]/nasiya]', { event: 'api.route_error', error: err })
     return serverError()

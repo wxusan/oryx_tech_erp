@@ -1,9 +1,11 @@
 import 'server-only'
 
 import type { Prisma } from '@/generated/prisma/client'
-import { normalizePhone } from '@/lib/phone'
+import { normalizeAdditionalPhones, normalizePhone } from '@/lib/phone'
+import { passportIdentifierStorage } from '@/lib/customer-passport'
 
 export type CustomerSelectionMode = 'EXISTING' | 'NEW'
+type CustomerTrustOverride = 'NEW' | 'LOW' | 'MEDIUM' | 'HIGH' | 'VERY_HIGH'
 
 export class CustomerSelectionError extends Error {
   constructor(
@@ -32,6 +34,10 @@ export async function resolveCustomerSelection(
     customerId?: string
     customerName?: string
     customerPhone?: string
+    customerAdditionalPhones?: string[]
+    customerNote?: string
+    customerPassportIdentifier?: string
+    customerTrustOverride?: CustomerTrustOverride | null
     passportPhotoUrl?: string
     requirePassportPhoto?: boolean
   },
@@ -64,6 +70,9 @@ export async function resolveCustomerSelection(
   if (input.requirePassportPhoto && !input.passportPhotoUrl) {
     throw new CustomerSelectionError('Yangi nasiya mijozining pasport rasmi kiritilishi shart', 400)
   }
+  const passport = input.customerPassportIdentifier
+    ? passportIdentifierStorage(input.customerPassportIdentifier)
+    : {}
 
   return tx.customer.create({
     data: {
@@ -71,7 +80,11 @@ export async function resolveCustomerSelection(
       name,
       phone,
       normalizedPhone: normalizePhone(phone),
+      additionalPhones: normalizeAdditionalPhones(input.customerAdditionalPhones ?? [], phone),
+      note: input.customerNote?.trim() || null,
+      trustOverride: input.customerTrustOverride ?? null,
       passportPhotoUrl: input.passportPhotoUrl,
+      ...passport,
     },
     select: { id: true, shopId: true, name: true, phone: true, passportPhotoUrl: true },
   })

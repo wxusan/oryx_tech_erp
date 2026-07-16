@@ -16,7 +16,7 @@ const TOKEN_VERSION = 'v1'
 const DEFAULT_TTL_MS = 60 * 60 * 1000
 
 function secretValue(explicit?: string) {
-  const secret = explicit ?? process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET
+  const secret = explicit || process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET
   if (!secret || secret.length < 32) {
     throw new Error('AUTH_SECRET or NEXTAUTH_SECRET must be at least 32 characters')
   }
@@ -30,7 +30,13 @@ function expectedKeyPrefix(shopId: string, kind: PrivateUploadKind) {
   return `shops/${shopId}/${kind === 'device' ? 'devices' : 'passports'}/`
 }
 
-function isValidStoredKey(key: string, shopId: string, kind: PrivateUploadKind) {
+export function isPrivateUploadStoredKey(input: {
+  key: string | null | undefined
+  shopId: string
+  kind: PrivateUploadKind
+}) {
+  if (!input.key) return false
+  const { key, shopId, kind } = input
   return key.startsWith(expectedKeyPrefix(shopId, kind)) && !key.slice(expectedKeyPrefix(shopId, kind).length).includes('/')
 }
 
@@ -42,7 +48,7 @@ export function createPrivateUploadReference(input: {
   ttlMs?: number
   secret?: string
 }) {
-  if (!isValidStoredKey(input.key, input.shopId, input.kind)) {
+  if (!isPrivateUploadStoredKey(input)) {
     throw new Error('Private upload key does not belong to the requested tenant and kind')
   }
   const iv = randomBytes(12)
@@ -89,7 +95,7 @@ export function readPrivateUploadReference(input: {
       typeof payload.key !== 'string' ||
       typeof payload.expiresAt !== 'number' ||
       payload.expiresAt <= (input.now ?? new Date()).getTime() ||
-      !isValidStoredKey(payload.key, payload.shopId, input.kind)
+      !isPrivateUploadStoredKey({ key: payload.key, shopId: payload.shopId, kind: input.kind })
     ) return null
     return payload as PrivateUploadPayload
   } catch {
@@ -125,7 +131,7 @@ export function resolvePrivateUploadReference(input: {
   now?: Date
   secret?: string
 }) {
-  if (input.allowLegacyRawKey && isValidStoredKey(input.value, input.shopId, input.kind)) {
+  if (input.allowLegacyRawKey && isPrivateUploadStoredKey({ key: input.value, shopId: input.shopId, kind: input.kind })) {
     return input.value
   }
   if (input.allowLegacyRawKey) {
@@ -134,7 +140,7 @@ export function resolvePrivateUploadReference(input: {
       const legacyKey = legacyUrl.pathname === `/api/uploads/${input.kind}`
         ? legacyUrl.searchParams.get('key')
         : null
-      if (legacyKey && isValidStoredKey(legacyKey, input.shopId, input.kind)) return legacyKey
+      if (legacyKey && isPrivateUploadStoredKey({ key: legacyKey, shopId: input.shopId, kind: input.kind })) return legacyKey
     } catch {
       // Continue with the opaque-reference path.
     }

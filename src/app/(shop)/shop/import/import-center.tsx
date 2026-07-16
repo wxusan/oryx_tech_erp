@@ -152,7 +152,7 @@ export default function ImportCenter() {
             <h2 className="text-base font-semibold text-zinc-900">Eski nasiya</h2>
             <p className="mt-1 text-sm text-zinc-500">Bitta eski nasiya shartnomasini kiritish</p>
           </div>
-          <Button render={<Link href="/shop/nasiyalar/import" />}>Eski nasiya kiritish</Button>
+          <Button render={<Link href="/shop/nasiyalar/import" />} nativeButton={false}>Eski nasiya kiritish</Button>
         </section>
       )}
     </div>

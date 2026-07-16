@@ -10,16 +10,18 @@ function read(rel: string): string {
 describe('nasiya completion is decided from the contract-currency ledger', () => {
   const route = read('src/app/api/nasiya/[id]/payment/route.ts')
 
-  it('newStatus/remainingToStore/contractRemainingToStore all key off the shared contract status derivation, not the legacy allFullyPaid', () => {
-    expect(route).toContain('const derivedAfterPayment = deriveContractNasiyaStatus({')
-    expect(route).toContain('const newStatus = derivedAfterPayment.displayStatus')
+  it('newStatus/remainingToStore/contractRemainingToStore all key off the post-payment schedule reconciliation, not legacy allFullyPaid', () => {
+    expect(route).toContain('const postPaymentLedger = reconcileNasiyaLedger({')
+    expect(route).toContain('const newStatus = postPaymentLedger.status')
     expect(route).toContain("const remainingToStore = newStatus === 'COMPLETED' ? 0 : remaining")
-    expect(route).toContain("const contractRemainingToStore = newStatus === 'COMPLETED' ? 0 : contractRemaining")
+    expect(route).toContain('const contractRemainingToStore = moneyDtoDatabaseAmount(postPaymentLedger.remaining)')
+    expect(route).toContain('contractPaidAmount: contractPaidToStore')
+    expect(route).toContain('contractRemainingAmount: contractRemainingToStore')
   })
 
-  it('guards a stale stored COMPLETED parent through contract status, not raw parent status', () => {
-    expect(route).toContain('const currentContractStatus = deriveContractNasiyaStatus({')
-    expect(route).toContain("if (currentContractStatus.displayStatus === 'COMPLETED')")
+  it('guards a stale stored COMPLETED parent through schedule truth, not raw parent status', () => {
+    expect(route).toContain('const currentLedger = reconcileNasiyaLedger({')
+    expect(route).toContain("if (currentLedger.status === 'COMPLETED')")
     expect(route).not.toContain("if (nasiya.status === 'COMPLETED')")
   })
 })

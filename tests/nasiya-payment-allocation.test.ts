@@ -96,13 +96,14 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
   })
 
   it('rejects a payment greater than the total outstanding balance — compared in CONTRACT currency (item 4 rate-drift fix), not a legacy-UZS sum', () => {
-    expect(source).toContain('appliedAmountInContractCurrency > totalOutstandingContract')
+    expect(source).toContain('const totalOutstandingContract = currentLedger.remaining')
+    expect(source).toContain('appliedMoney.minorUnits > totalOutstandingContract.minorUnits')
     expect(source).toContain("To'lov qolgan nasiya summasidan oshib ketdi")
-    expect(source).toContain('totalContractOutstanding(')
+    expect(source).toContain('const currentLedger = reconcileNasiyaLedger({')
   })
 
   it('delegates the per-schedule allocation loop to the pure, unit-tested allocateNasiyaPayment (item 4 rate-drift fix)', () => {
-    expect(source).toContain("import { allocateNasiyaPayment, totalContractOutstanding } from '@/lib/nasiya-payment-allocation'")
+    expect(source).toContain("import { allocateNasiyaPayment } from '@/lib/nasiya-payment-allocation'")
     expect(source).toContain('const scheduleUpdates = allocateNasiyaPayment({')
     expect(source).toContain('for (const [allocationIndex, scheduleUpdate] of scheduleUpdates.entries())')
   })
@@ -118,17 +119,16 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
   })
 
   it('marks the nasiya COMPLETED only on the real contract-status transition, not a raw stored parent label', () => {
-    expect(source).toContain("if (currentContractStatus.displayStatus === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }")
+    expect(source).toContain("if (currentLedger.status === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }")
+    expect(source).toContain('const postPaymentLedger = reconcileNasiyaLedger({')
     expect(source).toContain("const justCompleted = newStatus === 'COMPLETED'")
   })
 
-  it('uses the shared, tolerance-aware contractScheduleOutstanding helper instead of duplicated inline math', () => {
-    expect(source).toContain("import { calculateRemaining } from '@/lib/nasiya-utils'")
-    expect(source).toContain(
-      "import { convertPaymentToContractCurrency, contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'",
-    )
-    expect(source).toContain("import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'")
-    expect(source).toContain('const derivedAfterPayment = deriveContractNasiyaStatus({')
+  it('uses the shared reconciliation engine instead of duplicated completion or parent-cache math', () => {
+    expect(source).toContain("import { moneyDtoDatabaseAmount, reconcileNasiyaLedger } from '@/lib/nasiya-ledger'")
+    expect(source).toContain('if (currentLedger.health === \'QUARANTINED\')')
+    expect(source).toContain('if (postPaymentLedger.health === \'QUARANTINED\')')
+    expect(source).not.toContain('deriveContractNasiyaStatus({')
   })
 
   it('passes the per-schedule allocation breakdown (in contract currency) into the Telegram message', () => {
@@ -137,9 +137,9 @@ describe('nasiya payment route: chronological allocation, validation, idempotenc
     expect(source).toContain('amount: a.contractAmount')
   })
 
-  it('allows only meaningful overpayment above the contract-currency dust tolerance', () => {
-    expect(source).toContain('appliedAmountInContractCurrency > totalOutstandingContract')
-    expect(source).toContain('!isContractCurrencyDust(appliedAmountInContractCurrency - totalOutstandingContract, contractCurrency)')
+  it('allows no overpayment beyond the exact minor-unit contract debt', () => {
+    expect(source).toContain('appliedMoney.minorUnits > totalOutstandingContract.minorUnits')
+    expect(source).not.toContain('isContractCurrencyDust(')
   })
 })
 

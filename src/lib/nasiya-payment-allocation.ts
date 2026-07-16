@@ -47,23 +47,23 @@
  * nasiya-level completion do, after this fix).
  */
 
-import { contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'
-import { scheduleOutstanding } from '@/lib/nasiya-utils'
-import type { CurrencyCode } from '@/lib/currency'
+import { createMoneyDto, moneyDtoToAmount, moneyMinorUnitScale, type CurrencyCode } from '@/lib/currency'
 import { isBeforeTashkentToday } from '@/lib/timezone'
 
 /** Matches the Prisma NasiyaScheduleStatus enum's PAID/PARTIAL/OVERDUE/PENDING members. */
 export type NasiyaAllocationStatus = 'PAID' | 'PARTIAL' | 'OVERDUE' | 'PENDING'
+
+type MoneyValue = number | string
 
 export interface NasiyaAllocationScheduleInput {
   id: string
   monthNumber: number
   dueDate: Date
   delayedUntil: Date | null
-  expectedAmount: number
-  paidAmount: number
-  contractExpectedAmount: number
-  contractPaidAmount: number
+  expectedAmount: MoneyValue
+  paidAmount: MoneyValue
+  contractExpectedAmount: MoneyValue
+  contractPaidAmount: MoneyValue
 }
 
 export interface NasiyaAllocationUpdate {
@@ -81,10 +81,17 @@ export interface NasiyaAllocationUpdate {
   markPaidAt: boolean
 }
 
-function allocatableContractAmount(amount: number, currency: CurrencyCode): number {
-  if (!Number.isFinite(amount) || amount <= 0) return 0
-  const unitAmount = currency === 'USD' ? Math.floor((amount + 1e-9) * 100) / 100 : Math.floor(amount)
-  return isContractCurrencyDust(unitAmount, currency) ? 0 : unitAmount
+/**
+ * Route input has already passed the strict MoneyDto boundary. This small
+ * adapter preserves the old pure-helper behaviour for sub-unit floating dust
+ * in unit tests while immediately moving the allocation itself to integers.
+ */
+function allocatableMinorUnits(amount: MoneyValue, currency: CurrencyCode): number {
+  const numeric = Number(amount)
+  if (!Number.isFinite(numeric) || numeric <= 0) return 0
+  const scaled = numeric * moneyMinorUnitScale(currency)
+  const minorUnits = Math.floor(scaled + 1e-8)
+  return Number.isSafeInteger(minorUnits) && minorUnits > 0 ? minorUnits : 0
 }
 
 /**
@@ -96,43 +103,46 @@ function allocatableContractAmount(amount: number, currency: CurrencyCode): numb
  */
 export function allocateNasiyaPayment(params: {
   schedules: NasiyaAllocationScheduleInput[]
-  amountUzs: number
-  appliedAmountInContractCurrency: number
+  amountUzs: MoneyValue
+  appliedAmountInContractCurrency: MoneyValue
   contractCurrency: CurrencyCode
   now: Date
 }): NasiyaAllocationUpdate[] {
   const { schedules, contractCurrency, now } = params
-  let remainingPayment = params.amountUzs
-  let remainingContractPayment = allocatableContractAmount(params.appliedAmountInContractCurrency, contractCurrency)
+  let remainingPaymentMinorUnits = allocatableMinorUnits(params.amountUzs, 'UZS')
+  let remainingContractMinorUnits = allocatableMinorUnits(params.appliedAmountInContractCurrency, contractCurrency)
   const updates: NasiyaAllocationUpdate[] = []
 
   for (const schedule of schedules) {
-    if (isContractCurrencyDust(remainingContractPayment, contractCurrency)) break
+    if (remainingContractMinorUnits <= 0) break
 
     // Contract-currency side — computed FIRST because it alone decides
     // completion (see file doc comment).
-    const contractOutstanding = contractScheduleOutstanding(schedule.contractExpectedAmount, schedule.contractPaidAmount, contractCurrency)
-    if (contractOutstanding <= 0) continue
+    const contractExpected = createMoneyDto(contractCurrency, schedule.contractExpectedAmount)
+    const contractPaid = createMoneyDto(contractCurrency, schedule.contractPaidAmount)
+    const contractOutstandingMinorUnits = Math.max(0, contractExpected.minorUnits - contractPaid.minorUnits)
+    if (contractOutstandingMinorUnits <= 0) continue
 
-    const rawContractApplied = Math.min(remainingContractPayment, contractOutstanding)
-    const contractApplied = allocatableContractAmount(rawContractApplied, contractCurrency)
-    if (contractApplied <= 0) break
+    const contractAppliedMinorUnits = Math.min(remainingContractMinorUnits, contractOutstandingMinorUnits)
+    if (contractAppliedMinorUnits <= 0) break
 
-    const newContractPaidAmountRaw = schedule.contractPaidAmount + contractApplied
-    const isContractFullyPaid = contractScheduleOutstanding(schedule.contractExpectedAmount, newContractPaidAmountRaw, contractCurrency) <= 0
-    const newContractPaidAmount = isContractFullyPaid ? schedule.contractExpectedAmount : newContractPaidAmountRaw
-    const newContractRemainingAmount = Math.max(0, schedule.contractExpectedAmount - newContractPaidAmount)
+    const newContractPaidMinorUnitsRaw = contractPaid.minorUnits + contractAppliedMinorUnits
+    const isContractFullyPaid = newContractPaidMinorUnitsRaw >= contractExpected.minorUnits
+    const newContractPaidMinorUnits = isContractFullyPaid ? contractExpected.minorUnits : newContractPaidMinorUnitsRaw
+    const newContractRemainingMinorUnits = contractExpected.minorUnits - newContractPaidMinorUnits
 
     // Legacy-UZS side — a compatibility snapshot, never independently
     // deciding completion. Snapped up to expectedAmount whenever the
     // contract side closes, even if the legacy-math applied amount alone
     // wouldn't have reached expectedAmount (rate-drift item 4 fix).
-    const legacyOutstanding = scheduleOutstanding(schedule.expectedAmount, schedule.paidAmount)
-    const appliedUzs = Math.min(remainingPayment, legacyOutstanding)
-    const newPaidAmountRaw = schedule.paidAmount + appliedUzs
-    const newPaidAmount = isContractFullyPaid ? schedule.expectedAmount : newPaidAmountRaw
+    const legacyExpected = createMoneyDto('UZS', schedule.expectedAmount)
+    const legacyPaid = createMoneyDto('UZS', schedule.paidAmount)
+    const legacyOutstandingMinorUnits = Math.max(0, legacyExpected.minorUnits - legacyPaid.minorUnits)
+    const appliedUzsMinorUnits = Math.min(remainingPaymentMinorUnits, legacyOutstandingMinorUnits)
+    const newPaidMinorUnitsRaw = legacyPaid.minorUnits + appliedUzsMinorUnits
+    const newPaidMinorUnits = isContractFullyPaid ? legacyExpected.minorUnits : newPaidMinorUnitsRaw
 
-    const isPartial = !isContractFullyPaid && !isContractCurrencyDust(newContractPaidAmount, contractCurrency)
+    const isPartial = !isContractFullyPaid && newContractPaidMinorUnits > 0
     const effectiveDueDate = schedule.delayedUntil ?? schedule.dueDate
     const isPastDue = isBeforeTashkentToday(effectiveDueDate, now)
     const status: NasiyaAllocationUpdate['status'] = isContractFullyPaid ? 'PAID' : isPastDue ? 'OVERDUE' : isPartial ? 'PARTIAL' : 'PENDING'
@@ -140,17 +150,17 @@ export function allocateNasiyaPayment(params: {
     updates.push({
       scheduleId: schedule.id,
       monthNumber: schedule.monthNumber,
-      appliedUzs,
-      appliedContract: contractApplied,
-      newPaidAmount,
-      newContractPaidAmount,
-      newContractRemainingAmount,
+      appliedUzs: moneyDtoToAmount({ currency: 'UZS', minorUnits: appliedUzsMinorUnits }),
+      appliedContract: moneyDtoToAmount({ currency: contractCurrency, minorUnits: contractAppliedMinorUnits }),
+      newPaidAmount: moneyDtoToAmount({ currency: 'UZS', minorUnits: newPaidMinorUnits }),
+      newContractPaidAmount: moneyDtoToAmount({ currency: contractCurrency, minorUnits: newContractPaidMinorUnits }),
+      newContractRemainingAmount: moneyDtoToAmount({ currency: contractCurrency, minorUnits: newContractRemainingMinorUnits }),
       status,
       markPaidAt: isContractFullyPaid,
     })
 
-    remainingPayment -= appliedUzs
-    remainingContractPayment = allocatableContractAmount(remainingContractPayment - contractApplied, contractCurrency)
+    remainingPaymentMinorUnits -= appliedUzsMinorUnits
+    remainingContractMinorUnits -= contractAppliedMinorUnits
   }
 
   return updates
@@ -172,8 +182,10 @@ export function totalContractOutstanding(
   schedules: Pick<NasiyaAllocationScheduleInput, 'contractExpectedAmount' | 'contractPaidAmount'>[],
   contractCurrency: CurrencyCode,
 ): number {
-  return schedules.reduce(
-    (sum, schedule) => sum + contractScheduleOutstanding(schedule.contractExpectedAmount, schedule.contractPaidAmount, contractCurrency),
-    0,
-  )
+  const minorUnits = schedules.reduce((sum, schedule) => {
+    const expected = createMoneyDto(contractCurrency, schedule.contractExpectedAmount)
+    const paid = createMoneyDto(contractCurrency, schedule.contractPaidAmount)
+    return sum + Math.max(0, expected.minorUnits - paid.minorUnits)
+  }, 0)
+  return moneyDtoToAmount({ currency: contractCurrency, minorUnits })
 }

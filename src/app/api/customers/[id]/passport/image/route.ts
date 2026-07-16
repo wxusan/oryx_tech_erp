@@ -4,6 +4,7 @@ import { notFound, serverError } from '@/lib/api-helpers'
 import { logger } from '@/lib/logger'
 import { prisma } from '@/lib/prisma'
 import { getSupabaseAdminClient, PRIVATE_STORAGE_BUCKET } from '@/lib/supabase-admin'
+import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -21,7 +22,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       select: { passportPhotoUrl: true },
     })
     if (!customer?.passportPhotoUrl) return notFound('Pasport rasmi topilmadi')
-    if (!customer.passportPhotoUrl.startsWith(`shops/${resolved.shopId}/passports/`)) {
+    if (!isPrivateUploadStoredKey({ key: customer.passportPhotoUrl, shopId: resolved.shopId, kind: 'passport' })) {
       return notFound('Pasport rasmi topilmadi')
     }
 

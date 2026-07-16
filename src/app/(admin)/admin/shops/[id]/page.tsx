@@ -703,7 +703,7 @@ export default function ShopDetailPage() {
       <ShopPaymentsTable payments={shop.payments} />
 
       <Dialog open={packageModalOpen} onOpenChange={setPackageModalOpen}>
-        <DialogContent className="max-h-[92vh] max-w-5xl overflow-y-auto rounded-xl p-0">
+        <DialogContent className="max-h-[92vh] w-[calc(100%-2rem)] overflow-y-auto rounded-xl p-0 sm:max-w-5xl">
           <DialogHeader className="border-b border-zinc-200 px-5 py-4">
             <DialogTitle className="text-base font-semibold text-zinc-900">Paket, narx va kirish turini boshqarish</DialogTitle>
           </DialogHeader>

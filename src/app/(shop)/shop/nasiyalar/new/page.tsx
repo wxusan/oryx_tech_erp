@@ -1,6 +1,7 @@
 'use client'
 
-import { useMemo, useRef, useState } from 'react'
+import Image from 'next/image'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -23,10 +24,10 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { ArrowLeft, Check } from 'lucide-react'
+import { ArrowLeft, Check, Eye, EyeOff, FileImage, Loader2, X } from 'lucide-react'
 import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { displayImei } from '@/lib/device-display'
-import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
+import { formatUzPhoneDisplay, isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
@@ -37,13 +38,49 @@ import { NasiyaSchedulePreview } from '@/components/shop/nasiya-schedule-preview
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 import { CustomerCombobox, type CustomerPickerOption } from '@/components/shop/customer-combobox'
 import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
+import { formatPassportIdentifierInput, isValidPassportIdentifier } from '@/lib/passport-identifier-format'
+import type { TrustTier } from '@/components/shop/trust-badge'
 
 type Device = InStockPickerDevice
 
 interface CustomerUpdateResponse {
   success: boolean
-  data?: Pick<CustomerPickerOption, 'id' | 'name' | 'phone'>
+  data?: Pick<CustomerPickerOption, 'id' | 'name' | 'phone' | 'additionalPhones' | 'hasPassportPhoto'> & {
+    note?: string | null
+    trustOverride?: TrustTier | null
+    passportMasked?: string | null
+  }
   error?: string
+}
+
+interface CustomerEditDetailResponse {
+  success: boolean
+  data?: Pick<CustomerPickerOption, 'id' | 'name' | 'phone' | 'additionalPhones' | 'hasPassportPhoto'> & {
+    note?: string | null
+    trustOverride?: TrustTier | null
+    passportMasked?: string | null
+  }
+  error?: string
+}
+
+const TRUST_TIER_LABELS: Record<TrustTier, string> = {
+  NEW: 'Yangi mijoz',
+  LOW: 'Past ishonch',
+  MEDIUM: "O'rtacha ishonch",
+  HIGH: 'Ishonchli',
+  VERY_HIGH: 'Juda ishonchli',
+}
+
+interface CustomerPassportImageResponse {
+  success: boolean
+  data?: { url: string }
+  error?: string
+}
+
+interface CustomerPassportPreview {
+  key: string
+  url: string | null
+  error: string | null
 }
 
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
@@ -80,27 +117,52 @@ function AuthorizedNewNasiyaPage() {
   const { memberKind, can } = useShopAccess()
   const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const canEditCustomer = can('CUSTOMER_EDIT')
+  const canViewCustomerPassportPhoto = can('CUSTOMER_PASSPORT_PHOTO_VIEW')
+  const canManageCustomerPassport = can('CUSTOMER_PASSPORT_MANAGE')
+  const canOverrideCustomerTrust = can('CUSTOMER_TRUST_OVERRIDE')
+  const canRevealCustomerPassport = can('CUSTOMER_PASSPORT_REVEAL')
   const [step, setStep] = useState<1 | 2 | 3>(1)
   const [selectedDevice, setSelectedDevice] = useState<Device | null>(null)
 
   // Step 2
   const [customerName, setCustomerName] = useState('')
   const [customerPhone, setCustomerPhone] = useState('')
+  const [customerAdditionalPhones, setCustomerAdditionalPhones] = useState<string[]>([])
+  const [customerNote, setCustomerNote] = useState('')
+  const [customerPassportIdentifier, setCustomerPassportIdentifier] = useState('')
+  const [customerTrustOverride, setCustomerTrustOverride] = useState<TrustTier | ''>('')
   const [customerMode, setCustomerMode] = useState<'PICK' | 'EXISTING' | 'NEW'>('PICK')
   const [selectedCustomer, setSelectedCustomer] = useState<CustomerPickerOption | null>(null)
   const [customerEditOpen, setCustomerEditOpen] = useState(false)
   const [editedCustomerName, setEditedCustomerName] = useState('')
   const [editedCustomerPhone, setEditedCustomerPhone] = useState('')
+  const [editedCustomerAdditionalPhones, setEditedCustomerAdditionalPhones] = useState<string[]>([])
+  const [editedCustomerNote, setEditedCustomerNote] = useState('')
+  const [editedCustomerPassportIdentifier, setEditedCustomerPassportIdentifier] = useState('')
+  const [editedCustomerTrustOverride, setEditedCustomerTrustOverride] = useState<TrustTier | ''>('')
+  const [editedCustomerPassportMasked, setEditedCustomerPassportMasked] = useState<string | null>(null)
   const [customerEditNameError, setCustomerEditNameError] = useState('')
   const [customerEditPhoneError, setCustomerEditPhoneError] = useState('')
   const [customerEditSaveError, setCustomerEditSaveError] = useState('')
   const [savingCustomerEdit, setSavingCustomerEdit] = useState(false)
+  const [loadingCustomerEdit, setLoadingCustomerEdit] = useState(false)
+  const [selectedCustomerPassportPreview, setSelectedCustomerPassportPreview] = useState<CustomerPassportPreview | null>(null)
+  const [selectedCustomerPassportRevision, setSelectedCustomerPassportRevision] = useState(0)
+  const [selectedCustomerPassportMasked, setSelectedCustomerPassportMasked] = useState<string | null>(null)
+  const [selectedCustomerPassportIdentifier, setSelectedCustomerPassportIdentifier] = useState<string | null>(null)
+  const [revealingSelectedCustomerPassport, setRevealingSelectedCustomerPassport] = useState(false)
+  const [selectedCustomerPassportRevealError, setSelectedCustomerPassportRevealError] = useState('')
+  const customerEditPassportSelection = useImageSelection({
+    mode: 'single',
+    uploadEndpoint: '/api/uploads/passport',
+  })
   const passportSelection = useImageSelection({
     mode: 'single',
     uploadEndpoint: '/api/uploads/passport',
   })
   const [nameError, setNameError] = useState('')
   const [phoneError, setPhoneError] = useState('')
+  const [customerPassportIdentifierError, setCustomerPassportIdentifierError] = useState('')
   const phoneRef = useRef<HTMLInputElement>(null)
 
   // Step 3
@@ -166,6 +228,15 @@ function AuthorizedNewNasiyaPage() {
       setPhoneError(PHONE_ERROR)
       ok = false
     }
+    if (
+      customerMode === 'NEW' &&
+      canManageCustomerPassport &&
+      customerPassportIdentifier.trim() &&
+      !isValidPassportIdentifier(customerPassportIdentifier)
+    ) {
+      setCustomerPassportIdentifierError("Pasport seriya/raqami AA 1234567 formatida bo'lishi kerak")
+      ok = false
+    }
     if (!ok) {
       if (customerMode === 'NEW' && !isValidPhone(customerPhone)) phoneRef.current?.focus()
       return
@@ -176,23 +247,137 @@ function AuthorizedNewNasiyaPage() {
   function openCustomerEdit(customer: CustomerPickerOption) {
     setEditedCustomerName(customer.name)
     setEditedCustomerPhone(customer.phone)
+    setEditedCustomerAdditionalPhones(customer.additionalPhones ?? [])
+    setEditedCustomerNote('')
+    setEditedCustomerPassportIdentifier('')
+    setEditedCustomerTrustOverride('')
+    setEditedCustomerPassportMasked(null)
     setCustomerEditNameError('')
     setCustomerEditPhoneError('')
     setCustomerEditSaveError('')
+    customerEditPassportSelection.clear()
     setCustomerEditOpen(true)
+    setLoadingCustomerEdit(true)
+    fetch(`/api/customers/${encodeURIComponent(customer.id)}`, { cache: 'no-store' })
+      .then(async (response) => ({ response, json: await response.json() as CustomerEditDetailResponse }))
+      .then(({ response, json }) => {
+        if (!response.ok || !json.success || !json.data) {
+          throw new Error(json.error || "Mijoz ma'lumotlarini yuklab bo'lmadi")
+        }
+        const detail = json.data
+        setEditedCustomerName(detail.name)
+        setEditedCustomerPhone(detail.phone)
+        setEditedCustomerAdditionalPhones(detail.additionalPhones ?? [])
+        setEditedCustomerNote(detail.note ?? '')
+        setEditedCustomerTrustOverride(detail.trustOverride ?? '')
+        setEditedCustomerPassportMasked(detail.passportMasked ?? null)
+        setSelectedCustomerPassportMasked(detail.passportMasked ?? null)
+        setSelectedCustomer((current) => current?.id === detail.id
+          ? { ...current, name: detail.name, phone: detail.phone, additionalPhones: detail.additionalPhones, hasPassportPhoto: detail.hasPassportPhoto }
+          : current)
+      })
+      .catch((error) => {
+        setCustomerEditSaveError(error instanceof Error ? error.message : "Mijoz ma'lumotlarini yuklab bo'lmadi")
+      })
+      .finally(() => setLoadingCustomerEdit(false))
   }
+
+  useEffect(() => {
+    if (!selectedCustomerPassportIdentifier) return
+    const timeout = window.setTimeout(() => setSelectedCustomerPassportIdentifier(null), 30_000)
+    const hideOnBackground = () => {
+      if (document.visibilityState !== 'visible') setSelectedCustomerPassportIdentifier(null)
+    }
+    document.addEventListener('visibilitychange', hideOnBackground)
+    return () => {
+      window.clearTimeout(timeout)
+      document.removeEventListener('visibilitychange', hideOnBackground)
+    }
+  }, [selectedCustomerPassportIdentifier])
+
+  async function toggleSelectedCustomerPassportIdentifier() {
+    if (!selectedCustomer) return
+    if (selectedCustomerPassportIdentifier) {
+      setSelectedCustomerPassportIdentifier(null)
+      return
+    }
+    setRevealingSelectedCustomerPassport(true)
+    setSelectedCustomerPassportRevealError('')
+    try {
+      const response = await fetch(`/api/customers/${encodeURIComponent(selectedCustomer.id)}/passport/reveal`, {
+        method: 'POST',
+        cache: 'no-store',
+      })
+      const json = await response.json() as { success: boolean; data?: { identifier: string }; error?: string }
+      if (!response.ok || !json.success || !json.data?.identifier) {
+        throw new Error(json.error || "Pasport raqamini ochib bo'lmadi")
+      }
+      setSelectedCustomerPassportIdentifier(json.data.identifier)
+    } catch (error) {
+      setSelectedCustomerPassportRevealError(error instanceof Error ? error.message : "Pasport raqamini ochib bo'lmadi")
+    } finally {
+      setRevealingSelectedCustomerPassport(false)
+    }
+  }
+
+  const selectedCustomerPassportKey = selectedCustomer
+    ? `${selectedCustomer.id}:${selectedCustomerPassportRevision}`
+    : null
+
+  useEffect(() => {
+    if (!selectedCustomer?.hasPassportPhoto || !canViewCustomerPassportPhoto || !selectedCustomerPassportKey) return
+
+    let cancelled = false
+    fetch(`/api/customers/${encodeURIComponent(selectedCustomer.id)}/passport/image`, { cache: 'no-store' })
+      .then(async (response) => ({ response, json: await response.json() as CustomerPassportImageResponse }))
+      .then(({ response, json }) => {
+        if (cancelled) return
+        if (!response.ok || !json.success || !json.data?.url) {
+          if (response.status === 404) {
+            setSelectedCustomer((current) => current?.id === selectedCustomer.id
+              ? { ...current, hasPassportPhoto: false }
+              : current)
+            return
+          }
+          setSelectedCustomerPassportPreview({
+            key: selectedCustomerPassportKey,
+            url: null,
+            error: json.error || "Pasport rasmini ochib bo'lmadi",
+          })
+          return
+        }
+        setSelectedCustomerPassportPreview({ key: selectedCustomerPassportKey, url: json.data.url, error: null })
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setSelectedCustomerPassportPreview({
+            key: selectedCustomerPassportKey,
+            url: null,
+            error: "Pasport rasmini ochib bo'lmadi",
+          })
+        }
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [canViewCustomerPassportPhoto, selectedCustomer?.hasPassportPhoto, selectedCustomer?.id, selectedCustomerPassportKey])
 
   async function saveCustomerEdit() {
     if (!selectedCustomer || savingCustomerEdit) return
 
     const name = editedCustomerName.trim()
     let valid = true
-    if (name.length < 2) {
+    if (canEditCustomer && name.length < 2) {
       setCustomerEditNameError("Ism kamida 2 ta harfdan iborat bo'lishi kerak")
       valid = false
     }
-    if (!isValidPhone(editedCustomerPhone)) {
+    if (canEditCustomer && !isValidPhone(editedCustomerPhone)) {
       setCustomerEditPhoneError(PHONE_ERROR)
+      valid = false
+    }
+    if (canManageCustomerPassport && customerEditPassportSelection.hasBlockingErrors) {
+      setCustomerEditSaveError('Pasport rasmi tanlovini tekshiring')
       valid = false
     }
     if (!valid) return
@@ -200,10 +385,25 @@ function AuthorizedNewNasiyaPage() {
     setSavingCustomerEdit(true)
     setCustomerEditSaveError('')
     try {
+      const [passportPhotoUrl] = canManageCustomerPassport && customerEditPassportSelection.items.length
+        ? await customerEditPassportSelection.uploadAll()
+        : []
       const response = await fetch(`/api/customers/${selectedCustomer.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name, phone: editedCustomerPhone }),
+        body: JSON.stringify({
+          ...(canEditCustomer ? {
+            name,
+            phone: editedCustomerPhone,
+            additionalPhones: editedCustomerAdditionalPhones,
+            note: editedCustomerNote,
+          } : {}),
+          ...(canOverrideCustomerTrust ? { trustOverride: editedCustomerTrustOverride || null } : {}),
+          ...(canManageCustomerPassport ? {
+            passportIdentifier: editedCustomerPassportIdentifier.trim() || undefined,
+            passportPhotoUrl,
+          } : {}),
+        }),
       })
       const json = await response.json() as CustomerUpdateResponse
       if (!response.ok || !json.success || !json.data) {
@@ -212,10 +412,20 @@ function AuthorizedNewNasiyaPage() {
 
       const updated = json.data
       setSelectedCustomer((current) => current?.id === updated.id
-        ? { ...current, name: updated.name, phone: updated.phone }
+        ? {
+            ...current,
+            name: updated.name,
+            phone: updated.phone,
+            additionalPhones: updated.additionalPhones,
+            hasPassportPhoto: updated.hasPassportPhoto,
+          }
         : current)
+      setSelectedCustomerPassportMasked(updated.passportMasked ?? selectedCustomerPassportMasked)
+      setSelectedCustomerPassportIdentifier(null)
       setCustomerName(updated.name)
       setCustomerPhone(updated.phone)
+      setSelectedCustomerPassportRevision((revision) => revision + 1)
+      customerEditPassportSelection.clear()
       setCustomerEditOpen(false)
       void commitNavigationMutation({ kind: 'customer.updated' }).catch(() => undefined)
     } catch (error) {
@@ -285,6 +495,7 @@ function AuthorizedNewNasiyaPage() {
   const needsPassportPhoto = customerMode === 'NEW' || (customerMode === 'EXISTING' && !selectedCustomer?.hasPassportPhoto)
   const step2Valid =
     (customerMode === 'EXISTING' ? Boolean(selectedCustomer) : customerMode === 'NEW' && customerName.trim() && customerPhone.trim()) &&
+    (customerMode !== 'NEW' || !canManageCustomerPassport || !customerPassportIdentifier.trim() || isValidPassportIdentifier(customerPassportIdentifier)) &&
     (!needsPassportPhoto || passportSelection.items.length === 1) &&
     !passportSelection.hasBlockingErrors
   const step3Valid =
@@ -318,6 +529,14 @@ function AuthorizedNewNasiyaPage() {
           customerId: selectedCustomer?.id,
           customerName: customerMode === 'NEW' ? customerName.trim() : undefined,
           customerPhone: customerMode === 'NEW' ? customerPhone.trim() : undefined,
+          ...(customerMode === 'NEW' ? {
+            customerAdditionalPhones,
+            customerNote: customerNote.trim() || undefined,
+            ...(canManageCustomerPassport && customerPassportIdentifier.trim()
+              ? { customerPassportIdentifier: customerPassportIdentifier.trim() }
+              : {}),
+            ...(canOverrideCustomerTrust ? { customerTrustOverride: customerTrustOverride || null } : {}),
+          } : {}),
           passportPhotoUrl,
           totalAmount: Number(totalPrice),
           downPayment: Number(downPayment),
@@ -334,14 +553,14 @@ function AuthorizedNewNasiyaPage() {
           note: note.trim() || undefined,
         }),
       })
-      const json = await res.json()
-      if (!res.ok || !json.success) {
+      const json = await res.json() as { success: boolean; data?: { id?: string }; error?: string }
+      if (!res.ok || !json.success || !json.data?.id) {
         throw new Error(json.error || 'Nasiyani saqlashda xatolik')
       }
-      await navigateAfterMutation(router, `/shop/nasiyalar/${json.data?.nasiyaId}`, {
+      await navigateAfterMutation(router, `/shop/nasiyalar/${json.data.id}`, {
         kind: 'nasiya.created',
         deviceId: selectedDevice.id,
-        nasiyaId: json.data?.nasiyaId,
+        nasiyaId: json.data.id,
       })
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Nasiyani saqlashda xatolik')
@@ -463,21 +682,42 @@ function AuthorizedNewNasiyaPage() {
                     setCustomerMode('EXISTING')
                     setCustomerName(customer.name)
                     setCustomerPhone(customer.phone)
+                    setSelectedCustomerPassportMasked(customer.passportMasked ?? null)
+                    setSelectedCustomerPassportIdentifier(null)
+                    setSelectedCustomerPassportRevealError('')
                     setNameError('')
                     setPhoneError('')
                     passportSelection.clear()
                   }}
-                  onEdit={canEditCustomer ? openCustomerEdit : undefined}
+                  onEdit={canEditCustomer || canManageCustomerPassport || canOverrideCustomerTrust ? openCustomerEdit : undefined}
                   onClear={() => {
                     setSelectedCustomer(null)
                     setCustomerMode('PICK')
                     setCustomerName('')
                     setCustomerPhone('')
+                    setCustomerAdditionalPhones([])
+                    setCustomerNote('')
+                    setCustomerPassportIdentifier('')
+                    setCustomerTrustOverride('')
+                    setCustomerPassportIdentifierError('')
+                    setSelectedCustomerPassportMasked(null)
+                    setSelectedCustomerPassportIdentifier(null)
+                    setSelectedCustomerPassportRevealError('')
                     passportSelection.clear()
                   }}
                   onCreateNew={(searchText) => {
                     setSelectedCustomer(null)
                     setCustomerMode('NEW')
+                    setCustomerName('')
+                    setCustomerPhone('')
+                    setCustomerAdditionalPhones([])
+                    setCustomerNote('')
+                    setCustomerPassportIdentifier('')
+                    setCustomerTrustOverride('')
+                    setCustomerPassportIdentifierError('')
+                    setSelectedCustomerPassportMasked(null)
+                    setSelectedCustomerPassportIdentifier(null)
+                    setSelectedCustomerPassportRevealError('')
                     passportSelection.clear()
                     if (/\d/.test(searchText)) setCustomerPhone(searchText)
                     else setCustomerName(searchText)
@@ -485,6 +725,93 @@ function AuthorizedNewNasiyaPage() {
                   disabled={submitting}
                 />
               </div>
+              {customerMode === 'EXISTING' && selectedCustomer && (
+                <section aria-labelledby="selected-customer-profile-title" className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-sm">
+                  <div className="flex items-center justify-between gap-3 border-b border-zinc-200 bg-zinc-50/80 px-4 py-3 sm:px-5">
+                    <div>
+                      <h2 id="selected-customer-profile-title" className="text-base font-semibold text-zinc-900">Tanlangan mijoz profili</h2>
+                      <p className="mt-0.5 text-sm text-zinc-500">Nasiya shartnomasiga biriktiriladigan mijoz</p>
+                    </div>
+                    {(canEditCustomer || canManageCustomerPassport || canOverrideCustomerTrust) && (
+                      <Button type="button" variant="outline" size="sm" onClick={() => openCustomerEdit(selectedCustomer)} disabled={submitting} className="shrink-0">
+                        Tahrirlash
+                      </Button>
+                    )}
+                  </div>
+                  <div className="grid gap-5 p-4 sm:grid-cols-[minmax(0,1fr)_12rem] sm:p-5">
+                    <dl className="space-y-4 text-sm">
+                      <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-baseline gap-x-3">
+                        <dt className="text-zinc-500">Ism</dt>
+                        <dd className="font-semibold text-zinc-900">{selectedCustomer.name}</dd>
+                      </div>
+                      <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-baseline gap-x-3">
+                        <dt className="text-zinc-500">Telefon</dt>
+                        <dd className="font-medium text-zinc-900">{formatUzPhoneDisplay(selectedCustomer.phone)}</dd>
+                      </div>
+                      {selectedCustomer.additionalPhones?.length ? <>
+                        <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-baseline gap-x-3">
+                          <dt className="text-zinc-500">Qo&apos;shimcha</dt>
+                          <dd className="text-zinc-900">{selectedCustomer.additionalPhones.map(formatUzPhoneDisplay).join(', ')}</dd>
+                        </div>
+                      </> : null}
+                      <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] items-center gap-x-3">
+                        <dt className="text-zinc-500">Pasport seriya</dt>
+                        <dd>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-sm font-medium text-zinc-900">
+                              {selectedCustomerPassportIdentifier ?? selectedCustomerPassportMasked ?? 'Kiritilmagan'}
+                            </span>
+                            {selectedCustomerPassportMasked && canRevealCustomerPassport && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => void toggleSelectedCustomerPassportIdentifier()}
+                                disabled={revealingSelectedCustomerPassport}
+                                className="h-7 px-2 text-xs"
+                              >
+                                {selectedCustomerPassportIdentifier ? <EyeOff className="mr-1 size-3.5" aria-hidden="true" /> : <Eye className="mr-1 size-3.5" aria-hidden="true" />}
+                                {revealingSelectedCustomerPassport ? 'Ochilmoqda...' : selectedCustomerPassportIdentifier ? 'Yashirish' : "To'liq ko'rish"}
+                              </Button>
+                            )}
+                          </div>
+                          {selectedCustomerPassportIdentifier && <p className="mt-1 text-xs text-amber-700">30 soniyadan keyin yoki oynadan chiqqanda yashiriladi.</p>}
+                          {selectedCustomerPassportRevealError && <p role="alert" className="mt-1 text-xs text-red-600">{selectedCustomerPassportRevealError}</p>}
+                        </dd>
+                      </div>
+                    </dl>
+                    <div className="sm:justify-self-end">
+                      <p className="mb-2 text-xs font-medium text-zinc-700">Pasport rasmi</p>
+                      {selectedCustomer.hasPassportPhoto && canViewCustomerPassportPhoto ? (
+                        selectedCustomerPassportPreview?.key === selectedCustomerPassportKey && selectedCustomerPassportPreview.url ? (
+                          <div className="relative aspect-square w-full max-w-48 overflow-hidden rounded-lg border border-zinc-200 bg-zinc-50 shadow-inner sm:w-48">
+                            <Image
+                              src={selectedCustomerPassportPreview.url}
+                              alt={`${selectedCustomer.name} pasport rasmi`}
+                              fill
+                              sizes="(max-width: 640px) 100vw, 192px"
+                              unoptimized
+                              className="object-contain p-2"
+                            />
+                          </div>
+                        ) : selectedCustomerPassportPreview?.key === selectedCustomerPassportKey && selectedCustomerPassportPreview.error ? (
+                          <p role="alert" className="rounded border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-700">{selectedCustomerPassportPreview.error}</p>
+                        ) : (
+                          <div className="flex aspect-square w-full max-w-48 items-center justify-center rounded-lg border border-zinc-200 bg-zinc-50 text-xs text-zinc-500 sm:w-48">
+                            <Loader2 className="mr-1.5 size-3.5 animate-spin" aria-hidden="true" /> Yuklanmoqda...
+                          </div>
+                        )
+                      ) : selectedCustomer.hasPassportPhoto ? (
+                        <p className="rounded border border-zinc-200 bg-zinc-50 px-2 py-2 text-xs text-zinc-500">Pasport rasmini ko&apos;rish ruxsati yo&apos;q.</p>
+                      ) : (
+                        <div className="flex aspect-square w-full max-w-48 flex-col items-center justify-center rounded-lg border border-dashed border-zinc-300 bg-zinc-50 px-3 text-center text-xs text-zinc-500 sm:w-48">
+                          <FileImage className="mb-1 size-4" aria-hidden="true" /> Pasport rasmi kiritilmagan
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </section>
+              )}
               {customerMode === 'NEW' && <>
               <Field label="Mijoz ismi" required error={nameError || undefined}>
                 <Input
@@ -508,12 +835,88 @@ function AuthorizedNewNasiyaPage() {
                   className="h-9 text-sm border-zinc-200 rounded"
                 />
               </Field>
-              </>}
-              {customerMode === 'EXISTING' && selectedCustomer?.hasPassportPhoto && (
-                <p className="rounded border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-800">
-                  Tanlangan mijozning pasport rasmi mavjud; qayta yuklash shart emas.
-                </p>
+              <fieldset>
+                <legend className="mb-1.5 block text-xs font-medium text-zinc-700">Qo&apos;shimcha raqamlar</legend>
+                <div className="space-y-2">
+                  {customerAdditionalPhones.map((extra, index) => (
+                    <div key={`${index}-${extra}`} className="flex items-center gap-2">
+                      <PhoneInput
+                        aria-label={`Qo'shimcha telefon ${index + 1}`}
+                        value={extra}
+                        onChange={(value) => setCustomerAdditionalPhones((current) => current.map((phone, currentIndex) => currentIndex === index ? value : phone))}
+                        disabled={submitting}
+                        className="h-9 text-sm border-zinc-200 rounded"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="icon"
+                        aria-label="Raqamni o'chirish"
+                        onClick={() => setCustomerAdditionalPhones((current) => current.filter((_, currentIndex) => currentIndex !== index))}
+                        disabled={submitting}
+                        className="h-9 w-9 shrink-0 border-zinc-200 text-zinc-500 hover:text-red-600"
+                      >
+                        <X className="size-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => setCustomerAdditionalPhones((current) => [...current, ''])}
+                    disabled={submitting || customerAdditionalPhones.length >= 5}
+                    className="h-8 border-zinc-200 px-3 text-xs"
+                  >
+                    + Raqam qo&apos;shish
+                  </Button>
+                </div>
+              </fieldset>
+              <Field label="Izoh">
+                <Textarea
+                  value={customerNote}
+                  onChange={(event) => setCustomerNote(event.target.value)}
+                  disabled={submitting}
+                  placeholder="Qo'shimcha ma'lumot..."
+                  className="min-h-[80px] text-sm border-zinc-200 rounded"
+                />
+              </Field>
+              {canManageCustomerPassport && (
+                <Field label="Pasport seriya/raqami" error={customerPassportIdentifierError || undefined} help="Ixtiyoriy. To'liq raqam saqlangandan keyin qayta ko'rsatilmaydi.">
+                  <Input
+                    id="nasiya-new-customer-passport-identifier"
+                    value={customerPassportIdentifier}
+                    onChange={(event) => {
+                      setCustomerPassportIdentifier(formatPassportIdentifierInput(event.target.value))
+                      if (customerPassportIdentifierError) setCustomerPassportIdentifierError('')
+                    }}
+                    autoComplete="off"
+                    spellCheck={false}
+                    inputMode="text"
+                    maxLength={10}
+                    pattern="[A-Z]{2} [0-9]{7}"
+                    placeholder="AA 1234567"
+                    disabled={submitting}
+                    className="h-9 font-mono text-sm border-zinc-200 rounded"
+                  />
+                </Field>
               )}
+              {canOverrideCustomerTrust && (
+                <div>
+                  <label htmlFor="nasiya-new-customer-trust" className="mb-1.5 block text-xs font-medium text-zinc-700">Ishonch darajasi</label>
+                  <Select value={customerTrustOverride || 'AUTO'} onValueChange={(value) => setCustomerTrustOverride(value === 'AUTO' ? '' : value as TrustTier)}>
+                    <SelectTrigger id="nasiya-new-customer-trust" className="h-9 text-sm border-zinc-200 rounded">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="AUTO">Avtomatik hisoblash</SelectItem>
+                      {(Object.keys(TRUST_TIER_LABELS) as TrustTier[]).map((tier) => (
+                        <SelectItem key={tier} value={tier}>{TRUST_TIER_LABELS[tier]} (qo&apos;lda)</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              </>}
               {needsPassportPhoto && (
                 <ImageSelectionField
                   inputId="nasiya-passport-image"
@@ -766,58 +1169,167 @@ function AuthorizedNewNasiyaPage() {
           if (!open && !savingCustomerEdit) setCustomerEditOpen(false)
         }}
       >
-        <DialogContent className="max-w-md rounded" showCloseButton={!savingCustomerEdit}>
-          <DialogHeader>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-md grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded p-0" showCloseButton={!savingCustomerEdit}>
+          <DialogHeader className="px-4 pt-4 pr-12">
             <DialogTitle>Mijozni tahrirlash</DialogTitle>
           </DialogHeader>
           <form
-            className="space-y-4"
+            className="contents"
             onSubmit={(event) => {
               event.preventDefault()
               void saveCustomerEdit()
             }}
           >
-            {customerEditSaveError && (
-              <div className="rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
-                {customerEditSaveError}
+            <div className="min-h-0 overflow-y-auto px-4">
+              {customerEditSaveError && (
+                <div className="mt-3 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+                  {customerEditSaveError}
+                </div>
+              )}
+              <div className="space-y-3 py-4">
+                {loadingCustomerEdit ? (
+                  <div className="flex items-center gap-2 py-6 text-sm text-zinc-500">
+                    <Loader2 className="size-4 animate-spin" aria-hidden="true" />
+                    Mijoz ma&apos;lumotlari yuklanmoqda...
+                  </div>
+                ) : <>
+                  {canEditCustomer && <>
+                    <Field label="Mijoz ismi" required error={customerEditNameError || undefined}>
+                      <Input
+                        id="nasiya-edit-customer-name"
+                        value={editedCustomerName}
+                        onChange={(event) => {
+                          setEditedCustomerName(event.target.value)
+                          if (customerEditNameError) setCustomerEditNameError('')
+                        }}
+                        disabled={savingCustomerEdit}
+                        className="h-9 text-sm border-zinc-200 rounded"
+                      />
+                    </Field>
+                    <Field label="Mijoz tel raqami" required error={customerEditPhoneError || undefined}>
+                      <PhoneInput
+                        id="nasiya-edit-customer-phone"
+                        value={editedCustomerPhone}
+                        onChange={(value) => {
+                          setEditedCustomerPhone(value)
+                          if (customerEditPhoneError) setCustomerEditPhoneError('')
+                        }}
+                        disabled={savingCustomerEdit}
+                        className="h-9 text-sm border-zinc-200 rounded"
+                      />
+                    </Field>
+                    <fieldset>
+                      <legend className="mb-1.5 block text-xs font-medium text-zinc-700">Qo&apos;shimcha raqamlar</legend>
+                      <div className="space-y-2">
+                        {editedCustomerAdditionalPhones.map((extra, index) => (
+                          <div key={`${index}-${extra}`} className="flex items-center gap-2">
+                            <PhoneInput
+                              aria-label={`Qo'shimcha telefon ${index + 1}`}
+                              value={extra}
+                              onChange={(value) => setEditedCustomerAdditionalPhones((current) => current.map((phone, currentIndex) => currentIndex === index ? value : phone))}
+                              disabled={savingCustomerEdit}
+                              className="h-9 text-sm border-zinc-200 rounded"
+                            />
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="icon"
+                              aria-label="Raqamni o'chirish"
+                              onClick={() => setEditedCustomerAdditionalPhones((current) => current.filter((_, currentIndex) => currentIndex !== index))}
+                              disabled={savingCustomerEdit}
+                              className="h-9 w-9 shrink-0 border-zinc-200 text-zinc-500 hover:text-red-600"
+                            >
+                              <X className="size-4" aria-hidden="true" />
+                            </Button>
+                          </div>
+                        ))}
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => setEditedCustomerAdditionalPhones((current) => [...current, ''])}
+                          disabled={savingCustomerEdit || editedCustomerAdditionalPhones.length >= 5}
+                          className="h-8 border-zinc-200 px-3 text-xs"
+                        >
+                          + Raqam qo&apos;shish
+                        </Button>
+                      </div>
+                    </fieldset>
+                    <Field label="Izoh">
+                      <Textarea
+                        id="nasiya-edit-customer-note"
+                        value={editedCustomerNote}
+                        onChange={(event) => setEditedCustomerNote(event.target.value)}
+                        disabled={savingCustomerEdit}
+                        className="min-h-[80px] text-sm border-zinc-200 rounded"
+                      />
+                    </Field>
+                  </>}
+                  {canManageCustomerPassport && <>
+                    <div>
+                      <label htmlFor="nasiya-edit-customer-passport-identifier" className="mb-1.5 block text-xs font-medium text-zinc-700">Pasport seriya/raqami</label>
+                      <Input
+                        id="nasiya-edit-customer-passport-identifier"
+                        value={editedCustomerPassportIdentifier}
+                        onChange={(event) => setEditedCustomerPassportIdentifier(formatPassportIdentifierInput(event.target.value))}
+                        autoComplete="off"
+                        spellCheck={false}
+                        inputMode="text"
+                        maxLength={10}
+                        pattern="[A-Z]{2} [0-9]{7}"
+                        placeholder={editedCustomerPassportMasked ? `${editedCustomerPassportMasked} — o'zgartirish uchun yangisini kiriting` : 'AA 1234567'}
+                        disabled={savingCustomerEdit}
+                        className="h-9 font-mono text-sm border-zinc-200 rounded"
+                      />
+                      <p className="mt-1 text-xs text-zinc-500">To&apos;liq raqam saqlangandan keyin qayta ko&apos;rsatilmaydi.</p>
+                    </div>
+                    <ImageSelectionField
+                      inputId="nasiya-edit-customer-passport-image"
+                      label={selectedCustomer?.hasPassportPhoto ? "Pasport rasmini almashtirish (ixtiyoriy)" : "Pasport rasmi (ixtiyoriy)"}
+                      mode="single"
+                      selection={customerEditPassportSelection}
+                      disabled={savingCustomerEdit}
+                      previewClassName="aspect-[4/3]"
+                      help={selectedCustomer?.hasPassportPhoto
+                        ? "Yangi rasm tanlanmasa, mavjud private rasm saqlanib qoladi. JPG, PNG yoki WEBP, 5 MB gacha."
+                        : "Private saqlanadi; JPG, PNG yoki WEBP, 5 MB gacha."}
+                    />
+                  </>}
+                  {canOverrideCustomerTrust && (
+                    <div>
+                      <label htmlFor="nasiya-edit-customer-trust" className="mb-1.5 block text-xs font-medium text-zinc-700">Ishonch darajasi</label>
+                      <Select value={editedCustomerTrustOverride || 'AUTO'} onValueChange={(value) => setEditedCustomerTrustOverride(value === 'AUTO' ? '' : value as TrustTier)}>
+                        <SelectTrigger id="nasiya-edit-customer-trust" className="h-9 text-sm border-zinc-200 rounded">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="AUTO">Avtomatik hisoblash</SelectItem>
+                          {(Object.keys(TRUST_TIER_LABELS) as TrustTier[]).map((tier) => (
+                            <SelectItem key={tier} value={tier}>{TRUST_TIER_LABELS[tier]} (qo&apos;lda)</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  )}
+                </>}
               </div>
-            )}
-            <Field label="Mijoz ismi" required error={customerEditNameError || undefined}>
-              <Input
-                id="nasiya-edit-customer-name"
-                value={editedCustomerName}
-                onChange={(event) => {
-                  setEditedCustomerName(event.target.value)
-                  if (customerEditNameError) setCustomerEditNameError('')
-                }}
-                disabled={savingCustomerEdit}
-                className="h-9 text-sm border-zinc-200 rounded"
-              />
-            </Field>
-            <Field label="Mijoz tel raqami" required error={customerEditPhoneError || undefined}>
-              <PhoneInput
-                id="nasiya-edit-customer-phone"
-                value={editedCustomerPhone}
-                onChange={(value) => {
-                  setEditedCustomerPhone(value)
-                  if (customerEditPhoneError) setCustomerEditPhoneError('')
-                }}
-                disabled={savingCustomerEdit}
-                className="h-9 text-sm border-zinc-200 rounded"
-              />
-            </Field>
-            <DialogFooter>
+            </div>
+            <DialogFooter className="mx-0 mb-0 gap-2 px-4 py-4">
               <Button
                 type="button"
                 variant="outline"
-                disabled={savingCustomerEdit}
+                disabled={savingCustomerEdit || loadingCustomerEdit}
                 onClick={() => setCustomerEditOpen(false)}
               >
                 Bekor qilish
               </Button>
               <Button
                 type="submit"
-                disabled={savingCustomerEdit || editedCustomerName.trim().length < 2 || !isValidPhone(editedCustomerPhone)}
+                disabled={
+                  savingCustomerEdit || loadingCustomerEdit ||
+                  (canEditCustomer && (editedCustomerName.trim().length < 2 || !isValidPhone(editedCustomerPhone))) ||
+                  (canManageCustomerPassport && customerEditPassportSelection.hasBlockingErrors) ||
+                  (!canEditCustomer && !canManageCustomerPassport && !canOverrideCustomerTrust)
+                }
               >
                 {savingCustomerEdit ? 'Saqlanmoqda...' : 'Saqlash'}
               </Button>

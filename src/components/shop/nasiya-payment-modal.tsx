@@ -9,15 +9,18 @@ import { Field } from '@/components/ui/field'
 import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { scheduleDisplayStatus } from '@/lib/nasiya-utils'
-import { convertUsdToUzs, convertUzsToUsd, currencyLabel, type CurrencyCode } from '@/lib/currency'
 import {
-  convertPaymentToContractCurrency,
-  contractScheduleOutstanding,
-  formatDisplayMoneyFromContract,
-  isContractCurrencyDust,
-  roundContractMoney,
-} from '@/lib/nasiya-contract'
+  addMoneyDto,
+  convertMoneyDto,
+  createMoneyDto,
+  currencyLabel,
+  formatMoneyDto,
+  moneyDtoEquals,
+  moneyDtoToAmount,
+  subtractMoneyDto,
+  type CurrencyCode,
+  type MoneyDto,
+} from '@/lib/currency'
 import { uzDate, uzMonthYear } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { tashkentTodayInputValue } from '@/lib/timezone'
@@ -37,11 +40,12 @@ interface Schedule {
   monthNumber: number
   dueDate: string
   delayedUntil: string | null
-  expectedAmount: number
-  paidAmount: number
   status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
-  contractExpectedAmount: number
-  contractPaidAmount: number
+  expected: MoneyDto
+  paid: MoneyDto
+  remaining: MoneyDto
+  legacyExpected: MoneyDto
+  legacyPaid: MoneyDto
 }
 
 type RowStatus = 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
@@ -55,17 +59,12 @@ const scheduleStatusLabels: Record<RowStatus, string> = {
   CANCELLED: 'Bekor qilingan',
 }
 
-function scheduleBalance(row: Schedule) {
-  return Math.max(0, Number(row.expectedAmount) - Number(row.paidAmount))
-}
-
-/** Contract-currency outstanding balance — used only for DISPLAY (see dfmt below); validation still uses the UZS legacy figures above, which stay accurate via the dual-ledger lockstep. */
-function contractScheduleBalance(row: Schedule, currency: CurrencyCode) {
-  return contractScheduleOutstanding(Number(row.contractExpectedAmount), Number(row.contractPaidAmount), currency)
-}
-
 function rowDisplayStatus(row: Schedule): RowStatus {
-  return scheduleDisplayStatus(row) as RowStatus
+  if (row.status === 'CANCELLED') return 'CANCELLED'
+  if (row.remaining.minorUnits === 0) return 'PAID'
+  if (row.status === 'OVERDUE') return 'OVERDUE'
+  if (row.status === 'DEFERRED') return 'DEFERRED'
+  return row.paid.minorUnits > 0 ? 'PARTIAL' : 'PENDING'
 }
 
 function scheduleTriggerLabel(row: Schedule) {
@@ -95,11 +94,10 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
     customerName: string
     deviceName: string
   } | null>(null)
-  const [nasiyaRemainingAmount, setNasiyaRemainingAmount] = useState(0)
   // Frozen at creation, never changes with the shop's display toggle — see
   // docs/currency-accounting-model.md.
   const [contractCurrency, setContractCurrency] = useState<CurrencyCode>('UZS')
-  const [nasiyaContractRemainingAmount, setNasiyaContractRemainingAmount] = useState(0)
+  const [ledgerRemaining, setLedgerRemaining] = useState<MoneyDto | null>(null)
 
   const [payAmount, setPayAmount] = useState('')
   const [payMethod, setPayMethod] = useState('')
@@ -126,11 +124,15 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   const [submitting, setSubmitting] = useState(false)
   const [payError, setPayError] = useState('')
 
-  // Schedule/remaining-debt DISPLAY must convert from the deal's own contract
-  // currency using today's rate — never reconvert the frozen-creation-rate
-  // legacy UZS snapshot, which would drift from the true contract value as
-  // the rate moves. See docs/currency-accounting-model.md.
-  const dfmt = (n: number) => formatDisplayMoneyFromContract(n, contractCurrency, currency.currency, currency.usdUzsRate)
+  // Native contract value is always primary. A current FX conversion is a
+  // secondary approximation only, never a debt calculation or stored value.
+  const moneyView = (amount: MoneyDto) => {
+    const primary = formatMoneyDto(amount)
+    const converted = amount.currency === currency.currency
+      ? null
+      : convertMoneyDto(amount, currency.currency, currency.fxQuote)
+    return converted ? `${primary} · ≈ ${formatMoneyDto(converted)}` : primary
+  }
 
   // Load the nasiya's schedules whenever the modal opens. All setState lives
   // inside `load` (not the effect body) to keep it off the sync-in-effect path.
@@ -159,18 +161,17 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
         }
         const rows: Schedule[] = json.data.schedules ?? []
         setSchedules(rows)
-        setNasiyaRemainingAmount(Number(json.data.remainingAmount ?? 0))
         setContractCurrency((json.data.contractCurrency as CurrencyCode) ?? 'UZS')
-        setNasiyaContractRemainingAmount(Number(json.data.contractRemainingAmount ?? 0))
+        setLedgerRemaining(json.data.ledger?.remaining ?? null)
         setFetched({
           customerName: json.data.customer?.name ?? '',
           deviceName: json.data.device?.model ?? '',
         })
         const pending = rows
-          .filter((s) => ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(s.status))
+          .filter((s) => s.status !== 'CANCELLED' && s.remaining?.minorUnits > 0)
           .sort((a, b) => a.monthNumber - b.monthNumber)[0]
         const preferred = preferredScheduleId
-          ? rows.find((schedule) => schedule.id === preferredScheduleId && ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(schedule.status))
+          ? rows.find((schedule) => schedule.id === preferredScheduleId && schedule.status !== 'CANCELLED' && schedule.remaining?.minorUnits > 0)
           : undefined
         setSelectedScheduleId(preferred?.id ?? pending?.id ?? '')
       } catch {
@@ -186,12 +187,10 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   }, [open, nasiyaId, preferredScheduleId])
 
   const pendingSchedules = schedules
-    .filter((s) => ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(s.status))
+    .filter((s) => s.status !== 'CANCELLED' && s.remaining?.minorUnits > 0)
     .sort((a, b) => a.monthNumber - b.monthNumber)
   const selectedSchedule = pendingSchedules.find((s) => s.id === selectedScheduleId)
-  const selectedScheduleOutstanding = selectedSchedule ? scheduleBalance(selectedSchedule) : 0
-  // Native contract-currency outstanding balance — DISPLAY only (see dfmt).
-  const selectedScheduleContractOutstanding = selectedSchedule ? contractScheduleBalance(selectedSchedule, contractCurrency) : 0
+  const selectedScheduleRemaining = selectedSchedule?.remaining ?? null
 
   // The "suggested"/"target" amount — the selected schedule's own
   // outstanding balance, converted into whatever currency the user is
@@ -200,80 +199,84 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   // calculation, so they can never disagree on what "the recommended
   // amount" means. `null` when there's nothing to recommend (no schedule
   // outstanding balance, or a USD contract with no rate to convert with).
-  const suggestedAmountNumber: number | null =
-    selectedScheduleOutstanding > 0
-      ? contractCurrency !== currency.currency && !currency.usdUzsRate
-        ? selectedScheduleOutstanding
-        : convertPaymentToContractCurrency(selectedScheduleContractOutstanding, contractCurrency, currency.currency, currency.usdUzsRate)
-      : null
+  const suggestedMoney = selectedScheduleRemaining
+    ? convertMoneyDto(selectedScheduleRemaining, currency.currency, currency.fxQuote)
+    : null
 
-  // Round/format a display-currency amount consistently with how the user
-  // types it — whole so'm, or cents for USD.
-  const roundDisplayAmount = (n: number) => (currency.currency === 'USD' ? Math.round(n * 100) / 100 : Math.round(n))
-  const formatAmountForInput = (n: number) => (currency.currency === 'USD' ? n.toFixed(2) : String(Math.round(n)))
+  // Formatting is a DTO boundary as well: the browser never calculates with
+  // raw Decimal strings or adds/subtracts floating currency values.
+  const formatAmountForInput = (money: MoneyDto) => {
+    const amount = moneyDtoToAmount(money)
+    return money.currency === 'USD' ? amount.toFixed(2) : String(amount)
+  }
+  const parseDisplayMoney = (value: string): MoneyDto | null => {
+    try {
+      return createMoneyDto(currency.currency, value.trim() || '0')
+    } catch {
+      return null
+    }
+  }
 
   // Split payment: each part has its OWN amount; the total the customer is
   // paying is the SUM of the parts — never a total-minus-second-part
   // subtraction. `splitValid` requires both parts present, both positive,
   // and distinct methods (a "split" between the same method twice is
   // rejected — that's just one payment, not a split).
-  const splitTotal = Math.round((Number(splitAmount1Input || 0) + Number(splitAmount2Input || 0)) * 100) / 100
+  const splitPart1Money = parseDisplayMoney(splitAmount1Input)
+  const splitPart2Money = parseDisplayMoney(splitAmount2Input)
+  const splitMoney = splitPart1Money && splitPart2Money
+    ? addMoneyDto(splitPart1Money, splitPart2Money)
+    : null
   const splitValid =
     !splitPayment ||
     (Boolean(payMethod) &&
       Boolean(splitMethod2) &&
       splitAmount1Input.trim().length > 0 &&
-      Number(splitAmount1Input) > 0 &&
+      Boolean(splitPart1Money && splitPart1Money.minorUnits > 0) &&
       splitAmount2Input.trim().length > 0 &&
-      Number(splitAmount2Input) > 0 &&
+      Boolean(splitPart2Money && splitPart2Money.minorUnits > 0) &&
       splitMethod2 !== payMethod)
 
   // The amount actually being submitted: the split total when split mode is
   // on, otherwise the single "Miqdor" field. Every downstream currency/
   // validation calculation below reads from this ONE number so single and
   // split mode always agree on what "the amount" means.
-  const effectiveAmountNumber = splitPayment ? splitTotal : Number(payAmount || 0)
-  const hasEffectiveAmount = splitPayment ? splitTotal > 0 : payAmount.trim().length > 0
+  const singleMoney = payAmount.trim().length > 0 ? parseDisplayMoney(payAmount) : null
+  const enteredMoney = splitPayment ? splitMoney : singleMoney
+  const hasEffectiveAmount = Boolean(enteredMoney && enteredMoney.minorUnits > 0)
+  // The only client guard is the reconciled TOTAL schedule debt. It does not
+  // trust the legacy parent remainingAmount cache.
+  const payAmountContract = enteredMoney
+    ? convertMoneyDto(enteredMoney, contractCurrency, currency.fxQuote)
+    : null
+  const requiresCrossCurrencyRate = Boolean(enteredMoney && enteredMoney.currency !== contractCurrency && !payAmountContract)
+  const exceedsRemaining = Boolean(
+    payAmountContract && ledgerRemaining && payAmountContract.minorUnits > ledgerRemaining.minorUnits,
+  )
+  const overpayExtraContract = payAmountContract && selectedScheduleRemaining && payAmountContract.minorUnits > selectedScheduleRemaining.minorUnits
+    ? subtractMoneyDto(payAmountContract, selectedScheduleRemaining)
+    : null
+  const splitComparison = splitMoney && suggestedMoney && !moneyDtoEquals(splitMoney, suggestedMoney)
+    ? splitMoney.minorUnits < suggestedMoney.minorUnits
+      ? { kind: 'REMAINING' as const, amount: subtractMoneyDto(suggestedMoney, splitMoney) }
+      : { kind: 'EXTRA' as const, amount: subtractMoneyDto(splitMoney, suggestedMoney) }
+    : null
 
-  // Convert the typed amount to UZS (the allocation/validation source of truth)
-  // so the overpayment explanation and the "exceeds remaining debt" guard work
-  // the same regardless of the shop's selected display currency.
-  const payAmountUzs =
-    hasEffectiveAmount
-      ? currency.currency === 'USD' && currency.usdUzsRate
-        ? convertUsdToUzs(effectiveAmountNumber, currency.usdUzsRate)
-        : effectiveAmountNumber
-      : 0
-  const exceedsRemaining = payAmountUzs > nasiyaRemainingAmount
+  const suggestedRemainderAfterFirstPart = (firstPart: string): MoneyDto | null => {
+    if (!suggestedMoney) return null
+    const firstMoney = parseDisplayMoney(firstPart)
+    if (!firstMoney || firstMoney.minorUnits >= suggestedMoney.minorUnits) return null
+    return subtractMoneyDto(suggestedMoney, firstMoney)
+  }
 
-  // Purely informational preview of what would be applied to THIS deal's own
-  // (frozen) contract currency, shown only when it differs from what's being
-  // typed — a best-effort client-side estimate using today's rate; the
-  // server always recomputes and stores the authoritative figure at submit
-  // time. Omitted when no rate is available client-side (e.g. a UZS-display
-  // shop paying toward a USD contract, since the shop's own rate is only
-  // fetched when its display currency is USD). See
-  // docs/currency-accounting-model.md.
-  const contractPreviewAmount =
-    hasEffectiveAmount && contractCurrency !== currency.currency && currency.usdUzsRate
-      ? convertPaymentToContractCurrency(effectiveAmountNumber, currency.currency, contractCurrency, currency.usdUzsRate)
-      : null
-
-  // Contract-currency view of the same typed amount, used for the overpay
-  // explanation below — same-currency case needs no rate at all.
-  const payAmountContract =
-    hasEffectiveAmount ? (contractCurrency === currency.currency ? effectiveAmountNumber : (contractPreviewAmount ?? 0)) : 0
-  const rawOverpayExtraContract = Math.max(0, payAmountContract - selectedScheduleContractOutstanding)
-  const overpayExtraContract = isContractCurrencyDust(rawOverpayExtraContract, contractCurrency)
-    ? 0
-    : roundContractMoney(rawOverpayExtraContract, contractCurrency)
-
-  const canSubmit = Boolean(hasEffectiveAmount && payMethod && payDate.trim() && selectedScheduleId && !exceedsRemaining && splitValid)
+  const canSubmit = Boolean(
+    enteredMoney && enteredMoney.minorUnits > 0 && payMethod && payDate.trim() && selectedScheduleId && !requiresCrossCurrencyRate && !exceedsRemaining && splitValid,
+  )
 
   async function handleSubmit() {
     if (!canSubmit || submitting) return
-    if (currency.currency === 'USD' && !currency.usdUzsRate) {
-      setPayError("USD kursi mavjud emas. UZS rejimida kiriting yoki keyinroq urinib ko'ring.")
+    if (requiresCrossCurrencyRate) {
+      setPayError("Faqat turli valyutadagi to'lov uchun USD kursi kerak. Kurs tiklangach qayta urinib ko'ring.")
       return
     }
     setSubmitting(true)
@@ -283,14 +286,14 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
         nasiyaScheduleId: selectedScheduleId,
         // Split mode: the submitted total is always the SUM of the two
         // parts (never a total-minus-second-part subtraction).
-        amount: splitPayment ? splitTotal : Number(payAmount),
+        amount: moneyDtoToAmount(enteredMoney!),
         inputCurrency: currency.currency,
         paymentMethod: payMethod,
         paymentBreakdown:
           splitPayment
             ? [
-                { method: payMethod, amount: Number(splitAmount1Input) },
-                { method: splitMethod2, amount: Number(splitAmount2Input) },
+                { method: payMethod, amount: moneyDtoToAmount(splitPart1Money!) },
+                { method: splitMethod2, amount: moneyDtoToAmount(splitPart2Money!) },
               ]
             : undefined,
         date: payDate,
@@ -363,7 +366,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                               {s.monthNumber}-oy · {uzMonthYear(s.dueDate)}
                             </span>
                             <span className="text-xs text-zinc-500">
-                              {uzDate(s.dueDate)} · qolgan {dfmt(contractScheduleBalance(s, contractCurrency))}
+                              {uzDate(s.dueDate)} · qolgan {moneyView(s.remaining)}
                             </span>
                           </div>
                         </SelectItem>
@@ -378,7 +381,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                         </Badge>
                         <span className="text-xs text-zinc-500">Shu oy uchun qolgan</span>
                       </div>
-                      <span className="text-sm font-semibold text-zinc-900">{dfmt(selectedScheduleContractOutstanding)}</span>
+                      <span className="text-sm font-semibold text-zinc-900">{selectedScheduleRemaining ? moneyView(selectedScheduleRemaining) : '—'}</span>
                     </div>
                   )}
                 </div>
@@ -417,10 +420,8 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                       value={payAmount}
                       onChange={setPayAmount}
                       placeholder={
-                        selectedScheduleOutstanding
-                          ? currency.currency === 'USD' && currency.usdUzsRate
-                            ? convertUzsToUsd(selectedScheduleOutstanding, currency.usdUzsRate).toFixed(2)
-                            : String(selectedScheduleOutstanding)
+                        suggestedMoney
+                          ? formatAmountForInput(suggestedMoney)
                           : currency.currency === 'USD'
                             ? '100.00'
                             : '1000000'
@@ -431,30 +432,15 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                       {currencyLabel(currency.currency)}
                     </span>
                   </div>
-                  {selectedScheduleOutstanding > 0 && (
+                  {selectedScheduleRemaining && suggestedMoney && (
                     <button
                       type="button"
                       onClick={() => {
-                        // Suggest an amount that, once submitted, actually pays off
-                        // this schedule exactly — computed from the deal's own
-                        // contract-currency balance, not the legacy UZS snapshot.
-                        // Falls back to the legacy suggestion if no rate is
-                        // available client-side to convert across currencies.
-                        if (contractCurrency !== currency.currency && !currency.usdUzsRate) {
-                          setPayAmount(String(selectedScheduleOutstanding))
-                          return
-                        }
-                        const suggestion = convertPaymentToContractCurrency(
-                          selectedScheduleContractOutstanding,
-                          contractCurrency,
-                          currency.currency,
-                          currency.usdUzsRate,
-                        )
-                        setPayAmount(currency.currency === 'USD' ? suggestion.toFixed(2) : String(Math.round(suggestion)))
+                        setPayAmount(formatAmountForInput(suggestedMoney))
                       }}
                       className="inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-zinc-100 px-2.5 py-1 text-xs font-semibold text-zinc-800 hover:border-zinc-400 hover:bg-zinc-200"
                     >
-                      Tavsiya etilgan summa: {dfmt(selectedScheduleContractOutstanding)}
+                      Tavsiya etilgan summa: {moneyView(selectedScheduleRemaining)}
                     </button>
                   )}
                 </div>
@@ -494,42 +480,28 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                           // Auto-fill the second amount from the remaining
                           // suggested amount — but only while the user hasn't
                           // directly edited it themselves.
-                          if (!splitAmount2Touched && suggestedAmountNumber != null) {
-                            const remaining = Math.max(0, roundDisplayAmount(suggestedAmountNumber) - Number(v || 0))
-                            setSplitAmount2Input(remaining > 0 ? formatAmountForInput(remaining) : '')
+                          if (!splitAmount2Touched) {
+                            const remaining = suggestedRemainderAfterFirstPart(v)
+                            setSplitAmount2Input(remaining ? formatAmountForInput(remaining) : '')
                           }
                         }}
                         placeholder={currency.currency === 'USD' ? '60.00' : '600000'}
                         className="h-10 rounded-lg border-zinc-200 text-sm"
                       />
                     </div>
-                    {selectedScheduleOutstanding > 0 && (
+                    {selectedScheduleRemaining && suggestedMoney && (
                       <button
                         type="button"
                         onClick={() => {
-                          // Option A: fill part 1 with the recommended amount,
-                          // leave part 2 empty — never put the recommendation
-                          // into a "total" while a second amount is still required.
-                          // Untouch part 2 so it resumes auto-filling from
-                          // this new part 1 value.
+                          // Option A: fill part 1 with the exact recommended
+                          // input-currency amount; leave part 2 empty.
                           setSplitAmount2Touched(false)
-                          if (contractCurrency !== currency.currency && !currency.usdUzsRate) {
-                            setSplitAmount1Input(String(selectedScheduleOutstanding))
-                            setSplitAmount2Input('')
-                            return
-                          }
-                          const suggestion = convertPaymentToContractCurrency(
-                            selectedScheduleContractOutstanding,
-                            contractCurrency,
-                            currency.currency,
-                            currency.usdUzsRate,
-                          )
-                          setSplitAmount1Input(currency.currency === 'USD' ? suggestion.toFixed(2) : String(Math.round(suggestion)))
+                          setSplitAmount1Input(formatAmountForInput(suggestedMoney))
                           setSplitAmount2Input('')
                         }}
                         className="inline-flex items-center gap-1 rounded-md border border-zinc-300 bg-white px-2.5 py-1 text-xs font-semibold text-zinc-800 hover:border-zinc-400 hover:bg-zinc-100"
                       >
-                        Tavsiya etilgan summa: {dfmt(selectedScheduleContractOutstanding)}
+                        Tavsiya etilgan summa: {moneyView(selectedScheduleRemaining)}
                       </button>
                     )}
                   </fieldset>
@@ -538,12 +510,12 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                     <legend className="block text-xs font-medium text-zinc-700">
                       To&apos;lov usuli 2 <span aria-hidden="true" className="text-red-500">*</span>
                     </legend>
-                    {suggestedAmountNumber != null && (
+                    {suggestedMoney && (
                       <button
                         type="button"
                         onClick={() => {
-                          const remaining = Math.max(0, roundDisplayAmount(suggestedAmountNumber) - Number(splitAmount1Input || 0))
-                          setSplitAmount2Input(remaining > 0 ? formatAmountForInput(remaining) : '')
+                          const remaining = suggestedRemainderAfterFirstPart(splitAmount1Input)
+                          setSplitAmount2Input(remaining ? formatAmountForInput(remaining) : '')
                           // Resuming auto-follow — the button IS the
                           // auto-fill action, so further edits to part 1
                           // should keep updating part 2 again until the
@@ -590,9 +562,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
 
                   <div className="flex items-center justify-between border-t border-zinc-200 pt-2.5 text-sm">
                     <span className="font-medium text-zinc-700">Jami to&apos;lov</span>
-                    <span className="font-semibold text-zinc-900">
-                      {currencyLabel(currency.currency)} {splitTotal.toLocaleString('ru-RU')}
-                    </span>
+                    <span className="font-semibold text-zinc-900">{splitMoney ? formatMoneyDto(splitMoney) : '—'}</span>
                   </div>
 
                   {/* Real-time comparison against the suggested/target amount
@@ -601,17 +571,14 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                       contract debt. Hidden when the split total already
                       matches the suggested amount (within currency dust
                       tolerance) — "normal state", nothing to flag. */}
-                  {suggestedAmountNumber != null &&
-                    !isContractCurrencyDust(splitTotal - roundDisplayAmount(suggestedAmountNumber), currency.currency) &&
-                    (splitTotal < roundDisplayAmount(suggestedAmountNumber) ? (
+                  {splitComparison &&
+                    (splitComparison.kind === 'REMAINING' ? (
                       <p className="text-xs text-zinc-600">
-                        Qolgan: {currencyLabel(currency.currency)}{' '}
-                        {(roundDisplayAmount(suggestedAmountNumber) - splitTotal).toLocaleString('ru-RU')}
+                        Qolgan: {formatMoneyDto(splitComparison.amount)}
                       </p>
                     ) : (
                       <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
-                        Ortiqcha: {currencyLabel(currency.currency)}{' '}
-                        {(splitTotal - roundDisplayAmount(suggestedAmountNumber)).toLocaleString('ru-RU')}
+                        Ortiqcha: {formatMoneyDto(splitComparison.amount)}
                       </p>
                     ))}
                 </div>
@@ -621,16 +588,18 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                 <div className="space-y-2">
                   <div className="flex items-center justify-between text-xs text-zinc-500">
                     <span>Jami qolgan qarz</span>
-                    <span className="font-medium text-zinc-700">{dfmt(nasiyaContractRemainingAmount)}</span>
+                    <span className="font-medium text-zinc-700">{ledgerRemaining ? moneyView(ledgerRemaining) : '—'}</span>
                   </div>
-                  {contractPreviewAmount != null && (
-                    <p className="text-xs text-zinc-500">Shartnomaga qo&apos;llanadi: {dfmt(contractPreviewAmount)}</p>
+                  {payAmountContract && enteredMoney?.currency !== contractCurrency && (
+                    <p className="text-xs text-zinc-500">Shartnomaga qo&apos;llanadi: {moneyView(payAmountContract)}</p>
                   )}
-                  {exceedsRemaining ? (
+                  {requiresCrossCurrencyRate ? (
+                    <p className="text-xs text-red-600">Turli valyutadagi to&apos;lov uchun joriy USD kursi mavjud emas.</p>
+                  ) : exceedsRemaining ? (
                     <p className="text-xs text-red-600">To&apos;lov summasi qolgan qarzdan oshmasligi kerak.</p>
-                  ) : overpayExtraContract > 0 ? (
+                  ) : overpayExtraContract ? (
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
-                      To&apos;lov joriy oydan oshdi. Ortiqcha {dfmt(overpayExtraContract)} keyingi oy to&apos;loviga qo&apos;llanadi.
+                      To&apos;lov joriy oydan oshdi. Ortiqcha {moneyView(overpayExtraContract)} keyingi oy to&apos;loviga qo&apos;llanadi.
                     </p>
                   ) : null}
                 </div>

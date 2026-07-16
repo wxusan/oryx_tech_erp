@@ -1,4 +1,7 @@
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto'
+import { isValidPassportIdentifier, normalizePassportIdentifier } from '@/lib/passport-identifier-format'
+
+export { isValidPassportIdentifier, normalizePassportIdentifier } from '@/lib/passport-identifier-format'
 
 const ENCRYPTION_VERSION = 'v1'
 const MIN_SECRET_LENGTH = 32
@@ -10,13 +13,10 @@ export class CustomerPassportConfigurationError extends Error {
   }
 }
 
-export function normalizePassportIdentifier(value: string): string {
-  return value.normalize('NFKC').toUpperCase().replace(/[^A-Z0-9]/g, '')
-}
+const PASSPORT_IDENTIFIER_STORED = /^[A-Z]{2}\d{7}$/
 
-export function isValidPassportIdentifier(value: string): boolean {
-  const normalized = normalizePassportIdentifier(value)
-  return normalized.length >= 5 && normalized.length <= 32 && /[A-Z]/.test(normalized) && /\d/.test(normalized)
+function isValidStoredPassportIdentifier(value: string): boolean {
+  return PASSPORT_IDENTIFIER_STORED.test(value)
 }
 
 export function maskPassportIdentifier(value: string): string {
@@ -49,14 +49,14 @@ function searchSecret(secret?: string): string {
  */
 export function hashPassportIdentifier(value: string, secret?: string): string {
   const normalized = normalizePassportIdentifier(value)
-  if (!isValidPassportIdentifier(normalized)) throw new Error("Pasport seriya/raqami noto'g'ri")
+  if (!isValidStoredPassportIdentifier(normalized)) throw new Error("Pasport seriya/raqami AA 1234567 formatida bo'lishi kerak")
   return createHmac('sha256', searchSecret(secret)).update(normalized).digest('base64url')
 }
 
 /** AES-256-GCM envelope: version.iv.authTag.ciphertext (all base64url). */
 export function encryptPassportIdentifier(value: string, secret?: string): string {
   const normalized = normalizePassportIdentifier(value)
-  if (!isValidPassportIdentifier(normalized)) throw new Error("Pasport seriya/raqami noto'g'ri")
+  if (!isValidStoredPassportIdentifier(normalized)) throw new Error("Pasport seriya/raqami AA 1234567 formatida bo'lishi kerak")
 
   const iv = randomBytes(12)
   const cipher = createCipheriv('aes-256-gcm', encryptionKey(secret), iv)
@@ -77,13 +77,14 @@ export function decryptPassportIdentifier(envelope: string, secret?: string): st
     decipher.update(Buffer.from(ciphertextValue, 'base64url')),
     decipher.final(),
   ]).toString('utf8')
-  if (!isValidPassportIdentifier(plaintext)) throw new Error("Saqlangan pasport ma'lumoti noto'g'ri")
+  if (!isValidStoredPassportIdentifier(plaintext)) throw new Error("Saqlangan pasport ma'lumoti noto'g'ri")
   return plaintext
 }
 
 export function passportIdentifierStorage(value: string, secrets?: { encryption?: string; search?: string }) {
+  if (!isValidPassportIdentifier(value)) throw new Error("Pasport seriya/raqami AA 1234567 formatida bo'lishi kerak")
   const normalized = normalizePassportIdentifier(value)
-  if (!isValidPassportIdentifier(normalized)) throw new Error("Pasport seriya/raqami noto'g'ri")
+  if (!isValidStoredPassportIdentifier(normalized)) throw new Error("Pasport seriya/raqami AA 1234567 formatida bo'lishi kerak")
   return {
     passportIdentifierCiphertext: encryptPassportIdentifier(normalized, secrets?.encryption),
     passportIdentifierHash: hashPassportIdentifier(normalized, secrets?.search),

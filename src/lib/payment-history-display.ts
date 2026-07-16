@@ -1,31 +1,50 @@
-import { formatMoneyByCurrency, formatUserFacingMoney, type CurrencyContext } from '@/lib/currency'
+import { formatMoneyDto, type FxQuoteDto, type MoneyDto } from '@/lib/currency'
 
 export interface NasiyaPaymentDisplayRecord {
   id: string
-  amount: number
   paymentMethod: string | null
   paidAt: string
   note: string | null
   nasiyaScheduleId: string | null
-  paymentInputAmount: number | null
-  paymentInputCurrency: 'UZS' | 'USD' | null
-  paymentExchangeRate: number | null
-  appliedAmountInContractCurrency: number | null
-  paymentBreakdown?: { method: string; amount: number }[] | null
+  /** UZS reporting snapshot retained for older records/reports. */
+  recordedUzs: MoneyDto
+  /** What the customer actually handed over, in the original payment currency. */
+  input: MoneyDto | null
+  /** What was frozen into the contract ledger. */
+  applied: MoneyDto | null
+  /** Payment-time quote only; today's rate is never used for history. */
+  paymentFxQuote: FxQuoteDto | null
+  paymentBreakdown?: { method: string; amount: MoneyDto }[] | null
 }
-/** Render historical payments with the payment-time rate, never today's rate. */
-export function paymentAmountDisplay(
-  payment: NasiyaPaymentDisplayRecord,
-  _contractCurrency: 'UZS' | 'USD',
-  currency: CurrencyContext,
-) {
-  if (payment.paymentInputCurrency != null && payment.paymentInputAmount != null) {
-    return formatUserFacingMoney({
-      amount: payment.paymentInputAmount,
-      amountCurrency: payment.paymentInputCurrency,
-      displayCurrency: currency.currency,
-      rate: payment.paymentExchangeRate ?? currency.usdUzsRate,
-    })
+
+export interface HistoricalPaymentDisplay {
+  primary: string
+  secondary: string | null
+}
+
+/**
+ * Historical payment presentation is deliberately native-first. It never
+ * recomputes a past receipt through today's rate, so changing a shop setting
+ * cannot alter the amount a customer appears to have paid.
+ */
+export function paymentAmountDisplay(payment: NasiyaPaymentDisplayRecord): HistoricalPaymentDisplay {
+  const primaryMoney = payment.input ?? payment.applied ?? payment.recordedUzs
+  const primary = formatMoneyDto(primaryMoney)
+  const applied = payment.applied && payment.applied.currency !== primaryMoney.currency
+    ? `Shartnomaga: ${formatMoneyDto(payment.applied)}`
+    : null
+  const rate = payment.paymentFxQuote?.rate
+  const quote = payment.paymentFxQuote
+  const quoteDate = quote?.effectiveAt ?? quote?.fetchedAt ?? null
+  const rateDetail = rate
+    ? [
+        `Kurs: 1 USD = ${rate} so'm`,
+        quote?.source ?? null,
+        quoteDate ? new Intl.DateTimeFormat('uz-UZ', { dateStyle: 'medium' }).format(new Date(quoteDate)) : null,
+      ].filter(Boolean).join(' · ')
+    : null
+  return {
+    primary,
+    secondary: [applied, rateDetail].filter(Boolean).join(' · ') || null,
   }
-  return formatMoneyByCurrency(payment.amount, currency.currency, currency.usdUzsRate)
 }

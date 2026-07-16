@@ -123,7 +123,7 @@ export default function ShopsPage() {
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <h1 className="text-xl font-semibold text-zinc-900">Do&apos;konlar</h1>
-        <Button render={<Link href="/admin/shops/new" />} size="lg">
+        <Button render={<Link href="/admin/shops/new" />} nativeButton={false} size="lg">
           + Yangi do&apos;kon
         </Button>
       </div>

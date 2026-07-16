@@ -1,6 +1,36 @@
 import process from 'node:process'
+import { readFileSync } from 'node:fs'
 
 import pg from 'pg'
+
+// Keep the command useful for a local, read-only rehearsal while never
+// overriding credentials explicitly supplied by CI or Vercel.
+async function loadLocalDatabaseEnv() {
+  const explicitDatabaseUrl = process.env.DATABASE_URL
+  const explicitDirectUrl = process.env.DIRECT_URL
+  try {
+    const dotenv = await import('dotenv')
+    const environment = process.env.NODE_ENV || 'development'
+    for (const file of ['.env.local', `.env.${environment}.local`, `.env.${environment}`, '.env']) {
+      try {
+        const parsed = dotenv.parse(readFileSync(file))
+        for (const key of ['DATABASE_URL', 'DIRECT_URL']) {
+          const candidate = parsed[key]?.trim()
+          const value = candidate?.replace(/^(?:"(.*)"|'(.*)')$/, '$1$2').trim()
+          if (value && process.env[key] === undefined) process.env[key] = value
+        }
+      } catch {
+        // Environment files are optional for production CI.
+      }
+    }
+  } catch {
+    // A caller can always pass DATABASE_URL or DIRECT_URL explicitly.
+  }
+  if (explicitDatabaseUrl !== undefined) process.env.DATABASE_URL = explicitDatabaseUrl
+  if (explicitDirectUrl !== undefined) process.env.DIRECT_URL = explicitDirectUrl
+}
+
+await loadLocalDatabaseEnv()
 
 const RELEASE_MIGRATIONS = [
   '202607130001_immutable_return_ledger',
@@ -20,6 +50,8 @@ const RELEASE_MIGRATIONS = [
   '202607150005_reset_super_admin_subscription_reporting',
   '202607150006_ops_alert_acknowledgement',
   '202607150007_reset_current_ops_alerts',
+  '202607160001_nasiya_payment_rate_source',
+  '202607160002_nasiya_ledger_enforcement',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))
@@ -119,7 +151,7 @@ const countChecks = [
   },
   {
     name: 'invalid_currency_rates',
-    blocking: false,
+    blocking: true,
     sql: `
       SELECT COUNT(*)::integer AS count
       FROM "CurrencyRate"
@@ -143,7 +175,7 @@ const countChecks = [
   },
   {
     name: 'nasiya_contract_reconciliation_issues',
-    blocking: false,
+    blocking: true,
     sql: `
       SELECT COUNT(*)::integer AS count
       FROM "Nasiya"
@@ -163,7 +195,7 @@ const countChecks = [
   },
   {
     name: 'nasiya_schedule_reconciliation_issues',
-    blocking: false,
+    blocking: true,
     sql: `
       SELECT COUNT(*)::integer AS count
       FROM "NasiyaSchedule"
@@ -176,13 +208,72 @@ const countChecks = [
   },
   {
     name: 'cross_contract_schedule_payments',
-    blocking: false,
+    blocking: true,
     sql: `
       SELECT COUNT(*)::integer AS count
       FROM "NasiyaPayment" p
       JOIN "NasiyaSchedule" s ON s.id = p."nasiyaScheduleId"
       WHERE p."nasiyaScheduleId" IS NOT NULL
         AND (p."nasiyaId" <> s."nasiyaId" OR p."shopId" <> s."shopId")
+    `,
+  },
+  {
+    name: 'nasiya_parent_schedule_ledger_mismatches',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "Nasiya" n
+      WHERE EXISTS (
+        SELECT 1 FROM "NasiyaSchedule" s WHERE s."nasiyaId" = n.id
+      )
+        AND (
+          n."contractFinalAmount" <> (
+            SELECT COALESCE(SUM(s."contractExpectedAmount"), 0)
+            FROM "NasiyaSchedule" s WHERE s."nasiyaId" = n.id
+          )
+          OR n."contractPaidAmount" <> (
+            SELECT COALESCE(SUM(s."contractPaidAmount"), 0)
+            FROM "NasiyaSchedule" s WHERE s."nasiyaId" = n.id
+          )
+          OR n."contractRemainingAmount" <> (
+            SELECT COALESCE(SUM(s."contractRemainingAmount"), 0)
+            FROM "NasiyaSchedule" s WHERE s."nasiyaId" = n.id
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM "NasiyaSchedule" s
+            WHERE s."nasiyaId" = n.id
+              AND s."contractCurrency" <> n."contractCurrency"
+          )
+        )
+    `,
+  },
+  {
+    name: 'nasiya_without_authoritative_schedules',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "Nasiya" n
+      WHERE NOT EXISTS (
+        SELECT 1 FROM "NasiyaSchedule" s WHERE s."nasiyaId" = n.id
+      )
+    `,
+  },
+  {
+    name: 'complete_nasiya_schedule_allocation_mismatches',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM (
+        SELECT s.id
+        FROM "Nasiya" n
+        JOIN "NasiyaSchedule" s ON s."nasiyaId" = n.id
+        LEFT JOIN "NasiyaPaymentAllocation" a
+          ON a."nasiyaScheduleId" = s.id AND a."nasiyaId" = n.id
+        WHERE n."accountingReconstructionStatus" = 'COMPLETE'
+        GROUP BY s.id, s."contractPaidAmount"
+        HAVING COALESCE(SUM(a."contractAmount"), 0) <> s."contractPaidAmount"
+      ) mismatches
     `,
   },
   {
@@ -430,6 +521,69 @@ const postMigrationChecks = [
   },
 ]
 
+const nasiyaLedgerEnforcementChecks = [
+  {
+    name: 'nasiya_parent_schedule_trigger_installed',
+    blocking: true,
+    sql: `
+      SELECT CASE WHEN EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgname = 'Nasiya_parent_schedule_ledger_reconcile'
+          AND tgenabled = 'O'
+      ) AND EXISTS (
+        SELECT 1
+        FROM pg_trigger
+        WHERE tgname = 'NasiyaSchedule_parent_schedule_ledger_reconcile'
+          AND tgenabled = 'O'
+      ) THEN 0 ELSE 1 END::integer AS count
+    `,
+  },
+]
+
+const nasiyaPaymentRateSourceChecks = [
+  {
+    name: 'nasiya_payment_fx_snapshot_issues',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "NasiyaPayment" p
+      JOIN "Nasiya" n ON n.id = p."nasiyaId" AND n."shopId" = p."shopId"
+      WHERE p."deletedAt" IS NULL
+        AND (
+          (p."paymentInputAmount" IS NULL) <> (p."paymentInputCurrency" IS NULL)
+          OR (
+            p."paymentInputAmount" IS NOT NULL
+            AND (
+              p."paymentInputAmount" <= 0
+              OR (p."paymentInputCurrency" = 'UZS' AND trunc(p."paymentInputAmount") <> p."paymentInputAmount")
+              OR (p."paymentInputCurrency" <> n."contractCurrency" AND p."paymentExchangeRate" IS NULL)
+              OR (p."paymentInputCurrency" = 'USD' AND (
+                p."paymentExchangeRate" IS NULL
+                AND NOT (n."contractCurrency" = 'USD' AND p."paymentExchangeRateSource" = 'UNAVAILABLE_SAME_CURRENCY')
+              ))
+              OR (p."paymentExchangeRate" IS NOT NULL AND p."paymentExchangeRate" NOT BETWEEN 1000 AND 100000)
+              OR (p."paymentExchangeRate" IS NOT NULL AND p."paymentExchangeRateSource" IS NULL)
+              OR (p."paymentExchangeRateSource" IN ('CBU', 'MANUAL')
+                AND (p."paymentExchangeRate" IS NULL OR p."paymentExchangeRateFetchedAt" IS NULL))
+              OR (p."paymentExchangeRateSource" = 'RECORDED_FROZEN' AND p."paymentExchangeRate" IS NULL)
+              OR (p."paymentExchangeRateSource" = 'UNAVAILABLE_SAME_CURRENCY'
+                AND (
+                  p."paymentInputCurrency" <> 'USD'
+                  OR n."contractCurrency" <> 'USD'
+                  OR p."paymentExchangeRate" IS NOT NULL
+                  OR p."paymentExchangeRateEffectiveAt" IS NOT NULL
+                  OR p."paymentExchangeRateFetchedAt" IS NOT NULL
+                ))
+              OR (p."paymentExchangeRateSource" IS NOT NULL
+                AND p."paymentExchangeRateSource" NOT IN ('CBU', 'MANUAL', 'RECORDED_FROZEN', 'UNAVAILABLE_SAME_CURRENCY'))
+            )
+          )
+        )
+    `,
+  },
+]
+
 function logSummary(summary) {
   // Count-only output is safe to retain in deployment logs. Never add entity
   // identifiers, Telegram IDs, customer data, or connection details here.
@@ -473,6 +627,12 @@ try {
     ...applicableErp2Checks,
     ...(phase === 'post' && appliedMigrationSet.has('202607130009_erp2_session_rbac_hardening')
       ? postMigrationChecks
+      : []),
+    ...(appliedMigrationSet.has('202607160001_nasiya_payment_rate_source')
+      ? nasiyaPaymentRateSourceChecks
+      : []),
+    ...(phase === 'post' && appliedMigrationSet.has('202607160002_nasiya_ledger_enforcement')
+      ? nasiyaLedgerEnforcementChecks
       : []),
   ]
   for (const check of applicableChecks) {

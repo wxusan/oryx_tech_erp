@@ -13,8 +13,10 @@ import { formatUzPhoneDisplay } from '@/lib/phone'
 import { uzDate } from '@/lib/dates'
 import { cn } from '@/lib/utils'
 import { historyStatusLabel, paymentMethodLabel } from '@/lib/labels'
+import { formatMoneyByCurrency } from '@/lib/currency'
 import type { CustomerProfileSection } from '@/lib/server/customer-profile'
 import { useShopAccess } from '@/components/shop/shop-access-context'
+import { useShopCurrency } from '@/lib/use-shop-currency'
 
 const SECTION_LABELS: Record<CustomerProfileSection, string> = {
   devices: 'Qurilmalar',
@@ -105,6 +107,7 @@ export function CustomerProfileClient({
   initialPage: number
 }) {
   const { memberKind } = useShopAccess()
+  const { currency } = useShopCurrency()
   const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const scope = useAuthenticatedQueryScope()
   const section = initialSection
@@ -143,8 +146,8 @@ export function CustomerProfileClient({
           ["Jami tushgan pul", nativeMoney(overview.metrics.cashCollected)],
           ['Qaytarilgan pul', nativeMoney(overview.metrics.refunds)],
           ['Hisobdan chiqarilgan qarz', nativeMoney(overview.metrics.writeOffs)],
-          ['Hisob siyosati bo‘yicha yalpi foyda', `${Math.round(overview.metrics.accountingAccrualGrossProfitUzs).toLocaleString('ru-RU')} UZS`],
-          ['Nasiya foizi', `${Math.round(overview.metrics.nasiyaInterestUzs).toLocaleString('ru-RU')} UZS`],
+          ['Hisob siyosati bo‘yicha yalpi foyda', formatMoneyByCurrency(overview.metrics.accountingAccrualGrossProfitUzs, currency.currency, currency.usdUzsRate)],
+          ['Nasiya foizi', formatMoneyByCurrency(overview.metrics.nasiyaInterestUzs, currency.currency, currency.usdUzsRate)],
         ]
       : []),
   ] as const

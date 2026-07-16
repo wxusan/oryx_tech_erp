@@ -9,8 +9,8 @@ import { normalizePhone, normalizeAdditionalPhones } from '@/lib/phone'
 import { phoneSchema } from '@/lib/validations'
 import { logger } from '@/lib/logger'
 import { computeCustomerTrustRating, isValidTrustTier, type CustomerNasiyaInput } from '@/lib/nasiya-customer-trust'
-import { isValidPassportIdentifier, passportIdentifierStorage } from '@/lib/customer-passport'
-import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
+import { CustomerPassportConfigurationError, isValidPassportIdentifier, passportIdentifierStorage } from '@/lib/customer-passport'
+import { isPrivateUploadStoredKey, resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 import { principalHasPermission } from '@/lib/server/shop-access'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -25,13 +25,20 @@ const updateCustomerSchema = z.object({
   reason: z.string().trim().max(1000, "Sabab 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
   shopId: z.string().optional(),
   trustOverride: z.enum(['NEW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH']).nullable().optional(),
-  passportIdentifier: z.string().trim().max(64).refine(isValidPassportIdentifier, "Pasport seriya/raqami noto'g'ri").nullable().optional(),
+  passportIdentifier: z.string().trim().refine(isValidPassportIdentifier, "Pasport seriya/raqami AA 1234567 formatida bo'lishi kerak").nullable().optional(),
   passportPhotoUrl: z.string().max(500).nullable().optional(),
 })
 
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   try {
-    const guarded = await requireShopAnyPermission(['CUSTOMER_VIEW', 'CUSTOMER_TRUST_OVERRIDE'])
+    // The nasiya flow opens this same safe, masked customer profile before an
+    // authorized edit. It never returns a plaintext passport identifier.
+    const guarded = await requireShopAnyPermission([
+      'CUSTOMER_VIEW',
+      'CUSTOMER_EDIT',
+      'CUSTOMER_PASSPORT_MANAGE',
+      'CUSTOMER_TRUST_OVERRIDE',
+    ])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -96,7 +103,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     return ok({
       ...customerFields,
       passportMasked: customerFields.passportIdentifierLast4 ? `••••${customerFields.passportIdentifierLast4}` : null,
-      hasPassportPhoto: Boolean(customerFields.passportPhotoUrl),
+      hasPassportPhoto: isPrivateUploadStoredKey({ key: customerFields.passportPhotoUrl, shopId: customerFields.shopId, kind: 'passport' }),
       passportIdentifierLast4: undefined,
       passportPhotoUrl: undefined,
       trust,
@@ -224,7 +231,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
             ...(parsed.data.passportIdentifier !== undefined
               ? { passportIdentifierChanged: true, passportMasked: updated.passportIdentifierLast4 ? `••••${updated.passportIdentifierLast4}` : null }
               : {}),
-            ...(parsed.data.passportPhotoUrl !== undefined ? { hasPassportPhoto: Boolean(updated.passportPhotoUrl) } : {}),
+            ...(parsed.data.passportPhotoUrl !== undefined ? { hasPassportPhoto: isPrivateUploadStoredKey({ key: updated.passportPhotoUrl, shopId: updated.shopId, kind: 'passport' }) } : {}),
             ...(auditNote ? { editNote: auditNote } : {}),
           },
           note: auditNote,
@@ -233,7 +240,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       return {
         ...updated,
         passportMasked: updated.passportIdentifierLast4 ? `••••${updated.passportIdentifierLast4}` : null,
-        hasPassportPhoto: Boolean(updated.passportPhotoUrl),
+        hasPassportPhoto: isPrivateUploadStoredKey({ key: updated.passportPhotoUrl, shopId: updated.shopId, kind: 'passport' }),
         passportIdentifierLast4: undefined,
         passportPhotoUrl: undefined,
       }
@@ -243,6 +250,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
 
     return ok(customer, 'Mijoz yangilandi')
   } catch (err) {
+    if (err instanceof CustomerPassportConfigurationError) {
+      return serverError("Pasport ma'lumotlarini saqlash sozlanmagan. CUSTOMER_PII_ENCRYPTION_KEY va CUSTOMER_PII_SEARCH_KEY ni sozlang.")
+    }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict('Bu telefon yoki pasport bilan faol mijoz allaqachon mavjud')
     }

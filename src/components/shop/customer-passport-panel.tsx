@@ -6,6 +6,11 @@ import { Eye, EyeOff, FileImage } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { useShopAccess } from '@/components/shop/shop-access-context'
 
+type PassportPhotoCheck = {
+  customerId: string
+  status: 'available' | 'unavailable'
+}
+
 export function CustomerPassportPanel({
   customerId,
   passportMasked,
@@ -20,8 +25,14 @@ export function CustomerPassportPanel({
   const canViewPhoto = can('CUSTOMER_PASSPORT_PHOTO_VIEW')
   const [identifier, setIdentifier] = useState<string | null>(null)
   const [imageUrl, setImageUrl] = useState<string | null>(null)
+  const [photoCheck, setPhotoCheck] = useState<PassportPhotoCheck | null>(null)
   const [loading, setLoading] = useState<'identifier' | 'image' | null>(null)
   const [error, setError] = useState('')
+  const photoStatus = !hasPassportPhoto
+    ? 'unavailable'
+    : photoCheck?.customerId === customerId
+      ? photoCheck.status
+      : 'checking'
 
   useEffect(() => {
     if (!identifier) return
@@ -35,6 +46,31 @@ export function CustomerPassportPanel({
       document.removeEventListener('visibilitychange', hideOnBackground)
     }
   }, [identifier])
+
+  // A valid-looking legacy key can still point to a deleted storage object.
+  // Check it before rendering a view action, so users never get an unusable
+  // "Rasmni ko'rish" button for an absent passport image.
+  useEffect(() => {
+    if (!hasPassportPhoto || !canViewPhoto) return
+    let cancelled = false
+
+    fetch(`/api/customers/${customerId}/passport/image`, { cache: 'no-store' })
+      .then(async (response) => {
+        const json = await response.json().catch(() => null) as { success?: boolean; data?: { url?: string } } | null
+        if (cancelled) return
+        setPhotoCheck({
+          customerId,
+          status: response.ok && json?.success && Boolean(json.data?.url) ? 'available' : 'unavailable',
+        })
+      })
+      .catch(() => {
+        if (!cancelled) setPhotoCheck({ customerId, status: 'unavailable' })
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [canViewPhoto, customerId, hasPassportPhoto])
 
   async function revealIdentifier() {
     if (identifier) {
@@ -67,8 +103,12 @@ export function CustomerPassportPanel({
     setError('')
     try {
       const response = await fetch(`/api/customers/${customerId}/passport/image`, { cache: 'no-store' })
-      const json = await response.json() as { success: boolean; data?: { url: string }; error?: string }
-      if (!response.ok || !json.success || !json.data) throw new Error(json.error || "Pasport rasmini ochib bo'lmadi")
+      const json = await response.json().catch(() => null) as { success?: boolean; data?: { url?: string }; error?: string } | null
+      if (!response.ok || !json?.success || !json.data?.url) {
+        setImageUrl(null)
+        setPhotoCheck({ customerId, status: 'unavailable' })
+        return
+      }
       setImageUrl(json.data.url)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Pasport rasmini ochib bo'lmadi")
@@ -88,13 +128,19 @@ export function CustomerPassportPanel({
             {loading === 'identifier' ? 'Ochilmoqda…' : identifier ? 'Yashirish' : "To'liq ko'rish"}
           </Button>
         )}
-        {hasPassportPhoto && canViewPhoto && (
+        {photoStatus === 'available' && canViewPhoto && (
           <Button type="button" variant="outline" size="sm" onClick={showImage} disabled={loading === 'image'}>
             <FileImage className="mr-1.5 size-4" aria-hidden="true" />
             {loading === 'image' ? 'Ochilmoqda…' : imageUrl ? 'Rasmni yopish' : "Rasmni ko'rish"}
           </Button>
         )}
       </div>
+      {canViewPhoto && photoStatus === 'checking' && (
+        <p className="mt-2 text-xs text-zinc-500">Pasport rasmi tekshirilmoqda…</p>
+      )}
+      {canViewPhoto && photoStatus === 'unavailable' && (
+        <p className="mt-2 text-xs text-zinc-500">Pasport rasmi yuklanmagan</p>
+      )}
       {identifier && <p className="mt-2 text-xs text-amber-700">30 soniyadan keyin yoki oynadan chiqqanda avtomatik yashiriladi. Amal auditga yozildi.</p>}
       {error && <p role="alert" className="mt-2 text-xs text-red-600">{error}</p>}
       {imageUrl && (

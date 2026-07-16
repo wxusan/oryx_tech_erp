@@ -696,11 +696,11 @@ model SalePayment {
   note                            String?
   idempotencyKey                  String?
   // What the customer actually entered/paid, preserved for historical display
-  // — never recomputed from a later exchange rate. `amount` above (UZS)
-  // remains the authoritative applied-to-debt figure; these three are purely
-  // for showing "customer paid $200 at rate 12,500" verbatim later, even
-  // after the shop's rate or preferredCurrency has since changed. Null for
-  // older rows / UZS payments with no conversion involved.
+  // — never recomputed from a later exchange rate. `amount` above is a
+  // legacy UZS reporting snapshot only; `appliedAmountInContractCurrency`
+  // and the schedule ledger are the authoritative debt evidence. The quote
+  // fields retain exactly what was known at receipt time. Null for older rows
+  // or UZS payments where no conversion was needed.
   paymentInputAmount              Decimal?      @db.Decimal(12, 2)
   paymentInputCurrency            CurrencyCode?
   paymentExchangeRate             Decimal?      @db.Decimal(12, 4)
@@ -1069,6 +1069,14 @@ model NasiyaPayment {
   paymentInputAmount              Decimal?       @db.Decimal(12, 2)
   paymentInputCurrency            CurrencyCode?
   paymentExchangeRate             Decimal?       @db.Decimal(12, 4)
+  // A concrete provider (`CBU`/`MANUAL`) is retained for new receipts;
+  // `RECORDED_FROZEN` means an older row has a rate but no recoverable
+  // provider metadata. `UNAVAILABLE_SAME_CURRENCY` records that native debt
+  // was accepted without inventing an FX rate; the UZS compatibility snapshot
+  // may then use the contract-creation fallback.
+  paymentExchangeRateSource       String?
+  paymentExchangeRateEffectiveAt  DateTime?
+  paymentExchangeRateFetchedAt    DateTime?
   // The payment amount actually applied to the nasiya's contract-currency
   // debt (contractPaidAmount/contractRemainingAmount on Nasiya/NasiyaSchedule)
   // — frozen forever, never recomputed. `amount` above already serves as the

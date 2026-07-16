@@ -14,8 +14,7 @@ import { Field } from '@/components/ui/field'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { formatMoneyByCurrency } from '@/lib/currency'
-import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
+import { addMoneyDto, convertMoneyDto, formatMoneyDto, type FxQuoteDto, type MoneyDto } from '@/lib/currency'
 import { uzDate } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
@@ -30,6 +29,7 @@ import {
 } from '@/components/shop/nasiya-history-sections'
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
+import type { NasiyaLedgerDto } from '@/lib/nasiya-ledger'
 
 type NasiyaPayment = NasiyaPaymentDisplayRecord
 type ResolutionState = 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
@@ -49,9 +49,9 @@ interface ResolutionEvent {
   previousState: ResolutionState
   newState: ResolutionState
   contractCurrency: 'UZS' | 'USD'
-  nativeRemainingAmount: number
-  frozenUzsAmount: number
-  frozenUsdUzsRate: number
+  nativeRemaining: MoneyDto
+  frozenUzs: MoneyDto
+  frozenFxQuote: FxQuoteDto
   reason: string
   actorId: string
   actorType: string
@@ -62,23 +62,17 @@ interface ResolutionEvent {
 interface Nasiya {
   id: string
   shopId: string
-  totalAmount: number
-  downPayment: number
-  baseRemainingAmount: number
-  interestPercent: number
-  interestAmount: number
-  finalNasiyaAmount: number
-  remainingAmount: number
-  // Native contract-currency ledger — the deal's own frozen currency, source
-  // of truth for debt/schedule math. See docs/currency-accounting-model.md.
   contractCurrency: 'UZS' | 'USD'
-  contractTotalAmount: number
-  contractDownPayment: number
-  contractInterestAmount: number
-  contractFinalAmount: number
-  contractMonthlyPayment: number
-  contractRemainingAmount: number
-  contractPaidAmount: number
+  contractTerms: {
+    original: MoneyDto
+    downPayment: MoneyDto
+    principal: MoneyDto
+    interest: MoneyDto
+    financed: MoneyDto
+    monthly: MoneyDto
+    interestPercent: number
+  }
+  ledger: NasiyaLedgerDto
   status: string
   resolutionState: ResolutionState
   resolutionUpdatedAt: string | null
@@ -87,14 +81,16 @@ interface Nasiya {
   displayStatus?: 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
   reminderEnabled?: boolean
   note?: string | null
-  isImported?: boolean
-  importSource?: string | null
-  importedAt?: string | null
-  originalSaleDate?: string | null
-  originalTotalAmount?: number | null
-  alreadyPaidBeforeImport?: number | null
-  remainingAtImport?: number | null
-  importNote?: string | null
+  importData?: {
+    isImported: boolean
+    source: string | null
+    importedAt: string | null
+    originalSaleDate: string | null
+    originalTotal: MoneyDto | null
+    alreadyPaid: MoneyDto
+    remainingAtImport: MoneyDto | null
+    note: string | null
+  }
   device: { model: string }
   customer: { id: string; name: string; phone: string; hasPassportPhoto?: boolean }
   schedules: NasiyaSchedule[]
@@ -135,11 +131,6 @@ const historyConfidenceLabels: Record<string, string> = {
   LOW: 'Past',
   MEDIUM: "O'rtacha",
   HIGH: 'Yuqori',
-}
-
-function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
-  if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
-  return Number(n).toLocaleString('ru-RU')
 }
 
 function ImportField({ label, value }: { label: string; value: string }) {
@@ -190,6 +181,7 @@ function AuthorizedNasiyaDetailPage() {
   const [error, setError] = useState('')
 
   const [passportUrl, setPassportUrl] = useState<string | null>(null)
+  const [unavailablePassportCustomerId, setUnavailablePassportCustomerId] = useState<string | null>(null)
   const [reminderSubmitting, setReminderSubmitting] = useState(false)
   const [logs, setLogs] = useState<NasiyaLog[]>([])
 
@@ -233,16 +225,26 @@ function AuthorizedNasiyaDetailPage() {
   // key never enters browser state, URLs, logs, or query caches.
   const passportCustomerId = nasiya?.customer?.id ?? null
   const hasPassportPhoto = nasiya?.customer?.hasPassportPhoto ?? false
+  const passportPhotoAvailable = hasPassportPhoto && unavailablePassportCustomerId !== passportCustomerId
   useEffect(() => {
     if (!canViewPassportPhoto || !passportCustomerId || !hasPassportPhoto) return
     let cancelled = false
     fetch(`/api/customers/${encodeURIComponent(passportCustomerId)}/passport/image`)
-      .then((r) => r.json())
-      .then((json) => {
-        if (!cancelled && json.success && json.data?.url) setPassportUrl(json.data.url)
+      .then(async (response) => {
+        const json = await response.json() as { success?: boolean; data?: { url?: string } }
+        if (cancelled) return
+        if (response.ok && json.success && json.data?.url) {
+          setPassportUrl(json.data.url)
+          return
+        }
+        setPassportUrl(null)
+        setUnavailablePassportCustomerId(passportCustomerId)
       })
       .catch(() => {
-        if (!cancelled) setPassportUrl(null)
+        if (!cancelled) {
+          setPassportUrl(null)
+          setUnavailablePassportCustomerId(passportCustomerId)
+        }
       })
     return () => {
       cancelled = true
@@ -279,7 +281,7 @@ function AuthorizedNasiyaDetailPage() {
     setEditCustomerName(nasiya?.customer.name ?? '')
     setEditCustomerPhone(nasiya?.customer.phone ?? '')
     setEditNote(nasiya?.note ?? '')
-    setEditImportNote(nasiya?.importNote ?? '')
+    setEditImportNote(nasiya?.importData?.note ?? '')
     setEditReminderEnabled(nasiya?.reminderEnabled ?? true)
     setEditError('')
     setEditFieldErrors({})
@@ -315,7 +317,7 @@ function AuthorizedNasiyaDetailPage() {
             customerName: editCustomerName.trim(),
             customerPhone: editCustomerPhone.trim(),
             note: editNote.trim(),
-            importNote: nasiya.isImported ? editImportNote.trim() : undefined,
+            importNote: nasiya.importData?.isImported ? editImportNote.trim() : undefined,
           } : {}),
           ...(canManageReminder ? { reminderEnabled: editReminderEnabled } : {}),
         }),
@@ -327,7 +329,9 @@ function AuthorizedNasiyaDetailPage() {
           ? {
               ...current,
               note: updated.note,
-              importNote: updated.importNote,
+              importData: current.importData
+                ? { ...current.importData, note: updated.importNote }
+                : current.importData,
               reminderEnabled: updated.reminderEnabled,
               customer: { ...current.customer, ...updated.customer },
             }
@@ -422,17 +426,31 @@ function AuthorizedNasiyaDetailPage() {
     )
   }
 
-  // Progress must use the contract ledger too. Legacy UZS paid/remaining can
-  // reach their apparent endpoint at a different FX rate while contract debt
-  // still exists, which would otherwise render a misleading 100% bar.
-  const pct = nasiya.contractFinalAmount > 0 ? Math.min(100, Math.round((nasiya.contractPaidAmount / nasiya.contractFinalAmount) * 100)) : 0
-  // Contract-currency figures for the summary cards below — a nasiya's
-  // "current state" (jami/qoldiq/to'langan/oylik) must convert from its OWN
-  // contract currency using TODAY's rate, never reconvert the frozen-rate
-  // legacy UZS snapshot a second time (that would silently drift from the
-  // true contract value as the rate moves). See docs/currency-accounting-model.md.
-  const contractMonthlyPayment = nasiya.schedules?.length > 0 ? nasiya.schedules[0].contractExpectedAmount : nasiya.contractMonthlyPayment
-  const dfmt = (n: number) => formatDisplayMoneyFromContract(n, nasiya.contractCurrency, currency.currency, currency.usdUzsRate)
+  // Progress is based entirely on the reconciled schedule projection, never
+  // on a potentially stale parent cache or a legacy UZS snapshot.
+  const { contractTerms, ledger } = nasiya
+  const pct = ledger.financed.minorUnits > 0
+    ? Math.min(100, Math.round((ledger.paid.minorUnits / ledger.financed.minorUnits) * 100))
+    : 0
+  const contractMonthlyPayment = nasiya.schedules?.[0]?.expected ?? contractTerms.monthly
+  const contractTotal = addMoneyDto(contractTerms.downPayment, contractTerms.financed)
+  const mfmt = (amount: MoneyDto) => {
+    const primary = formatMoneyDto(amount)
+    const currentApproximation = amount.currency === currency.currency
+      ? null
+      : convertMoneyDto(amount, currency.currency, currency.fxQuote)
+    return currentApproximation ? `${primary} · ≈ ${formatMoneyDto(currentApproximation)}` : primary
+  }
+  const currentFxCaption = nasiya.contractCurrency !== currency.currency && currency.fxQuote?.rate
+    ? [
+        `Joriy kurs bo'yicha ≈ · 1 USD = ${currency.fxQuote.rate} so'm`,
+        currency.fxQuote.source ?? 'manba noma’lum',
+        currency.fxQuote.effectiveAt || currency.fxQuote.fetchedAt
+          ? uzDate(currency.fxQuote.effectiveAt ?? currency.fxQuote.fetchedAt)
+          : null,
+        currency.fxQuote.freshness === 'FALLBACK' ? 'oxirgi mavjud kurs' : null,
+      ].filter(Boolean).join(' · ')
+    : null
 
 
   // Server-derived (src/lib/nasiya-contract-status.ts) so this page
@@ -442,6 +460,7 @@ function AuthorizedNasiyaDetailPage() {
   const displayStatus = nasiya.displayStatus ?? (nasiya.status as 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED')
   const isCompleted = displayStatus === 'COMPLETED'
   const isOperationallyActive = nasiya.resolutionState === 'ACTIVE'
+  const ledgerQuarantined = ledger.health === 'QUARANTINED'
   const resolutionEvents = nasiya.resolutionEvents ?? []
   const statusBadgeStyles: Record<string, string> = {
     ACTIVE: 'bg-zinc-100 text-zinc-700',
@@ -495,12 +514,12 @@ function AuthorizedNasiyaDetailPage() {
               Tahrirlash
             </Button>
           )}
-          {canDeferNasiya && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (
+          {canDeferNasiya && !ledgerQuarantined && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (
             <Button variant="outline" onClick={() => setDeferModalOpen(true)} className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded">
               Muddatni uzaytirish
             </Button>
           )}
-          {canReceivePayment && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (
+          {canReceivePayment && !ledgerQuarantined && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (
             <Button onClick={() => setPaymentModalOpen(true)} className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">
               To'lov qabul qilish
             </Button>
@@ -533,6 +552,12 @@ function AuthorizedNasiyaDetailPage() {
         </div>
       )}
 
+      {ledgerQuarantined && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          Nasiya jadvali va hisob dalillari mos emas. To&apos;lov hamda muddatni o&apos;zgartirish tekshiruv tugaguncha yopildi.
+        </div>
+      )}
+
       {isCompleted && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
           <div className="text-sm font-semibold text-emerald-900">Bu nasiya to'liq yopilgan.</div>
@@ -547,7 +572,7 @@ function AuthorizedNasiyaDetailPage() {
         </div>
       )}
 
-      {canBrowseNasiyas && nasiya.isImported && (
+      {canBrowseNasiyas && nasiya.importData?.isImported && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-center gap-2">
             <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Eski nasiya</span>
@@ -557,16 +582,16 @@ function AuthorizedNasiyaDetailPage() {
             Bu Oryx'dan oldingi eski nasiya. Importgacha to'langan pul joriy oy daromadiga qo'shilmaydi.
           </p>
           <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
-            <ImportField label="Manba" value={nasiya.importSource === 'MANUAL' ? "Qo'lda" : (nasiya.importSource ?? '—')} />
-            <ImportField label="Import sanasi" value={nasiya.importedAt ? uzDate(nasiya.importedAt) : '—'} />
-            <ImportField label="Eski sotuv sanasi" value={nasiya.originalSaleDate ? uzDate(nasiya.originalSaleDate) : '—'} />
-            <ImportField label="Eski nasiya summasi" value={fmt(nasiya.originalTotalAmount ?? 0, currency)} />
-            <ImportField label="Importgacha to'langan" value={fmt(nasiya.alreadyPaidBeforeImport ?? 0, currency)} />
-            <ImportField label="Import paytidagi qarz" value={fmt(nasiya.remainingAtImport ?? 0, currency)} />
+            <ImportField label="Manba" value={nasiya.importData.source === 'MANUAL' ? "Qo'lda" : (nasiya.importData.source ?? '—')} />
+            <ImportField label="Import sanasi" value={nasiya.importData.importedAt ? uzDate(nasiya.importData.importedAt) : '—'} />
+            <ImportField label="Eski sotuv sanasi" value={nasiya.importData.originalSaleDate ? uzDate(nasiya.importData.originalSaleDate) : '—'} />
+            <ImportField label="Eski nasiya summasi" value={nasiya.importData.originalTotal ? mfmt(nasiya.importData.originalTotal) : '—'} />
+            <ImportField label="Importgacha to'langan" value={mfmt(nasiya.importData.alreadyPaid)} />
+            <ImportField label="Import paytidagi qarz" value={nasiya.importData.remainingAtImport ? mfmt(nasiya.importData.remainingAtImport) : '—'} />
           </div>
-          {nasiya.importNote && (
+          {nasiya.importData.note && (
             <div className="mt-3 text-xs text-amber-800">
-              <span className="font-medium">Izoh:</span> {nasiya.importNote}
+              <span className="font-medium">Izoh:</span> {nasiya.importData.note}
             </div>
           )}
         </div>
@@ -580,36 +605,33 @@ function AuthorizedNasiyaDetailPage() {
           // debt). These are deliberately two different numbers — no separate
           // "Qolgan summa" card, which duplicated one or the other and read
           // as a confusing third figure (see docs/nasiya-payment-allocation.md).
-          // All values below convert from the deal's OWN contract currency
-          // using today's rate (dfmt) — never reconvert the frozen-creation-
-          // rate legacy UZS snapshot, which would drift from the true
-          // contract value as the rate moves (see
-          // docs/currency-accounting-model.md).
-          { label: 'Shartnomadagi qurilma narxi', value: dfmt(nasiya.contractTotalAmount) },
+          // Contract currency is always primary; any second value is an
+          // explicitly approximate current-rate display.
+          { label: 'Shartnomadagi qurilma narxi', value: mfmt(contractTerms.original) },
           {
             label: "Boshlang'ich to'lov",
-            value: dfmt(nasiya.contractDownPayment),
+            value: mfmt(contractTerms.downPayment),
           },
-          ...(nasiya.contractInterestAmount > 0
+          ...(contractTerms.interest.minorUnits > 0
             ? [
                 {
                   label: 'Nasiya foizi',
-                  value: `${fmt(nasiya.interestPercent)}%`,
+                  value: `${contractTerms.interestPercent}%`,
                 },
                 {
                   label: 'Shartnoma bo\'yicha jami foiz',
-                  value: dfmt(nasiya.contractInterestAmount),
+                  value: mfmt(contractTerms.interest),
                 },
               ]
             : []),
-          { label: "Bo'lib to'lash jami (boshlang'ichsiz)", value: dfmt(nasiya.contractFinalAmount) },
-          { label: 'Jami shartnoma qiymati', value: dfmt(nasiya.contractDownPayment + nasiya.contractFinalAmount) },
-          { label: "To'langan", value: dfmt(nasiya.contractPaidAmount) },
+          { label: "Bo'lib to'lash jami (boshlang'ichsiz)", value: mfmt(ledger.financed) },
+          { label: 'Jami shartnoma qiymati', value: mfmt(contractTotal) },
+          { label: "To'langan", value: mfmt(ledger.paid) },
           {
             label: "Qarz qoldig'i",
-            value: dfmt(nasiya.contractRemainingAmount),
+            value: mfmt(ledger.remaining),
           },
-          { label: "Oylik to'lov", value: dfmt(contractMonthlyPayment) },
+          { label: "Oylik to'lov", value: mfmt(contractMonthlyPayment) },
         ].map((c) => (
           <Card key={c.label} className="rounded-lg" size="sm">
             <CardContent>
@@ -619,6 +641,7 @@ function AuthorizedNasiyaDetailPage() {
           </Card>
         ))}
       </div>
+      {currentFxCaption && <p className="-mt-2 text-xs text-zinc-500">{currentFxCaption}</p>}
 
       {/* Progress */}
       {nasiya.paymentScore && (
@@ -632,13 +655,13 @@ function AuthorizedNasiyaDetailPage() {
             </CardHeader>
             <CardContent>
               <div className="flex justify-between text-sm mb-2">
-                <span className="text-zinc-600 font-medium">{dfmt(nasiya.contractPaidAmount)} to'landi</span>
+                <span className="text-zinc-600 font-medium">{mfmt(ledger.paid)} to'landi</span>
                 <span className="font-bold text-zinc-900">{pct}%</span>
               </div>
               <Progress value={pct} className="h-2.5 rounded-full" />
               <div className="flex justify-between text-xs text-zinc-400 mt-1.5">
-                <span>{dfmt(0)}</span>
-                <span>{dfmt(nasiya.contractFinalAmount)}</span>
+                <span>{mfmt({ currency: nasiya.contractCurrency, minorUnits: 0 })}</span>
+                <span>{mfmt(ledger.financed)}</span>
               </div>
             </CardContent>
           </Card>
@@ -728,8 +751,8 @@ function AuthorizedNasiyaDetailPage() {
                   <span className="text-xs text-zinc-500">{uzDate(event.createdAt)}</span>
                 </div>
                 <div className="mt-1 text-xs text-zinc-500">
-                  {event.previousState} → {event.newState} · {event.nativeRemainingAmount.toLocaleString('ru-RU')} {event.contractCurrency}
-                  {' · '}muzlatilgan UZS: {event.frozenUzsAmount.toLocaleString('ru-RU')}
+                  {event.previousState} → {event.newState} · {formatMoneyDto(event.nativeRemaining)}
+                  {' · '}muzlatilgan UZS: {formatMoneyDto(event.frozenUzs)}
                 </div>
                 <p className="mt-2 whitespace-pre-wrap text-zinc-700">{event.reason}</p>
                 {event.reversesEventId && (
@@ -745,11 +768,11 @@ function AuthorizedNasiyaDetailPage() {
       {canViewPassportPhoto && <div className="border border-zinc-200 rounded overflow-hidden">
         <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">Pasport rasmi</div>
         <div className="p-4">
-          {hasPassportPhoto && passportUrl ? (
+          {passportPhotoAvailable && passportUrl ? (
             <div className="relative aspect-[4/3] max-h-80 w-full overflow-hidden rounded border border-zinc-200 bg-zinc-50">
               <Image src={passportUrl} alt="Pasport rasmi" fill sizes="(max-width: 640px) 100vw, 720px" unoptimized className="object-contain" />
             </div>
-          ) : hasPassportPhoto && !passportUrl ? (
+          ) : passportPhotoAvailable && !passportUrl ? (
             <div className="text-sm text-zinc-400">Yuklanmoqda...</div>
           ) : (
             <div className="text-sm text-zinc-400">Pasport rasmi yuklanmagan</div>
@@ -761,13 +784,11 @@ function AuthorizedNasiyaDetailPage() {
         schedules={nasiya.schedules ?? []}
         payments={nasiya.payments ?? []}
         logs={logs}
-        contractCurrency={nasiya.contractCurrency}
-        currency={currency}
-        formatContractAmount={dfmt}
+        formatMoney={mfmt}
       />
 
       {/* Payment modal — shared component, also used on the nasiyalar list */}
-      {canReceivePayment && isOperationallyActive && (
+      {canReceivePayment && !ledgerQuarantined && isOperationallyActive && (
         <NasiyaPaymentModal
           nasiyaId={nasiya.id}
           open={paymentModalOpen}
@@ -781,7 +802,7 @@ function AuthorizedNasiyaDetailPage() {
         />
       )}
 
-      {canDeferNasiya && isOperationallyActive && (
+      {canDeferNasiya && !ledgerQuarantined && isOperationallyActive && (
         <NasiyaDeferModal
           nasiyaId={nasiya.id}
           open={deferModalOpen}
@@ -905,7 +926,7 @@ function AuthorizedNasiyaDetailPage() {
                   className="min-h-24 rounded-lg border-zinc-200 text-sm"
                 />
               </Field>
-              {nasiya.isImported && (
+              {nasiya.importData?.isImported && (
                 <Field label="Import izohi" help="Ixtiyoriy">
                   <Textarea
                     disabled={!canEditNasiya}
@@ -943,13 +964,13 @@ function AuthorizedNasiyaDetailPage() {
               </div>
               <dl className="grid grid-cols-2 gap-2 rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-sm sm:grid-cols-3">
                 {[
-                  { label: 'Qurilma narxi', value: dfmt(nasiya.contractTotalAmount) },
-                  { label: 'Jami shartnoma foizi', value: dfmt(nasiya.contractInterestAmount) },
-                  { label: "Bo'lib to'lash jami", value: dfmt(nasiya.contractFinalAmount) },
-                  { label: 'Jami shartnoma qiymati', value: dfmt(nasiya.contractDownPayment + nasiya.contractFinalAmount) },
-                  { label: "To'langan", value: dfmt(nasiya.contractPaidAmount) },
-                  { label: 'Qarz qoldig\'i', value: dfmt(nasiya.contractRemainingAmount) },
-                  { label: "Oylik to'lov", value: dfmt(contractMonthlyPayment) },
+                  { label: 'Qurilma narxi', value: mfmt(contractTerms.original) },
+                  { label: 'Jami shartnoma foizi', value: mfmt(contractTerms.interest) },
+                  { label: "Bo'lib to'lash jami", value: mfmt(ledger.financed) },
+                  { label: 'Jami shartnoma qiymati', value: mfmt(contractTotal) },
+                  { label: "To'langan", value: mfmt(ledger.paid) },
+                  { label: 'Qarz qoldig\'i', value: mfmt(ledger.remaining) },
+                  { label: "Oylik to'lov", value: mfmt(contractMonthlyPayment) },
                   { label: 'Valyuta', value: nasiya.contractCurrency },
                 ].map((item) => (
                   <div key={item.label} className="min-w-0">

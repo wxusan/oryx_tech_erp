@@ -16,6 +16,7 @@ export interface CustomerPickerOption {
   name: string
   phone: string
   additionalPhones?: string[]
+  passportMasked?: string | null
   hasPassportPhoto?: boolean
   trust?: { label: string; color: string }
   _count?: { sales: number; nasiya: number }

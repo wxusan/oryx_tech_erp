@@ -4,7 +4,6 @@ import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-auth'
 import { deferNasiyaScheduleSchema } from '@/lib/validations'
-import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { badRequest, conflict, notFound, ok, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
@@ -12,6 +11,7 @@ import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { sameInstant, sameOptionalText } from '@/lib/idempotency-replay'
 import { logger } from '@/lib/logger'
+import { moneyDtoDatabaseAmount, reconcileNasiyaLedger } from '@/lib/nasiya-ledger'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -75,7 +75,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       `)
       const nasiya = await tx.nasiya.findFirst({
         where: { id: nasiyaId, shopId, deletedAt: null },
-        include: { schedules: true },
+        include: {
+          schedules: true,
+          paymentAllocations: {
+            select: {
+              nasiyaScheduleId: true,
+              contractCurrency: true,
+              contractAmount: true,
+            },
+          },
+        },
       })
       if (!nasiya) throw { status: 404, message: 'Nasiya topilmadi' }
       if (nasiya.resolutionState !== 'ACTIVE') {
@@ -83,22 +92,35 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       }
       if (nasiya.status === 'CANCELLED') throw { status: 409, message: 'Bekor qilingan nasiya kechiktirilmaydi' }
 
-      const derived = deriveContractNasiyaStatus({
+      const currentLedger = reconcileNasiyaLedger({
         status: nasiya.status,
         contractCurrency: nasiya.contractCurrency,
-        contractFinalAmount: Number(nasiya.contractFinalAmount),
-        contractRemainingAmount: Number(nasiya.contractRemainingAmount),
+        contractFinalAmount: nasiya.contractFinalAmount.toString(),
+        contractPaidAmount: nasiya.contractPaidAmount.toString(),
+        contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
         schedules: nasiya.schedules.map((schedule) => ({
+          id: schedule.id,
           status: schedule.status,
           dueDate: schedule.dueDate,
           delayedUntil: schedule.delayedUntil,
-          expectedAmount: Number(schedule.expectedAmount),
-          paidAmount: Number(schedule.paidAmount),
-          contractExpectedAmount: Number(schedule.contractExpectedAmount),
-          contractPaidAmount: Number(schedule.contractPaidAmount),
+          expectedAmount: schedule.expectedAmount.toString(),
+          paidAmount: schedule.paidAmount.toString(),
+          contractCurrency: schedule.contractCurrency,
+          contractExpectedAmount: schedule.contractExpectedAmount.toString(),
+          contractPaidAmount: schedule.contractPaidAmount.toString(),
+          contractRemainingAmount: schedule.contractRemainingAmount.toString(),
+        })),
+        allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE',
+        allocations: nasiya.paymentAllocations.map((allocation) => ({
+          nasiyaScheduleId: allocation.nasiyaScheduleId,
+          contractCurrency: allocation.contractCurrency,
+          contractAmount: allocation.contractAmount.toString(),
         })),
       })
-      if (derived.displayStatus === 'COMPLETED') throw { status: 409, message: 'Yakunlangan nasiya kechiktirilmaydi' }
+      if (currentLedger.health === 'QUARANTINED') {
+        throw { status: 409, message: "Nasiya hisob-kitobida tekshiruv talab qilinadigan tafovut bor" }
+      }
+      if (currentLedger.status === 'COMPLETED') throw { status: 409, message: 'Yakunlangan nasiya kechiktirilmaydi' }
 
       await tx.$queryRaw(Prisma.sql`
         SELECT "id" FROM "NasiyaSchedule"
@@ -111,7 +133,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         where: { id: nasiyaScheduleId, nasiyaId, shopId },
       })
       if (!schedule) throw { status: 404, message: "To'lov jadvali topilmadi" }
-      if (['PAID', 'CANCELLED'].includes(schedule.status)) {
+      const selectedScheduleLedger = currentLedger.schedules.find((row) => row.id === schedule.id)
+      if (schedule.status === 'CANCELLED' || !selectedScheduleLedger || selectedScheduleLedger.remaining.minorUnits === 0) {
         throw { status: 409, message: "Yopilgan to'lov jadvali kechiktirilmaydi" }
       }
       const originalDueDate = schedule.delayedUntil ?? schedule.dueDate
@@ -126,6 +149,46 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           delayedUntil: newDueDate,
           deferredToNext: true,
           note: reason ?? null,
+        },
+      })
+      // Keep the parent cache in the same transaction as the schedule state.
+      // A deferred due date may change ACTIVE/OVERDUE even though no money
+      // moved, so status must come from the same reconciled schedule ledger.
+      const updatedSchedules = await tx.nasiyaSchedule.findMany({ where: { nasiyaId } })
+      const postDeferLedger = reconcileNasiyaLedger({
+        status: nasiya.status,
+        contractCurrency: nasiya.contractCurrency,
+        contractFinalAmount: nasiya.contractFinalAmount.toString(),
+        contractPaidAmount: nasiya.contractPaidAmount.toString(),
+        contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
+        schedules: updatedSchedules.map((updated) => ({
+          id: updated.id,
+          status: updated.status,
+          dueDate: updated.dueDate,
+          delayedUntil: updated.delayedUntil,
+          expectedAmount: updated.expectedAmount.toString(),
+          paidAmount: updated.paidAmount.toString(),
+          contractCurrency: updated.contractCurrency,
+          contractExpectedAmount: updated.contractExpectedAmount.toString(),
+          contractPaidAmount: updated.contractPaidAmount.toString(),
+          contractRemainingAmount: updated.contractRemainingAmount.toString(),
+        })),
+        allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE',
+        allocations: nasiya.paymentAllocations.map((allocation) => ({
+          nasiyaScheduleId: allocation.nasiyaScheduleId,
+          contractCurrency: allocation.contractCurrency,
+          contractAmount: allocation.contractAmount.toString(),
+        })),
+      })
+      if (postDeferLedger.health === 'QUARANTINED') {
+        throw { status: 409, message: "Muddat o'zgargach nasiya jadvali mos kelmadi; amaliyot bekor qilindi" }
+      }
+      await tx.nasiya.update({
+        where: { id: nasiyaId },
+        data: {
+          status: postDeferLedger.status,
+          contractPaidAmount: moneyDtoDatabaseAmount(postDeferLedger.paid),
+          contractRemainingAmount: moneyDtoDatabaseAmount(postDeferLedger.remaining),
         },
       })
       const event = await tx.nasiyaDeferral.create({

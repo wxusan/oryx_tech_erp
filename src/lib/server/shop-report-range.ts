@@ -226,23 +226,23 @@ export async function getShopRangeReport(input: {
       SELECT
         to_char(coalesce(s."delayedUntil", s."dueDate") AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
         n."contractCurrency" AS currency,
-        greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0)::numeric AS outstanding
+        -- The schedule ledger is authoritative for an instalment's current
+        -- debt. Never derive report debt from the denormalised parent Nasiya
+        -- cache or a mutable status label.
+        s."contractRemainingAmount"::numeric AS outstanding
       FROM "NasiyaSchedule" s
       JOIN "Nasiya" n ON n."id" = s."nasiyaId" AND n."shopId" = s."shopId"
       WHERE s."shopId" = ${input.shopId}
         AND coalesce(s."delayedUntil", s."dueDate") >= ${input.range.start}
         AND coalesce(s."delayedUntil", s."dueDate") < ${input.range.end}
-        AND s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+        AND s."status" <> 'CANCELLED'
+        AND s."contractRemainingAmount" > 0
         AND n."deletedAt" IS NULL
         AND n."returnedAt" IS NULL
         AND n."status" <> 'CANCELLED'
         -- Archived and written-off contracts are not open receivables. Cash
         -- payments are queried separately above and remain in the report.
         AND n."resolutionState" = 'ACTIVE'
-        AND (
-          (n."contractCurrency" = 'USD' AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01)
-          OR (n."contractCurrency" = 'UZS' AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1)
-        )
       UNION ALL
       SELECT
         to_char(s."dueDate" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM'),
@@ -277,7 +277,8 @@ export async function getShopRangeReport(input: {
       WHERE s."shopId" = ${input.shopId}
         AND coalesce(s."delayedUntil", s."dueDate") >= ${input.range.start}
         AND coalesce(s."delayedUntil", s."dueDate") < ${input.range.end}
-        AND s.status IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+        AND s."status" <> 'CANCELLED'
+        AND s."contractRemainingAmount" > 0
         AND n."deletedAt" IS NULL
         AND n."returnedAt" IS NULL
         AND n.status <> 'CANCELLED'

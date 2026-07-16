@@ -8,6 +8,7 @@ import {
 } from '@/lib/nasiya-customer-trust'
 import { customerSearchWhere } from '@/lib/server/customer-search'
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
+import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
 
 const EMPTY_TRUST_FACTORS: CustomerTrustFactors = {
   totalNasiyaCount: 0,
@@ -78,7 +79,7 @@ export async function getCustomerList(input: CustomerListInput) {
     return {
       ...rest,
       passportMasked: rest.passportIdentifierLast4 ? `••••${rest.passportIdentifierLast4}` : null,
-      hasPassportPhoto: Boolean(rest.passportPhotoUrl),
+      hasPassportPhoto: isPrivateUploadStoredKey({ key: rest.passportPhotoUrl, shopId: rest.shopId, kind: 'passport' }),
       passportIdentifierLast4: undefined,
       passportPhotoUrl: undefined,
       trust: { tier: trust.tier, label: trust.label, color: trust.color },

@@ -2,7 +2,7 @@ import 'server-only'
 
 import { cache } from 'react'
 import { prisma } from '@/lib/prisma'
-import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
+import { createFxQuoteDto, type CurrencyCode, type CurrencyContext, type FxQuoteFreshness } from '@/lib/currency'
 
 const CBU_USD_URL = 'https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/'
 const RATE_TTL_MS = 12 * 60 * 60 * 1000
@@ -32,9 +32,10 @@ export const getShopCurrencyContext = cache(async function getShopCurrencyContex
   // currencies may appear. A UZS-preferred shop can still have USD-native
   // debt, so every context carries the best governed USD/UZS rate available.
   try {
-    return { currency, usdUzsRate: await getUsdUzsRate() }
+    const snapshot = await getUsdUzsRateSnapshot()
+    return currencyContextFromSnapshot(currency, snapshot)
   } catch {
-    return { currency, usdUzsRate: null }
+    return unavailableCurrencyContext(currency)
   }
 })
 
@@ -46,19 +47,9 @@ export const getSuperAdminCurrencyContext = cache(async function getSuperAdminCu
   const currency = (admin?.preferredCurrency ?? 'UZS') as CurrencyCode
   try {
     const snapshot = await getUsdUzsRateSnapshot()
-    return {
-      currency,
-      usdUzsRate: snapshot.rate,
-      usdUzsRateSource: snapshot.source,
-      usdUzsRateFetchedAt: snapshot.fetchedAt.toISOString(),
-    }
+    return currencyContextFromSnapshot(currency, snapshot)
   } catch {
-    return {
-      currency,
-      usdUzsRate: null,
-      usdUzsRateSource: null,
-      usdUzsRateFetchedAt: null,
-    }
+    return unavailableCurrencyContext(currency)
   }
 })
 
@@ -66,10 +57,24 @@ export async function getUsdUzsRate(): Promise<number> {
   return (await getUsdUzsRateSnapshot()).rate
 }
 
-async function getUsdUzsRateSnapshot(): Promise<{ rate: number; source: string; fetchedAt: Date }> {
+export interface UsdUzsRateSnapshot {
+  rate: number
+  source: string
+  effectiveAt: Date | null
+  fetchedAt: Date
+  freshness: Exclude<FxQuoteFreshness, 'UNAVAILABLE'>
+}
+
+export async function getUsdUzsRateSnapshot(): Promise<UsdUzsRateSnapshot> {
   const latestCbu = await latestStoredUsdRate('CBU')
   if (latestCbu && isOperationalUsdUzsRate(latestCbu.rate) && Date.now() - latestCbu.fetchedAt.getTime() <= RATE_TTL_MS) {
-    return { rate: Number(latestCbu.rate), source: latestCbu.source, fetchedAt: latestCbu.fetchedAt }
+    return {
+      rate: Number(latestCbu.rate),
+      source: latestCbu.source,
+      effectiveAt: latestCbu.effectiveDate,
+      fetchedAt: latestCbu.fetchedAt,
+      freshness: 'FRESH',
+    }
   }
 
   try {
@@ -78,7 +83,9 @@ async function getUsdUzsRateSnapshot(): Promise<{ rate: number; source: string; 
     return {
       rate,
       source: refreshed?.source ?? 'CBU',
+      effectiveAt: refreshed?.effectiveDate ?? null,
       fetchedAt: refreshed?.fetchedAt ?? new Date(),
+      freshness: 'FRESH',
     }
   } catch (err) {
     await logRateFailure(err)
@@ -87,7 +94,13 @@ async function getUsdUzsRateSnapshot(): Promise<{ rate: number; source: string; 
       latest &&
       isOperationalUsdUzsRate(latest.rate) &&
       Date.now() - latest.fetchedAt.getTime() <= MAX_FALLBACK_RATE_AGE_MS
-    ) return { rate: Number(latest.rate), source: latest.source, fetchedAt: latest.fetchedAt }
+    ) return {
+      rate: Number(latest.rate),
+      source: latest.source,
+      effectiveAt: latest.effectiveDate,
+      fetchedAt: latest.fetchedAt,
+      freshness: 'FALLBACK',
+    }
     throw new CurrencyRateUnavailableError()
   }
 }
@@ -127,8 +140,35 @@ async function latestStoredUsdRate(source?: 'CBU' | 'MANUAL') {
   return prisma.currencyRate.findFirst({
     where: { baseCurrency: 'USD', quoteCurrency: 'UZS', ...(source ? { source } : {}) },
     orderBy: { fetchedAt: 'desc' },
-    select: { rate: true, source: true, fetchedAt: true },
+    select: { rate: true, source: true, effectiveDate: true, fetchedAt: true },
   })
+}
+
+function currencyContextFromSnapshot(currency: CurrencyCode, snapshot: UsdUzsRateSnapshot): CurrencyContext {
+  const fxQuote = createFxQuoteDto({
+    rate: snapshot.rate,
+    source: snapshot.source,
+    effectiveAt: snapshot.effectiveAt?.toISOString() ?? null,
+    fetchedAt: snapshot.fetchedAt.toISOString(),
+    freshness: snapshot.freshness,
+  })
+  return {
+    currency,
+    usdUzsRate: snapshot.rate,
+    usdUzsRateSource: snapshot.source,
+    usdUzsRateFetchedAt: snapshot.fetchedAt.toISOString(),
+    fxQuote,
+  }
+}
+
+function unavailableCurrencyContext(currency: CurrencyCode): CurrencyContext {
+  return {
+    currency,
+    usdUzsRate: null,
+    usdUzsRateSource: null,
+    usdUzsRateFetchedAt: null,
+    fxQuote: createFxQuoteDto({ rate: null, freshness: 'UNAVAILABLE' }),
+  }
 }
 
 async function logRateFailure(err: unknown) {

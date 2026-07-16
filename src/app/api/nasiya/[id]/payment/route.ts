@@ -12,10 +12,7 @@ import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-auth'
 import { addNasiyaPaymentSchema } from '@/lib/validations'
-import { calculateRemaining } from '@/lib/nasiya-utils'
-import { convertPaymentToContractCurrency, contractScheduleOutstanding, isContractCurrencyDust } from '@/lib/nasiya-contract'
-import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
-import { allocateNasiyaPayment, totalContractOutstanding } from '@/lib/nasiya-payment-allocation'
+import { allocateNasiyaPayment } from '@/lib/nasiya-payment-allocation'
 import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { processPendingNotifications } from '@/lib/notification-service'
 import { nasiyaPaymentMessage, nasiyaCompletedMessage } from '@/lib/telegram-templates'
@@ -24,8 +21,7 @@ import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
-import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
-import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
+import { getShopCurrencyContext, getUsdUzsRateSnapshot } from '@/lib/server/currency'
 import { validatePaymentBreakdown, representativePaymentMethod } from '@/lib/payment-breakdown'
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
@@ -35,6 +31,12 @@ import {
   allocateUzsAcrossContractAmounts,
   splitUzsReportingAmount,
 } from '@/lib/payment-profit-allocation'
+import { convertMoneyDto, createFxQuoteDto, createMoneyDto, moneyDtoToAmount, type CurrencyCode } from '@/lib/currency'
+import { moneyDtoDatabaseAmount, reconcileNasiyaLedger } from '@/lib/nasiya-ledger'
+import {
+  hasNasiyaPaymentFxQuoteColumns,
+  nasiyaPaymentFxSourceForPersistence,
+} from '@/lib/server/nasiya-payment-schema'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -48,6 +50,8 @@ type ExistingPaymentForReplay = {
   note: string | null
   paymentInputAmount: unknown | null
   paymentInputCurrency: 'UZS' | 'USD' | null
+  appliedAmountInContractCurrency: unknown | null
+  paymentExchangeRate: unknown | null
 }
 
 /**
@@ -129,42 +133,84 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currency = await getShopCurrencyContext(shopId)
+    const paymentFxQuoteColumnsAvailable = await hasNasiyaPaymentFxQuoteColumns()
     // A regular payment note is optional. Store blank input as NULL, never as
     // a fabricated placeholder or an empty string.
     const auditNote = note?.trim() || undefined
-    let amountInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    const inputCurrency = (parsed.data.inputCurrency ?? 'UZS') as CurrencyCode
+    let inputMoney
     try {
-      amountInput = await moneyInputToUzs(amount, parsed.data.inputCurrency)
+      inputMoney = createMoneyDto(inputCurrency, amount)
     } catch (err) {
-      return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
+      return badRequest(err instanceof Error ? err.message : "To'lov summasi noto'g'ri")
     }
-    const amountUzs = amountInput.amountUzs
 
-    // Native contract-currency conversion — computed once, before the
-    // transaction, same reasoning as amountInput above (no slow I/O held
-    // inside the serializable transaction). A cheap pre-read of just the
-    // nasiya's (immutable) contractCurrency is enough; the transaction below
-    // still loads the authoritative nasiya row for everything else.
+    // Contract and conversion lookup happen before the serializable mutation.
+    // A rate is mandatory only when currencies genuinely differ. For a
+    // same-currency USD payment, debt math remains available even if today's
+    // quote endpoint is down; the legacy UZS reporting mirror then falls back
+    // to the contract's frozen creation quote and is labelled as such by the
+    // absence of a payment-time exchange rate on the receipt.
     let contractCurrency: 'UZS' | 'USD' = 'UZS'
-    let contractRate: number | null = amountInput.exchangeRateUsed
     const contractLookup = await prisma.nasiya.findFirst({
       where: { id: nasiyaId, shopId, resolutionState: 'ACTIVE' },
-      select: { contractCurrency: true },
+      select: { contractCurrency: true, contractExchangeRateAtCreation: true },
     })
     contractCurrency = contractLookup?.contractCurrency ?? 'UZS'
-    if (amountInput.inputCurrency !== contractCurrency && contractRate == null) {
+    let paymentTimeSnapshot: Awaited<ReturnType<typeof getUsdUzsRateSnapshot>> | null = null
+    if (inputCurrency !== contractCurrency) {
       try {
-        contractRate = await getUsdUzsRate()
+        paymentTimeSnapshot = await getUsdUzsRateSnapshot()
       } catch (err) {
         return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
       }
     }
-    const appliedAmountInContractCurrency = convertPaymentToContractCurrency(
-      amount,
-      amountInput.inputCurrency,
-      contractCurrency,
-      contractRate,
-    )
+    // A same-currency USD payment does not need a quote to settle USD debt.
+    // Fetching one remains best-effort only to retain the old UZS report
+    // snapshot; never block the operation when it is unavailable.
+    if (inputCurrency === 'USD' && contractCurrency === 'USD') {
+      try {
+        paymentTimeSnapshot = await getUsdUzsRateSnapshot()
+      } catch {
+        if (!paymentFxQuoteColumnsAvailable) {
+          return badRequest("USDdan USDga to'lov kurs talab qilmaydi, lekin bu ma'lumotlar bazasiga avval nasiya ledger yangilanishini qo'llash kerak")
+        }
+        paymentTimeSnapshot = null
+      }
+    }
+    const paymentTimeRate = paymentTimeSnapshot?.rate ?? null
+    const paymentTimeRateSource = nasiyaPaymentFxSourceForPersistence(paymentTimeSnapshot?.source)
+    const conversionQuote = paymentTimeSnapshot == null
+      ? null
+      : createFxQuoteDto({
+          rate: paymentTimeSnapshot.rate,
+          source: paymentTimeSnapshot.source,
+          effectiveAt: paymentTimeSnapshot.effectiveAt?.toISOString() ?? null,
+          fetchedAt: paymentTimeSnapshot.fetchedAt.toISOString(),
+          freshness: paymentTimeSnapshot.freshness,
+        })
+    const appliedMoney = convertMoneyDto(inputMoney, contractCurrency, conversionQuote)
+    if (!appliedMoney) return badRequest("Turli valyutadagi to'lov uchun USD kursi mavjud emas")
+    const appliedAmountInContractCurrency = moneyDtoToAmount(appliedMoney)
+    const legacyUzsQuote = inputCurrency === 'USD' && !paymentTimeRate
+      ? (contractLookup?.contractExchangeRateAtCreation == null
+          ? null
+          : createFxQuoteDto({
+              rate: contractLookup.contractExchangeRateAtCreation.toString(),
+              source: 'CONTRACT_CREATION_FALLBACK',
+              freshness: 'FALLBACK',
+            }))
+      : conversionQuote
+    const amountUzsMoney = convertMoneyDto(inputMoney, 'UZS', legacyUzsQuote)
+    if (!amountUzsMoney) return badRequest("USD nasiya uchun muzlatilgan kurs mavjud emas")
+    const amountUzs = moneyDtoToAmount(amountUzsMoney)
+    const amountInput = {
+      amountUzs,
+      inputCurrency,
+      // This is null only when a same-currency USD payment used a frozen
+      // legacy reporting fallback. Do not falsely label it payment-time FX.
+      exchangeRateUsed: paymentTimeRate,
+    }
 
     const runPaymentTransaction = () =>
       prisma.$transaction(
@@ -180,6 +226,13 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             },
             include: {
               schedules: true,
+              paymentAllocations: {
+                select: {
+                  nasiyaScheduleId: true,
+                  contractCurrency: true,
+                  contractAmount: true,
+                },
+              },
               shop: { select: { name: true } },
               customer: { select: { name: true, phone: true } },
               device: {
@@ -189,9 +242,56 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           })
           if (!nasiya) throw { status: 404, message: 'Nasiya topilmadi' }
 
+          // Derive the receipt response and all later validation from the
+          // authoritative schedules. This is intentionally calculated before
+          // the idempotency replay branch, but a matching replay still wins
+          // over quarantine/completion guards below.
+          const currentLedger = reconcileNasiyaLedger({
+            status: nasiya.status,
+            contractCurrency: nasiya.contractCurrency,
+            contractFinalAmount: nasiya.contractFinalAmount.toString(),
+            contractPaidAmount: nasiya.contractPaidAmount.toString(),
+            contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
+            schedules: nasiya.schedules.map((schedule) => ({
+              id: schedule.id,
+              status: schedule.status,
+              dueDate: schedule.dueDate,
+              delayedUntil: schedule.delayedUntil,
+              expectedAmount: schedule.expectedAmount.toString(),
+              paidAmount: schedule.paidAmount.toString(),
+              contractCurrency: schedule.contractCurrency,
+              contractExpectedAmount: schedule.contractExpectedAmount.toString(),
+              contractPaidAmount: schedule.contractPaidAmount.toString(),
+              contractRemainingAmount: schedule.contractRemainingAmount.toString(),
+            })),
+            allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE',
+            allocations: nasiya.paymentAllocations.map((allocation) => ({
+              nasiyaScheduleId: allocation.nasiyaScheduleId,
+              contractCurrency: allocation.contractCurrency,
+              contractAmount: allocation.contractAmount.toString(),
+            })),
+          })
+
           if (idempotencyKey) {
             const existingPayment = await tx.nasiyaPayment.findUnique({
               where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+              // Do not use Prisma's default select: it would request the
+              // stage-1 quote columns on an older local database. This replay
+              // shape intentionally includes only columns that predate the
+              // staged migration.
+              select: {
+                nasiyaId: true,
+                nasiyaScheduleId: true,
+                amount: true,
+                paymentMethod: true,
+                paymentBreakdown: true,
+                paidAt: true,
+                note: true,
+                paymentInputAmount: true,
+                paymentInputCurrency: true,
+                appliedAmountInContractCurrency: true,
+                paymentExchangeRate: true,
+              },
             })
             if (existingPayment) {
               if (
@@ -214,33 +314,42 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               return {
                 nasiyaId,
                 nasiyaScheduleId: existingPayment.nasiyaScheduleId ?? nasiyaScheduleId,
-                amount: Number(existingPayment.amount),
-                remaining: Number(nasiya.remainingAmount),
+                receipt: {
+                  input: createMoneyDto(
+                    existingPayment.paymentInputCurrency ?? 'UZS',
+                    String(existingPayment.paymentInputAmount ?? existingPayment.amount),
+                  ),
+                  recordedUzs: createMoneyDto('UZS', String(existingPayment.amount)),
+                  applied: existingPayment.appliedAmountInContractCurrency == null
+                    ? null
+                    : createMoneyDto(contractCurrency, String(existingPayment.appliedAmountInContractCurrency)),
+                  paymentFxQuote: existingPayment.paymentExchangeRate == null
+                    ? null
+                    : createFxQuoteDto({
+                        rate: String(existingPayment.paymentExchangeRate),
+                        source: 'RECORDED_FROZEN',
+                        effectiveAt: null,
+                        fetchedAt: null,
+                        freshness: 'FROZEN',
+                      }),
+                },
+                ledger: {
+                  paid: currentLedger.paid,
+                  remaining: currentLedger.remaining,
+                  status: currentLedger.status,
+                },
                 duplicate: true,
               }
             }
           }
 
-          const currentContractStatus = deriveContractNasiyaStatus({
-            status: nasiya.status,
-            contractCurrency: nasiya.contractCurrency,
-            contractFinalAmount: Number(nasiya.contractFinalAmount),
-            contractRemainingAmount: Number(nasiya.contractRemainingAmount),
-            schedules: nasiya.schedules.map((schedule) => ({
-              status: schedule.status,
-              dueDate: schedule.dueDate,
-              delayedUntil: schedule.delayedUntil,
-              expectedAmount: Number(schedule.expectedAmount),
-              paidAmount: Number(schedule.paidAmount),
-              contractExpectedAmount: Number(schedule.contractExpectedAmount),
-              contractPaidAmount: Number(schedule.contractPaidAmount),
-            })),
-          })
+          if (currentLedger.health === 'QUARANTINED') {
+            throw { status: 409, message: "Nasiya hisob-kitobida tekshiruv talab qilinadigan tafovut bor" }
+          }
           // Idempotent replays above must be returned before this terminal-state
           // guard; otherwise retrying the final successful payment reports 409.
-          // A raw COMPLETED parent can also be stale after legacy-UZS/contract
-          // FX drift, so reject only a contract-complete nasiya.
-          if (currentContractStatus.displayStatus === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }
+          // A raw COMPLETED parent can be stale, so this uses schedule truth.
+          if (currentLedger.status === 'COMPLETED') throw { status: 409, message: 'Bu nasiya yakunlangan' }
 
           const selectedSchedule = await tx.nasiyaSchedule.findFirst({
             where: { id: nasiyaScheduleId, nasiyaId, shopId },
@@ -249,19 +358,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
           // Eligibility is contract-ledger-based, not a stored schedule label:
           // a legacy-derived PAID label must not prevent settling native debt.
-          const unpaidSchedules = [...nasiya.schedules].filter(
-            (schedule) =>
-              contractScheduleOutstanding(
-                Number(schedule.contractExpectedAmount),
-                Number(schedule.contractPaidAmount),
-                contractCurrency,
-              ) > 0,
-          )
-          const selectedOutstanding = contractScheduleOutstanding(
-            Number(selectedSchedule.contractExpectedAmount),
-            Number(selectedSchedule.contractPaidAmount),
-            contractCurrency,
-          )
+          const ledgerScheduleById = new Map(currentLedger.schedules.map((schedule) => [schedule.id, schedule]))
+          const unpaidSchedules = [...nasiya.schedules].filter((schedule) => (ledgerScheduleById.get(schedule.id)?.remaining.minorUnits ?? 0) > 0)
+          const selectedOutstanding = ledgerScheduleById.get(selectedSchedule.id)?.remaining ?? createMoneyDto(contractCurrency, 0)
           const allocationRows = [
             ...unpaidSchedules.filter((schedule) => schedule.id === selectedSchedule.id),
             ...unpaidSchedules
@@ -281,28 +380,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             contractAmount: number
           }[] = []
 
-          if (selectedOutstanding <= 0) {
+          if (selectedOutstanding.minorUnits <= 0) {
             throw {
               status: 409,
               message: "Tanlangan oy to'lovi allaqachon yopilgan",
             }
           }
-            // Item 4 fix: compared in CONTRACT currency, not a legacy-UZS sum —
-            // a legacy sum frozen at each schedule's creation rate can drift
-            // from the real remaining contract debt after enough exchange-rate
-            // movement, wrongly rejecting (or wrongly allowing) a payment. See
-            // nasiya-payment-allocation.ts's totalContractOutstanding doc comment.
-            const totalOutstandingContract = totalContractOutstanding(
-              allocationRows.map((schedule) => ({
-                contractExpectedAmount: Number(schedule.contractExpectedAmount),
-                contractPaidAmount: Number(schedule.contractPaidAmount),
-              })),
-              contractCurrency,
-            )
-            if (
-              appliedAmountInContractCurrency > totalOutstandingContract &&
-              !isContractCurrencyDust(appliedAmountInContractCurrency - totalOutstandingContract, contractCurrency)
-            ) {
+            // Compare against the complete reconciled schedule debt, never a
+            // parent cache or UZS mirror. The selected schedule may overflow
+            // into later rows, so this is intentionally not just its balance.
+            const totalOutstandingContract = currentLedger.remaining
+            if (appliedMoney.minorUnits > totalOutstandingContract.minorUnits) {
               throw {
                 status: 409,
                 message: "To'lov qolgan nasiya summasidan oshib ketdi",
@@ -315,10 +403,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 monthNumber: schedule.monthNumber,
                 dueDate: schedule.dueDate,
                 delayedUntil: schedule.delayedUntil,
-                expectedAmount: Number(schedule.expectedAmount),
-                paidAmount: Number(schedule.paidAmount),
-                contractExpectedAmount: Number(schedule.contractExpectedAmount),
-                contractPaidAmount: Number(schedule.contractPaidAmount),
+                expectedAmount: schedule.expectedAmount.toString(),
+                paidAmount: schedule.paidAmount.toString(),
+                contractExpectedAmount: schedule.contractExpectedAmount.toString(),
+                contractPaidAmount: schedule.contractPaidAmount.toString(),
               })),
               amountUzs,
               appliedAmountInContractCurrency,
@@ -430,7 +518,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 paymentInputAmount: amount,
                 paymentInputCurrency: amountInput.inputCurrency,
                 appliedAmountInContractCurrency,
-                paymentExchangeRate: contractRate,
+                paymentExchangeRate: paymentTimeRate,
+                ...(paymentFxQuoteColumnsAvailable ? {
+                  paymentExchangeRateSource: paymentTimeRateSource ?? (
+                    inputCurrency === 'USD' && contractCurrency === 'USD'
+                      ? 'UNAVAILABLE_SAME_CURRENCY'
+                      : null
+                  ),
+                  paymentExchangeRateEffectiveAt: paymentTimeSnapshot?.effectiveAt ?? null,
+                  paymentExchangeRateFetchedAt: paymentTimeSnapshot?.fetchedAt ?? null,
+                } : {}),
               },
             })
             if (profitAllocations.length > 0) {
@@ -453,35 +550,60 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 })),
               })
             }
-          // Recalculate nasiya totals
+          // Reconcile the authoritative schedule projection after every row,
+          // allocation, and payment write. Parent totals are updated only as
+          // a cache inside this same serializable transaction.
           const allSchedules = await tx.nasiyaSchedule.findMany({
             where: { nasiyaId },
           })
-          const scheduleInputs = allSchedules.map((s) => ({
-            status: s.status,
-            dueDate: s.dueDate,
-            delayedUntil: s.delayedUntil,
-            expectedAmount: Number(s.expectedAmount),
-            paidAmount: Number(s.paidAmount),
-            contractExpectedAmount: Number(s.contractExpectedAmount),
-            contractPaidAmount: Number(s.contractPaidAmount),
-          }))
-          const totalPaid = allSchedules.reduce((sum: number, s: { paidAmount: unknown }) => sum + Number(s.paidAmount), 0)
-          const remaining = calculateRemaining(Number(nasiya.finalNasiyaAmount), totalPaid)
-
-          // Native contract-currency totals — the actual source of truth for
-          // whether this nasiya is complete (see docs/currency-accounting-model.md).
-          const contractTotalPaid = allSchedules.reduce((sum, s) => sum + Number(s.contractPaidAmount), 0)
-          const contractRemaining = Math.max(0, Number(nasiya.contractFinalAmount) - contractTotalPaid)
-
-          const derivedAfterPayment = deriveContractNasiyaStatus({
+          const allAllocations = nasiya.accountingReconstructionStatus === 'COMPLETE'
+            ? await tx.nasiyaPaymentAllocation.findMany({
+                where: { nasiyaId },
+                select: {
+                  nasiyaScheduleId: true,
+                  contractCurrency: true,
+                  contractAmount: true,
+                },
+              })
+            : []
+          const legacyFinal = createMoneyDto('UZS', nasiya.finalNasiyaAmount.toString())
+          const legacyPaidMinorUnits = allSchedules.reduce(
+            (sum, schedule) => sum + createMoneyDto('UZS', schedule.paidAmount.toString()).minorUnits,
+            0,
+          )
+          const remaining = moneyDtoToAmount({
+            currency: 'UZS',
+            minorUnits: Math.max(0, legacyFinal.minorUnits - legacyPaidMinorUnits),
+          })
+          const postPaymentLedger = reconcileNasiyaLedger({
             status: nasiya.status,
             contractCurrency,
-            contractFinalAmount: Number(nasiya.contractFinalAmount),
-            contractRemainingAmount: contractRemaining,
-            schedules: scheduleInputs,
+            contractFinalAmount: nasiya.contractFinalAmount.toString(),
+            contractPaidAmount: nasiya.contractPaidAmount.toString(),
+            contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
+            schedules: allSchedules.map((schedule) => ({
+              id: schedule.id,
+              status: schedule.status,
+              dueDate: schedule.dueDate,
+              delayedUntil: schedule.delayedUntil,
+              expectedAmount: schedule.expectedAmount.toString(),
+              paidAmount: schedule.paidAmount.toString(),
+              contractCurrency: schedule.contractCurrency,
+              contractExpectedAmount: schedule.contractExpectedAmount.toString(),
+              contractPaidAmount: schedule.contractPaidAmount.toString(),
+              contractRemainingAmount: schedule.contractRemainingAmount.toString(),
+            })),
+            allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE',
+            allocations: allAllocations.map((allocation) => ({
+              nasiyaScheduleId: allocation.nasiyaScheduleId,
+              contractCurrency: allocation.contractCurrency,
+              contractAmount: allocation.contractAmount.toString(),
+            })),
           })
-          const newStatus = derivedAfterPayment.displayStatus
+          if (postPaymentLedger.health === 'QUARANTINED') {
+            throw { status: 409, message: "To'lovdan keyin nasiya jadvali mos kelmadi; amaliyot bekor qilindi" }
+          }
+          const newStatus = postPaymentLedger.status
           // The contract-complete guard above excludes an already-complete
           // contract, so reaching COMPLETED here is a real transition.
           const justCompleted = newStatus === 'COMPLETED'
@@ -489,14 +611,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           // status and contract remainder above are decided only by native
           // contract schedule amounts, so an FX-rate move cannot close debt.
           const remainingToStore = newStatus === 'COMPLETED' ? 0 : remaining
-          const contractRemainingToStore = newStatus === 'COMPLETED' ? 0 : contractRemaining
+          const contractPaidToStore = moneyDtoDatabaseAmount(postPaymentLedger.paid)
+          const contractRemainingToStore = moneyDtoDatabaseAmount(postPaymentLedger.remaining)
 
           await tx.nasiya.update({
             where: { id: nasiyaId },
             data: {
               remainingAmount: remainingToStore,
               status: newStatus,
-              contractPaidAmount: contractTotalPaid,
+              contractPaidAmount: contractPaidToStore,
               contractRemainingAmount: contractRemainingToStore,
             },
           })
@@ -524,7 +647,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               remaining: contractRemainingToStore,
               note: auditNote,
               paymentInput: { amount, currency: amountInput.inputCurrency },
-              paymentExchangeRate: contractRate,
+              paymentExchangeRate: paymentTimeRate,
               adminName: session.user.name,
               currency,
               allocations: allocations.map((a) => ({
@@ -590,7 +713,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 auditReason: auditNote,
                 contractCurrency,
                 appliedAmountInContractCurrency,
-                ...moneyInputMeta(amountInput),
+                inputCurrency: amountInput.inputCurrency,
+                exchangeRateUsed: amountInput.exchangeRateUsed,
               },
               note: auditNote,
             },
@@ -616,9 +740,23 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           return {
             nasiyaId,
             nasiyaScheduleId,
-            amount: amountUzs,
-            remaining: remainingToStore,
-            allocations,
+            receipt: {
+              input: inputMoney,
+              recordedUzs: amountUzsMoney,
+              applied: appliedMoney,
+              paymentFxQuote: conversionQuote,
+            },
+            ledger: {
+              paid: postPaymentLedger.paid,
+              remaining: postPaymentLedger.remaining,
+              status: postPaymentLedger.status,
+            },
+            allocations: allocations.map((allocation) => ({
+              scheduleId: allocation.scheduleId,
+              monthNumber: allocation.monthNumber,
+              applied: createMoneyDto(contractCurrency, allocation.contractAmount),
+              recordedUzs: createMoneyDto('UZS', allocation.amount),
+            })),
             duplicate: false,
           }
         },

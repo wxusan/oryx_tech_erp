@@ -19,11 +19,14 @@ import { invalidateShopNasiyaMutation } from '@/lib/server/cache-tags'
 import { normalizePhone } from '@/lib/phone'
 import { phoneSchema } from '@/lib/validations'
 import { computeNasiyaPaymentScore } from '@/lib/nasiya-payment-score'
-import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { computeCustomerTrustRating, isValidTrustTier, type CustomerNasiyaInput } from '@/lib/nasiya-customer-trust'
 import { logger } from '@/lib/logger'
 import { principalHasPermission } from '@/lib/server/shop-access'
+import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
+import { createFxQuoteDto, createMoneyDto } from '@/lib/currency'
+import { reconcileNasiyaLedger } from '@/lib/nasiya-ledger'
+import { hasNasiyaPaymentFxQuoteColumns } from '@/lib/server/nasiya-payment-schema'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -52,6 +55,20 @@ const updateNasiyaSchema = z.object({
   // context, never a mandatory reason for a financial correction.
   reason: z.string().trim().max(1000, "Sabab 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
 })
+
+function mapPaymentBreakdown(value: unknown, currency: 'UZS' | 'USD') {
+  if (!Array.isArray(value)) return null
+  return value.flatMap((part) => {
+    if (!part || typeof part !== 'object') return []
+    const row = part as { method?: unknown; amount?: unknown }
+    if (typeof row.method !== 'string' || (typeof row.amount !== 'number' && typeof row.amount !== 'string')) return []
+    try {
+      return [{ method: row.method, amount: createMoneyDto(currency, row.amount) }]
+    } catch {
+      return []
+    }
+  })
+}
 
 export async function GET(_req: NextRequest, ctx: RouteContext) {
   try {
@@ -100,6 +117,12 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     )
 
     const { id: nasiyaId } = await ctx.params
+    // Do not query the additive column until its migration is applied. This
+    // keeps older local/prod databases readable during the review-only repair
+    // phase; after a deployment the process restarts and detects the column.
+    const paymentFxQuoteColumnsAvailable = includePaymentHistory
+      ? await hasNasiyaPaymentFxQuoteColumns()
+      : false
 
     const nasiya = await prisma.nasiya.findFirst({
       where: {
@@ -123,11 +146,13 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         contractCurrency: true,
         contractTotalAmount: true,
         contractDownPayment: true,
+        contractBaseRemainingAmount: true,
         contractInterestAmount: true,
         contractFinalAmount: true,
         contractMonthlyPayment: true,
         contractRemainingAmount: true,
         contractPaidAmount: true,
+        accountingReconstructionStatus: true,
         status: true,
         resolutionState: true,
         resolutionUpdatedAt: true,
@@ -171,6 +196,14 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             paidAt: true,
             contractExpectedAmount: true,
             contractPaidAmount: true,
+            contractRemainingAmount: true,
+          },
+        },
+        paymentAllocations: {
+          select: {
+            nasiyaScheduleId: true,
+            contractCurrency: true,
+            contractAmount: true,
           },
         },
         ...(includePaymentHistory ? { payments: {
@@ -187,6 +220,11 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             paymentInputAmount: true,
             paymentInputCurrency: true,
             paymentExchangeRate: true,
+            ...(paymentFxQuoteColumnsAvailable ? {
+              paymentExchangeRateSource: true,
+              paymentExchangeRateEffectiveAt: true,
+              paymentExchangeRateFetchedAt: true,
+            } : {}),
             appliedAmountInContractCurrency: true,
           },
         } } : {}),
@@ -220,24 +258,33 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         })
       : []
 
-    const scheduleInputs = nasiya.schedules.map((s) => ({
-      status: s.status,
-      dueDate: s.dueDate,
-      delayedUntil: s.delayedUntil,
-      expectedAmount: Number(s.expectedAmount),
-      paidAmount: Number(s.paidAmount),
-      contractExpectedAmount: Number(s.contractExpectedAmount),
-      contractPaidAmount: Number(s.contractPaidAmount),
-    }))
-    // Same contract-authoritative derivation the nasiya list uses. The legacy
-    // UZS schedule mirror can diverge when exchange rates move, so it must
-    // never decide this badge or whether a final payment remains possible.
-    const derived = deriveContractNasiyaStatus({
+    // One projection is the only source for detail status, progress, payment
+    // validation data, and the parent-cache health badge. Do not re-add raw
+    // Decimal fields in React: all amounts below are mapped to MoneyDto.
+    const ledger = reconcileNasiyaLedger({
       status: nasiya.status,
       contractCurrency: nasiya.contractCurrency,
-      contractFinalAmount: Number(nasiya.contractFinalAmount),
-      contractRemainingAmount: Number(nasiya.contractRemainingAmount),
-      schedules: scheduleInputs,
+      contractFinalAmount: nasiya.contractFinalAmount.toString(),
+      contractPaidAmount: nasiya.contractPaidAmount.toString(),
+      contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
+      schedules: nasiya.schedules.map((schedule) => ({
+        id: schedule.id,
+        status: schedule.status,
+        dueDate: schedule.dueDate,
+        delayedUntil: schedule.delayedUntil,
+        expectedAmount: schedule.expectedAmount.toString(),
+        paidAmount: schedule.paidAmount.toString(),
+        contractCurrency: nasiya.contractCurrency,
+        contractExpectedAmount: schedule.contractExpectedAmount.toString(),
+        contractPaidAmount: schedule.contractPaidAmount.toString(),
+        contractRemainingAmount: schedule.contractRemainingAmount.toString(),
+      })),
+      allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE',
+      allocations: nasiya.paymentAllocations.map((allocation) => ({
+        nasiyaScheduleId: allocation.nasiyaScheduleId,
+        contractCurrency: allocation.contractCurrency,
+        contractAmount: allocation.contractAmount.toString(),
+      })),
     })
 
     // Reason text must respect the shop's selected display currency, not
@@ -307,25 +354,134 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
       id: nasiya.customer.id,
       name: nasiya.customer.name,
       phone: nasiya.customer.phone,
-      ...(canViewPassportPhoto ? { hasPassportPhoto: Boolean(passportPhotoUrl) } : {}),
+      ...(canViewPassportPhoto ? { hasPassportPhoto: isPrivateUploadStoredKey({ key: passportPhotoUrl, shopId: nasiya.shopId, kind: 'passport' }) } : {}),
     }
+    const reconciledScheduleById = new Map(ledger.schedules.map((schedule) => [schedule.id, schedule]))
+    const responseSchedules = nasiya.schedules.map((schedule) => {
+      const reconciled = reconciledScheduleById.get(schedule.id)
+      // A malformed row is quarantined by `ledger`; still return a safe,
+      // zero-valued DTO rather than a raw Decimal to the browser.
+      const fallback = {
+        expected: createMoneyDto(nasiya.contractCurrency, 0),
+        paid: createMoneyDto(nasiya.contractCurrency, 0),
+        remaining: createMoneyDto(nasiya.contractCurrency, 0),
+      }
+      return {
+        id: schedule.id,
+        monthNumber: schedule.monthNumber,
+        dueDate: schedule.dueDate.toISOString(),
+        delayedUntil: schedule.delayedUntil?.toISOString() ?? null,
+        status: schedule.status,
+        paidAt: schedule.paidAt?.toISOString() ?? null,
+        expected: reconciled?.expected ?? fallback.expected,
+        paid: reconciled?.paid ?? fallback.paid,
+        remaining: reconciled?.remaining ?? fallback.remaining,
+        // Explicit legacy mirrors are read-only reporting context; native
+        // schedule DTOs above remain the debt source of truth.
+        legacyExpected: createMoneyDto('UZS', schedule.expectedAmount.toString()),
+        legacyPaid: createMoneyDto('UZS', schedule.paidAmount.toString()),
+      }
+    })
+    const responsePayments = includePaymentHistory
+      ? (nasiya.payments ?? []).map((payment) => ({
+          id: payment.id,
+          paymentMethod: payment.paymentMethod,
+          paymentBreakdown: mapPaymentBreakdown(payment.paymentBreakdown, payment.paymentInputCurrency ?? 'UZS'),
+          paidAt: payment.paidAt.toISOString(),
+          note: payment.note,
+          nasiyaScheduleId: payment.nasiyaScheduleId,
+          recordedUzs: createMoneyDto('UZS', payment.amount.toString()),
+          input: payment.paymentInputAmount != null && payment.paymentInputCurrency
+            ? createMoneyDto(payment.paymentInputCurrency, payment.paymentInputAmount.toString())
+            : null,
+          applied: payment.appliedAmountInContractCurrency != null
+            ? createMoneyDto(nasiya.contractCurrency, payment.appliedAmountInContractCurrency.toString())
+            : null,
+          paymentFxQuote: payment.paymentExchangeRate != null
+            ? createFxQuoteDto({
+                rate: payment.paymentExchangeRate.toString(),
+                // Older rows predate auditable provider/timestamp metadata.
+                // Preserve their frozen number, but never invent when it was
+                // fetched or which provider supplied it.
+                source: ('paymentExchangeRateSource' in payment && payment.paymentExchangeRateSource) || 'RECORDED_FROZEN',
+                effectiveAt: ('paymentExchangeRateEffectiveAt' in payment && payment.paymentExchangeRateEffectiveAt)
+                  ? payment.paymentExchangeRateEffectiveAt.toISOString()
+                  : null,
+                fetchedAt: ('paymentExchangeRateFetchedAt' in payment && payment.paymentExchangeRateFetchedAt)
+                  ? payment.paymentExchangeRateFetchedAt.toISOString()
+                  : null,
+                freshness: 'FROZEN',
+              })
+            : null,
+        }))
+      : undefined
+    const profileData = includeProfileData
+      ? {
+          reminderEnabled: nasiya.reminderEnabled,
+          note: nasiya.note,
+          importData: {
+            isImported: nasiya.isImported,
+            source: nasiya.importSource,
+            importedAt: nasiya.importedAt?.toISOString() ?? null,
+            originalSaleDate: nasiya.originalSaleDate?.toISOString() ?? null,
+            originalTotal: nasiya.originalTotalAmount == null ? null : createMoneyDto('UZS', nasiya.originalTotalAmount.toString()),
+            alreadyPaid: createMoneyDto('UZS', nasiya.alreadyPaidBeforeImport.toString()),
+            remainingAtImport: nasiya.remainingAtImport == null ? null : createMoneyDto('UZS', nasiya.remainingAtImport.toString()),
+            note: nasiya.importNote,
+          },
+        }
+      : {}
 
     return ok(
       {
-        ...nasiya,
+        id: nasiya.id,
+        shopId: nasiya.shopId,
+        contractCurrency: nasiya.contractCurrency,
+        status: ledger.status,
+        resolutionState: nasiya.resolutionState,
+        resolutionUpdatedAt: nasiya.resolutionUpdatedAt?.toISOString() ?? null,
+        contractTerms: {
+          original: createMoneyDto(nasiya.contractCurrency, nasiya.contractTotalAmount.toString()),
+          downPayment: createMoneyDto(nasiya.contractCurrency, nasiya.contractDownPayment.toString()),
+          principal: createMoneyDto(nasiya.contractCurrency, nasiya.contractBaseRemainingAmount.toString()),
+          interest: createMoneyDto(nasiya.contractCurrency, nasiya.contractInterestAmount.toString()),
+          financed: ledger.financed,
+          monthly: createMoneyDto(nasiya.contractCurrency, nasiya.contractMonthlyPayment.toString()),
+          interestPercent: Number(nasiya.interestPercent),
+        },
+        ledger,
         customer,
-        displayStatus: derived.displayStatus,
-        isOverdue: derived.isOverdue,
-        overdueAmount: derived.overdueAmount,
+        device: nasiya.device,
+        schedules: responseSchedules,
+        ...(responsePayments ? { payments: responsePayments } : {}),
+        ...profileData,
+        displayStatus: ledger.status,
+        isOverdue: ledger.isOverdue,
+        overdueAmount: ledger.overdue,
         ...(paymentScore ? { paymentScore } : {}),
         ...(customerTrust ? { customerTrust } : {}),
         ...(includeResolutionData
           ? {
               resolutionEvents: resolutionEvents.map((event) => ({
-                ...event,
-                nativeRemainingAmount: Number(event.nativeRemainingAmount),
-                frozenUzsAmount: Number(event.frozenUzsAmount),
-                frozenUsdUzsRate: Number(event.frozenUsdUzsRate),
+                id: event.id,
+                eventType: event.eventType,
+                previousState: event.previousState,
+                newState: event.newState,
+                contractCurrency: event.contractCurrency,
+                nativeRemaining: createMoneyDto(event.contractCurrency, event.nativeRemainingAmount.toString()),
+                frozenUzs: createMoneyDto('UZS', event.frozenUzsAmount.toString()),
+                frozenFxQuote: createFxQuoteDto({
+                  rate: event.frozenUsdUzsRate.toString(),
+                  source: 'CONTRACT_FROZEN',
+                  effectiveAt: event.createdAt.toISOString(),
+                  fetchedAt: event.createdAt.toISOString(),
+                  freshness: 'FRESH',
+                }),
+                reason: event.reason,
+                actorId: event.actorId,
+                actorType: event.actorType,
+                reversesEventId: event.reversesEventId,
+                createdAt: event.createdAt.toISOString(),
               })),
             }
           : {}),

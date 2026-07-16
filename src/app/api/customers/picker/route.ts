@@ -7,6 +7,7 @@ import { logger } from '@/lib/logger'
 import { customerSearchWhere } from '@/lib/server/customer-search'
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
 import { computeCustomerTrustRatingFromFactors, isValidTrustTier, type CustomerTrustFactors } from '@/lib/nasiya-customer-trust'
+import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
 import {
   isInvalidRequestBody,
   isRequestBodyTooLarge,
@@ -81,7 +82,7 @@ export async function POST(req: NextRequest) {
       return {
         ...customer,
         passportMasked: passportIdentifierLast4 ? `••••${passportIdentifierLast4}` : null,
-        hasPassportPhoto: Boolean(passportPhotoUrl),
+        hasPassportPhoto: isPrivateUploadStoredKey({ key: passportPhotoUrl, shopId: resolved.shopId, kind: 'passport' }),
         trust: { tier: trust.tier, label: trust.label, color: trust.color },
       }
     }), 'Mijoz qidiruvi')

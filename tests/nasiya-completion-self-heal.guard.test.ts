@@ -6,17 +6,17 @@ function read(rel: string): string {
   return readFileSync(resolve(process.cwd(), rel), 'utf8')
 }
 
-describe('GET /api/nasiya/[id] — contract-authoritative display status', () => {
+describe('GET /api/nasiya/[id] — schedule-authoritative display status', () => {
   const route = read('src/app/api/nasiya/[id]/route.ts')
 
-  it('derives displayStatus/isOverdue/overdueAmount with the same contract helper the list uses', () => {
-    expect(route).toContain("import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'")
-    expect(route).toContain('const derived = deriveContractNasiyaStatus({')
+  it('derives displayStatus/isOverdue/overdueAmount from the shared reconciled schedule projection', () => {
+    expect(route).toContain("import { reconcileNasiyaLedger } from '@/lib/nasiya-ledger'")
+    expect(route).toContain('const ledger = reconcileNasiyaLedger({')
     expect(route).toContain('contractCurrency: nasiya.contractCurrency')
-    expect(route).toContain('contractRemainingAmount: Number(nasiya.contractRemainingAmount)')
-    expect(route).toContain('displayStatus: derived.displayStatus,')
-    expect(route).toContain('isOverdue: derived.isOverdue,')
-    expect(route).toContain('overdueAmount: derived.overdueAmount,')
+    expect(route).toContain('displayStatus: ledger.status,')
+    expect(route).toContain('isOverdue: ledger.isOverdue,')
+    expect(route).toContain('overdueAmount: ledger.overdue,')
+    expect(route).toContain('ledger,')
   })
 
   it('never mutates financial status as a side effect of a GET', () => {

@@ -6,11 +6,11 @@ import { enrichLogsWithActors } from '@/lib/server/log-actors'
 import { resolveShopLogTargetHrefs, shopLogTargetKey } from '@/lib/server/log-links'
 import { redactShopStaffLogValue } from '@/lib/log-financial-redaction'
 import type { NasiyaDisplayStatus } from '@/lib/nasiya-utils'
-import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { computeNasiyaPaymentScore, type NasiyaPaymentScore } from '@/lib/nasiya-payment-score'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { computeSaleContractMargin, contractScheduleOutstanding, roundContractMoney, type PurchaseCostLike } from '@/lib/nasiya-contract'
-import type { CurrencyCode } from '@/lib/currency'
+import { computeSaleContractMargin, type PurchaseCostLike } from '@/lib/nasiya-contract'
+import { addMoneyDto, createMoneyDto, type CurrencyCode, type MoneyDto } from '@/lib/currency'
+import { reconcileNasiyaLedger, type NasiyaLedgerDto } from '@/lib/nasiya-ledger'
 import { normalizePhone } from '@/lib/phone'
 import type { DeviceListItem, DeviceListSaleInfo } from '@/lib/device-list-contract'
 import { deviceConditionLabel, formatDeviceStorage } from '@/lib/device-specs'
@@ -82,7 +82,7 @@ export type NasiyaCollectionCohort = 'OVERDUE' | 'DUE_TODAY' | 'UPCOMING'
 export interface NasiyaCollectionWorkItem {
   cohort: NasiyaCollectionCohort
   /** Outstanding balance of schedules in this cohort, in contract currency. */
-  outstanding: number
+  outstanding: MoneyDto
   /** Earliest effective due date represented by this collection task. */
   effectiveDue: string
   /** First still-open schedule in this cohort; payment/defer actions target it. */
@@ -91,17 +91,10 @@ export interface NasiyaCollectionWorkItem {
 
 export interface ShopNasiyaListItem {
   id: string
-  totalAmount: number
-  remainingAmount: number
-  baseRemainingAmount: number
   interestPercent: number
-  interestAmount: number
-  finalNasiyaAmount: number
-  // Native contract-currency ledger — see docs/currency-accounting-model.md.
   contractCurrency: 'UZS' | 'USD'
-  contractInterestAmount: number
-  contractFinalAmount: number
-  contractRemainingAmount: number
+  contractInterest: MoneyDto
+  ledger: NasiyaLedgerDto
   /** Stored parent status (kept for reference / debugging). */
   status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
   /** Operational collection state; separate from the immutable financial ledger. */
@@ -112,7 +105,7 @@ export interface ShopNasiyaListItem {
   /** Live display status derived from schedules (matches the dashboard). */
   displayStatus: NasiyaDisplayStatus
   isOverdue: boolean
-  overdueAmount: number
+  overdueAmount: MoneyDto
   overdueCount: number
   nextPaymentDate: string | null
   createdAt: string
@@ -650,10 +643,6 @@ type CollectionSchedule = {
   dueDate: Date
   delayedUntil: Date | null
   status: string
-  expectedAmount: unknown
-  paidAmount: unknown
-  contractExpectedAmount: unknown
-  contractPaidAmount: unknown
 }
 
 /**
@@ -667,21 +656,18 @@ type CollectionSchedule = {
 function deriveNasiyaCollectionWorkItem(input: {
   cohort: NasiyaCohortFilter | undefined
   contractCurrency: CurrencyCode
+  ledger: NasiyaLedgerDto
   schedules: readonly CollectionSchedule[]
   now: Date
 }): NasiyaCollectionWorkItem | null {
   if (!input.cohort || input.cohort === 'ACTIVE') return null
 
   const { start, end } = tashkentDayRange(input.now)
+  const scheduleLedger = new Map(input.ledger.schedules.map((schedule) => [schedule.id, schedule]))
   const matches = input.schedules.flatMap((schedule) => {
     if (!OPEN_NASIYA_SCHEDULE_STATUSES.has(schedule.status)) return []
-
-    const contractExpected = Number(schedule.contractExpectedAmount)
-    const contractPaid = Number(schedule.contractPaidAmount)
-    const outstanding = Number.isFinite(contractExpected) && Number.isFinite(contractPaid)
-      ? contractScheduleOutstanding(contractExpected, contractPaid, input.contractCurrency)
-      : Math.max(0, Number(schedule.expectedAmount) - Number(schedule.paidAmount))
-    if (!Number.isFinite(outstanding) || outstanding <= 0) return []
+    const outstanding = scheduleLedger.get(schedule.id)?.remaining
+    if (!outstanding || outstanding.minorUnits <= 0) return []
 
     const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
     const dueAt = effectiveDue.getTime()
@@ -699,7 +685,10 @@ function deriveNasiyaCollectionWorkItem(input: {
   if (matches.length === 0) return null
   return {
     cohort: input.cohort,
-    outstanding: roundContractMoney(matches.reduce((sum, schedule) => sum + schedule.outstanding, 0), input.contractCurrency),
+    outstanding: matches.reduce(
+      (total, schedule) => addMoneyDto(total, schedule.outstanding),
+      createMoneyDto(input.contractCurrency, 0),
+    ),
     effectiveDue: matches[0].effectiveDue.toISOString(),
     preferredScheduleId: matches[0].id,
   }
@@ -747,31 +736,17 @@ export async function findShopNasiyaIdsByDerivedStatus(input: {
         n."createdAt",
         n."status",
         n."contractCurrency",
-        n."contractRemainingAmount",
         count(s."id") AS schedule_count,
-        coalesce(bool_and(
-          CASE
-            WHEN s."status" = 'CANCELLED' THEN true
-            ELSE CASE WHEN n."contractCurrency" = 'USD'
-              THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-              ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-            END <= 0
-          END
-        ) FILTER (WHERE s."id" IS NOT NULL), false) AS all_schedules_paid,
+        coalesce(bool_and(s."contractRemainingAmount" = 0)
+          FILTER (WHERE s."id" IS NOT NULL), false) AS all_schedules_paid,
         coalesce(bool_or(
-          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
-          AND (CASE WHEN n."contractCurrency" = 'USD'
-            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-          END > 0)
+          s."status" <> 'CANCELLED'
+          AND s."contractRemainingAmount" > 0
           AND coalesce(s."delayedUntil", s."dueDate") < ${start}
         ), false) AS has_overdue,
         min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
-          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
-          AND CASE WHEN n."contractCurrency" = 'USD'
-            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-          END > 0
+          s."status" <> 'CANCELLED'
+          AND s."contractRemainingAmount" > 0
         ) AS next_due
       FROM "Nasiya" n
       JOIN "Customer" c ON c."id" = n."customerId" AND c."shopId" = n."shopId"
@@ -784,11 +759,7 @@ export async function findShopNasiyaIdsByDerivedStatus(input: {
     ), derived AS (
       SELECT *, CASE
         WHEN "status" = 'CANCELLED' THEN 'CANCELLED'
-        WHEN (schedule_count > 0 AND all_schedules_paid)
-          OR (schedule_count = 0 AND CASE WHEN "contractCurrency" = 'USD'
-            THEN round(greatest("contractRemainingAmount", 0), 2)
-            ELSE round(greatest("contractRemainingAmount", 0), 0)
-          END <= 0) THEN 'COMPLETED'
+        WHEN schedule_count > 0 AND all_schedules_paid THEN 'COMPLETED'
         WHEN has_overdue THEN 'OVERDUE'
         ELSE 'ACTIVE'
       END AS display_status
@@ -874,72 +845,43 @@ export async function findShopNasiyaIdsByCohort(input: {
         n."createdAt",
         n."status",
         n."contractCurrency",
-        n."contractRemainingAmount",
         count(s."id") AS schedule_count,
-        coalesce(bool_and(
-          CASE
-            WHEN s."status" = 'CANCELLED' THEN true
-            ELSE CASE WHEN n."contractCurrency" = 'USD'
-              THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-              ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-            END <= 0
-          END
-        ) FILTER (WHERE s."id" IS NOT NULL), false) AS all_schedules_paid,
+        coalesce(bool_and(s."contractRemainingAmount" = 0)
+          FILTER (WHERE s."id" IS NOT NULL), false) AS all_schedules_paid,
         coalesce(bool_or(
-          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
-          AND (CASE WHEN n."contractCurrency" = 'USD'
-            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-          END > 0)
+          s."status" <> 'CANCELLED'
+          AND s."contractRemainingAmount" > 0
           AND coalesce(s."delayedUntil", s."dueDate") < ${start}
         ), false) AS has_overdue,
         coalesce(bool_or(
-          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
-          AND (CASE WHEN n."contractCurrency" = 'USD'
-            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-          END > 0)
+          s."status" <> 'CANCELLED'
+          AND s."contractRemainingAmount" > 0
           AND coalesce(s."delayedUntil", s."dueDate") >= ${start}
           AND coalesce(s."delayedUntil", s."dueDate") < ${end}
         ), false) AS has_due_today,
         coalesce(bool_or(
-          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
-          AND (CASE WHEN n."contractCurrency" = 'USD'
-            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-          END > 0)
+          s."status" <> 'CANCELLED'
+          AND s."contractRemainingAmount" > 0
           AND coalesce(s."delayedUntil", s."dueDate") >= ${end}
         ), false) AS has_upcoming,
         min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
-          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
-          AND CASE WHEN n."contractCurrency" = 'USD'
-            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-          END > 0
+          s."status" <> 'CANCELLED'
+          AND s."contractRemainingAmount" > 0
         ) AS next_due,
         min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
-          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
-          AND CASE WHEN n."contractCurrency" = 'USD'
-            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-          END > 0
+          s."status" <> 'CANCELLED'
+          AND s."contractRemainingAmount" > 0
           AND coalesce(s."delayedUntil", s."dueDate") < ${start}
         ) AS overdue_due,
         min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
-          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
-          AND CASE WHEN n."contractCurrency" = 'USD'
-            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-          END > 0
+          s."status" <> 'CANCELLED'
+          AND s."contractRemainingAmount" > 0
           AND coalesce(s."delayedUntil", s."dueDate") >= ${start}
           AND coalesce(s."delayedUntil", s."dueDate") < ${end}
         ) AS due_today_due,
         min(coalesce(s."delayedUntil", s."dueDate")) FILTER (WHERE
-          s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
-          AND CASE WHEN n."contractCurrency" = 'USD'
-            THEN round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 2)
-            ELSE round(greatest(s."contractExpectedAmount" - s."contractPaidAmount", 0), 0)
-          END > 0
+          s."status" <> 'CANCELLED'
+          AND s."contractRemainingAmount" > 0
           AND coalesce(s."delayedUntil", s."dueDate") >= ${end}
         ) AS upcoming_due
       FROM "Nasiya" n
@@ -953,11 +895,7 @@ export async function findShopNasiyaIdsByCohort(input: {
     ), derived AS (
       SELECT *, CASE
         WHEN "status" = 'CANCELLED' THEN 'CANCELLED'
-        WHEN (schedule_count > 0 AND all_schedules_paid)
-          OR (schedule_count = 0 AND CASE WHEN "contractCurrency" = 'USD'
-            THEN round(greatest("contractRemainingAmount", 0), 2)
-            ELSE round(greatest("contractRemainingAmount", 0), 0)
-          END <= 0) THEN 'COMPLETED'
+        WHEN schedule_count > 0 AND all_schedules_paid THEN 'COMPLETED'
         WHEN has_overdue THEN 'OVERDUE'
         ELSE 'ACTIVE'
       END AS display_status
@@ -1023,6 +961,7 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
       contractCurrency: true,
       contractInterestAmount: true,
       contractFinalAmount: true,
+      contractPaidAmount: true,
       contractRemainingAmount: true,
       status: true,
       resolutionState: true,
@@ -1056,6 +995,7 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
           paidAt: true,
           contractExpectedAmount: true,
           contractPaidAmount: true,
+          contractRemainingAmount: true,
         },
       },
     },
@@ -1075,25 +1015,25 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
   // Single `now` for the whole batch so all rows are judged against the same instant.
   const derivedItems = orderedRows
     .map((nasiya) => {
-      const scheduleInputs = nasiya.schedules.map((s) => ({
-        status: s.status,
-        dueDate: s.dueDate,
-        delayedUntil: s.delayedUntil,
-        expectedAmount: Number(s.expectedAmount),
-        paidAmount: Number(s.paidAmount),
-        contractExpectedAmount: Number(s.contractExpectedAmount),
-        contractPaidAmount: Number(s.contractPaidAmount),
-      }))
-      const derived = deriveContractNasiyaStatus(
-        {
-          status: nasiya.status,
+      const ledger = reconcileNasiyaLedger({
+        status: nasiya.status,
+        contractCurrency: nasiya.contractCurrency,
+        contractFinalAmount: nasiya.contractFinalAmount.toString(),
+        contractPaidAmount: nasiya.contractPaidAmount.toString(),
+        contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
+        schedules: nasiya.schedules.map((schedule) => ({
+          id: schedule.id,
+          status: schedule.status,
+          dueDate: schedule.dueDate,
+          delayedUntil: schedule.delayedUntil,
+          expectedAmount: schedule.expectedAmount.toString(),
+          paidAmount: schedule.paidAmount.toString(),
           contractCurrency: nasiya.contractCurrency,
-          contractFinalAmount: Number(nasiya.contractFinalAmount),
-          contractRemainingAmount: Number(nasiya.contractRemainingAmount),
-          schedules: scheduleInputs,
-        },
-        now,
-      )
+          contractExpectedAmount: schedule.contractExpectedAmount.toString(),
+          contractPaidAmount: schedule.contractPaidAmount.toString(),
+          contractRemainingAmount: schedule.contractRemainingAmount.toString(),
+        })),
+      }, now)
       // Payment score must read the deal's own contract-currency amounts —
       // see docs/currency-accounting-model.md — never the legacy UZS
       // snapshot, which would misjudge overdue tolerance for a USD contract.
@@ -1115,31 +1055,26 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
       const collectionWorkItem = deriveNasiyaCollectionWorkItem({
         cohort: query.cohort,
         contractCurrency: nasiya.contractCurrency,
+        ledger,
         schedules: nasiya.schedules,
         now,
       })
 
       return {
         id: nasiya.id,
-        totalAmount: Number(nasiya.totalAmount),
-        remainingAmount: Number(nasiya.remainingAmount),
-        baseRemainingAmount: Number(nasiya.baseRemainingAmount),
         interestPercent: Number(nasiya.interestPercent),
-        interestAmount: Number(nasiya.interestAmount),
-        finalNasiyaAmount: Number(nasiya.finalNasiyaAmount),
         contractCurrency: nasiya.contractCurrency,
-        contractInterestAmount: Number(nasiya.contractInterestAmount),
-        contractFinalAmount: Number(nasiya.contractFinalAmount),
-        contractRemainingAmount: Number(nasiya.contractRemainingAmount),
+        contractInterest: createMoneyDto(nasiya.contractCurrency, nasiya.contractInterestAmount.toString()),
+        ledger,
         status: nasiya.status,
         resolutionState: nasiya.resolutionState,
         resolutionUpdatedAt: nasiya.resolutionUpdatedAt?.toISOString() ?? null,
         isImported: nasiya.isImported,
-        displayStatus: derived.displayStatus,
-        isOverdue: derived.isOverdue,
-        overdueAmount: derived.overdueAmount,
-        overdueCount: derived.overdueCount,
-        nextPaymentDate: derived.nextPaymentDate?.toISOString() ?? null,
+        displayStatus: ledger.status,
+        isOverdue: ledger.isOverdue,
+        overdueAmount: ledger.overdue,
+        overdueCount: ledger.overdueCount,
+        nextPaymentDate: ledger.nextPaymentDate,
         createdAt: nasiya.createdAt.toISOString(),
         note: nasiya.note,
         customer: nasiya.customer,

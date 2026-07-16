@@ -269,7 +269,9 @@ async function verifyShopAdminPassword(
 // ---------------------------------------------------------------------------
 
 export const authConfig: NextAuthConfig = {
-  // The AUTH_SECRET env variable is read automatically by NextAuth v5.
+  // An empty AUTH_SECRET value from a deployment must not mask a valid
+  // legacy NEXTAUTH_SECRET during local development or migration.
+  secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
   providers: [
     // --- Super Admin flow ---
     Credentials({

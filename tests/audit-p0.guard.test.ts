@@ -68,9 +68,11 @@ describe('P0 nasiya deferral idempotency guard', () => {
 
   it('replays a matching final payment before COMPLETED rejection and conflicts on changed durable payload', () => {
     const replayLookup = paymentRoute.indexOf('const existingPayment = await tx.nasiyaPayment.findUnique')
-    const completedGuard = paymentRoute.indexOf("if (currentContractStatus.displayStatus === 'COMPLETED')")
+    const completedGuard = paymentRoute.indexOf("if (currentLedger.status === 'COMPLETED')")
     expect(replayLookup).toBeGreaterThan(-1)
     expect(completedGuard).toBeGreaterThan(replayLookup)
+    expect(paymentRoute).toContain('const currentLedger = reconcileNasiyaLedger({')
+    expect(paymentRoute).not.toContain("if (nasiya.status === 'COMPLETED')")
     expect(paymentRoute).toContain('matchesExistingPaymentPayload(existingPayment')
     const matcherStart = paymentRoute.indexOf('function matchesExistingPaymentPayload(')
     const matcherBlock = paymentRoute.slice(matcherStart, paymentRoute.indexOf('export async function POST', matcherStart))

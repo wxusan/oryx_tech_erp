@@ -5,7 +5,7 @@ import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { badRequest, conflict, created, forbidden, ok, serverError } from '@/lib/api-helpers'
 import { normalizeAdditionalPhones, normalizePhone } from '@/lib/phone'
 import { logger } from '@/lib/logger'
-import { passportIdentifierStorage } from '@/lib/customer-passport'
+import { CustomerPassportConfigurationError, isValidPassportIdentifier, passportIdentifierStorage } from '@/lib/customer-passport'
 import { phoneSchema } from '@/lib/validations'
 import { invalidateShopCustomerMutation } from '@/lib/server/cache-tags'
 import { Prisma } from '@/generated/prisma/client'
@@ -53,7 +53,7 @@ const createCustomerSchema = z.object({
   name: z.string().trim().min(2, "Ism kamida 2 ta belgidan iborat bo'lishi kerak").max(100),
   phone: phoneSchema,
   additionalPhones: z.array(z.string()).max(5).optional(),
-  passportIdentifier: z.string().trim().max(64).optional(),
+  passportIdentifier: z.string().trim().refine(isValidPassportIdentifier, "Pasport seriya/raqami AA 1234567 formatida bo'lishi kerak").optional(),
   passportPhotoUrl: z.string().max(500).optional(),
   note: z.string().trim().max(1000).optional(),
   shopId: z.string().optional(),
@@ -135,6 +135,9 @@ export async function POST(req: NextRequest) {
       passportIdentifierLast4: undefined,
     }, 'Mijoz yaratildi')
   } catch (error) {
+    if (error instanceof CustomerPassportConfigurationError) {
+      return serverError("Pasport ma'lumotlarini saqlash sozlanmagan. CUSTOMER_PII_ENCRYPTION_KEY va CUSTOMER_PII_SEARCH_KEY ni sozlang.")
+    }
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
       return conflict('Bu telefon yoki pasport bilan faol mijoz mavjud. Mavjud mijozni qidiruvdan tanlang.')
     }

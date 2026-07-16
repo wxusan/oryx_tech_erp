@@ -116,7 +116,10 @@ export async function getShopMonthlyAccountingAggregate(input: {
       WHERE s."shopId" = ${input.shopId}
         AND coalesce(s."delayedUntil", s."dueDate") >= ${input.monthStart}
         AND coalesce(s."delayedUntil", s."dueDate") < ${input.monthEnd}
-        AND s.status IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+        -- Schedule remaining is the authoritative Nasiya debt projection.
+        -- Do not use a mutable status label or parent cache to decide it.
+        AND s."status" <> 'CANCELLED'
+        AND s."contractRemainingAmount" > 0
         AND n."deletedAt" IS NULL
         AND n."returnedAt" IS NULL
         AND n.status <> 'CANCELLED'
@@ -282,19 +285,12 @@ export async function getShopObligationAggregate(input: {
         n."status" AS nasiya_status,
         n."contractCurrency" AS currency,
         coalesce(s."delayedUntil", s."dueDate") AS effective_due,
-        CASE
-          WHEN n."contractCurrency" = 'USD'
-            AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01
-            THEN s."contractExpectedAmount" - s."contractPaidAmount"
-          WHEN n."contractCurrency" = 'UZS'
-            AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1
-            THEN s."contractExpectedAmount" - s."contractPaidAmount"
-          ELSE 0
-        END AS outstanding
+        s."contractRemainingAmount"::numeric AS outstanding
       FROM "NasiyaSchedule" s
       JOIN "Nasiya" n ON n."id" = s."nasiyaId" AND n."shopId" = s."shopId"
       WHERE s."shopId" = ${input.shopId}
-        AND s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+        AND s."status" <> 'CANCELLED'
+        AND s."contractRemainingAmount" > 0
         AND n."deletedAt" IS NULL
         AND n."returnedAt" IS NULL
         AND n."status" <> 'CANCELLED'
@@ -376,15 +372,12 @@ export async function getUpcomingScheduleIds(shopId: string, take = 5): Promise<
     FROM "NasiyaSchedule" s
     JOIN "Nasiya" n ON n."id" = s."nasiyaId" AND n."shopId" = s."shopId"
     WHERE s."shopId" = ${shopId}
-      AND s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+      AND s."status" <> 'CANCELLED'
+      AND s."contractRemainingAmount" > 0
       AND n."deletedAt" IS NULL
       AND n."returnedAt" IS NULL
       AND n."status" <> 'CANCELLED'
       AND n."resolutionState" = 'ACTIVE'
-      AND (
-        (n."contractCurrency" = 'USD' AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01)
-        OR (n."contractCurrency" = 'UZS' AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1)
-      )
     ORDER BY coalesce(s."delayedUntil", s."dueDate") ASC, s."id" ASC
     LIMIT ${Math.max(1, Math.min(Math.trunc(take), 50))}
   `)
@@ -481,22 +474,15 @@ function receivableDealsCte(input: {
         d."model" AS device_model,
         n."contractCurrency" AS currency,
         coalesce(s."delayedUntil", s."dueDate") AS effective_due,
-        CASE
-          WHEN n."contractCurrency" = 'USD'
-            AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01
-            THEN s."contractExpectedAmount" - s."contractPaidAmount"
-          WHEN n."contractCurrency" = 'UZS'
-            AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1
-            THEN s."contractExpectedAmount" - s."contractPaidAmount"
-          ELSE 0
-        END::numeric AS outstanding
+        s."contractRemainingAmount"::numeric AS outstanding
       FROM "NasiyaSchedule" s
       JOIN "Nasiya" n ON n."id" = s."nasiyaId" AND n."shopId" = s."shopId"
       JOIN "Customer" c ON c."id" = n."customerId" AND c."shopId" = n."shopId"
       JOIN "Device" d ON d."id" = n."deviceId" AND d."shopId" = n."shopId"
       WHERE s."shopId" = ${input.shopId}
         AND ${input.includeNasiya}
-        AND s."status" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')
+        AND s."status" <> 'CANCELLED'
+        AND s."contractRemainingAmount" > 0
         AND coalesce(s."delayedUntil", s."dueDate") < ${input.tomorrowStart}
         AND n."deletedAt" IS NULL
         AND n."returnedAt" IS NULL

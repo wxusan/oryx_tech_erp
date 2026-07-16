@@ -32,8 +32,8 @@ function requestNetworkAddress(headers: HeaderReader) {
 function networkFingerprint(headers: HeaderReader) {
   const address = requestNetworkAddress(headers)
   const secret = process.env.AUDIT_NETWORK_HASH_SECRET
-    ?? process.env.AUTH_SECRET
-    ?? process.env.NEXTAUTH_SECRET
+    || process.env.AUTH_SECRET
+    || process.env.NEXTAUTH_SECRET
   if (!address || !secret || Buffer.byteLength(secret, 'utf8') < 32) return null
 
   const digest = createHmac('sha256', secret)

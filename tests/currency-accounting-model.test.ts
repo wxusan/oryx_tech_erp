@@ -3,114 +3,61 @@ import {
   paymentAmountDisplay,
   type NasiyaPaymentDisplayRecord as NasiyaPayment,
 } from '@/lib/payment-history-display'
+import { createFxQuoteDto, createMoneyDto } from '@/lib/currency'
 import { nasiyaPaymentMessage, salePaymentMessage } from '@/lib/telegram-templates'
 
 function payment(overrides: Partial<NasiyaPayment> = {}): NasiyaPayment {
   return {
     id: 'p1',
-    amount: 2_500_000,
     paymentMethod: 'CASH',
     paidAt: '2026-07-08T00:00:00.000Z',
     note: null,
     nasiyaScheduleId: null,
-    paymentInputAmount: null,
-    paymentInputCurrency: null,
-    paymentExchangeRate: null,
-    appliedAmountInContractCurrency: null,
+    recordedUzs: createMoneyDto('UZS', 2_500_000),
+    input: null,
+    applied: null,
+    paymentFxQuote: null,
     ...overrides,
   }
 }
 
-const uzsDisplay = { currency: 'UZS' as const, usdUzsRate: null }
-const usdDisplay = { currency: 'USD' as const, usdUzsRate: 13_500 } // deliberately a DIFFERENT rate than payment time
-
-describe('paymentAmountDisplay — historical payment display uses one selected currency with payment-time rate', () => {
-  it("USD contract paid in UZS: USD display converts the paid input using the payment-time rate, not today's rate", () => {
+describe('paymentAmountDisplay — historical payment display is native-first and frozen', () => {
+  it('USD contract paid in UZS keeps the original UZS receipt primary and shows the frozen rate', () => {
     const p = payment({
-      amount: 2_500_000,
-      paymentInputAmount: 2_500_000,
-      paymentInputCurrency: 'UZS',
-      paymentExchangeRate: 12_500,
-      appliedAmountInContractCurrency: 200,
+      recordedUzs: createMoneyDto('UZS', 2_500_000),
+      input: createMoneyDto('UZS', 2_500_000),
+      applied: createMoneyDto('USD', 200),
+      paymentFxQuote: createFxQuoteDto({ rate: '12500.0000', source: 'PAYMENT_FROZEN', freshness: 'FRESH' }),
     })
-    const text = paymentAmountDisplay(p, 'USD', usdDisplay)
-    expect(text).toBe('$200.00')
-    expect(text).not.toMatch(/so'm/)
-    expect(text).not.toContain('→')
-    expect(text).not.toContain('$185')
+    const display = paymentAmountDisplay(p)
+    expect(display.primary).toMatch(/2.?500.?000 so'm/)
+    expect(display.secondary).toContain('Shartnomaga: $200.00')
+    expect(display.secondary).toContain('12500.0000')
   })
 
-  it('USD contract paid in UZS: UZS display shows only the original UZS input', () => {
+  it('does not change a historical payment when today’s display currency/rate changes', () => {
     const p = payment({
-      amount: 2_500_000,
-      paymentInputAmount: 2_500_000,
-      paymentInputCurrency: 'UZS',
-      paymentExchangeRate: 12_500,
-      appliedAmountInContractCurrency: 200,
+      input: createMoneyDto('USD', 160),
+      applied: createMoneyDto('UZS', 2_000_000),
+      paymentFxQuote: createFxQuoteDto({ rate: '12500.0000', source: 'PAYMENT_FROZEN', freshness: 'FRESH' }),
     })
-    const text = paymentAmountDisplay(p, 'USD', uzsDisplay)
-    expect(text).toMatch(/2.?500.?000 so'm/)
-    expect(text).not.toContain('$')
-    expect(text).not.toContain('→')
+    expect(paymentAmountDisplay(p)).toEqual({
+      primary: '$160.00',
+      secondary: "Shartnomaga: 2 000 000 so'm · Kurs: 1 USD = 12500.0000 so'm · PAYMENT_FROZEN",
+    })
   })
 
-  it('UZS contract paid in USD: UZS display converts the paid input using the payment-time rate', () => {
+  it('same-currency payment shows one native amount and no fabricated rate', () => {
     const p = payment({
-      amount: 2_000_000,
-      paymentInputAmount: 160,
-      paymentInputCurrency: 'USD',
-      paymentExchangeRate: 12_500,
-      appliedAmountInContractCurrency: 2_000_000,
+      input: createMoneyDto('USD', 200),
+      applied: createMoneyDto('USD', 200),
     })
-    const text = paymentAmountDisplay(p, 'UZS', uzsDisplay)
-    expect(text).toMatch(/2.?000.?000 so'm/)
-    expect(text).not.toContain('$')
-    expect(text).not.toContain('kurs')
-    // Must NOT contain today's (different) rate or a recomputed dollar figure.
-    expect(text).not.toMatch(/13.?500/)
-    expect(text).not.toContain('$185')
+    expect(paymentAmountDisplay(p)).toEqual({ primary: '$200.00', secondary: null })
   })
 
-  it('USD input shown in USD display remains the original USD amount', () => {
-    const p = payment({
-      amount: 2_500_000,
-      paymentInputAmount: 200,
-      paymentInputCurrency: 'USD',
-      paymentExchangeRate: 12_500,
-      appliedAmountInContractCurrency: 2_500_000,
-    })
-    expect(paymentAmountDisplay(p, 'UZS', usdDisplay)).toBe('$200.00')
-  })
-
-  it('falls back to the live display currency only for legacy payments with no payment-time data (paymentInputCurrency null)', () => {
-    const legacy = payment({ amount: 2_500_000 })
-    expect(paymentAmountDisplay(legacy, 'UZS', uzsDisplay)).toMatch(/2.?500.?000 so'm/)
-    expect(paymentAmountDisplay(legacy, 'UZS', usdDisplay)).toContain('$')
-  })
-
-  it('a UZS-native payment on a UZS contract (no conversion) never shows a dollar sign or a rate', () => {
-    const p = payment({
-      amount: 500_000,
-      paymentInputAmount: 500_000,
-      paymentInputCurrency: 'UZS',
-      appliedAmountInContractCurrency: 500_000,
-    })
-    const text = paymentAmountDisplay(p, 'UZS', uzsDisplay)
-    expect(text).not.toContain('$')
-    expect(text).not.toContain('kurs')
-  })
-
-  it('a USD-native payment on a USD contract (no conversion) shows a single native $ figure, no arrow/kurs', () => {
-    const p = payment({
-      amount: 2_500_000,
-      paymentInputAmount: 200,
-      paymentInputCurrency: 'USD',
-      appliedAmountInContractCurrency: 200,
-    })
-    const text = paymentAmountDisplay(p, 'USD', usdDisplay)
-    expect(text).toBe('$200.00')
-    expect(text).not.toContain('kurs')
-    expect(text).not.toContain('→')
+  it('legacy payments remain native UZS rather than being recomputed with today’s rate', () => {
+    const legacy = payment()
+    expect(paymentAmountDisplay(legacy)).toEqual({ primary: "2 500 000 so'm", secondary: null })
   })
 })
 

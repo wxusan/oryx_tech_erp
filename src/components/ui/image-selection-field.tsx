@@ -320,6 +320,7 @@ export interface ImageSelectionFieldProps {
   disabled?: boolean
   help?: string
   className?: string
+  previewClassName?: string
 }
 
 function statusCopy(item: ImageSelectionItem) {
@@ -339,6 +340,7 @@ export function ImageSelectionField({
   disabled = false,
   help = 'JPG, PNG yoki WEBP; har bir rasm 5 MB gacha',
   className,
+  previewClassName,
 }: ImageSelectionFieldProps) {
   const helpId = `${inputId}-help`
   const errorId = `${inputId}-error`
@@ -384,12 +386,18 @@ export function ImageSelectionField({
       </div>
 
       {selection.items.length > 0 && (
-        <ol className="mt-3 grid min-w-0 grid-cols-1 gap-3 min-[380px]:grid-cols-2 sm:grid-cols-3" aria-label={`${label} tartibi`}>
+        <ol
+          className={cn(
+            'mt-3 grid min-w-0 gap-3',
+            mode === 'single' ? 'grid-cols-1' : 'grid-cols-1 min-[380px]:grid-cols-2 sm:grid-cols-3',
+          )}
+          aria-label={`${label} tartibi`}
+        >
           {selection.items.map((item, index) => {
             const itemError = Boolean(item.validationError || item.uploadError)
             return (
               <li key={item.id} className={cn('min-w-0 overflow-hidden rounded-lg border bg-white', itemError ? 'border-red-300' : 'border-zinc-200')}>
-                <div className="relative aspect-square bg-zinc-100">
+                <div className={cn('relative aspect-square bg-zinc-100', previewClassName)}>
                   {item.validationError && item.file && !DEFAULT_ACCEPTED_TYPES.includes(item.file.type as (typeof DEFAULT_ACCEPTED_TYPES)[number]) ? (
                     <div className="flex h-full items-center justify-center p-4 text-center text-xs text-zinc-500">Rasmni ko‘rib bo‘lmaydi</div>
                   ) : (

@@ -319,7 +319,7 @@ export default function QurilmalarClient({
             </Button>
           )}
           {canCreateDevice && (
-            <Button render={<Link href="/shop/qurilmalar/new" />} size="lg">
+            <Button render={<Link href="/shop/qurilmalar/new" />} nativeButton={false} size="lg">
               + Yangi qurilma
             </Button>
           )}

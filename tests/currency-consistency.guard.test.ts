@@ -75,18 +75,20 @@ describe('sold devices list and olib-sotdim use the shared formatter, not manual
 describe('nasiya payment modal: overpayment explanation and validation use the shared formatter', () => {
   const source = read('src/components/shop/nasiya-payment-modal.tsx')
 
-  it('computes payAmountUzs regardless of display currency (source of truth for validation)', () => {
-    // Reads from `effectiveAmountNumber` (the single "Miqdor" field in
-    // non-split mode, or the split total in split mode — see
-    // docs/product-feature-fixes.md's split-payment amount-entry fix), not
-    // straight from `payAmount`, so single and split mode validate identically.
-    expect(source).toContain('const payAmountUzs =')
-    expect(source).toContain('convertUsdToUzs(effectiveAmountNumber, currency.usdUzsRate)')
+  it('uses exact MoneyDto input and reconciled schedule debt for validation', () => {
+    // Single and split modes share one MoneyDto. The browser may show a
+    // current-rate approximation, but server-side schedule debt remains the
+    // authority and no raw Decimal or UZS-only conversion is used here.
+    expect(source).toContain('const enteredMoney = splitPayment ? splitMoney : singleMoney')
+    expect(source).toContain('const payAmountContract = enteredMoney')
+    expect(source).toContain('convertMoneyDto(enteredMoney, contractCurrency, currency.fxQuote)')
+    expect(source).toContain('payAmountContract.minorUnits > ledgerRemaining.minorUnits')
+    expect(source).not.toContain('convertUsdToUzs(')
   })
 
-  it('shows the overpayment explanation and total-remaining line via dfmt() (contract-currency-aware formatter)', () => {
-    expect(source).toContain('isContractCurrencyDust(rawOverpayExtraContract, contractCurrency)')
-    expect(source).toContain('Ortiqcha {dfmt(overpayExtraContract)} keyingi oy')
+  it('shows native-first overpayment and total-remaining amounts through the MoneyDto formatter', () => {
+    expect(source).toContain('const moneyView = (amount: MoneyDto) =>')
+    expect(source).toContain('Ortiqcha {moneyView(overpayExtraContract)} keyingi oy')
     expect(source).toContain('Jami qolgan qarz')
   })
 

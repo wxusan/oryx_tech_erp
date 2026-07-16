@@ -7,8 +7,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { uzDate } from '@/lib/dates'
 import { formatUzPhoneDisplay } from '@/lib/phone'
-import type { CurrencyContext } from '@/lib/currency'
-import { formatDisplayMoneyFromContract } from '@/lib/nasiya-contract'
+import { convertMoneyDto, formatMoneyDto, type CurrencyContext, type MoneyDto } from '@/lib/currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 import { NasiyaDeferModal } from '@/components/shop/nasiya-defer-modal'
 import { StretchedLink } from '@/components/ui/stretched-link'
@@ -18,6 +17,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import type { NasiyaStatus } from '@/lib/domain-types'
 import { useShopAccess } from '@/components/shop/shop-access-context'
+import type { NasiyaLedgerDto } from '@/lib/nasiya-ledger'
 
 type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan' | 'Bekor qilingan'
 type ResolutionState = 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
@@ -41,24 +41,17 @@ interface PaymentScore {
 
 interface CollectionWorkItem {
   cohort: 'OVERDUE' | 'DUE_TODAY' | 'UPCOMING'
-  outstanding: number
+  outstanding: MoneyDto
   effectiveDue: string
   preferredScheduleId: string
 }
 
 interface Nasiya {
   id: string
-  totalAmount: number
-  remainingAmount: number
-  baseRemainingAmount: number
   interestPercent: number
-  interestAmount: number
-  finalNasiyaAmount: number
-  // Native contract-currency ledger — see docs/currency-accounting-model.md.
   contractCurrency: 'UZS' | 'USD'
-  contractInterestAmount: number
-  contractFinalAmount: number
-  contractRemainingAmount: number
+  contractInterest: MoneyDto
+  ledger: NasiyaLedgerDto
   status: NasiyaStatus
   resolutionState: ResolutionState
   resolutionUpdatedAt: string | null
@@ -68,7 +61,7 @@ interface Nasiya {
   /** Live display status derived server-side from schedules (matches dashboard). */
   displayStatus: NasiyaStatus
   isOverdue: boolean
-  overdueAmount: number
+  overdueAmount: MoneyDto
   overdueCount: number
   nextPaymentDate: string | null
   device: { model: string; imei: string }
@@ -288,12 +281,12 @@ export default function NasiyalarClient({
             </Button>
           )}
           {canImport && (
-            <Button render={<Link href="/shop/nasiyalar/import" />} size="lg" variant="outline">
+            <Button render={<Link href="/shop/nasiyalar/import" />} nativeButton={false} size="lg" variant="outline">
               + Eski nasiya kiritish
             </Button>
           )}
           {canCreate && (
-            <Button render={<Link href="/shop/nasiyalar/new" />} size="lg">
+            <Button render={<Link href="/shop/nasiyalar/new" />} nativeButton={false} size="lg">
               + Yangi nasiya
             </Button>
           )}
@@ -340,14 +333,16 @@ export default function NasiyalarClient({
           {/* Desktop list — unchanged rendering, just gated to sm: and up. */}
           <div className="hidden sm:block space-y-2">
             {nasiyalar.map((n) => {
-              const paidAmount = n.finalNasiyaAmount - n.remainingAmount
-              const pct = n.finalNasiyaAmount > 0 ? Math.round((paidAmount / n.finalNasiyaAmount) * 100) : 0
-              // Money TEXT must convert from the deal's own contract currency via
-              // today's rate — never reconvert the legacy UZS snapshot (frozen at
-              // creation rate), which drifts for a USD contract as the rate moves.
-              // See docs/currency-accounting-model.md.
-              const dfmt = (amount: number) => formatDisplayMoneyFromContract(amount, n.contractCurrency, currency.currency, currency.usdUzsRate)
-              const contractPaidAmount = n.contractFinalAmount - n.contractRemainingAmount
+              const pct = n.ledger.financed.minorUnits > 0
+                ? Math.round((n.ledger.paid.minorUnits / n.ledger.financed.minorUnits) * 100)
+                : 0
+              const mfmt = (amount: MoneyDto) => {
+                const primary = formatMoneyDto(amount)
+                const approximate = amount.currency === currency.currency
+                  ? null
+                  : convertMoneyDto(amount, currency.currency, currency.fxQuote)
+                return approximate ? `${primary} · ≈ ${formatMoneyDto(approximate)}` : primary
+              }
               const collectionWorkItem = n.collectionWorkItem
               // A due-today schedule remains due today even if this same
               // contract has a different older schedule. The queue badge and
@@ -357,8 +352,9 @@ export default function NasiyalarClient({
               const collectionDateLabel = collectionWorkItem
                 ? `${collectionCohortLabels[collectionWorkItem.cohort]}: ${uzDate(collectionWorkItem.effectiveDue)}`
                 : n.nextPaymentDate ? `Keyingi to'lov: ${uzDate(n.nextPaymentDate)}` : null
-              const canPay = canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
-              const canDefer = canDeferNasiya && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              const ledgerQuarantined = n.ledger.health === 'QUARANTINED'
+              const canPay = !ledgerQuarantined && canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.ledger.remaining.minorUnits > 0
+              const canDefer = !ledgerQuarantined && canDeferNasiya && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.ledger.remaining.minorUnits > 0
               return (
                 <div
                   key={n.id}
@@ -369,7 +365,7 @@ export default function NasiyalarClient({
                   <StretchedLink href={`/shop/nasiyalar/${n.id}`} aria-label={`${n.customer.name} nasiyasini ochish`}>
                     <span className="sr-only">{n.customer.name} nasiyasini ochish</span>
                   </StretchedLink>
-                  <div className="relative z-10 flex items-start justify-between gap-4">
+                  <div className="pointer-events-none relative z-10 flex items-start justify-between gap-4">
                     <div className="pointer-events-none flex-1 min-w-0">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
@@ -382,6 +378,7 @@ export default function NasiyalarClient({
                           )}
                           {n.resolutionState !== 'ACTIVE' && <ResolutionBadge state={n.resolutionState} />}
                           <PaymentScoreBadge score={n.paymentScore} />
+                          {ledgerQuarantined && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Hisob tekshiruvi kerak</span>}
                           {n.isImported && (
                             <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
                               Eski nasiya
@@ -404,30 +401,30 @@ export default function NasiyalarClient({
                           <span className="text-xs text-zinc-500 whitespace-nowrap">{pct}%</span>
                         </div>
                         <div className="flex gap-3 mt-1 text-xs text-zinc-500">
-                          <span>To'langan: {dfmt(contractPaidAmount)}</span>
+                          <span>To'langan: {mfmt(n.ledger.paid)}</span>
                           <span>·</span>
-                          <span>Nasiya jami: {dfmt(n.contractFinalAmount)}</span>
-                          {n.contractInterestAmount > 0 && (
+                          <span>Nasiya jami: {mfmt(n.ledger.financed)}</span>
+                          {n.contractInterest.minorUnits > 0 && (
                             <>
                               <span>·</span>
-                              <span>Foiz: {dfmt(n.contractInterestAmount)}</span>
+                              <span>Foiz: {mfmt(n.contractInterest)}</span>
                             </>
                           )}
                         </div>
                       </div>
                     </div>
 
-                    <div className="relative z-10 text-right flex-shrink-0 space-y-2">
+                    <div className="text-right flex-shrink-0 space-y-2">
                       {collectionWorkItem && (
                         <div>
                           <div className={`text-sm font-bold ${collectionWorkItem.cohort === 'OVERDUE' ? 'text-red-700' : collectionWorkItem.cohort === 'DUE_TODAY' ? 'text-emerald-700' : 'text-blue-700'}`}>
-                            {dfmt(collectionWorkItem.outstanding)}
+                            {mfmt(collectionWorkItem.outstanding)}
                           </div>
                           <div className="mt-0.5 text-xs text-zinc-400">{collectionCohortLabels[collectionWorkItem.cohort]}</div>
                         </div>
                       )}
                       <div>
-                        <div className="text-sm font-bold text-zinc-900">{dfmt(n.contractRemainingAmount)}</div>
+                        <div className="text-sm font-bold text-zinc-900">{mfmt(n.ledger.remaining)}</div>
                         <div className="text-xs text-zinc-400 mt-0.5">{collectionWorkItem ? 'shartnoma qoldig\'i' : 'qolgan'}</div>
                       </div>
                       {canPay && (
@@ -435,7 +432,7 @@ export default function NasiyalarClient({
                           type="button"
                           size="sm"
                           onClick={() => setPayFor(n)}
-                          className="w-full whitespace-nowrap"
+                          className="pointer-events-auto w-full whitespace-nowrap"
                         >
                           To&apos;lov qabul qilish
                         </Button>
@@ -446,7 +443,7 @@ export default function NasiyalarClient({
                           size="sm"
                           variant="outline"
                           onClick={() => setDeferFor(n)}
-                          className="w-full whitespace-nowrap"
+                          className="pointer-events-auto w-full whitespace-nowrap"
                         >
                           Muddatni uzaytirish
                         </Button>
@@ -461,18 +458,25 @@ export default function NasiyalarClient({
             )}
           </div>
 
-          {/* Mobile card view — the card opens the detail; operational actions
-              stay directly visible instead of moving into an overflow menu. */}
+          {/* Mobile card view — tapping the card opens the profile; operational
+              actions remain directly clickable. */}
           <div className="sm:hidden space-y-3">
             {nasiyalar.map((n) => {
-              const dfmt = (amount: number) => formatDisplayMoneyFromContract(amount, n.contractCurrency, currency.currency, currency.usdUzsRate)
+              const mfmt = (amount: MoneyDto) => {
+                const primary = formatMoneyDto(amount)
+                const approximate = amount.currency === currency.currency
+                  ? null
+                  : convertMoneyDto(amount, currency.currency, currency.fxQuote)
+                return approximate ? `${primary} · ≈ ${formatMoneyDto(approximate)}` : primary
+              }
               const collectionWorkItem = n.collectionWorkItem
               const isOverdue = collectionWorkItem ? collectionWorkItem.cohort === 'OVERDUE' : n.isOverdue
               const collectionDateLabel = collectionWorkItem
                 ? `${collectionCohortLabels[collectionWorkItem.cohort]}: ${uzDate(collectionWorkItem.effectiveDue)}`
                 : n.nextPaymentDate ? `Keyingi to'lov: ${uzDate(n.nextPaymentDate)}` : '—'
-              const canPay = canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
-              const canDefer = canDeferNasiya && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0
+              const ledgerQuarantined = n.ledger.health === 'QUARANTINED'
+              const canPay = !ledgerQuarantined && canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.ledger.remaining.minorUnits > 0
+              const canDefer = !ledgerQuarantined && canDeferNasiya && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.ledger.remaining.minorUnits > 0
               return (
                 <div
                   key={n.id}
@@ -496,6 +500,7 @@ export default function NasiyalarClient({
                   <div className="pointer-events-none relative z-10 text-xs text-zinc-500">{n.device.model}</div>
                   <div className="pointer-events-none relative z-10 flex flex-wrap items-center gap-2">
                     <PaymentScoreBadge score={n.paymentScore} />
+                    {ledgerQuarantined && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Tekshiruv kerak</span>}
                     {n.isImported && (
                       <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
                         Eski nasiya
@@ -511,22 +516,21 @@ export default function NasiyalarClient({
                   <div className="pointer-events-none relative z-10 flex items-center justify-between text-xs text-zinc-500">
                     <span>{collectionDateLabel}</span>
                     <span className={`font-bold text-sm ${collectionWorkItem?.cohort === 'OVERDUE' ? 'text-red-700' : collectionWorkItem?.cohort === 'DUE_TODAY' ? 'text-emerald-700' : 'text-zinc-900'}`}>
-                      {dfmt(collectionWorkItem?.outstanding ?? n.contractRemainingAmount)} {collectionWorkItem ? collectionCohortLabels[collectionWorkItem.cohort] : 'qolgan'}
+                      {mfmt(collectionWorkItem?.outstanding ?? n.ledger.remaining)} {collectionWorkItem ? collectionCohortLabels[collectionWorkItem.cohort] : 'qolgan'}
                     </span>
                   </div>
                   {collectionWorkItem && (
                     <div className="pointer-events-none relative z-10 text-right text-xs text-zinc-500">
-                      Shartnoma qoldig'i: {dfmt(n.contractRemainingAmount)}
+                      Shartnoma qoldig'i: {mfmt(n.ledger.remaining)}
                     </div>
                   )}
-                  {(canPay || canDefer) && (
-                  <div className="relative z-10 flex items-center gap-2">
+                  <div className="pointer-events-none relative z-10 flex items-center gap-2">
                     {canPay && (
                       <Button
                         type="button"
                         size="sm"
                         onClick={() => setPayFor(n)}
-                        className="flex-1 whitespace-nowrap"
+                        className="pointer-events-auto flex-1 whitespace-nowrap"
                       >
                         To&apos;lov qabul qilish
                       </Button>
@@ -537,13 +541,12 @@ export default function NasiyalarClient({
                         size="sm"
                         variant="outline"
                         onClick={() => setDeferFor(n)}
-                        className="flex-1 whitespace-nowrap"
+                        className="pointer-events-auto flex-1 whitespace-nowrap"
                       >
                         Uzaytirish
                       </Button>
                     )}
                   </div>
-                  )}
                 </div>
               )
             })}

@@ -7,6 +7,49 @@ native contract-currency model built on top of it, in 11 phases (Nasiya
 first — full treatment; Sale/Olib-sotdim — minimal, additive; reports/import
 audited and fixed where genuinely broken).
 
+## Current Nasiya ledger contract (2026-07 repair)
+
+This section supersedes any conflicting older wording below for **Nasiya**.
+It is deliberately stricter than the initial dual-ledger rollout.
+
+1. **Frozen contract terms** own the contract currency, original amount, down
+   payment, interest, and financed total. A contract never changes currency
+   because a shop setting or an FX rate changes.
+2. **Payment and allocation rows** preserve the amount entered, applied native
+   amount, and the governed payment-time quote. A same-currency payment needs
+   no quote; a cross-currency payment converts once and freezes that quote.
+3. **Schedules are authoritative**: expected = paid + remaining on every row;
+   their native totals determine debt, progress, and status. Parent Nasiya
+   paid/remaining fields are a synchronized cache only.
+4. **API money is exact**: Nasiya APIs expose `MoneyDto { currency,
+   minorUnits }` (whole so'm or USD cents), never raw Prisma Decimal values.
+   FX uses `FxQuoteDto` with a fixed four-decimal rate, provenance,
+   effective/fetched timestamps, and freshness. React formats projections but
+   never adds raw financial fields.
+5. **Presentation is native-first**: the exact contract amount is primary.
+   A current-rate conversion is optional secondary context, clearly marked
+   `≈`; it never rewrites debt. Historical payments show their original
+   entered currency and frozen payment-time quote, never today's quote.
+6. **One reconciliation engine** projects the detail page, list, payment
+   modal, progress, and schedule data. Parent-only disagreements are
+   deterministically repairable; schedule/payment/allocation evidence
+   conflicts are quarantined for manual review and cannot accept a payment.
+7. **Repair is opt-in**: `npm run nasiya:ledger:reconcile -- --verbose` is
+   read-only by default. `--apply` requires an actor, actor type, backup/PITR
+   confirmation, and a backup reference; it repairs cached parent totals only
+   and writes an audit trail. It never rewrites payment history, schedules,
+   contract terms, or FX.
+8. **Rollout is staged**: apply the additive payment-quote migration first,
+   dry-run and review the ledger repair, confirm backup/PITR, apply the
+   approved repair, then apply the self-gating deferred database trigger.
+   The production release preflight blocks unexplained ledger or FX evidence
+   mismatches. No script deploys or financially repairs production by itself.
+
+The known locally audited contract is a deterministic parent-cache mismatch:
+the schedule ledger projects **9,799,942 UZS paid** and **58 UZS remaining**.
+It remains unchanged until the separately approved, scoped repair command is
+run against a backed-up production database.
+
 ## 1. Three currencies, three different jobs
 
 **Contract currency** — the currency the deal was actually agreed in.
@@ -64,9 +107,11 @@ through a later rate — is exactly what Phases 6 and 9 found and fixed; see
 **NasiyaSchedule**: `contractCurrency` (copied from parent, immutable),
 `contractExpectedAmount`, `contractPaidAmount`, `contractRemainingAmount`.
 
-**NasiyaPayment**: `appliedAmountInContractCurrency` (the existing `amount`
-field already served as the UZS-applied snapshot from the prior pass — no
-change needed there).
+**NasiyaPayment**: `paymentInputAmount`, `paymentInputCurrency`,
+`appliedAmountInContractCurrency`, `paymentExchangeRate`, and staged quote
+provenance fields `paymentExchangeRateSource`,
+`paymentExchangeRateEffectiveAt`, `paymentExchangeRateFetchedAt`. The legacy
+`amount` field remains a UZS reporting snapshot; it is not the debt ledger.
 
 **Sale**: same shape as Nasiya minus the schedule (`contractCurrency`,
 `contractExchangeRateAtCreation`, `contractSalePrice`, `contractAmountPaid`,

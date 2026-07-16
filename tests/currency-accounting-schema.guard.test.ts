@@ -28,6 +28,9 @@ describe('schema: additive payment/creation currency fields exist', () => {
       expect(block).toContain('paymentInputCurrency')
       expect(block).toContain('paymentExchangeRate')
     }
+    expect(nasiyaPaymentBlock).toContain('paymentExchangeRateSource')
+    expect(nasiyaPaymentBlock).toContain('paymentExchangeRateEffectiveAt')
+    expect(nasiyaPaymentBlock).toContain('paymentExchangeRateFetchedAt')
   })
 
   it('the migration is additive only (ADD COLUMN, no drops/renames)', () => {
@@ -57,7 +60,10 @@ describe('payment routes persist what the customer actually entered', () => {
     const route = read('src/app/api/nasiya/[id]/payment/route.ts')
     expect(route).toContain('paymentInputAmount: amount')
     expect(route).toContain('paymentInputCurrency: amountInput.inputCurrency')
-    expect(route).toContain('paymentExchangeRate: contractRate')
+    expect(route).toContain('paymentExchangeRate: paymentTimeRate')
+    expect(route).toContain('paymentExchangeRateSource: paymentTimeRateSource')
+    expect(route).toContain('paymentExchangeRateEffectiveAt: paymentTimeSnapshot?.effectiveAt ?? null')
+    expect(route).toContain('paymentExchangeRateFetchedAt: paymentTimeSnapshot?.fetchedAt ?? null')
   })
 
   it('sale payment stores paymentInputAmount/Currency/ExchangeRate on the SalePayment row itself', () => {
@@ -72,20 +78,27 @@ describe('payment routes persist what the customer actually entered', () => {
     expect(route).toContain('paymentInputAmount: true')
     expect(route).toContain('paymentInputCurrency: true')
     expect(route).toContain('paymentExchangeRate: true')
+    expect(route).toContain('paymentExchangeRateSource: true')
+    expect(route).toContain('paymentExchangeRateEffectiveAt: true')
+    expect(route).toContain('paymentExchangeRateFetchedAt: true')
   })
 })
 
-describe('debt/schedule math is untouched by this change (regression guard)', () => {
-  it('the payment route still uses amountUzs (not a native-currency figure) for allocation and debt math', () => {
+describe('debt/schedule math is schedule-authoritative (regression guard)', () => {
+  it('the payment route validates native money against the reconciled schedule ledger, not a parent or legacy UZS cache', () => {
     const route = read('src/app/api/nasiya/[id]/payment/route.ts')
-    expect(route).toContain('const amountUzs = amountInput.amountUzs')
-    expect(route).toContain('amountUzs,')
-    // The per-schedule allocation loop itself (and its `remainingPayment`
-    // local) was extracted to src/lib/nasiya-payment-allocation.ts (item 4
-    // rate-drift fix) so it can be unit-tested directly — the route now
-    // just passes amountUzs into the pure allocator, unchanged in kind.
+    expect(route).toContain('const currentLedger = reconcileNasiyaLedger({')
+    expect(route).toContain('const totalOutstandingContract = currentLedger.remaining')
+    expect(route).toContain('appliedMoney.minorUnits > totalOutstandingContract.minorUnits')
+    expect(route).toContain('const postPaymentLedger = reconcileNasiyaLedger({')
+    expect(route).toContain('contractRemainingToStore = moneyDtoDatabaseAmount(postPaymentLedger.remaining)')
+
+    // The allocator keeps a UZS reporting snapshot for legacy readers, but
+    // moves both UZS and contract allocation arithmetic through exact units.
     const allocation = read('src/lib/nasiya-payment-allocation.ts')
-    expect(allocation).toContain('let remainingPayment = params.amountUzs')
+    expect(allocation).toContain('remainingPaymentMinorUnits')
+    expect(allocation).toContain('remainingContractMinorUnits')
+    expect(allocation).toContain('createMoneyDto(contractCurrency, schedule.contractExpectedAmount)')
   })
 
   it('nasiya-utils.ts schedule/completion helpers are unchanged by this ticket (still UZS-based)', () => {

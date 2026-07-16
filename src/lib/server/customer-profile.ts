@@ -4,6 +4,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { computeCustomerTrustRatingFromFactors, isValidTrustTier, type CustomerTrustFactors } from '@/lib/nasiya-customer-trust'
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
+import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
 import { tashkentDayRange } from '@/lib/timezone'
 import {
   redactShopStaffCustomerProfileMetrics,
@@ -254,7 +255,7 @@ export async function getCustomerProfileOverview(input: {
       note: customer.note,
       createdAt: customer.createdAt.toISOString(),
       passportMasked: customer.passportIdentifierLast4 ? `••••${customer.passportIdentifierLast4}` : null,
-      hasPassportPhoto: Boolean(customer.passportPhotoUrl),
+      hasPassportPhoto: isPrivateUploadStoredKey({ key: customer.passportPhotoUrl, shopId: input.shopId, kind: 'passport' }),
     },
     trust,
     metrics: visibleMetrics,

@@ -71,7 +71,7 @@ export default function SalesWorkQueue() {
                   <td className="px-4 py-3 font-medium">{formatUserFacingMoney({ amount: sale.contractRemainingAmount, amountCurrency: sale.contractCurrency, displayCurrency: sale.contractCurrency })}</td>
                   <td className="px-4 py-3 text-zinc-600">{sale.dueDate ? uzDate(sale.dueDate) : '—'}</td>
                   <td className="px-4 py-3 text-zinc-600">{sale.reminderEnabled ? 'Yoqilgan' : "O'chirilgan"}</td>
-                  <td className="px-4 py-3 text-right"><Button render={<Link href={`/shop/qurilmalar/${item.id}?purpose=sale`} />} variant="outline" size="sm">Ochish</Button></td>
+                  <td className="px-4 py-3 text-right"><Button render={<Link href={`/shop/qurilmalar/${item.id}?purpose=sale`} />} nativeButton={false} variant="outline" size="sm">Ochish</Button></td>
                 </tr>
               )
             }) : (

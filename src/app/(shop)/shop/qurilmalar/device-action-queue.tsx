@@ -71,7 +71,7 @@ export default function DeviceActionQueue() {
               <div className="mt-1 text-xs text-zinc-500">{[device.color, device.storage, statusLabels[device.status]].filter(Boolean).join(' · ')}</div>
               <div className="mt-1 font-mono text-xs text-zinc-400">{device.imei}</div>
             </div>
-            <Button render={<Link href={`/shop/qurilmalar/${device.id}?purpose=device`} />} variant="outline">Amalni ochish</Button>
+            <Button render={<Link href={`/shop/qurilmalar/${device.id}?purpose=device`} />} nativeButton={false} variant="outline">Amalni ochish</Button>
           </div>
         )) : (
           <div className="p-8 text-center text-sm text-zinc-500">Mos qurilma topilmadi</div>

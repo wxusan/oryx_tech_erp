@@ -127,7 +127,9 @@ export async function proxy(req: NextRequest) {
 
   const token = await getToken({
     req,
-    secret: process.env.AUTH_SECRET ?? process.env.NEXTAUTH_SECRET,
+    // Vercel can retain an empty optional AUTH_SECRET entry. Treat it as
+    // unset so it cannot mask a configured NEXTAUTH_SECRET fallback.
+    secret: process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET,
     secureCookie: req.nextUrl.protocol === 'https:',
   })
 

@@ -194,6 +194,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
         {canCreate && (
           <Button
             render={<Link href="/shop/olib-sotdim/new" />}
+            nativeButton={false}
             size="lg"
             className="bg-zinc-900 text-white hover:bg-zinc-800"
           >

@@ -33,6 +33,7 @@ import { useShopAccess } from '@/components/shop/shop-access-context'
 import { CustomerPassportPanel } from '@/components/shop/customer-passport-panel'
 import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
 import { customerSearchRequest } from '@/lib/customer-search-transport'
+import { formatPassportIdentifierInput } from '@/lib/passport-identifier-format'
 
 const TRUST_TIER_LABELS: Record<TrustTier, string> = {
   NEW: 'Yangi mijoz',
@@ -399,12 +400,13 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
           setCreating(false)
         }
       }}>
-        <DialogContent className="max-w-md rounded">
-          <DialogHeader>
+        <DialogContent className="max-h-[calc(100dvh-2rem)] max-w-md grid-rows-[auto_minmax(0,1fr)_auto] gap-0 overflow-hidden rounded p-0">
+          <DialogHeader className="px-4 pt-4 pr-12">
             <DialogTitle>{creating ? 'Yangi mijoz' : 'Mijozni tahrirlash'}</DialogTitle>
           </DialogHeader>
-          {saveError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{saveError}</div>}
-          <div className="space-y-3">
+          <div className="min-h-0 overflow-y-auto px-4">
+            {saveError && <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{saveError}</div>}
+            <div className="space-y-3 py-4">
             <div>
               <label htmlFor="customer-name" className="block text-xs font-medium text-zinc-700 mb-1.5">Ism</label>
               <Input id="customer-name" disabled={Boolean(editing) && !canEditCustomer} value={name} onChange={(e) => setName(e.target.value)} className="h-9 text-sm border-zinc-200 rounded" />
@@ -458,9 +460,12 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
               <Input
                 id="customer-passport-identifier"
                 value={passportIdentifier}
-                onChange={(event) => setPassportIdentifier(event.target.value)}
+                onChange={(event) => setPassportIdentifier(formatPassportIdentifierInput(event.target.value))}
                 autoComplete="off"
                 spellCheck={false}
+                inputMode="text"
+                maxLength={10}
+                pattern="[A-Z]{2} [0-9]{7}"
                 placeholder={editing?.passportMasked ? `${editing.passportMasked} — o'zgartirish uchun yangisini kiriting` : 'AA 1234567'}
                 className="h-9 font-mono text-sm border-zinc-200 rounded"
               />
@@ -472,6 +477,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
               mode="single"
               selection={passportSelection}
               disabled={saving}
+              previewClassName="aspect-[4/3]"
               help={editing?.hasPassportPhoto
                 ? "Yangi rasm tanlanmasa, mavjud private rasm saqlanib qoladi. JPG, PNG yoki WEBP, 5 MB gacha."
                 : "Private saqlanadi; Telegram qurilma rasmlariga qo‘shilmaydi. JPG, PNG yoki WEBP, 5 MB gacha."}
@@ -510,7 +516,8 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
               />
             )}
           </div>
-          <DialogFooter className="gap-2">
+          </div>
+          <DialogFooter className="mx-0 mb-0 gap-2">
             <Button variant="outline" onClick={() => { setEditing(null); setCreating(false) }} className="border-zinc-200 rounded">Bekor qilish</Button>
             <Button
               disabled={

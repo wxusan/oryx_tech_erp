@@ -6,6 +6,7 @@
 import { z } from 'zod'
 import { MAX_NASIYA_INTEREST_PERCENT } from '@/lib/nasiya-utils'
 import { isValidPhone, normalizeUzPhone, PHONE_ERROR } from '@/lib/phone'
+import { isValidPassportIdentifier } from '@/lib/passport-identifier-format'
 import { isValidImei } from '@/lib/device-specs'
 import {
   BCRYPT_PASSWORD_TOO_LONG_MESSAGE,
@@ -337,6 +338,14 @@ export const createNasiyaSchema = z
       .max(100, "Ism 100 ta belgidan oshmasligi kerak")
       .optional(),
     customerPhone: phoneSchema.optional(),
+    customerAdditionalPhones: z.array(z.string()).max(5).optional(),
+    customerNote: z.string().trim().max(1000, "Mijoz izohi 1000 ta belgidan oshmasligi kerak").optional(),
+    customerPassportIdentifier: z
+      .string()
+      .trim()
+      .refine(isValidPassportIdentifier, "Pasport seriya/raqami AA 1234567 formatida bo'lishi kerak")
+      .optional(),
+    customerTrustOverride: z.enum(['NEW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH']).nullable().optional(),
     passportPhotoUrl: privateFileKeySchema.optional(),
     totalAmount: z
       .number({ error: "Umumiy summa kiritilishi shart" })
