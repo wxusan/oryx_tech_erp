@@ -344,14 +344,29 @@ try {
         backupReference,
       }
       if (logHasShopId) {
-        await client.query(`
-          INSERT INTO "Log" (id, "shopId", "actorId", "actorType", action, "targetType", "targetId", "oldValue", "newValue", note)
-          VALUES ($1, $2, $3, $4::"ActorType", 'RECONCILE_NASIYA_LEDGER_CACHE', 'Nasiya', $5, $6::jsonb, $7::jsonb, $8)
-        `, [
-          randomUUID(), nasiya.shopId, actorId, actorType, nasiya.id,
-          JSON.stringify(oldValue), JSON.stringify(newValue),
-          `Nasiya ledger cache repair run ${runId}`,
-        ])
+        await client.query('SAVEPOINT nasiya_ledger_audit')
+        try {
+          await client.query(`
+            INSERT INTO "Log" (id, "shopId", "actorId", "actorType", action, "targetType", "targetId", "oldValue", "newValue", note)
+            VALUES ($1, $2, $3, $4::"ActorType", 'RECONCILE_NASIYA_LEDGER_CACHE', 'Nasiya', $5, $6::jsonb, $7::jsonb, $8)
+          `, [
+            randomUUID(), nasiya.shopId, actorId, actorType, nasiya.id,
+            JSON.stringify(oldValue), JSON.stringify(newValue),
+            `Nasiya ledger cache repair run ${runId}`,
+          ])
+          await client.query('RELEASE SAVEPOINT nasiya_ledger_audit')
+        } catch (error) {
+          await client.query('ROLLBACK TO SAVEPOINT nasiya_ledger_audit')
+          if (error?.code !== '42703') throw error
+          await client.query(`
+            INSERT INTO "Log" (id, "actorId", "actorType", action, "targetType", "targetId", "oldValue", "newValue", note)
+            VALUES ($1, $2, $3::"ActorType", 'RECONCILE_NASIYA_LEDGER_CACHE', 'Nasiya', $4, $5::jsonb, $6::jsonb, $7)
+          `, [
+            randomUUID(), actorId, actorType, nasiya.id,
+            JSON.stringify(oldValue), JSON.stringify(newValue),
+            `Nasiya ledger cache repair run ${runId}`,
+          ])
+        }
       } else {
         await client.query(`
           INSERT INTO "Log" (id, "actorId", "actorType", action, "targetType", "targetId", "oldValue", "newValue", note)
