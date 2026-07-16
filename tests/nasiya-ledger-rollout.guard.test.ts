@@ -37,6 +37,7 @@ describe('Nasiya ledger rollout safety', () => {
     expect(repair).toContain("column_name = 'shopId'")
     expect(repair).toContain('SAVEPOINT nasiya_ledger_audit')
     expect(repair).toContain("error?.code !== '42703'")
+    expect(repair).toContain('SELECT id FROM "SuperAdmin"')
     expect(repair).not.toContain('DELETE FROM "NasiyaPayment"')
     expect(repair).not.toContain('UPDATE "NasiyaSchedule"')
   })

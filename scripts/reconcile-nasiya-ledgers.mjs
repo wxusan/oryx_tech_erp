@@ -203,7 +203,12 @@ function classify(nasiya, today) {
 async function assertActor() {
   if (!apply) return
   const table = actorType === 'SUPER_ADMIN' ? 'SuperAdmin' : 'ShopAdmin'
-  const actor = await client.query(`SELECT id, "shopId" FROM "${table}" WHERE id = $1 AND "deletedAt" IS NULL`, [actorId])
+  const actor = await client.query(
+    actorType === 'SUPER_ADMIN'
+      ? `SELECT id FROM "SuperAdmin" WHERE id = $1 AND "deletedAt" IS NULL`
+      : `SELECT id, "shopId" FROM "ShopAdmin" WHERE id = $1 AND "deletedAt" IS NULL`,
+    [actorId],
+  )
   if (actor.rowCount !== 1) throw new Error('repair actor is not active')
   if (actorType === 'SHOP_ADMIN' && actor.rows[0].shopId !== shopId) {
     throw new Error('SHOP_ADMIN actor does not belong to the requested shop')
