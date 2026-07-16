@@ -70,11 +70,11 @@ describe('nasiyalar page/client: page state, total, and pagination controls', ()
   })
 })
 
-describe('nasiyalar client: mobile card view alongside the desktop list', () => {
+describe('nasiyalar client: responsive card views', () => {
   const client = read('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')
 
-  it('desktop list is hidden below sm:, shown from sm: up', () => {
-    expect(client).toContain('hidden sm:block space-y-2')
+  it('uses a comfortable multi-column card grid from sm: up', () => {
+    expect(client).toContain('hidden sm:grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3')
   })
 
   it('a separate card list is shown only below sm:, with a full-card detail link and the payment action', () => {

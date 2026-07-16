@@ -331,8 +331,9 @@ export default function NasiyalarClient({
         <div className="text-sm text-zinc-400 py-8 text-center">Yuklanmoqda...</div>
       ) : (
         <>
-          {/* Desktop list — unchanged rendering, just gated to sm: and up. */}
-          <div className="hidden sm:block space-y-2">
+          {/* Desktop card grid — two comfortable cards on standard desktops;
+              a third column only where there is enough room for the details. */}
+          <div className="hidden sm:grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3">
             {nasiyalar.map((n) => {
               const pct = n.ledger.financed.minorUnits > 0
                 ? Math.round((n.ledger.paid.minorUnits / n.ledger.financed.minorUnits) * 100)
@@ -359,97 +360,67 @@ export default function NasiyalarClient({
               return (
                 <div
                   key={n.id}
-                  className={`relative border border-zinc-200 rounded p-4 hover:bg-zinc-50 transition-colors ${
+                  className={`relative flex min-h-[250px] flex-col rounded-lg border border-zinc-200 p-4 transition-colors hover:bg-zinc-50 ${
                     isOverdue ? 'border-l-2 border-l-red-500 pl-4' : ''
                   }`}
                 >
                   <StretchedLink href={`/shop/nasiyalar/${n.id}`} aria-label={`${n.customer.name} nasiyasini ochish`}>
                     <span className="sr-only">{n.customer.name} nasiyasini ochish</span>
                   </StretchedLink>
-                  <div className="pointer-events-none relative z-10 flex items-start justify-between gap-4">
-                    <div className="pointer-events-none flex-1 min-w-0">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
+                  <div className="pointer-events-none relative z-10 flex h-full flex-col">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="mb-1 flex flex-wrap items-center gap-1.5">
                           <span className="font-medium text-sm text-zinc-900">{n.customer.name}</span>
                           {collectionWorkItem ? <CollectionCohortBadge cohort={collectionWorkItem.cohort} /> : <StatusBadge status={n.displayStatus} />}
                           {collectionWorkItem?.cohort === 'DUE_TODAY' && n.isOverdue && (
-                            <span className="inline-block rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">
-                              Shartnomada eski qarz bor
-                            </span>
+                            <span className="inline-block rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">Eski qarz bor</span>
                           )}
                           {n.resolutionState !== 'ACTIVE' && <ResolutionBadge state={n.resolutionState} />}
                           <PaymentScoreBadge score={n.paymentScore} />
                           {ledgerQuarantined && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Hisob tekshiruvi kerak</span>}
-                          {n.isImported && (
-                            <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
-                              Eski nasiya
-                            </span>
-                          )}
+                          {n.isImported && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Eski nasiya</span>}
                         </div>
-                        <div className="text-xs text-zinc-500 mb-2">
+                        <div className="text-xs text-zinc-500">
                           {n.device.model} · {formatUzPhoneDisplay(n.customer.phone)}
-                          {collectionDateLabel && <> · {collectionDateLabel}</>}
                         </div>
-
-                        {/* Progress */}
-                        <div className="flex items-center gap-2">
-                          <div className="flex-1 w-full bg-zinc-100 h-1.5 rounded-full overflow-hidden">
-                            <div
-                              className="h-full bg-zinc-900 rounded-full"
-                              style={{ width: `${pct}%` }}
-                            />
-                          </div>
-                          <span className="text-xs text-zinc-500 whitespace-nowrap">{pct}%</span>
+                        {collectionDateLabel && <div className="mt-1 text-xs text-zinc-500">{collectionDateLabel}</div>}
+                      </div>
+                      <div className="shrink-0 text-right">
+                        <div className={`text-base font-bold ${collectionWorkItem?.cohort === 'OVERDUE' ? 'text-red-700' : collectionWorkItem?.cohort === 'DUE_TODAY' ? 'text-emerald-700' : collectionWorkItem ? 'text-blue-700' : 'text-zinc-900'}`}>
+                          {mfmt(collectionWorkItem?.outstanding ?? n.ledger.remaining)}
                         </div>
-                        <div className="flex gap-3 mt-1 text-xs text-zinc-500">
-                          <span>To'langan: {mfmt(n.ledger.paid)}</span>
-                          <span>·</span>
-                          <span>Nasiya jami: {mfmt(n.ledger.financed)}</span>
-                          {n.contractInterest.minorUnits > 0 && (
-                            <>
-                              <span>·</span>
-                              <span>Foiz: {mfmt(n.contractInterest)}</span>
-                            </>
-                          )}
-                        </div>
+                        <div className="mt-0.5 text-xs text-zinc-400">{collectionWorkItem ? 'qabul qilinadi' : 'qolgan'}</div>
                       </div>
                     </div>
 
-                    <div className="text-right flex-shrink-0 space-y-2">
-                      {collectionWorkItem && (
-                        <div>
-                          <div className={`text-sm font-bold ${collectionWorkItem.cohort === 'OVERDUE' ? 'text-red-700' : collectionWorkItem.cohort === 'DUE_TODAY' ? 'text-emerald-700' : 'text-blue-700'}`}>
-                            {mfmt(collectionWorkItem.outstanding)}
-                          </div>
-                          <div className="mt-0.5 text-xs text-zinc-400">{collectionCohortLabels[collectionWorkItem.cohort]}</div>
-                        </div>
-                      )}
-                      <div>
-                        <div className="text-sm font-bold text-zinc-900">{mfmt(n.ledger.remaining)}</div>
-                        <div className="text-xs text-zinc-400 mt-0.5">{collectionWorkItem ? 'shartnoma qoldig\'i' : 'qolgan'}</div>
+                    <div className="mt-4 flex items-center gap-2">
+                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100">
+                        <div className="h-full rounded-full bg-zinc-900" style={{ width: `${pct}%` }} />
                       </div>
-                      {canPay && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          onClick={() => setPayFor(n)}
-                          className="pointer-events-auto w-full whitespace-nowrap"
-                        >
-                          To&apos;lov qabul qilish
-                        </Button>
-                      )}
-                      {canDefer && (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setDeferFor(n)}
-                          className="pointer-events-auto w-full whitespace-nowrap"
-                        >
-                          Muddatni uzaytirish
-                        </Button>
-                      )}
+                      <span className="text-xs text-zinc-500">{pct}%</span>
                     </div>
+                    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-zinc-500">
+                      <span>To&apos;langan: <span className="font-medium text-zinc-700">{mfmt(n.ledger.paid)}</span></span>
+                      <span className="text-right">Jami: <span className="font-medium text-zinc-700">{mfmt(n.ledger.financed)}</span></span>
+                      {collectionWorkItem && <span>Shartnoma qoldig&apos;i: <span className="font-medium text-zinc-700">{mfmt(n.ledger.remaining)}</span></span>}
+                      {n.contractInterest.minorUnits > 0 && <span className="text-right">Foiz: <span className="font-medium text-zinc-700">{mfmt(n.contractInterest)}</span></span>}
+                    </div>
+
+                    {(canPay || canDefer) && (
+                      <div className="mt-auto grid grid-cols-2 gap-2 pt-4">
+                        {canPay && (
+                          <Button type="button" size="sm" onClick={() => setPayFor(n)} className="pointer-events-auto w-full whitespace-nowrap">
+                            To&apos;lov qabul qilish
+                          </Button>
+                        )}
+                        {canDefer && (
+                          <Button type="button" size="sm" variant="outline" onClick={() => setDeferFor(n)} className="pointer-events-auto w-full whitespace-nowrap">
+                            Muddatni uzaytirish
+                          </Button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               )

@@ -24,6 +24,7 @@ import type { ZodError } from 'zod'
 import { formatDeviceStorage, deviceConditionLabel, normalizeImei } from '@/lib/device-specs'
 import { displayImei } from '@/lib/device-display'
 import { principalHasPermission } from '@/lib/server/shop-access'
+import { computeSaleContractMargin } from '@/lib/nasiya-contract'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED', 'DELETED'] as const
 
@@ -107,6 +108,11 @@ export async function GET(req: NextRequest) {
             imei: true,
             status: true,
             createdAt: true,
+            // These never leave the server. They are only used to calculate
+            // the sale margin for the shop owner below.
+            purchaseCurrency: true,
+            purchaseInputAmount: true,
+            purchaseAmountUzsSnapshot: true,
             ...(actionPickerPurpose === 'sale'
               ? {
                   sales: {
@@ -120,6 +126,7 @@ export async function GET(req: NextRequest) {
                       contractCurrency: true,
                       contractSalePrice: true,
                       contractRemainingAmount: true,
+                      contractExchangeRateAtCreation: true,
                       paymentMethod: true,
                       paidFully: true,
                       createdAt: true,
@@ -133,16 +140,38 @@ export async function GET(req: NextRequest) {
         prisma.device.count({ where }),
       ])
       return ok({
-        items: rows.map((row) => ({
-          id: row.id,
-          model: row.model,
-          color: row.color,
-          storage: row.storage,
-          imei: displayImei(row.imei),
-          status: row.status,
-          createdAt: row.createdAt,
-          ...('sales' in row ? { sale: row.sales[0] ?? null } : {}),
-        })),
+        items: rows.map((row) => {
+          const sale = 'sales' in row ? row.sales[0] : null
+          const contractProfit = includeOwnerFinancials && sale
+            ? computeSaleContractMargin(
+                Number(sale.contractSalePrice),
+                sale.contractCurrency,
+                sale.contractExchangeRateAtCreation == null ? null : Number(sale.contractExchangeRateAtCreation),
+                {
+                  purchaseCurrency: row.purchaseCurrency,
+                  purchaseInputAmount: Number(row.purchaseInputAmount),
+                  purchaseAmountUzsSnapshot: Number(row.purchaseAmountUzsSnapshot),
+                },
+              )
+            : undefined
+
+          return {
+            id: row.id,
+            model: row.model,
+            color: row.color,
+            storage: row.storage,
+            imei: displayImei(row.imei),
+            status: row.status,
+            createdAt: row.createdAt,
+            ...('sales' in row
+              ? {
+                  sale: sale
+                    ? { ...sale, ...(includeOwnerFinancials ? { contractProfit } : {}) }
+                    : null,
+                }
+              : {}),
+          }
+        }),
         total,
         skip,
         take,
