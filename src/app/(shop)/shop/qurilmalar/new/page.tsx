@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import Link from 'next/link'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { StorageInput } from '@/components/ui/storage-input'
@@ -45,6 +45,7 @@ export default function NewDevicePage() {
 
 function AuthorizedNewDevicePage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { can } = useShopAccess()
   const queryClient = useQueryClient()
   const queryScope = useAuthenticatedQueryScope()
@@ -70,6 +71,9 @@ function AuthorizedNewDevicePage() {
     uploadEndpoint: '/api/uploads/device',
     maxFiles: 10,
   })
+  const openedFromNewOperation = searchParams.get('from') === 'yangi-operatsiya'
+  const backHref = openedFromNewOperation ? '/shop/yangi-operatsiya' : '/shop/qurilmalar'
+  const backLabel = openedFromNewOperation ? 'Orqaga qaytish' : 'Qurilmalarga qaytish'
 
   const set = (field: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }))
@@ -131,9 +135,9 @@ function AuthorizedNewDevicePage() {
 
   return (
     <div className="p-6 max-w-2xl space-y-5">
-      <Link href="/shop/qurilmalar" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
+      <Link href={backHref} className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
         <ArrowLeft size={14} />
-        Qurilmalarga qaytish
+        {backLabel}
       </Link>
 
       <div>

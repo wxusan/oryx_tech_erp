@@ -7,7 +7,7 @@ import type { ShopPermissionCode } from '@/lib/access-control'
 
 const operations = [
   {
-    href: '/shop/qurilmalar/new',
+    href: '/shop/qurilmalar/new?from=yangi-operatsiya',
     icon: Smartphone,
     title: "Yangi qurilma qo'shish",
     description: "Yangi kelgan qurilmani omborga kiriting",
