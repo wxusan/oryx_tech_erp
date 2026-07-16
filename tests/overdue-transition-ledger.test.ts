@@ -11,6 +11,7 @@ describe('hasValidNasiyaScheduleNativeLedger', () => {
       contractExpectedAmount: '120.00',
       contractPaidAmount: '0.00',
       contractRemainingAmount: '120.00',
+      contractCurrency: 'USD',
       status: 'PENDING',
     })).toBe(true)
   })
@@ -20,6 +21,7 @@ describe('hasValidNasiyaScheduleNativeLedger', () => {
       contractExpectedAmount: '120.00',
       contractPaidAmount: '0.00',
       contractRemainingAmount: '0.00',
+      contractCurrency: 'USD',
       status: 'PENDING',
     })).toBe(false)
   })
@@ -29,6 +31,7 @@ describe('hasValidNasiyaScheduleNativeLedger', () => {
       contractExpectedAmount: '120.00',
       contractPaidAmount: '10.00',
       contractRemainingAmount: '110.00',
+      contractCurrency: 'USD',
       status: 'PAID',
     })).toBe(false)
   })

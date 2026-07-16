@@ -122,6 +122,32 @@ describe('allocateNasiyaPayment — rate-drift edge case (item 4)', () => {
     expect(update.newContractRemainingAmount).toBe(0)
   })
 
+  it('accepts and closes the exact 58 so\u2018m residual identified by the ledger audit', () => {
+    const residual = schedule({
+      expectedAmount: 9_800_000,
+      paidAmount: 9_799_942,
+      contractExpectedAmount: 9_800_000,
+      contractPaidAmount: 9_799_942,
+    })
+    expect(totalContractOutstanding([residual], 'UZS')).toBe(58)
+
+    const updates = allocateNasiyaPayment({
+      schedules: [residual],
+      amountUzs: 58,
+      appliedAmountInContractCurrency: 58,
+      contractCurrency: 'UZS',
+      now: NOW,
+    })
+
+    expect(updates).toHaveLength(1)
+    expect(updates[0]).toMatchObject({
+      appliedContract: 58,
+      newContractRemainingAmount: 0,
+      status: 'PAID',
+      markPaidAt: true,
+    })
+  })
+
   it('overdue-ness is still due-date-driven when NOT fully paid (unchanged behavior)', () => {
     const overdueSchedule = schedule({ dueDate: PAST_DUE })
     const updates = allocateNasiyaPayment({

@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Button } from '@/components/ui/button'
 import { DateInput } from '@/components/ui/date-input'
 import { MoneyInput } from '@/components/ui/money-input'
@@ -18,7 +19,6 @@ import {
   moneyDtoEquals,
   moneyDtoToAmount,
   subtractMoneyDto,
-  type CurrencyCode,
   type MoneyDto,
 } from '@/lib/currency'
 import { uzDate, uzMonthYear } from '@/lib/dates'
@@ -26,6 +26,10 @@ import { useShopCurrency } from '@/lib/use-shop-currency'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import { commitNavigationMutation } from '@/lib/client-events'
 import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
+import { useNasiyaOperationContext } from '@/lib/use-nasiya-operation-context'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { queryKeys } from '@/lib/query-keys'
+import type { NasiyaOperationContext, NasiyaOperationSchedule, NasiyaPaymentMutationResult } from '@/lib/nasiya-operation-context'
 
 /**
  * The single receive-payment modal used by BOTH the nasiya detail page and the
@@ -35,18 +39,7 @@ import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempote
  * — no payment logic is duplicated here.
  */
 
-interface Schedule {
-  id: string
-  monthNumber: number
-  dueDate: string
-  delayedUntil: string | null
-  status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
-  expected: MoneyDto
-  paid: MoneyDto
-  remaining: MoneyDto
-  legacyExpected: MoneyDto
-  legacyPaid: MoneyDto
-}
+type Schedule = NasiyaOperationSchedule
 
 type RowStatus = 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
 
@@ -76,28 +69,27 @@ export interface NasiyaPaymentModalProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   /** Called after a successful payment so the caller can revalidate. */
-  onSuccess: () => void
+  onSuccess: (result: NasiyaPaymentMutationResult) => void
   /** Optional context shown instantly while schedules load. */
   customerName?: string
   deviceName?: string
   /** Queue actions preselect this still-open schedule when it remains valid. */
   preferredScheduleId?: string
+  /** Detail pages can immediately reuse their already-loaded schedule DTO. */
+  initialContext?: NasiyaOperationContext
 }
 
-export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, customerName, deviceName, preferredScheduleId }: NasiyaPaymentModalProps) {
+export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, customerName, deviceName, preferredScheduleId, initialContext }: NasiyaPaymentModalProps) {
   const paymentCommand = useLogicalCommandIdempotency()
   const { currency } = useShopCurrency()
-
-  const [schedules, setSchedules] = useState<Schedule[]>([])
-  const [loadingData, setLoadingData] = useState(false)
-  const [fetched, setFetched] = useState<{
-    customerName: string
-    deviceName: string
-  } | null>(null)
-  // Frozen at creation, never changes with the shop's display toggle — see
-  // docs/currency-accounting-model.md.
-  const [contractCurrency, setContractCurrency] = useState<CurrencyCode>('UZS')
-  const [ledgerRemaining, setLedgerRemaining] = useState<MoneyDto | null>(null)
+  const queryClient = useQueryClient()
+  const scope = useAuthenticatedQueryScope()
+  const contextQuery = useNasiyaOperationContext({
+    nasiyaId,
+    intent: 'payment',
+    enabled: open,
+    initialData: initialContext,
+  })
 
   const [payAmount, setPayAmount] = useState('')
   const [payMethod, setPayMethod] = useState('')
@@ -134,13 +126,11 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
     return converted ? `${primary} · ≈ ${formatMoneyDto(converted)}` : primary
   }
 
-  // Load the nasiya's schedules whenever the modal opens. All setState lives
-  // inside `load` (not the effect body) to keep it off the sync-in-effect path.
+  // Reset user-entered fields immediately as the dialog shell opens. Query
+  // loading is separate so React Query can dedupe and abort it safely.
   useEffect(() => {
     if (!open || !nasiyaId) return
-    let cancelled = false
-    const load = async () => {
-      setLoadingData(true)
+    const frame = window.requestAnimationFrame(() => {
       setPayError('')
       setPayAmount('')
       setPayMethod('')
@@ -151,40 +141,32 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
       setSplitAmount1Input('')
       setSplitAmount2Input('')
       setSplitAmount2Touched(false)
-      try {
-        const r = await fetch(`/api/nasiya/${nasiyaId}`)
-        const json = await r.json()
-        if (cancelled) return
-        if (!json.success) {
-          setPayError(json.error || 'Nasiya topilmadi')
-          return
-        }
-        const rows: Schedule[] = json.data.schedules ?? []
-        setSchedules(rows)
-        setContractCurrency((json.data.contractCurrency as CurrencyCode) ?? 'UZS')
-        setLedgerRemaining(json.data.ledger?.remaining ?? null)
-        setFetched({
-          customerName: json.data.customer?.name ?? '',
-          deviceName: json.data.device?.model ?? '',
-        })
-        const pending = rows
-          .filter((s) => s.status !== 'CANCELLED' && s.remaining?.minorUnits > 0)
-          .sort((a, b) => a.monthNumber - b.monthNumber)[0]
-        const preferred = preferredScheduleId
-          ? rows.find((schedule) => schedule.id === preferredScheduleId && schedule.status !== 'CANCELLED' && schedule.remaining?.minorUnits > 0)
-          : undefined
-        setSelectedScheduleId(preferred?.id ?? pending?.id ?? '')
-      } catch {
-        if (!cancelled) setPayError('Xatolik yuz berdi')
-      } finally {
-        if (!cancelled) setLoadingData(false)
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [open, nasiyaId, preferredScheduleId])
+      setSelectedScheduleId('')
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [open, nasiyaId])
+
+  const schedules = useMemo(() => contextQuery.data?.schedules ?? [], [contextQuery.data?.schedules])
+  // Frozen at creation, never changes with the shop's display toggle.
+  const contractCurrency = contextQuery.data?.contractCurrency ?? 'UZS'
+  const ledgerRemaining = contextQuery.data?.ledger.remaining ?? null
+  const loadingData = open && contextQuery.isPending && !contextQuery.data
+  const contextError = contextQuery.error instanceof Error ? contextQuery.error.message : ''
+
+  useEffect(() => {
+    if (!open || schedules.length === 0) return
+    const frame = window.requestAnimationFrame(() => {
+      const pending = schedules
+        .filter((schedule) => schedule.status !== 'CANCELLED' && schedule.remaining.minorUnits > 0)
+        .sort((a, b) => a.monthNumber - b.monthNumber)
+      setSelectedScheduleId((current) => {
+        if (current && pending.some((schedule) => schedule.id === current)) return current
+        const preferred = preferredScheduleId ? pending.find((schedule) => schedule.id === preferredScheduleId) : undefined
+        return preferred?.id ?? pending[0]?.id ?? ''
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [open, preferredScheduleId, schedules])
 
   const pendingSchedules = schedules
     .filter((s) => s.status !== 'CANCELLED' && s.remaining?.minorUnits > 0)
@@ -310,12 +292,41 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
       const json = await res.json()
       if (res.ok && json.success) {
         paymentCommand.committed()
-        await commitNavigationMutation({
+        const receipt = json.data as NasiyaPaymentMutationResult
+        for (const intent of ['payment', 'defer'] as const) {
+          queryClient.setQueryData<NasiyaOperationContext>(
+            queryKeys.nasiyas.operationContext(scope, nasiyaId, intent),
+            (current) => {
+              if (!current) return current
+              const allocations = new Map((receipt.allocations ?? []).map((allocation) => [allocation.scheduleId, allocation.applied]))
+              return {
+                ...current,
+                ledger: {
+                  ...current.ledger,
+                  ...(receipt.ledger?.remaining ? { remaining: receipt.ledger.remaining } : {}),
+                  ...(receipt.ledger?.status ? { status: receipt.ledger.status } : {}),
+                },
+                schedules: current.schedules.map((schedule) => {
+                  const applied = allocations.get(schedule.id)
+                  if (!applied) return schedule
+                  const remaining = subtractMoneyDto(schedule.remaining, applied)
+                  return {
+                    ...schedule,
+                    paid: addMoneyDto(schedule.paid, applied),
+                    remaining,
+                    status: remaining.minorUnits === 0 ? 'PAID' : schedule.status === 'PENDING' ? 'PARTIAL' : schedule.status,
+                  }
+                }),
+              }
+            },
+          )
+        }
+        void commitNavigationMutation({
           kind: 'nasiya.paymentRecorded',
           nasiyaId,
         }).catch(() => undefined)
         onOpenChange(false)
-        onSuccess()
+        onSuccess(receipt)
       } else {
         paymentCommand.rejected(res.status)
         setPayError(json.error || "To'lovda xatolik")
@@ -327,8 +338,8 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
     }
   }
 
-  const subtitleCustomer = fetched?.customerName || customerName || ''
-  const subtitleDevice = fetched?.deviceName || deviceName || ''
+  const subtitleCustomer = contextQuery.data?.customer.name || customerName || ''
+  const subtitleDevice = contextQuery.data?.device.model || deviceName || ''
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -341,7 +352,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
         </DialogHeader>
 
         <div className="max-h-[65vh] space-y-4 overflow-y-auto px-5 py-4">
-          {payError && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{payError}</div>}
+          {(payError || contextError) && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{payError || contextError}</div>}
 
           {loadingData ? (
             <div className="py-6 text-center text-sm text-zinc-400">Yuklanmoqda...</div>

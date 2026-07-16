@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { beginLoginSubmitTiming, completeLoginSubmitTiming } from '@/lib/login-performance'
 
 type LoginMode = 'admin' | 'shop'
 type ValidatedSession = { role?: string }
@@ -58,7 +59,6 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
       void redirectIfSignedIn()
     }
 
-    void redirectIfSignedIn()
     window.addEventListener('pageshow', handlePageShow)
 
     return () => {
@@ -71,6 +71,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
     event.preventDefault()
     setLoading(true)
     setError(null)
+    const loginTimingMark = beginLoginSubmitTiming(mode)
 
     const result = await signIn(isAdmin ? 'superadmin' : 'shopadmin', {
       login: form.login,
@@ -78,6 +79,7 @@ function LoginFormInner({ mode }: { mode: LoginMode }) {
       ...(!isAdmin ? { rememberMe: form.rememberMe ? 'true' : 'false' } : {}),
       redirect: false,
     })
+    completeLoginSubmitTiming(mode, loginTimingMark, !result?.error)
 
     setLoading(false)
     if (result?.error) {

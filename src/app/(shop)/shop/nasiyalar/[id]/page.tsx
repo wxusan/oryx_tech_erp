@@ -14,7 +14,7 @@ import { Field } from '@/components/ui/field'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Progress } from '@/components/ui/progress'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog'
-import { addMoneyDto, convertMoneyDto, formatMoneyDto, type FxQuoteDto, type MoneyDto } from '@/lib/currency'
+import { addMoneyDto, convertMoneyDto, formatMoneyDto, subtractMoneyDto, type FxQuoteDto, type MoneyDto } from '@/lib/currency'
 import { uzDate } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
@@ -30,6 +30,11 @@ import {
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 import type { NasiyaLedgerDto } from '@/lib/nasiya-ledger'
+import type {
+  NasiyaDeferMutationResult,
+  NasiyaOperationContext,
+  NasiyaPaymentMutationResult,
+} from '@/lib/nasiya-operation-context'
 
 type NasiyaPayment = NasiyaPaymentDisplayRecord
 type ResolutionState = 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
@@ -179,11 +184,17 @@ function AuthorizedNasiyaDetailPage() {
   const [nasiya, setNasiya] = useState<Nasiya | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [detailDataLoaded, setDetailDataLoaded] = useState(false)
+  const [detailDataLoading, setDetailDataLoading] = useState(false)
 
   const [passportUrl, setPassportUrl] = useState<string | null>(null)
   const [unavailablePassportCustomerId, setUnavailablePassportCustomerId] = useState<string | null>(null)
+  const [passportRequested, setPassportRequested] = useState(false)
   const [reminderSubmitting, setReminderSubmitting] = useState(false)
   const [logs, setLogs] = useState<NasiyaLog[]>([])
+  const [logsRequested, setLogsRequested] = useState(false)
+  const [logsLoading, setLogsLoading] = useState(false)
+  const [logsLoaded, setLogsLoaded] = useState(false)
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [deferModalOpen, setDeferModalOpen] = useState(false)
@@ -202,32 +213,90 @@ function AuthorizedNasiyaDetailPage() {
   const [editError, setEditError] = useState('')
   const [editFieldErrors, setEditFieldErrors] = useState<{ customerName?: string; customerPhone?: string }>({})
 
-  const fetchNasiya = useCallback(() => {
+  const fetchNasiya = useCallback((view: 'summary' | 'full' = 'summary') => {
     if (!id) return
-    fetch(`/api/nasiya/${id}`)
+    if (view === 'full') setDetailDataLoading(true)
+    fetch(`/api/nasiya/${id}?view=${view}`)
       .then((r) => r.json())
       .then((json) => {
         if (json.success) {
           setNasiya(json.data)
+          if (view === 'full') setDetailDataLoaded(true)
+          else setDetailDataLoaded(false)
         } else {
           setError(json.error || 'Xatolik yuz berdi')
         }
       })
       .catch(() => setError('Xatolik yuz berdi'))
-      .finally(() => setLoading(false))
+      .finally(() => {
+        if (view === 'summary') setLoading(false)
+        else setDetailDataLoading(false)
+      })
   }, [id])
 
   useEffect(() => {
-    fetchNasiya()
+    const frame = window.requestAnimationFrame(() => fetchNasiya())
+    return () => window.cancelAnimationFrame(frame)
   }, [fetchNasiya])
 
-  // Fetch through the tenant-scoped customer endpoint; the private storage
-  // key never enters browser state, URLs, logs, or query caches.
+  function patchOperationLedger(current: Nasiya, update: NasiyaPaymentMutationResult['ledger'] | NasiyaDeferMutationResult['ledger']) {
+    const nextStatus = update?.status
+    return {
+      ...current,
+      ledger: {
+        ...current.ledger,
+        ...(update?.paid ? { paid: update.paid } : {}),
+        ...(update?.remaining ? { remaining: update.remaining } : {}),
+        ...(nextStatus ? { status: nextStatus, isOverdue: nextStatus === 'OVERDUE' } : {}),
+      },
+      ...(nextStatus ? { status: nextStatus, displayStatus: nextStatus } : {}),
+    }
+  }
+
+  function applyPaymentResult(receipt: NasiyaPaymentMutationResult) {
+    setNasiya((current) => {
+      if (!current) return current
+      const allocations = new Map((receipt.allocations ?? []).map((allocation) => [allocation.scheduleId, allocation.applied]))
+      const patched = patchOperationLedger(current, receipt.ledger)
+      return {
+        ...patched,
+        schedules: patched.schedules.map((schedule) => {
+          const applied = allocations.get(schedule.id)
+          if (!applied) return schedule
+          const remaining = subtractMoneyDto(schedule.remaining, applied)
+          return {
+            ...schedule,
+            paid: addMoneyDto(schedule.paid, applied),
+            remaining,
+            status: remaining.minorUnits === 0 ? 'PAID' : schedule.status === 'PENDING' ? 'PARTIAL' : schedule.status,
+          }
+        }),
+      }
+    })
+  }
+
+  function applyDeferResult(result: NasiyaDeferMutationResult) {
+    if (!result.nasiyaScheduleId || !result.newDueDate) return
+    setNasiya((current) => {
+      if (!current) return current
+      const patched = patchOperationLedger(current, result.ledger)
+      return {
+        ...patched,
+        schedules: patched.schedules.map((schedule) => schedule.id === result.nasiyaScheduleId
+          ? { ...schedule, status: 'DEFERRED', delayedUntil: result.newDueDate! }
+          : schedule),
+      }
+    })
+  }
+
+  // Fetch through the tenant-scoped customer endpoint only when the user
+  // chooses to view the image; the private storage key never enters browser
+  // state, URLs, logs, or query caches.
   const passportCustomerId = nasiya?.customer?.id ?? null
   const hasPassportPhoto = nasiya?.customer?.hasPassportPhoto ?? false
   const passportPhotoAvailable = hasPassportPhoto && unavailablePassportCustomerId !== passportCustomerId
   useEffect(() => {
-    if (!canViewPassportPhoto || !passportCustomerId || !hasPassportPhoto) return
+    if (!passportRequested || !canViewPassportPhoto || !passportCustomerId || !hasPassportPhoto) return
     let cancelled = false
     fetch(`/api/customers/${encodeURIComponent(passportCustomerId)}/passport/image`)
       .then(async (response) => {
@@ -249,13 +318,13 @@ function AuthorizedNasiyaDetailPage() {
     return () => {
       cancelled = true
     }
-  }, [canViewPassportPhoto, hasPassportPhoto, passportCustomerId])
+  }, [canViewPassportPhoto, hasPassportPhoto, passportCustomerId, passportRequested])
 
-  // Fetch recent action logs for this nasiya (reminder toggles, payments, etc.).
+  // Audit rows are loaded only after the user opens their history section.
   const nasiyaShopId = nasiya?.shopId
   const nasiyaId = nasiya?.id
   useEffect(() => {
-    if (!canViewLogs || !nasiyaId) return
+    if (!logsRequested || !canViewLogs || !nasiyaId) return
     const targetIds = [nasiyaId, ...(nasiya?.schedules?.map((s) => s.id) ?? [])]
     const url = new URL('/api/logs', window.location.origin)
     if (nasiyaShopId) url.searchParams.set('shopId', nasiyaShopId)
@@ -267,15 +336,27 @@ function AuthorizedNasiyaDetailPage() {
       .then((json) => {
         if (cancelled || !json.success) return
         setLogs(json.data?.logs ?? [])
+        setLogsLoaded(true)
       })
       .catch(() => {
-        if (!cancelled) setLogs([])
+        if (!cancelled) {
+          setLogs([])
+          setLogsLoaded(true)
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setLogsLoading(false)
       })
     return () => {
       cancelled = true
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [canViewLogs, nasiyaId, nasiyaShopId])
+  }, [canViewLogs, logsRequested, nasiya?.schedules, nasiyaId, nasiyaShopId])
+
+  function requestLogs() {
+    setLogsLoaded(false)
+    setLogsLoading(true)
+    setLogsRequested(true)
+  }
 
   function openEdit() {
     setEditCustomerName(nasiya?.customer.name ?? '')
@@ -362,11 +443,14 @@ function AuthorizedNasiyaDetailPage() {
       })
       const json = await res.json()
       if (res.ok && json.success) {
-        await commitNavigationMutation({
+        setNasiya((current) => current ? {
+          ...current,
+          reminderEnabled: !current.reminderEnabled,
+        } : current)
+        void commitNavigationMutation({
           kind: 'nasiya.reminderUpdated',
           nasiyaId: nasiya.id,
         })
-        fetchNasiya()
       }
     } catch {
       // silent — state is re-derived from server on next fetch
@@ -403,10 +487,9 @@ function AuthorizedNasiyaDetailPage() {
       }
       resolutionCommand.committed()
       const kind = resolutionAction === 'ARCHIVE' ? 'nasiya.archived' : 'nasiya.reopened'
-      await commitNavigationMutation({ kind, nasiyaId: nasiya.id })
+      void commitNavigationMutation({ kind, nasiyaId: nasiya.id })
       setResolutionAction(null)
-      setLoading(true)
-      fetchNasiya()
+      fetchNasiya(detailDataLoaded ? 'full' : 'summary')
     } catch {
       setResolutionError("Holatni o'zgartirishda xatolik")
     } finally {
@@ -462,6 +545,18 @@ function AuthorizedNasiyaDetailPage() {
   const isOperationallyActive = nasiya.resolutionState === 'ACTIVE'
   const ledgerQuarantined = ledger.health === 'QUARANTINED'
   const resolutionEvents = nasiya.resolutionEvents ?? []
+  const operationContext: NasiyaOperationContext = {
+    id: nasiya.id,
+    customer: { name: nasiya.customer.name },
+    device: { model: nasiya.device.model },
+    contractCurrency: nasiya.contractCurrency,
+    ledger: {
+      remaining: nasiya.ledger.remaining,
+      status: nasiya.ledger.status,
+      health: nasiya.ledger.health,
+    },
+    schedules: nasiya.schedules,
+  }
   const statusBadgeStyles: Record<string, string> = {
     ACTIVE: 'bg-zinc-100 text-zinc-700',
     OVERDUE: 'bg-red-100 text-red-700',
@@ -768,7 +863,11 @@ function AuthorizedNasiyaDetailPage() {
       {canViewPassportPhoto && <div className="border border-zinc-200 rounded overflow-hidden">
         <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200 font-semibold text-sm text-zinc-900">Pasport rasmi</div>
         <div className="p-4">
-          {passportPhotoAvailable && passportUrl ? (
+          {passportPhotoAvailable && !passportRequested ? (
+            <button type="button" onClick={() => setPassportRequested(true)} className="rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50">
+              Pasport rasmini ko&apos;rish
+            </button>
+          ) : passportPhotoAvailable && passportUrl ? (
             <div className="relative aspect-[4/3] max-h-80 w-full overflow-hidden rounded border border-zinc-200 bg-zinc-50">
               <Image src={passportUrl} alt="Pasport rasmi" fill sizes="(max-width: 640px) 100vw, 720px" unoptimized className="object-contain" />
             </div>
@@ -785,6 +884,12 @@ function AuthorizedNasiyaDetailPage() {
         payments={nasiya.payments ?? []}
         logs={logs}
         formatMoney={mfmt}
+        historyLoaded={detailDataLoaded}
+        historyLoading={detailDataLoading}
+        onLoadHistory={() => fetchNasiya('full')}
+        logsLoaded={!canViewLogs || logsLoaded}
+        logsLoading={logsLoading}
+        onLoadLogs={canViewLogs ? requestLogs : undefined}
       />
 
       {/* Payment modal — shared component, also used on the nasiyalar list */}
@@ -795,10 +900,8 @@ function AuthorizedNasiyaDetailPage() {
           onOpenChange={setPaymentModalOpen}
           customerName={nasiya.customer.name}
           deviceName={nasiya.device.model}
-          onSuccess={() => {
-            setLoading(true)
-            fetchNasiya()
-          }}
+          initialContext={operationContext}
+          onSuccess={applyPaymentResult}
         />
       )}
 
@@ -809,10 +912,8 @@ function AuthorizedNasiyaDetailPage() {
           onOpenChange={setDeferModalOpen}
           customerName={nasiya.customer.name}
           deviceName={nasiya.device.model}
-          onSuccess={() => {
-            setLoading(true)
-            fetchNasiya()
-          }}
+          initialContext={operationContext}
+          onSuccess={applyDeferResult}
         />
       )}
 

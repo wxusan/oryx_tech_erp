@@ -13,7 +13,8 @@ describe('currency source guards', () => {
     expect(src).toContain('https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/')
     expect(src).toContain('latestStoredUsdRate()')
     expect(src).toContain("latestStoredUsdRate('CBU')")
-    expect(src).toContain('rate: Number(latest.rate), source: latest.source, fetchedAt: latest.fetchedAt')
+    expect(src).toContain("freshness: 'FALLBACK'")
+    expect(src).toContain('effectiveAt: latest.effectiveDate')
     expect(src).toContain('prisma.currencyRate.create')
     expect(src).toContain('prisma.opsEvent.create')
     expect(src).toContain('currency.rate_fetch_failed')
@@ -50,13 +51,19 @@ describe('currency source guards', () => {
       'src/app/api/devices/[id]/sell/route.ts',
       'src/app/api/devices/[id]/nasiya/route.ts',
       'src/app/api/sales/[id]/payment/route.ts',
-      'src/app/api/nasiya/[id]/payment/route.ts',
       'src/app/api/nasiya/import/route.ts',
     ]) {
       const src = read(file)
       expect(src, file).toMatch(/moneyInputToUzs|createMoneyInputConverter/)
       expect(src, file).toContain('moneyInputMeta')
     }
+
+    // Nasiya payments have a stricter source-of-truth boundary: exact money
+    // DTOs are created first, then converted once with the frozen quote.
+    const nasiyaPaymentRoute = read('src/app/api/nasiya/[id]/payment/route.ts')
+    expect(nasiyaPaymentRoute).toContain('createMoneyDto(inputCurrency, amount)')
+    expect(nasiyaPaymentRoute).toContain('convertMoneyDto(inputMoney, contractCurrency, conversionQuote)')
+    expect(nasiyaPaymentRoute).toContain('createFxQuoteDto({')
 
     // Returns settle against an existing contract and therefore use the pure
     // normalizer with one route-scoped rate snapshot, then persist dedicated

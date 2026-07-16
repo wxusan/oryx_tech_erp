@@ -43,12 +43,12 @@ describe('nasiyalar list client renders the derived display status', () => {
   })
 })
 
-describe('nasiya detail page derives each schedule from contract currency', () => {
+describe('nasiya detail page renders server-reconciled schedule DTOs', () => {
   const src = read('src/components/shop/nasiya-history-sections.tsx')
 
-  it('uses deriveContractScheduleStatus for the row badge instead of the raw status', () => {
-    expect(src).toContain('deriveContractScheduleStatus(row, contractCurrency).displayStatus')
-    expect(src).toContain('deriveContractScheduleStatus')
+  it('derives the row badge from its reconciled remaining amount instead of trusting a stale raw label', () => {
+    expect(src).toContain('function rowStatus(row: NasiyaScheduleRow): RowStatus')
+    expect(src).toContain('if (row.remaining.minorUnits === 0) return \'PAID\'')
     expect(src).not.toContain('status={row.status as RowStatus}')
   })
 })

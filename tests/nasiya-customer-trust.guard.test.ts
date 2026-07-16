@@ -129,14 +129,15 @@ describe('nasiya creation form: explicit existing-customer trust preview', () =>
 
   it('lets permitted staff edit the selected customer without leaving the Nasiya flow', () => {
     expect(source).toContain("const canEditCustomer = can('CUSTOMER_EDIT')")
-    expect(source).toContain('onEdit={canEditCustomer ? openCustomerEdit : undefined}')
+    expect(source).toContain('onEdit={canEditCustomer || canManageCustomerPassport || canOverrideCustomerTrust ? openCustomerEdit : undefined}')
     expect(source).toContain("method: 'PATCH'")
     expect(source).toContain("kind: 'customer.updated'")
   })
 
-  it('uses the concise passport-photo wording for an existing customer', () => {
-    expect(source).toContain('Tanlangan mijozning pasport rasmi mavjud; qayta yuklash shart emas.')
-    expect(source).not.toContain('Tanlangan mijozning private pasport rasmi mavjud; qayta yuklash shart emas.')
+  it('shows the existing customer passport state without asking for a duplicate upload', () => {
+    expect(source).toContain('Pasport rasmi kiritilmagan')
+    expect(source).toContain('Pasport rasmini almashtirish (ixtiyoriy)')
+    expect(source).toContain("Yangi rasm tanlanmasa, mavjud private rasm saqlanib qoladi")
   })
 })
 

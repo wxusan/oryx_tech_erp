@@ -89,7 +89,7 @@ describe('import UI + docs wiring', () => {
 
   it('the nasiya detail page renders an import card', () => {
     const src = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
-    expect(src).toContain('nasiya.isImported')
+    expect(src).toContain('nasiya.importData?.isImported')
     expect(src).toContain("Importgacha to'langan")
   })
 

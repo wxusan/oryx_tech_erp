@@ -30,6 +30,9 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
+# operator recovery snapshots (may contain private production data)
+/.local-backups/
+
 # env files (can opt-in for committing if needed)
 .env*
 !.env.example

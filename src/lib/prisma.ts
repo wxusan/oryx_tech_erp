@@ -10,34 +10,35 @@ import { PrismaClient } from '@/generated/prisma/client'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { currentBusinessLogContext, currentRequestAuditContext } from '@/lib/server/request-context'
 
-const connectionString =
-  process.env.NODE_ENV === 'production'
-    ? process.env.DATABASE_URL
-    : process.env.DATABASE_URL ?? process.env.DIRECT_URL
-
-if (!connectionString) {
-  throw new Error(
+function connectionStringForRuntime(): string {
+  const connectionString =
     process.env.NODE_ENV === 'production'
-      ? 'DATABASE_URL is required for Prisma in production'
-      : 'DATABASE_URL or DIRECT_URL is required for Prisma',
-  )
+      ? process.env.DATABASE_URL
+      : process.env.DATABASE_URL ?? process.env.DIRECT_URL
+
+  if (!connectionString) {
+    throw new Error(
+      process.env.NODE_ENV === 'production'
+        ? 'DATABASE_URL is required for Prisma in production'
+        : 'DATABASE_URL or DIRECT_URL is required for Prisma',
+    )
+  }
+  return connectionString
 }
 
-// Client-side pool size for the pg driver adapter.
-// max:1 serializes every Promise.all onto one connection (each query waits for
-// the previous — a big latency multiplier over a remote Supabase link). The app
-// connects through Supabase's transaction pooler (pgbouncer, port 6543), which
-// multiplexes to Postgres, so a modest per-instance pool is safe and lets
-// independent queries run concurrently. Tunable via DATABASE_POOL_MAX; set it
-// against your Supabase pooler pool_size (total ≈ instances × max). Set to 1 to
-// restore the old serialized behavior. Clamp to a conservative range so a
-// mistyped env var cannot exhaust the Supabase pooler.
-const parsedPoolMax = Number(process.env.DATABASE_POOL_MAX)
-const requestedPoolMax = Number.isFinite(parsedPoolMax) && parsedPoolMax > 0 ? Math.floor(parsedPoolMax) : 5
-const poolMax = Math.min(Math.max(requestedPoolMax, 1), 20)
+function poolMaxForRuntime(): number {
+  // Client-side pool size for the pg driver adapter. `max:1` serializes every
+  // Promise.all onto one connection; this modest, bounded pool is safe behind
+  // Supabase's transaction pooler and avoids needless local/production drift.
+  const parsedPoolMax = Number(process.env.DATABASE_POOL_MAX)
+  const requestedPoolMax = Number.isFinite(parsedPoolMax) && parsedPoolMax > 0 ? Math.floor(parsedPoolMax) : 5
+  return Math.min(Math.max(requestedPoolMax, 1), 20)
+}
 
 function createPrismaClient() {
-  return new PrismaClient({ adapter: new PrismaPg({ connectionString, max: poolMax }) }).$extends({
+  return new PrismaClient({
+    adapter: new PrismaPg({ connectionString: connectionStringForRuntime(), max: poolMaxForRuntime() }),
+  }).$extends({
     name: 'request-audit-context',
     query: {
       log: {
@@ -62,11 +63,24 @@ declare global {
   var prisma: PrismaClient | undefined
 }
 
-// Keep the public type compatible with Prisma.TransactionClient annotations
-// used throughout route handlers. The runtime instance still carries the
-// request-audit query extension above.
-export const prisma: PrismaClient = global.prisma ?? createPrismaClient() as unknown as PrismaClient
-
-if (process.env.NODE_ENV !== 'production') {
-  global.prisma = prisma
+function getPrisma(): PrismaClient {
+  if (global.prisma) return global.prisma
+  const client = createPrismaClient() as unknown as PrismaClient
+  if (process.env.NODE_ENV !== 'production') global.prisma = client
+  return client
 }
+
+/**
+ * A lazy proxy keeps module evaluation build-safe. Next can import route/page
+ * modules while collecting production metadata without requiring a live
+ * database; the real client is constructed only when a request uses it.
+ * The public shape remains `PrismaClient`, so existing route and transaction
+ * code does not need a risky repository-wide rewrite.
+ */
+export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
+  get(_target, property) {
+    const client = getPrisma() as unknown as Record<PropertyKey, unknown>
+    const value = Reflect.get(client, property, client)
+    return typeof value === 'function' ? value.bind(client) : value
+  },
+})

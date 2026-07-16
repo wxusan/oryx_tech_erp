@@ -56,7 +56,7 @@ describe('Nasiya cohort tabs', () => {
     expect(lists).toContain('collectionWorkItem')
     expect(client).toContain('preferredScheduleId={payFor?.collectionWorkItem?.preferredScheduleId}')
     expect(client).toContain("Shartnomada eski qarz bor")
-    expect(lists).toContain("s.\"status\" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')")
+    expect(lists).toContain("s.\"status\" <> 'CANCELLED'")
     expect(lists).toContain('n."returnedAt" IS NULL')
   })
 })

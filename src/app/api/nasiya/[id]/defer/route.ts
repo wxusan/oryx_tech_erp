@@ -229,6 +229,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         nasiyaScheduleId,
         originalDueDate,
         newDueDate,
+        ledger: {
+          paid: postDeferLedger.paid,
+          remaining: postDeferLedger.remaining,
+          status: postDeferLedger.status,
+        },
         duplicate: false,
       }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })

@@ -10,17 +10,17 @@ describe('nasiya completion: status transition, log, and Telegram message', () =
   const route = read('src/app/api/nasiya/[id]/payment/route.ts')
 
   it('marks the nasiya COMPLETED in the same transaction when fully paid (contract-currency ledger decides, see docs/currency-accounting-model.md)', () => {
-    expect(route).toContain('const derivedAfterPayment = deriveContractNasiyaStatus({')
-    expect(route).toContain('const newStatus = derivedAfterPayment.displayStatus')
+    expect(route).toContain('const postPaymentLedger = reconcileNasiyaLedger({')
+    expect(route).toContain('const newStatus = postPaymentLedger.status')
   })
 
   it('only treats it as a fresh completion when contract status actually crosses to COMPLETED', () => {
-    expect(route).toContain("if (currentContractStatus.displayStatus === 'COMPLETED')")
+    expect(route).toContain("if (currentLedger.status === 'COMPLETED')")
     expect(route).toContain("const justCompleted = newStatus === 'COMPLETED'")
   })
 
   it('blocks a payment attempt only against a contract-complete nasiya with a clear message', () => {
-    expect(route).toContain("if (currentContractStatus.displayStatus === 'COMPLETED')")
+    expect(route).toContain("if (currentLedger.status === 'COMPLETED')")
     expect(route).toContain("message: 'Bu nasiya yakunlangan'")
   })
 
@@ -42,12 +42,12 @@ describe('nasiyalar list surfaces the Yakunlangan tab and excludes completed nas
     expect(client).toContain("{ label: 'Yakunlangan', value: 'COMPLETED' }")
   })
 
-  it('cron reminder queries only select unpaid schedule statuses, so a fully-PAID (completed) nasiya never matches', () => {
+  it('cron reminder queries require native remaining debt, so a fully-paid nasiya never matches', () => {
     const cron = read('src/app/api/cron/reminders/route.ts')
     // Every schedule query in the cron filters status to unpaid states —
     // a completed nasiya's schedules are all PAID and never appear here.
-    expect(cron).not.toContain("status: { in: ['PAID'")
-    expect(cron).toContain("status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'")
+    expect(cron).toContain("status: { not: 'CANCELLED' }")
+    expect(cron).toContain('contractRemainingAmount: { gt: 0 }')
   })
 
   it('dashboard/report active-debt stats correct a raw COMPLETED parent when an unpaid native schedule remains', () => {

@@ -21,8 +21,8 @@ describe('nasiya detail: no duplicate summary cards', () => {
     expect(count).toBe(1)
   })
 
-  it('renders the full preferred card set in order: Sotilish narxi, Boshlang\'ich to\'lov, Nasiya jami, To\'langan, Qarz qoldig\'i, Oylik to\'lov', () => {
-    const order = ['Sotilish narxi', "Boshlang'ich to'lov", 'Nasiya jami', "To'langan", "Qarz qoldig'i", "Oylik to'lov"]
+  it('renders the contract-ledger card set in order', () => {
+    const order = ['Shartnomadagi qurilma narxi', "Boshlang'ich to'lov", "Bo'lib to'lash jami (boshlang'ichsiz)", "To'langan", "Qarz qoldig'i", "Oylik to'lov"]
     let cursor = 0
     for (const label of order) {
       const idx = source.indexOf(label, cursor)
@@ -40,7 +40,7 @@ describe('nasiya detail: completed profile', () => {
   })
 
   it('hides the "To\'lov qabul qilish" button once completed/cancelled', () => {
-    expect(source).toContain("{canReceivePayment && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (")
+    expect(source).toContain("{canReceivePayment && !ledgerQuarantined && isOperationallyActive && !isCompleted && displayStatus !== 'CANCELLED' && (")
   })
 
   it('shows a clear completed banner text', () => {

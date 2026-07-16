@@ -1,6 +1,7 @@
 'use client'
 
 import Link from 'next/link'
+import { useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, ScrollText, Settings, UserCog, WalletCards, ShoppingBag } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
@@ -13,6 +14,7 @@ import {
   type ShopPermissionCode,
 } from '@/lib/access-control'
 import { ShopAccessProvider } from '@/components/shop/shop-access-context'
+import { measureAuthenticatedShellUsable } from '@/lib/login-performance'
 
 const navLinks = [
   { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard, prefetch: true, permission: null, anyPermissions: ['DASHBOARD_OPERATIONAL_VIEW', 'DASHBOARD_FINANCIAL_VIEW'], ownerOnly: false, sidebar: true, header: false },
@@ -52,6 +54,7 @@ export function ShopLayoutClient({
   legacyFullAccess,
   sessionPolicy,
   initialDueSummary,
+  initialCanSeeReceivables,
 }: {
   children: React.ReactNode
   shopName: string
@@ -62,8 +65,12 @@ export function ShopLayoutClient({
   legacyFullAccess: boolean
   sessionPolicy: 'IDLE_10_MINUTES' | 'REMEMBERED_30_DAYS'
   initialDueSummary: DueOverdueSummary | null
+  initialCanSeeReceivables: boolean
 }) {
   const pathname = usePathname()
+  useEffect(() => {
+    measureAuthenticatedShellUsable('shop')
+  }, [])
   const principal = {
     memberKind,
     legacyFullAccess,
@@ -77,7 +84,7 @@ export function ShopLayoutClient({
   )
   const visibleSidebarLinks = permittedNavLinks.filter((link) => link.sidebar)
   const visibleHeaderLinks = permittedNavLinks.filter((link) => link.header)
-  const canSeeReceivables = [
+  const canSeeReceivables = initialCanSeeReceivables && [
     'RECEIVABLES_VIEW',
     'SALE_VIEW',
     'SALE_PAYMENT_RECEIVE',

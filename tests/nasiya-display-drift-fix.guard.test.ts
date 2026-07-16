@@ -14,67 +14,69 @@ function read(rel: string): string {
  * double-conversion silently drifts from the true contract value as the
  * rate moves between creation and any later viewing. These guard tests
  * confirm every such figure now reads from the contract-currency ledger and
- * converts exactly once, via formatDisplayMoneyFromContract.
+ * exposes exact native contract money as the primary value and a clearly
+ * labelled current-rate approximation only when a governed quote exists.
  */
 describe('nasiya detail page: no double-conversion drift for USD contracts', () => {
   const page = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
 
-  it('defines dfmt() converting from the deal\'s own contractCurrency, not a legacy UZS field', () => {
-    expect(page).toContain(
-      'const dfmt = (n: number) => formatDisplayMoneyFromContract(n, nasiya.contractCurrency, currency.currency, currency.usdUzsRate)',
-    )
+  it('formats MoneyDto values from the reconciled native ledger, never legacy UZS snapshots', () => {
+    expect(page).toContain('const mfmt = (amount: MoneyDto) => {')
+    expect(page).toContain('const primary = formatMoneyDto(amount)')
+    expect(page).toContain('convertMoneyDto(amount, currency.currency, currency.fxQuote)')
   })
 
-  it('every summary card money value uses dfmt() + a contract* field, not fmt() + a legacy field', () => {
+  it('every summary card reads a contract term or reconciled ledger MoneyDto', () => {
     for (const text of [
-      'Sotilish narxi',
+      'Shartnomadagi qurilma narxi',
       "Boshlang'ich to'lov",
-      'Nasiya jami',
+      "Bo'lib to'lash jami (boshlang'ichsiz)",
       "To'langan",
       "Qarz qoldig'i",
       "Oylik to'lov",
-      'dfmt(nasiya.contractTotalAmount)',
-      'dfmt(nasiya.contractDownPayment)',
-      'dfmt(nasiya.contractFinalAmount)',
-      'dfmt(nasiya.contractPaidAmount)',
-      'dfmt(nasiya.contractRemainingAmount)',
-      'dfmt(contractMonthlyPayment)',
+      'mfmt(contractTerms.original)',
+      'mfmt(contractTerms.downPayment)',
+      'mfmt(ledger.financed)',
+      'mfmt(ledger.paid)',
+      'mfmt(ledger.remaining)',
+      'mfmt(contractMonthlyPayment)',
     ]) {
       expect(page).toContain(text)
     }
   })
 
-  it('the progress card and per-schedule table also use dfmt() + contract fields', () => {
+  it('the progress card and schedule table also use MoneyDto values', () => {
     const history = read('src/components/shop/nasiya-history-sections.tsx')
-    expect(page).toContain('dfmt(nasiya.contractPaidAmount)} to\'landi')
-    expect(page).toContain('formatContractAmount={dfmt}')
-    expect(history).toContain('formatContractAmount(row.contractExpectedAmount)')
-    expect(history).toContain('formatContractAmount(row.contractPaidAmount)')
+    expect(page).toContain("mfmt(ledger.paid)} to'landi")
+    expect(page).toContain('formatMoney={mfmt}')
+    expect(history).toContain('formatMoney(row.expected)')
+    expect(history).toContain('formatMoney(row.paid)')
   })
 })
 
 describe('nasiya payment modal: no double-conversion drift for USD contracts', () => {
   const modal = read('src/components/shop/nasiya-payment-modal.tsx')
 
-  it('defines dfmt() converting from the fetched contractCurrency', () => {
-    expect(modal).toContain(
-      'const dfmt = (n: number) => formatDisplayMoneyFromContract(n, contractCurrency, currency.currency, currency.usdUzsRate)',
-    )
+  it('defines a MoneyDto formatter with a secondary current-rate approximation', () => {
+    expect(modal).toContain('const moneyView = (amount: MoneyDto) => {')
+    expect(modal).toContain('const primary = formatMoneyDto(amount)')
+    expect(modal).toContain('convertMoneyDto(amount, currency.currency, currency.fxQuote)')
   })
 
-  it('schedule balances, "Jami qolgan qarz", and the Tavsiya suggestion all use dfmt() + contract-currency amounts', () => {
-    expect(modal).toContain('dfmt(contractScheduleBalance(s, contractCurrency))')
-    expect(modal).toContain('dfmt(selectedScheduleContractOutstanding)')
-    expect(modal).toContain('dfmt(nasiyaContractRemainingAmount)')
+  it('schedule balances, total debt, and the Tavsiya suggestion all use MoneyDto values', () => {
+    expect(modal).toContain('moneyView(s.remaining)')
+    expect(modal).toContain('moneyView(selectedScheduleRemaining)')
+    expect(modal).toContain('moneyView(ledgerRemaining)')
   })
 
-  it('the Tavsiya button prefill is computed from the contract-currency balance (falls back safely with no rate)', () => {
-    expect(modal).toContain('convertPaymentToContractCurrency(\n                          selectedScheduleContractOutstanding,')
-    expect(modal).toContain('if (contractCurrency !== currency.currency && !currency.usdUzsRate)')
+  it('the Tavsiya button prefill converts exactly once and fails safely when a cross-currency quote is absent', () => {
+    expect(modal).toContain('convertMoneyDto(selectedScheduleRemaining, currency.currency, currency.fxQuote)')
+    expect(modal).toContain('setPayAmount(formatAmountForInput(suggestedMoney))')
+    expect(modal).toContain('const requiresCrossCurrencyRate = Boolean(enteredMoney && enteredMoney.currency !== contractCurrency && !payAmountContract)')
   })
 
-  it('validation math (exceedsRemaining) is untouched — still the UZS legacy comparison, which stays accurate via the dual-ledger lockstep', () => {
-    expect(modal).toContain('const exceedsRemaining = payAmountUzs > nasiyaRemainingAmount')
+  it('validation compares exact contract minor units against reconciled remaining debt', () => {
+    expect(modal).toContain('payAmountContract.minorUnits > ledgerRemaining.minorUnits')
   })
 })
 

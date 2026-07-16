@@ -50,6 +50,7 @@ describe('Nasiya ledger rollout safety', () => {
   it('keeps release preflight blocking for ledger and FX evidence mismatches without logging records', () => {
     expect(preflight).toContain('nasiya_parent_schedule_ledger_mismatches')
     expect(preflight).toContain('complete_nasiya_schedule_allocation_mismatches')
+    expect(preflight).toContain('nasiya_payment_stage_one_validation_issues')
     expect(preflight).toContain('nasiya_payment_fx_snapshot_issues')
     expect(preflight).toContain('Production release blocked by one or more integrity diagnostics')
     expect(preflight).toContain('Never add entity')

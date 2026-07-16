@@ -1,6 +1,7 @@
 import 'server-only'
 
 import { prisma } from '@/lib/prisma'
+import { addMoneyDto, createMoneyDto, moneyDtoEquals, type CurrencyCode } from '@/lib/currency'
 
 /**
  * The financial-invariants migration protects new writes, but historic rows
@@ -13,15 +14,19 @@ export function hasValidNasiyaScheduleNativeLedger(input: {
   contractExpectedAmount: number | string | { toString(): string }
   contractPaidAmount: number | string | { toString(): string }
   contractRemainingAmount: number | string | { toString(): string }
+  contractCurrency: CurrencyCode
   status: string
 }): boolean {
-  const expected = Number(input.contractExpectedAmount)
-  const paid = Number(input.contractPaidAmount)
-  const remaining = Number(input.contractRemainingAmount)
-  if (!Number.isFinite(expected) || !Number.isFinite(paid) || !Number.isFinite(remaining)) return false
-  if (expected <= 0 || paid < 0 || paid > expected) return false
-  if (Math.abs(remaining - (expected - paid)) > 0.000001) return false
-  return input.status === 'CANCELLED' || (input.status === 'PAID') === (remaining === 0)
+  try {
+    const expected = createMoneyDto(input.contractCurrency, input.contractExpectedAmount.toString())
+    const paid = createMoneyDto(input.contractCurrency, input.contractPaidAmount.toString())
+    const remaining = createMoneyDto(input.contractCurrency, input.contractRemainingAmount.toString())
+    if (expected.minorUnits <= 0 || paid.minorUnits > expected.minorUnits) return false
+    if (!moneyDtoEquals(expected, addMoneyDto(paid, remaining))) return false
+    return input.status === 'CANCELLED' || (input.status === 'PAID') === (remaining.minorUnits === 0)
+  } catch {
+    return false
+  }
 }
 
 /** Shared by the reminders cron and database integration tests. */
@@ -48,7 +53,8 @@ export function transitionNasiyaToOverdue(input: {
         id: input.scheduleId,
         nasiyaId: input.nasiyaId,
         shopId: input.shopId,
-        status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
+        status: { not: 'CANCELLED' },
+        contractRemainingAmount: { gt: 0 },
         OR: [
           { delayedUntil: null, dueDate: { lt: input.overdueBefore } },
           { delayedUntil: { lt: input.overdueBefore } },
@@ -57,7 +63,7 @@ export function transitionNasiyaToOverdue(input: {
           id: input.nasiyaId,
           shopId: input.shopId,
           deletedAt: null,
-          status: { in: ['ACTIVE', 'OVERDUE'] },
+          status: { not: 'CANCELLED' },
           resolutionState: 'ACTIVE',
         },
       },
@@ -74,6 +80,7 @@ export function transitionNasiyaToOverdue(input: {
           nasiyaId: input.nasiyaId,
           shopId: input.shopId,
           status: 'OVERDUE',
+          contractRemainingAmount: { gt: 0 },
           OR: [
             { delayedUntil: null, dueDate: { lt: input.overdueBefore } },
             { delayedUntil: { lt: input.overdueBefore } },
@@ -82,7 +89,7 @@ export function transitionNasiyaToOverdue(input: {
             id: input.nasiyaId,
             shopId: input.shopId,
             deletedAt: null,
-            status: { in: ['ACTIVE', 'OVERDUE'] },
+            status: { not: 'CANCELLED' },
             resolutionState: 'ACTIVE',
           },
         },
@@ -105,7 +112,7 @@ export function transitionNasiyaToOverdue(input: {
       })
     }
     const nasiyaUpdate = await tx.nasiya.updateMany({
-      where: { id: input.nasiyaId, shopId: input.shopId, status: 'ACTIVE', resolutionState: 'ACTIVE', deletedAt: null },
+      where: { id: input.nasiyaId, shopId: input.shopId, status: { not: 'CANCELLED' }, resolutionState: 'ACTIVE', deletedAt: null },
       data: { status: 'OVERDUE' },
     })
     const changed = scheduleUpdate.count > 0 || nasiyaUpdate.count > 0

@@ -10,26 +10,26 @@ describe('nasiyalar list: money text reads from the contract-currency ledger, no
   const listServer = read('src/lib/server/shop-lists.ts')
   const client = read('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')
 
-  it('getShopNasiyalarListFresh selects and returns contractCurrency/contractInterestAmount/contractFinalAmount/contractRemainingAmount', () => {
+  it('getShopNasiyalarListFresh selects native contract fields and returns a reconciled MoneyDto ledger', () => {
     expect(listServer).toContain('contractInterestAmount: true')
     expect(listServer).toContain('contractFinalAmount: true')
     expect(listServer).toContain('contractRemainingAmount: true')
-    expect(listServer).toContain('contractInterestAmount: Number(nasiya.contractInterestAmount)')
-    expect(listServer).toContain('contractFinalAmount: Number(nasiya.contractFinalAmount)')
-    expect(listServer).toContain('contractRemainingAmount: Number(nasiya.contractRemainingAmount)')
+    expect(listServer).toContain('const ledger = reconcileNasiyaLedger({')
+    expect(listServer).toContain('contractInterest: createMoneyDto(nasiya.contractCurrency, nasiya.contractInterestAmount.toString())')
+    expect(listServer).toContain('ledger,')
   })
 
-  it('the client defines dfmt() converting from each row\'s own contractCurrency via today\'s rate', () => {
-    expect(client).toContain(
-      'const dfmt = (amount: number) => formatDisplayMoneyFromContract(amount, n.contractCurrency, currency.currency, currency.usdUzsRate)',
-    )
+  it('the client formats each exact MoneyDto and only adds an approximate current-rate display', () => {
+    expect(client).toContain('const mfmt = (amount: MoneyDto) => {')
+    expect(client).toContain('const primary = formatMoneyDto(amount)')
+    expect(client).toContain('convertMoneyDto(amount, currency.currency, currency.fxQuote)')
   })
 
-  it("To'langan/Nasiya jami/Foiz/qolgan all use dfmt() + contract fields, not the legacy fmt()", () => {
-    expect(client).toContain("To'langan: {dfmt(contractPaidAmount)}")
-    expect(client).toContain('Nasiya jami: {dfmt(n.contractFinalAmount)}')
-    expect(client).toContain('Foiz: {dfmt(n.contractInterestAmount)}')
-    expect(client).toContain('{dfmt(n.contractRemainingAmount)}')
+  it("To'langan/Nasiya jami/Foiz/qolgan all use the native ledger MoneyDto values", () => {
+    expect(client).toContain("To'langan: {mfmt(n.ledger.paid)}")
+    expect(client).toContain('Nasiya jami: {mfmt(n.ledger.financed)}')
+    expect(client).toContain('Foiz: {mfmt(n.contractInterest)}')
+    expect(client).toContain('{mfmt(n.ledger.remaining)}')
     expect(client).not.toContain('function fmt(')
   })
 })

@@ -110,7 +110,13 @@ function sumMoney(currency: CurrencyCode, values: MoneyDto[]): MoneyDto {
   return values.reduce((total, value) => addMoneyDto(total, value), zero(currency))
 }
 
-function scheduleStatusInput(schedule: NasiyaLedgerScheduleInput, currency: CurrencyCode, expected: MoneyDto, paid: MoneyDto) {
+function scheduleStatusInput(
+  schedule: NasiyaLedgerScheduleInput,
+  currency: CurrencyCode,
+  expected: MoneyDto,
+  paid: MoneyDto,
+  remaining: MoneyDto,
+) {
   return {
     status: schedule.status,
     dueDate: schedule.dueDate,
@@ -119,6 +125,7 @@ function scheduleStatusInput(schedule: NasiyaLedgerScheduleInput, currency: Curr
     paidAmount: schedule.paidAmount ?? moneyDtoToAmount(paid),
     contractExpectedAmount: moneyDtoToAmount(expected),
     contractPaidAmount: moneyDtoToAmount(paid),
+    contractRemainingAmount: moneyDtoToAmount(remaining),
   }
 }
 
@@ -220,7 +227,7 @@ export function reconcileNasiyaLedger(input: NasiyaLedgerInput, now: Date = new 
       contractFinalAmount: moneyDtoToAmount(financed),
       // Deliberately use schedule truth rather than the parent cache.
       contractRemainingAmount: moneyDtoToAmount(scheduleRemaining),
-      schedules: schedules.map(({ source, expected, paid }) => scheduleStatusInput(source, currency, expected, paid)),
+      schedules: schedules.map(({ source, expected, paid, remaining }) => scheduleStatusInput(source, currency, expected, paid, remaining)),
     },
     now,
   )

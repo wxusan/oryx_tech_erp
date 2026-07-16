@@ -143,3 +143,51 @@ Existing targeted plans remain authoritative for device and nasiya status:
 
 - `docs/device-status-repair-plan.md`
 - `docs/nasiya-contract-status-repair-plan.md`
+
+## Nasiya schedule-ledger cache repair (reviewed-only)
+
+This procedure is for a **parent-cache-only** Nasiya repair. It does not
+authorize a payment, allocation, schedule, FX, or contract-term rewrite.
+The repair must be reviewed separately from deployment because it changes a
+financial cache and durable status.
+
+1. Run `npm run nasiya:ledger:reconcile -- --verbose`. Stop unless every
+   candidate is `REPAIRABLE` and `ambiguous` is zero. Do not use a dry-run
+   result from a previous day.
+2. For each approved candidate, create a fresh, scoped recovery snapshot:
+
+   ```bash
+   npm run nasiya:ledger:snapshot -- --nasiya-id=<nasiya-id>
+   ```
+
+   Record the returned `backupReference`. The command is read-only, writes a
+   mode-0600 checksum-verified snapshot under ignored `.local-backups/`, and
+   captures the parent plus its schedule/payment/allocation evidence.
+3. Record the actual approving administrator and recovery reference in the
+   change record. Never choose an audit actor merely because an account exists.
+4. Only the approved actor runs the scoped cache repair:
+
+   ```bash
+   ORYX_NASIYA_LEDGER_REPAIR_PITR_CONFIRMED=YES \
+   npm run nasiya:ledger:reconcile -- --apply \
+     --shop-id=<shop-id> \
+     --actor-id=<approved-shop-admin-id> \
+     --actor-type=SHOP_ADMIN \
+     --backup-reference='<snapshot-file>#sha256:<checksum>'
+   ```
+
+   A super-admin repair may omit `--shop-id`, but still requires a real
+   approved `--actor-id`, the same confirmation, and the snapshot reference.
+   The script uses serializable compare-and-set writes, changes parent caches
+   only, and writes before/after `Log` and `OpsEvent` audit entries.
+5. Re-run the dry-run and `npm run release:preflight -- --phase=pre`. The
+   repair is acceptable only when it produces zero repairable/ambiguous Nasiya
+   records and zero blocking preflight issues.
+6. Apply the staged migrations in order with `npx prisma migrate deploy`, then
+   run `npm run release:preflight -- --phase=post`. The final migration installs
+   deferred parent/schedule reconciliation triggers and will fail safely if the
+   repair was incomplete.
+
+Stop immediately if the repair skips a concurrent row, reports ambiguity, or
+either preflight is non-zero. Investigate and make a forward fix; do not rerun
+with a different actor or relax the database constraint.

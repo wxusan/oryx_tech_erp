@@ -8,13 +8,13 @@ import { authenticatedQueryScope } from '@/lib/query-scope'
 import { latestChangeCursorForSession } from '@/lib/server/change-events'
 import { AuthenticatedQueryProvider } from '@/components/authenticated-query-provider'
 import { principalHasFeature, principalHasPermission } from '@/lib/server/shop-access'
-import { getReceivableCohortSummaries } from '@/lib/server/shop-stats-queries'
-import { tashkentDayRange } from '@/lib/timezone'
 
 export default async function ShopLayout({ children }: { children: React.ReactNode }) {
   const guarded = await requireApiSession()
   if (!guarded.ok || !guarded.shopId || !guarded.principal) redirect('/shop/login')
 
+  // Capability checks are cheap local set lookups. Keep the banner itself
+  // client-fetched so every navigation avoids blocking on its aggregate.
   const includeCashSales = principalHasFeature(guarded.principal, 'CASH_SALES') && (
     principalHasPermission(guarded.principal, 'RECEIVABLES_VIEW') ||
     principalHasPermission(guarded.principal, 'SALE_VIEW') ||
@@ -26,20 +26,10 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
     principalHasPermission(guarded.principal, 'NASIYA_PAYMENT_RECEIVE') ||
     principalHasPermission(guarded.principal, 'NASIYA_DEFER')
   )
-  const { start: todayStart, end: tomorrowStart, dayKey } = tashkentDayRange(new Date())
-  const [syncCursor, currency, shop, dueCohorts] = await Promise.all([
+  const [syncCursor, currency, shop] = await Promise.all([
     latestChangeCursorForSession(guarded.session),
     getShopCurrencyContext(guarded.shopId),
     prisma.shop.findUnique({ where: { id: guarded.shopId }, select: { name: true } }),
-    includeCashSales || includeNasiya
-      ? getReceivableCohortSummaries({
-          shopId: guarded.shopId,
-          todayStart,
-          tomorrowStart,
-          includeCashSales,
-          includeNasiya,
-        })
-      : Promise.resolve(null),
   ])
 
   return (
@@ -61,12 +51,8 @@ export default async function ShopLayout({ children }: { children: React.ReactNo
           grantedPermissions={[...guarded.principal.grantedPermissions]}
           legacyFullAccess={guarded.principal.legacyFullAccess}
           sessionPolicy={guarded.session.user.sessionPolicy}
-          initialDueSummary={dueCohorts ? {
-            dueToday: dueCohorts.DUE_TODAY,
-            overdue: dueCohorts.OVERDUE,
-            currency,
-            dayKey,
-          } : null}
+          initialDueSummary={null}
+          initialCanSeeReceivables={includeCashSales || includeNasiya}
         >
           {children}
         </ShopLayoutClient>

@@ -18,10 +18,10 @@ import { invalidateShopOverdueCron } from '@/lib/server/cache-tags'
 import { tashkentDayRange } from '@/lib/timezone'
 import { recordOpsEvent } from '@/lib/server/ops-events'
 import { getUsdUzsRate } from '@/lib/server/currency'
-import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import type { CurrencyCode, CurrencyContext } from '@/lib/currency'
 import { cleanupExpiredChangeEvents } from '@/lib/server/change-events'
 import { cleanupRetainedOperationalData } from '@/lib/server/data-retention'
+import { monitorNasiyaLedgerIntegrity } from '@/lib/server/nasiya-ledger-monitor'
 import { hasValidNasiyaScheduleNativeLedger, transitionNasiyaToOverdue } from '@/lib/server/overdue-transition'
 import { presentDeviceSpecs } from '@/lib/device-specs'
 import { initializeRequestAuditContext } from '@/lib/server/request-context'
@@ -182,12 +182,13 @@ export async function GET(request: NextRequest): Promise<Response> {
               { delayedUntil: null, dueDate: { gte: windowStart, lt: windowEnd } },
               { delayedUntil: { gte: windowStart, lt: windowEnd } },
             ],
-            status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
+            status: { not: 'CANCELLED' },
+            contractRemainingAmount: { gt: 0 },
             nasiya: {
               resolutionState: 'ACTIVE',
               deletedAt: null,
               returnedAt: null,
-              status: { in: ['ACTIVE', 'OVERDUE'] },
+              status: { not: 'CANCELLED' },
               reminderEnabled: true,
               shop: { status: 'ACTIVE', deletedAt: null },
             },
@@ -216,7 +217,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             customerPhone: nasiya.customer.phone,
             device: presentDeviceSpecs(nasiya.device),
             month: schedule.monthNumber,
-            amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency),
+            amountDue: Number(schedule.contractRemainingAmount),
             contractCurrency: nasiya.contractCurrency,
             dueDate: effectiveDue,
             currency: await reminderCurrency(nasiya.shop),
@@ -250,12 +251,13 @@ export async function GET(request: NextRequest): Promise<Response> {
               { delayedUntil: null, dueDate: { lt: today } },
               { delayedUntil: { lt: today } },
             ],
-            status: { in: ['PENDING', 'PARTIAL', 'DEFERRED', 'OVERDUE'] },
+            status: { not: 'CANCELLED' },
+            contractRemainingAmount: { gt: 0 },
             nasiya: {
               resolutionState: 'ACTIVE',
               deletedAt: null,
               returnedAt: null,
-              status: { in: ['ACTIVE', 'OVERDUE'] },
+              status: { not: 'CANCELLED' },
               shop: { status: 'ACTIVE', deletedAt: null },
             },
           },
@@ -296,7 +298,7 @@ export async function GET(request: NextRequest): Promise<Response> {
               customerPhone: schedule.nasiya.customer.phone,
               device: presentDeviceSpecs(schedule.nasiya.device),
               month: schedule.monthNumber,
-              amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), schedule.nasiya.contractCurrency),
+              amountDue: Number(schedule.contractRemainingAmount),
               contractCurrency: schedule.nasiya.contractCurrency,
               dueDate: effectiveDue,
               daysLate,
@@ -332,12 +334,13 @@ export async function GET(request: NextRequest): Promise<Response> {
               { delayedUntil: null, dueDate: { gte: tomorrow, lt: earlyWindowEnd } },
               { delayedUntil: { gte: tomorrow, lt: earlyWindowEnd } },
             ],
-            status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
+            status: { not: 'CANCELLED' },
+            contractRemainingAmount: { gt: 0 },
             nasiya: {
               resolutionState: 'ACTIVE',
               deletedAt: null,
               returnedAt: null,
-              status: { in: ['ACTIVE', 'OVERDUE'] },
+              status: { not: 'CANCELLED' },
               reminderEnabled: true,
               earlyReminderEnabled: true,
               shop: { status: 'ACTIVE', deletedAt: null },
@@ -369,7 +372,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             customerPhone: nasiya.customer.phone,
             device: presentDeviceSpecs(nasiya.device),
             month: schedule.monthNumber,
-            amountDue: contractScheduleOutstanding(Number(schedule.contractExpectedAmount), Number(schedule.contractPaidAmount), nasiya.contractCurrency),
+            amountDue: Number(schedule.contractRemainingAmount),
             contractCurrency: nasiya.contractCurrency,
             dueDate: effectiveDue,
             daysLeft: nasiya.earlyReminderDays!,
@@ -767,6 +770,10 @@ export async function GET(request: NextRequest): Promise<Response> {
       cleanupExpiredChangeEvents(),
       cleanupRetainedOperationalData(),
     ])
+    // Count-only, best-effort ledger monitoring: it does not mutate nasiya
+    // data and failure is represented as an OpsEvent rather than breaking a
+    // daily reminder delivery run.
+    const nasiyaLedgerIntegrity = await monitorNasiyaLedgerIntegrity()
     // `runPhase` mutates this captured state; TypeScript's control-flow
     // analysis intentionally does not infer closure side effects.
     const generationOk = (generationStatus as GenerationStatus) === 'complete'
@@ -801,6 +808,7 @@ export async function GET(request: NextRequest): Promise<Response> {
         retainedOpsEventsDeleted: retainedData.opsEvents,
         retainedAuthSessionsDeleted: retainedData.authSessions,
         retainedBusinessAuditLogsDeleted: retainedData.businessAuditLogs,
+        nasiyaLedgerIntegrity,
         durationMs: Date.now() - startedAt,
       },
     })

@@ -59,6 +59,8 @@ export interface ShopStatsRows {
     paidAmount: unknown
     contractExpectedAmount: unknown
     contractPaidAmount: unknown
+    /** Present for all current Prisma rows; optional only for legacy pure tests. */
+    contractRemainingAmount?: unknown
     nasiya: { contractCurrency: 'UZS' | 'USD' }
   }[]
   unpaidSales: { dueDate: Date | null; remainingAmount: unknown; contractCurrency: 'UZS' | 'USD'; contractRemainingAmount: unknown }[]
@@ -86,6 +88,8 @@ export interface ShopStatsRows {
     status: string
     contractExpectedAmount: unknown
     contractPaidAmount: unknown
+    /** Present for all current Prisma rows; optional only for legacy pure tests. */
+    contractRemainingAmount?: unknown
     nasiya: { id: string; contractCurrency: 'UZS' | 'USD'; customer: { name: string }; device: { model: string } }
   }[]
 }
@@ -155,12 +159,18 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
   const scheduleOutstandingNative = (schedule: {
     contractExpectedAmount: unknown
     contractPaidAmount: unknown
+    contractRemainingAmount?: unknown
     nasiya: { contractCurrency: 'UZS' | 'USD' }
-  }) => contractScheduleOutstanding(
-    Number(schedule.contractExpectedAmount),
-    Number(schedule.contractPaidAmount),
-    schedule.nasiya.contractCurrency,
-  )
+  }) => {
+    const storedRemaining = Number(schedule.contractRemainingAmount)
+    if (Number.isFinite(storedRemaining) && storedRemaining >= 0) return storedRemaining
+    // Compatibility only for old unit-test fixtures / pre-ledger callers.
+    return contractScheduleOutstanding(
+      Number(schedule.contractExpectedAmount),
+      Number(schedule.contractPaidAmount),
+      schedule.nasiya.contractCurrency,
+    )
+  }
   type MoneyPartition = { uzs: number; usd: number }
   const addNative = (partition: MoneyPartition, amount: number, currency: 'UZS' | 'USD') => {
     partition[currency === 'USD' ? 'usd' : 'uzs'] += amount
@@ -317,6 +327,7 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
           // plain numbers and expose the converted UZS helpers separately.
           contractExpectedAmount: Number(payment.contractExpectedAmount),
           contractPaidAmount: Number(payment.contractPaidAmount),
+          contractRemainingAmount: scheduleOutstandingNative(payment),
           expectedAmount: toUzs(payment.contractExpectedAmount),
           paidAmount: toUzs(payment.contractPaidAmount),
         }

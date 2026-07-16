@@ -42,8 +42,8 @@ describe('primary list navigation contract', () => {
     const source = read(NASIYALAR)
     expect(source).toContain("href={`/shop/nasiyalar/${n.id}`}")
     expect(source).toContain('aria-label={`${n.customer.name} nasiyasini ochish`}')
-    expect(source).toContain('relative z-10 text-right flex-shrink-0 space-y-2')
-    expect(source).toContain('className="relative z-10 flex items-center gap-2"')
+    expect(source).toContain('pointer-events-none relative z-10 flex items-start justify-between gap-4')
+    expect(source).toContain('className="pointer-events-auto w-full whitespace-nowrap"')
     expect(source).not.toContain('buttonVariants')
   })
 

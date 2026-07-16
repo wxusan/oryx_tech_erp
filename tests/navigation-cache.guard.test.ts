@@ -20,10 +20,11 @@ describe('navigation cache integration guards', () => {
     expect(read('prisma/migrations/202607120001_incremental_change_events/migration.sql')).toContain('AFTER INSERT ON "Log"')
   })
 
-  it('synchronizes, then broadcasts without a cache-clearing Server Action', () => {
+  it('broadcasts and starts background reconciliation without a cache-clearing Server Action', () => {
     const events = read('src/lib/client-events.ts')
-    expect(events).toContain('await requestIncrementalSync()')
+    expect(events).toContain('void requestIncrementalSync()')
     expect(events).toContain('broadcastSuccessfulMutation(message)')
+    expect(events).toContain("performance.measure('oryx:client-sync', syncMark)")
     expect(events).not.toContain('invalidateNavigationAfterMutation')
     expect(events).not.toContain('window.location.assign(href)')
   })

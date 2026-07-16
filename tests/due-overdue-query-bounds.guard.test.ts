@@ -32,7 +32,7 @@ describe('due/overdue summary query bounds', () => {
 
   it('applies tenant and open-debt predicates before the UNION/aggregate', () => {
     expect(queries.split('s."shopId" = ${input.shopId}').length - 1).toBeGreaterThanOrEqual(2)
-    expect(queries).toContain("s.\"status\" IN ('PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED')")
+    expect(queries).toContain("s.\"status\" <> 'CANCELLED'")
     expect(queries).toContain('n."returnedAt" IS NULL')
     expect(queries).toContain('s."contractRemainingAmount" > 0')
   })

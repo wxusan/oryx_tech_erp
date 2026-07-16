@@ -207,6 +207,33 @@ const countChecks = [
     `,
   },
   {
+    // Stage 1 adds this check as NOT VALID and stage 2 validates it. Check
+    // the existing shape before either migration is applied, so a release
+    // cannot discover an unvalidated historical receipt halfway through.
+    name: 'nasiya_payment_stage_one_validation_issues',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "NasiyaPayment"
+      WHERE NOT (
+        ("paymentInputAmount" IS NULL
+          AND "paymentInputCurrency" IS NULL
+          AND "paymentExchangeRate" IS NULL)
+        OR (
+          "paymentInputAmount" > 0
+          AND "paymentInputCurrency" IS NOT NULL
+          AND (
+            ("paymentInputCurrency" = 'UZS'
+              AND trunc("paymentInputAmount") = "paymentInputAmount"
+              AND ("paymentExchangeRate" IS NULL OR "paymentExchangeRate" BETWEEN 1000 AND 100000))
+            OR ("paymentInputCurrency" = 'USD'
+              AND "paymentExchangeRate" BETWEEN 1000 AND 100000)
+          )
+        )
+      )
+    `,
+  },
+  {
     name: 'cross_contract_schedule_payments',
     blocking: true,
     sql: `

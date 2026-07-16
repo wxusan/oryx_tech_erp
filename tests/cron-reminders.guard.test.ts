@@ -13,8 +13,9 @@ const src = readFileSync(
 ).replace(/\s+/g, ' ')
 
 describe('cron overdue-reminder guard (req 12)', () => {
-  it('overdue nasiya selection includes OVERDUE so chronic debtors keep alerting', () => {
-    expect(src).toContain("status: { in: ['PENDING', 'PARTIAL', 'DEFERRED', 'OVERDUE'] }")
+  it('overdue nasiya selection includes every non-cancelled schedule with native debt, so chronic debtors keep alerting', () => {
+    expect(src).toContain("status: { not: 'CANCELLED' }")
+    expect(src).toContain('contractRemainingAmount: { gt: 0 }')
   })
 
   it('due reminders use the durable catch-up window while overdue alerts remain current-day', () => {
@@ -34,7 +35,8 @@ describe('cron overdue-reminder guard (req 12)', () => {
   it('transitions active debt regardless of reminder preference, but queues alerts only when enabled', () => {
     const selection = src.slice(src.indexOf("'NASIYA_OVERDUE'"), src.indexOf("'NASIYA_EARLY'"))
     expect(selection).not.toContain('reminderEnabled: true')
-    expect(selection).toContain("status: { in: ['ACTIVE', 'OVERDUE'] }")
+    expect(selection).toContain("status: { not: 'CANCELLED' }")
+    expect(selection).toContain("resolutionState: 'ACTIVE'")
     expect(src).toContain('schedule.nasiya.reminderEnabled && reminderEnabledShopIds.has(schedule.nasiya.shopId)')
     expect(src).toContain("activeShopIdsForFeature('REMINDERS')")
   })

@@ -7,7 +7,6 @@ import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle }
 import { Badge } from '@/components/ui/badge'
 import type { getShopStats } from '@/lib/server/shop-stats'
 import { formatMoneyByCurrency, formatPartitionedMoney, formatUserFacingMoney, type CurrencyContext } from '@/lib/currency'
-import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
 import { uzDate, uzMonthYear } from '@/lib/dates'
 import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
 import { queryKeys } from '@/lib/query-keys'
@@ -29,6 +28,7 @@ interface UpcomingPayment {
   paidAmount: number
   contractExpectedAmount: number
   contractPaidAmount: number
+  contractRemainingAmount: number
   status: string
 }
 
@@ -65,11 +65,7 @@ function activityLabel(action: string) {
 }
 
 function outstanding(payment: UpcomingPayment) {
-  return contractScheduleOutstanding(
-    Number(payment.contractExpectedAmount),
-    Number(payment.contractPaidAmount),
-    payment.nasiya.contractCurrency,
-  )
+  return Math.max(0, Number(payment.contractRemainingAmount))
 }
 
 function statusLabel(status: string) {

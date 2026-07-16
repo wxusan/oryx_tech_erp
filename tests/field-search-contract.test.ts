@@ -166,7 +166,8 @@ describe('ERP 2.0 field/search contract', () => {
 
     const nasiyaPage = readFileSync(resolve(process.cwd(), 'src/app/(shop)/shop/nasiyalar/[id]/page.tsx'), 'utf8')
     expect(nasiyaPage).toContain('customerName: editCustomerName.trim()')
-    expect(nasiyaPage).toContain('importNote: nasiya.isImported ? editImportNote.trim() : undefined')
+    expect(nasiyaPage).toContain('customerPhone: editCustomerPhone.trim()')
+    expect(nasiyaPage).toContain('importNote: nasiya.importData?.isImported ? editImportNote.trim() : undefined')
     expect(nasiyaPage).toContain('body: JSON.stringify({ reminderEnabled: !nasiya.reminderEnabled })')
     const nasiyaRoute = readFileSync(resolve(process.cwd(), 'src/app/api/nasiya/[id]/route.ts'), 'utf8')
     expect(nasiyaRoute).toContain('const updateNasiyaSchema = z.object({')

@@ -79,11 +79,23 @@ export function NasiyaHistorySections({
   payments,
   logs,
   formatMoney,
+  historyLoaded = true,
+  historyLoading = false,
+  onLoadHistory,
+  logsLoaded = true,
+  logsLoading = false,
+  onLoadLogs,
 }: {
   schedules: NasiyaScheduleRow[]
   payments: NasiyaPaymentDisplayRecord[]
   logs: NasiyaActionLog[]
   formatMoney: (amount: MoneyDto) => string
+  historyLoaded?: boolean
+  historyLoading?: boolean
+  onLoadHistory?: () => void
+  logsLoaded?: boolean
+  logsLoading?: boolean
+  onLoadLogs?: () => void
 }) {
   const sortedSchedules = schedules.toSorted((a, b) => a.monthNumber - b.monthNumber)
 
@@ -109,7 +121,12 @@ export function NasiyaHistorySections({
 
       <section className="overflow-hidden rounded border border-zinc-200" aria-labelledby="nasiya-payments-heading">
         <h2 id="nasiya-payments-heading" className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-900">To&apos;lov tarixi</h2>
-        {payments.length ? <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm">
+        {!historyLoaded && onLoadHistory ? <div className="px-4 py-5">
+          <p className="text-sm text-zinc-500">To&apos;lovlar, mijoz bahosi va qo&apos;shimcha tarix birinchi ekranni sekinlashtirmasligi uchun alohida yuklanadi.</p>
+          <button type="button" onClick={onLoadHistory} disabled={historyLoading} className="mt-3 rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
+            {historyLoading ? 'Tarix yuklanmoqda...' : 'Batafsil tarixni yuklash'}
+          </button>
+        </div> : payments.length ? <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm">
           <caption className="sr-only">Nasiya bo&apos;yicha qabul qilingan to&apos;lovlar</caption>
           <thead className="border-b border-zinc-200"><tr>{['Sana', 'Miqdor', 'Usul', 'Izoh'].map((heading) => <th key={heading} className="bg-zinc-50 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">{heading}</th>)}</tr></thead>
           <tbody>{payments.map((payment) => {
@@ -125,7 +142,12 @@ export function NasiyaHistorySections({
 
       <section className="overflow-hidden rounded border border-zinc-200" aria-labelledby="nasiya-actions-heading">
         <h2 id="nasiya-actions-heading" className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-900">Amallar tarixi</h2>
-        {logs.length ? <ul className="divide-y divide-zinc-100">{logs.map((log) => {
+        {!logsLoaded && onLoadLogs ? <div className="px-4 py-5">
+          <p className="text-sm text-zinc-500">Audit yozuvlari faqat ochilganda yuklanadi.</p>
+          <button type="button" onClick={onLoadLogs} disabled={logsLoading} className="mt-3 rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
+            {logsLoading ? 'Amallar yuklanmoqda...' : 'Amallar tarixini yuklash'}
+          </button>
+        </div> : logs.length ? <ul className="divide-y divide-zinc-100">{logs.map((log) => {
           const detail = logDetail(log)
           return <li key={log.id} className="flex items-start justify-between gap-4 px-4 py-3"><div className="min-w-0"><div className="text-sm text-zinc-900">{logLabel(log)}</div>{detail && <div className="mt-0.5 text-xs text-zinc-500">{detail}</div>}{log.note && <div className="mt-0.5 text-xs text-zinc-500">{log.note}</div>}</div><time className="flex-shrink-0 whitespace-nowrap text-xs text-zinc-400" dateTime={log.createdAt}>{uzDateTime(log.createdAt)}</time></li>
         })}</ul> : <div className="px-4 py-6 text-sm text-zinc-500">Amallar tarixi yo&apos;q</div>}

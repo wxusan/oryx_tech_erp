@@ -1,6 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { DateInput } from '@/components/ui/date-input'
@@ -11,24 +12,23 @@ import { Textarea } from '@/components/ui/textarea'
 import { commitNavigationMutation } from '@/lib/client-events'
 import { uzDate } from '@/lib/dates'
 import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
+import { useNasiyaOperationContext } from '@/lib/use-nasiya-operation-context'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { queryKeys } from '@/lib/query-keys'
+import type { NasiyaDeferMutationResult, NasiyaOperationContext, NasiyaOperationSchedule } from '@/lib/nasiya-operation-context'
 
-interface Schedule {
-  id: string
-  monthNumber: number
-  dueDate: string
-  delayedUntil: string | null
-  status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
-}
+type Schedule = NasiyaOperationSchedule
 
 interface NasiyaDeferModalProps {
   nasiyaId: string
   open: boolean
   onOpenChange: (open: boolean) => void
-  onSuccess: () => void
+  onSuccess: (result: NasiyaDeferMutationResult) => void
   customerName?: string
   deviceName?: string
   /** Queue actions preselect this still-open schedule when it remains valid. */
   preferredScheduleId?: string
+  initialContext?: NasiyaOperationContext
 }
 
 function effectiveDue(schedule: Schedule) {
@@ -43,54 +43,55 @@ export function NasiyaDeferModal({
   customerName,
   deviceName,
   preferredScheduleId,
+  initialContext,
 }: NasiyaDeferModalProps) {
   const command = useLogicalCommandIdempotency()
-  const [schedules, setSchedules] = useState<Schedule[]>([])
+  const queryClient = useQueryClient()
+  const scope = useAuthenticatedQueryScope()
+  const contextQuery = useNasiyaOperationContext({
+    nasiyaId,
+    intent: 'defer',
+    enabled: open,
+    initialData: initialContext,
+  })
   const [selectedScheduleId, setSelectedScheduleId] = useState('')
   const [newDueDate, setNewDueDate] = useState('')
   const [reason, setReason] = useState('')
-  const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [identity, setIdentity] = useState({ customerName: '', deviceName: '' })
 
   useEffect(() => {
     if (!open || !nasiyaId) return
-    let cancelled = false
-    const load = async () => {
-      setLoading(true)
+    const frame = window.requestAnimationFrame(() => {
       setError('')
       setNewDueDate('')
       setReason('')
-      try {
-        const response = await fetch(`/api/nasiya/${nasiyaId}`)
-        const json = await response.json()
-        if (cancelled) return
-        if (!json.success) {
-          setError(json.error || 'Nasiya topilmadi')
-          return
-        }
-        const pending = (json.data.schedules ?? []).filter((schedule: Schedule) =>
-          ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(schedule.status),
-        )
-        setSchedules(pending)
-        const preferred = preferredScheduleId ? pending.find((schedule: Schedule) => schedule.id === preferredScheduleId) : undefined
-        setSelectedScheduleId(preferred?.id ?? pending[0]?.id ?? '')
-        setIdentity({
-          customerName: json.data.customer?.name ?? '',
-          deviceName: json.data.device?.model ?? '',
-        })
-      } catch {
-        if (!cancelled) setError('Nasiya ma’lumotlarini olishda xatolik')
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    void load()
-    return () => {
-      cancelled = true
-    }
-  }, [nasiyaId, open, preferredScheduleId])
+      setSelectedScheduleId('')
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [nasiyaId, open])
+
+  const schedules = useMemo(
+    () => (contextQuery.data?.schedules ?? []).filter((schedule) =>
+      ['PENDING', 'PARTIAL', 'OVERDUE', 'DEFERRED'].includes(schedule.status),
+    ),
+    [contextQuery.data?.schedules],
+  )
+  const loading = open && contextQuery.isPending && !contextQuery.data
+  const contextError = contextQuery.error instanceof Error ? contextQuery.error.message : ''
+
+  useEffect(() => {
+    if (!open || schedules.length === 0) return
+    const frame = window.requestAnimationFrame(() => {
+      setSelectedScheduleId((current) => {
+        if (current && schedules.some((schedule) => schedule.id === current)) return current
+        return preferredScheduleId && schedules.some((schedule) => schedule.id === preferredScheduleId)
+          ? preferredScheduleId
+          : schedules[0]?.id ?? ''
+      })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [open, preferredScheduleId, schedules])
 
   const selected = useMemo(
     () => schedules.find((schedule) => schedule.id === selectedScheduleId) ?? null,
@@ -125,9 +126,28 @@ export function NasiyaDeferModal({
         return
       }
       command.committed()
-      await commitNavigationMutation({ kind: 'nasiya.deferred', nasiyaId }).catch(() => undefined)
+      const result = json.data as NasiyaDeferMutationResult
+      if (result.nasiyaScheduleId && result.newDueDate) {
+        for (const intent of ['payment', 'defer'] as const) {
+          queryClient.setQueryData<NasiyaOperationContext>(
+            queryKeys.nasiyas.operationContext(scope, nasiyaId, intent),
+            (current) => current ? {
+              ...current,
+              ledger: {
+                ...current.ledger,
+                ...(result.ledger?.remaining ? { remaining: result.ledger.remaining } : {}),
+                ...(result.ledger?.status ? { status: result.ledger.status } : {}),
+              },
+              schedules: current.schedules.map((schedule) => schedule.id === result.nasiyaScheduleId
+                ? { ...schedule, status: 'DEFERRED', delayedUntil: result.newDueDate! }
+                : schedule),
+            } : current,
+          )
+        }
+      }
+      void commitNavigationMutation({ kind: 'nasiya.deferred', nasiyaId }).catch(() => undefined)
       onOpenChange(false)
-      onSuccess()
+      onSuccess(result)
     } catch {
       setError('Muddatni uzaytirishda xatolik')
     } finally {
@@ -135,7 +155,7 @@ export function NasiyaDeferModal({
     }
   }
 
-  const subtitle = [identity.customerName || customerName, identity.deviceName || deviceName]
+  const subtitle = [contextQuery.data?.customer.name || customerName, contextQuery.data?.device.model || deviceName]
     .filter(Boolean)
     .join(' · ')
 
@@ -149,7 +169,7 @@ export function NasiyaDeferModal({
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
-          {error && <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{error}</div>}
+          {(error || contextError) && <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{error || contextError}</div>}
           {loading ? (
             <div className="py-6 text-center text-sm text-zinc-400">Yuklanmoqda...</div>
           ) : (

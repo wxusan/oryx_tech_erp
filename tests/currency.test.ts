@@ -64,6 +64,15 @@ describe('currency helpers', () => {
     })
   })
 
+  it('uses exact cents and a four-decimal governed quote for command conversion', () => {
+    expect(normalizeMoneyInput(0.01, 'USD', 12_650.1234)).toEqual({
+      amountUzs: 127,
+      inputCurrency: 'USD',
+      exchangeRateUsed: 12_650.1234,
+    })
+    expect(() => normalizeMoneyInput(1, 'USD', 12_650.12345)).toThrow('4 kasr')
+  })
+
   it("keeps whole-so'm UZS input unchanged and rejects fractional UZS", () => {
     expect(normalizeMoneyInput(1_506_250, 'UZS', null)).toEqual({
       amountUzs: 1_506_250,

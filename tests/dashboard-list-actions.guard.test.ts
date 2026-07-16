@@ -58,7 +58,7 @@ describe('nasiyalar list payment action', () => {
 
   it('shows "To\'lov qabul qilish" only with permission and an active/overdue remaining balance', () => {
     expect(src).toContain(
-      "const canPay = canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.remainingAmount > 0",
+      "const canPay = !ledgerQuarantined && canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.ledger.remaining.minorUnits > 0",
     )
     expect(src).toContain('{canPay && (')
     expect(src).toContain("To&apos;lov qabul qilish")
@@ -87,7 +87,8 @@ describe('payment modal is the single shared implementation', () => {
 
   it('uses MoneyInput and currency formatting (USD/UZS preserved)', () => {
     expect(modal).toContain('MoneyInput')
-    expect(modal).toContain('formatDisplayMoneyFromContract')
+    expect(modal).toContain('formatMoneyDto')
+    expect(modal).toContain('convertMoneyDto')
     expect(modal).toContain('currencyLabel')
   })
 

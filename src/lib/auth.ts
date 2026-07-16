@@ -251,16 +251,15 @@ async function verifyShopAdminPassword(
       shopId: true,
       passwordHash: true,
       sessionVersion: true,
-      shop: { select: { ownerAdminId: true } },
     },
   })
   if (!admin) return null
   const valid = await bcrypt.compare(password, admin.passwordHash)
   if (!valid) return null
-  const packageVersion = await getActiveShopPackage(admin.shopId)
-  if (!packageVersion) return null
-  const memberKind = shopMemberKind({ memberId: admin.id, ownerAdminId: admin.shop.ownerAdminId })
-  if (memberKind === 'SHOP_STAFF' && !enabledFeatureSet(packageVersion).has('STAFF_ACCESS')) return null
+  // Package and staff entitlement are re-read inside createGuardedShopSession
+  // under the Shop row lock. Keeping that single authoritative check avoids a
+  // duplicate package query on every successful login while preserving the
+  // race-safe disabled-account, subscription, package, and staff checks.
   return { id: admin.id, name: admin.name, shopId: admin.shopId, sessionVersion: admin.sessionVersion }
 }
 

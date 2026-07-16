@@ -65,6 +65,7 @@ const routes: Array<{ path: string; load: () => Promise<RouteModule> }> = [
   { path: 'src/app/api/logs/[id]/link/route.ts', load: () => import('@/app/api/logs/[id]/link/route') },
   { path: 'src/app/api/logs/route.ts', load: () => import('@/app/api/logs/route') },
   { path: 'src/app/api/nasiya/[id]/defer/route.ts', load: () => import('@/app/api/nasiya/[id]/defer/route') },
+  { path: 'src/app/api/nasiya/[id]/operation-context/route.ts', load: () => import('@/app/api/nasiya/[id]/operation-context/route') },
   { path: 'src/app/api/nasiya/[id]/payment/route.ts', load: () => import('@/app/api/nasiya/[id]/payment/route') },
   { path: 'src/app/api/nasiya/[id]/reminder/route.ts', load: () => import('@/app/api/nasiya/[id]/reminder/route') },
   { path: 'src/app/api/nasiya/[id]/resolution/route.ts', load: () => import('@/app/api/nasiya/[id]/resolution/route') },

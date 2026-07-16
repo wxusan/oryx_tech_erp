@@ -61,6 +61,12 @@ describe('authenticated query keys', () => {
     expect(queryKeys.devices.list(scopeA, baseQuery)).not.toEqual(
       queryKeys.devices.list({ ...scopeA, permissionVersion: 2 }, baseQuery),
     )
+    expect(queryKeys.nasiyas.operationContext(scopeA, 'nasiya-1', 'payment')).not.toEqual(
+      queryKeys.nasiyas.operationContext({ ...scopeA, packageVersionId: 'package-2' }, 'nasiya-1', 'payment'),
+    )
+    expect(queryKeys.nasiyas.operationContext(scopeA, 'nasiya-1', 'payment')).not.toEqual(
+      queryKeys.nasiyas.operationContext(scopeA, 'nasiya-1', 'defer'),
+    )
     expect(queryKeys.devices.list(scopeA, baseQuery)).not.toEqual(
       queryKeys.devices.list(scopeA, { ...baseQuery, page: 2 }),
     )

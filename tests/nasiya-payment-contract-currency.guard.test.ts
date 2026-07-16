@@ -9,14 +9,16 @@ function read(rel: string): string {
 describe('nasiya payment route allocates in native contract currency alongside the legacy UZS ledger', () => {
   const route = read('src/app/api/nasiya/[id]/payment/route.ts')
 
-  it('computes appliedAmountInContractCurrency once, before the transaction, reusing the payment rate when possible', () => {
-    expect(route).toContain('let contractRate: number | null = amountInput.exchangeRateUsed')
-    expect(route).toContain('appliedAmountInContractCurrency = convertPaymentToContractCurrency(')
+  it('computes one exact native applied MoneyDto before the transaction', () => {
+    expect(route).toContain('inputMoney = createMoneyDto(inputCurrency, amount)')
+    expect(route).toContain('const appliedMoney = convertMoneyDto(inputMoney, contractCurrency, conversionQuote)')
+    expect(route).toContain('const appliedAmountInContractCurrency = moneyDtoToAmount(appliedMoney)')
   })
 
-  it('only fetches an extra rate when the payment currency differs from the contract currency and no rate was already fetched', () => {
-    expect(route).toContain('amountInput.inputCurrency !== contractCurrency && contractRate == null')
-    expect(route).toContain('contractRate = await getUsdUzsRate()')
+  it('requires a governed rate only when payment and contract currencies differ', () => {
+    expect(route).toContain('if (inputCurrency !== contractCurrency)')
+    expect(route).toContain('paymentTimeSnapshot = await getUsdUzsRateSnapshot()')
+    expect(route).toContain("USDdan USDga to'lov kurs talab qilmaydi")
   })
 
   it('the pure allocateNasiyaPayment (called by this route) tracks a parallel contract-currency remaining amount alongside the legacy one', () => {
@@ -24,16 +26,16 @@ describe('nasiya payment route allocates in native contract currency alongside t
     // src/lib/nasiya-payment-allocation.ts (item 4 rate-drift fix) so it
     // can be unit-tested directly — see tests/nasiya-allocation-rate-drift.test.ts.
     const allocation = read('src/lib/nasiya-payment-allocation.ts')
-    expect(allocation).toContain('let remainingContractPayment = allocatableContractAmount(params.appliedAmountInContractCurrency, contractCurrency)')
-    expect(allocation).toContain('const rawContractApplied = Math.min(remainingContractPayment, contractOutstanding)')
-    expect(allocation).toContain('const contractApplied = allocatableContractAmount(rawContractApplied, contractCurrency)')
-    expect(allocation).toContain('remainingContractPayment = allocatableContractAmount(remainingContractPayment - contractApplied, contractCurrency)')
+    expect(allocation).toContain('let remainingContractMinorUnits = allocatableMinorUnits(params.appliedAmountInContractCurrency, contractCurrency)')
+    expect(allocation).toContain('const contractAppliedMinorUnits = Math.min(remainingContractMinorUnits, contractOutstandingMinorUnits)')
+    expect(allocation).toContain('remainingContractMinorUnits -= contractAppliedMinorUnits')
   })
 
-  it('uses contractScheduleOutstanding (currency-aware tolerance), not the UZS-only scheduleOutstanding, for the contract ledger', () => {
-    expect(route).toContain('contractScheduleOutstanding(')
+  it('uses the reconciled native schedule ledger rather than UZS-only outstanding math', () => {
+    expect(route).toContain('const currentLedger = reconcileNasiyaLedger({')
+    expect(route).toContain('const totalOutstandingContract = currentLedger.remaining')
     const allocation = read('src/lib/nasiya-payment-allocation.ts')
-    expect(allocation).toContain('contractScheduleOutstanding(')
+    expect(allocation).toContain('const contractExpected = createMoneyDto(contractCurrency, schedule.contractExpectedAmount)')
   })
 
   it('updates contractPaidAmount/contractRemainingAmount on every allocated schedule row', () => {
@@ -48,9 +50,10 @@ describe('nasiya payment route allocates in native contract currency alongside t
     expect(route).toContain('appliedAmountInContractCurrency,')
   })
 
-  it('dual-writes Nasiya-level contractPaidAmount/contractRemainingAmount from the freshly-refetched schedules', () => {
-    expect(route).toContain('const contractTotalPaid = allSchedules.reduce((sum, s) => sum + Number(s.contractPaidAmount), 0)')
-    expect(route).toContain('contractPaidAmount: contractTotalPaid')
+  it('synchronizes Nasiya-level contract cache fields from a freshly reconciled schedule projection', () => {
+    expect(route).toContain('const postPaymentLedger = reconcileNasiyaLedger({')
+    expect(route).toContain('const contractPaidToStore = moneyDtoDatabaseAmount(postPaymentLedger.paid)')
+    expect(route).toContain('contractPaidAmount: contractPaidToStore')
     expect(route).toContain('contractRemainingAmount: contractRemainingToStore')
   })
 })

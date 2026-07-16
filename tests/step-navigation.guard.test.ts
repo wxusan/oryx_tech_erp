@@ -59,7 +59,7 @@ describe('nasiya: phone validated on the customer step, before step 3', () => {
     expect(src).toContain('function handleContinueToTerms')
     expect(src).toContain('onClick={handleContinueToTerms}')
     // The continue handler blocks on an invalid phone and does not advance.
-    const fn = src.slice(src.indexOf('function handleContinueToTerms'), src.indexOf('function handleContinueToTerms') + 600)
+    const fn = src.slice(src.indexOf('function handleContinueToTerms'), src.indexOf('function handleContinueToTerms') + 1_000)
     expect(fn).toContain('isValidPhone(customerPhone)')
     expect(fn).toContain('setPhoneError(PHONE_ERROR)')
     expect(fn).toContain('setStep(3)')
@@ -73,6 +73,6 @@ describe('nasiya: phone validated on the customer step, before step 3', () => {
   })
 
   it('keeps the shared phone rule (imports the helper, no ad-hoc regex)', () => {
-    expect(src).toContain("import { isValidPhone, PHONE_ERROR } from '@/lib/phone'")
+    expect(src).toContain("isValidPhone, PHONE_ERROR } from '@/lib/phone'")
   })
 })

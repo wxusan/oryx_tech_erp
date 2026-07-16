@@ -32,7 +32,7 @@ describe('shop stats use bounded set-based native-currency aggregates', () => {
     for (const alias of ['expected_uzs', 'expected_usd', 'overdue_uzs', 'overdue_usd']) {
       expect(queries).toContain(`AS ${alias}`)
     }
-    expect(queries).toContain('s."contractExpectedAmount" - s."contractPaidAmount"')
+    expect(queries).not.toContain('s."contractExpectedAmount" - s."contractPaidAmount"')
     expect(queries).toContain('s."contractRemainingAmount" AS outstanding')
     expect(queries).toContain("WHERE currency = 'UZS'")
     expect(queries).toContain("WHERE currency = 'USD'")
@@ -42,6 +42,7 @@ describe('shop stats use bounded set-based native-currency aggregates', () => {
     expect(source).toContain('getUpcomingScheduleIds(shopId, 5)')
     expect(source.split('contractExpectedAmount: true').length - 1).toBe(1)
     expect(source.split('contractPaidAmount: true').length - 1).toBe(1)
+    expect(source.split('contractRemainingAmount: true').length - 1).toBe(1)
     expect(queries).toContain('LIMIT ${Math.max(1, Math.min(Math.trunc(take), 50))}')
   })
 
@@ -76,15 +77,14 @@ describe('shop-stats-formulas.ts consumes native partitions without mixing curre
     expect(source).toContain('overdueMoneyUsd: overduePartition.usd')
   })
 
-  it('upcomingPayments converts both expectedAmount and paidAmount from the nasiya\'s own contract currency via today\'s rate', () => {
+  it('upcomingPayments exposes the authoritative native remaining balance for the client', () => {
     const idx = source.indexOf('upcomingPayments: upcomingPayments')
     const block = source.slice(idx, idx + 1_200)
     expect(block).toContain("payment.nasiya.contractCurrency === 'USD'")
     expect(block).toContain("convertContractAmountToUzs(Number(amount), 'USD', usdUzsRate) ?? 0")
     expect(block).toContain('contractExpectedAmount: Number(payment.contractExpectedAmount)')
     expect(block).toContain('contractPaidAmount: Number(payment.contractPaidAmount)')
-    expect(block).toContain('expectedAmount: toUzs(payment.contractExpectedAmount)')
-    expect(block).toContain('paidAmount: toUzs(payment.contractPaidAmount)')
+    expect(block).toContain('contractRemainingAmount: scheduleOutstandingNative(payment)')
   })
 
   it('actual profit is set-based on frozen payment/allocation UZS components', () => {

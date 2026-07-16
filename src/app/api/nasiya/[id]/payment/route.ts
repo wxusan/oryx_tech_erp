@@ -95,8 +95,13 @@ function matchesExistingPaymentPayload(
 }
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
+  const startedAt = performance.now()
+  const timings: Record<string, number> = {}
+  let measuredShopId: string | null = null
   try {
+    const authStartedAt = performance.now()
     const guarded = await requireShopPermissionAndFeature('NASIYA_PAYMENT_RECEIVE', 'NASIYA')
+    timings.authenticationPermissions = performance.now() - authStartedAt
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
@@ -129,11 +134,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const { shopId } = resolved
 
     // Distributed when Upstash is configured; bounded in-process fallback otherwise.
+    measuredShopId = shopId
+    const rateLimitStartedAt = performance.now()
     const rate = await checkRateLimitDistributed(rateLimitKey('nasiya-payment', shopId, session.user.id), { windowMs: 60_000, max: 20 })
+    timings.rateLimiter = performance.now() - rateLimitStartedAt
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
-    const currency = await getShopCurrencyContext(shopId)
-    const paymentFxQuoteColumnsAvailable = await hasNasiyaPaymentFxQuoteColumns()
+    // These reads are independent and sit before the serializable write, so
+    // do them concurrently instead of extending the login-to-payment path
+    // with a needless three-query waterfall.
+    const initialReadsStartedAt = performance.now()
+    const [currency, paymentFxQuoteColumnsAvailable, contractLookup] = await Promise.all([
+      getShopCurrencyContext(shopId),
+      hasNasiyaPaymentFxQuoteColumns(),
+      prisma.nasiya.findFirst({
+        where: { id: nasiyaId, shopId, resolutionState: 'ACTIVE' },
+        select: { contractCurrency: true, contractExchangeRateAtCreation: true },
+      }),
+    ])
+    timings.initialDatabaseReads = performance.now() - initialReadsStartedAt
     // A regular payment note is optional. Store blank input as NULL, never as
     // a fabricated placeholder or an empty string.
     const auditNote = note?.trim() || undefined
@@ -152,11 +171,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // to the contract's frozen creation quote and is labelled as such by the
     // absence of a payment-time exchange rate on the receipt.
     let contractCurrency: 'UZS' | 'USD' = 'UZS'
-    const contractLookup = await prisma.nasiya.findFirst({
-      where: { id: nasiyaId, shopId, resolutionState: 'ACTIVE' },
-      select: { contractCurrency: true, contractExchangeRateAtCreation: true },
-    })
     contractCurrency = contractLookup?.contractCurrency ?? 'UZS'
+    const currencyFxStartedAt = performance.now()
     let paymentTimeSnapshot: Awaited<ReturnType<typeof getUsdUzsRateSnapshot>> | null = null
     if (inputCurrency !== contractCurrency) {
       try {
@@ -211,6 +227,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       // legacy reporting fallback. Do not falsely label it payment-time FX.
       exchangeRateUsed: paymentTimeRate,
     }
+    timings.currencyFx = performance.now() - currencyFxStartedAt
 
     const runPaymentTransaction = () =>
       prisma.$transaction(
@@ -361,6 +378,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           const ledgerScheduleById = new Map(currentLedger.schedules.map((schedule) => [schedule.id, schedule]))
           const unpaidSchedules = [...nasiya.schedules].filter((schedule) => (ledgerScheduleById.get(schedule.id)?.remaining.minorUnits ?? 0) > 0)
           const selectedOutstanding = ledgerScheduleById.get(selectedSchedule.id)?.remaining ?? createMoneyDto(contractCurrency, 0)
+          const allocationLedgerStartedAt = performance.now()
           const allocationRows = [
             ...unpaidSchedules.filter((schedule) => schedule.id === selectedSchedule.id),
             ...unpaidSchedules
@@ -623,8 +641,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               contractRemainingAmount: contractRemainingToStore,
             },
           })
+          timings.allocationLedgerReconciliation = (timings.allocationLedgerReconciliation ?? 0)
+            + (performance.now() - allocationLedgerStartedAt)
 
           // Notify all active shop admins with a verified telegramId.
+          const notificationAuditStartedAt = performance.now()
           const shopAdmins = await tx.shopAdmin.findMany({
               where: {
                 shopId,
@@ -667,33 +688,36 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                   currency,
                 })
               : null
-          for (const admin of shopAdmins) {
-            await tx.notification.create({
-                data: {
+          // Queue every recipient in one set-based write. Telegram delivery
+          // remains post-response; serializable payment locks are no longer
+          // held for two inserts per active administrator.
+          const scheduledAt = new Date()
+          // `if (completedMessage)`, each administrator receives one
+          // completion row in addition to the ordinary payment row.
+          const notificationRows: Prisma.NotificationCreateManyInput[] = shopAdmins.flatMap((admin) => [
+            {
+              shopId,
+              type: 'PAYMENT_RECEIVED' as const,
+              message: paymentMessage,
+              telegramId: admin.telegramId!,
+              recipientShopAdminId: admin.id,
+              scheduledAt,
+              relatedId: allocations.length === 1 ? allocations[0].scheduleId : nasiyaId,
+              relatedType: allocations.length === 1 ? ('NasiyaSchedule' as const) : ('Nasiya' as const),
+            },
+            ...(completedMessage ? [{
                   shopId,
-                  type: 'PAYMENT_RECEIVED',
-                  message: paymentMessage,
+                  type: 'NASIYA_COMPLETED' as const,
+                  message: completedMessage,
                   telegramId: admin.telegramId!,
                   recipientShopAdminId: admin.id,
-                  scheduledAt: new Date(),
-                  relatedId: allocations.length === 1 ? allocations[0].scheduleId : nasiyaId,
-                  relatedType: allocations.length === 1 ? 'NasiyaSchedule' : 'Nasiya',
-                },
-              })
-            if (completedMessage) {
-              await tx.notification.create({
-                  data: {
-                    shopId,
-                    type: 'NASIYA_COMPLETED',
-                    message: completedMessage,
-                    telegramId: admin.telegramId!,
-                    recipientShopAdminId: admin.id,
-                    scheduledAt: new Date(),
-                    relatedId: nasiyaId,
-                    relatedType: 'Nasiya',
-                  },
-                })
-            }
+                  scheduledAt,
+                  relatedId: nasiyaId,
+                  relatedType: 'Nasiya' as const,
+                }] : []),
+          ])
+          if (notificationRows.length > 0) {
+            await tx.notification.createMany({ data: notificationRows })
           }
 
           await tx.log.create({
@@ -736,6 +760,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               },
             })
           }
+          timings.notificationsAudit = (timings.notificationsAudit ?? 0)
+            + (performance.now() - notificationAuditStartedAt)
 
           return {
             nasiyaId,
@@ -763,6 +789,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
       )
 
+    const transactionStartedAt = performance.now()
     let result: Awaited<ReturnType<typeof runPaymentTransaction>> | undefined
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
@@ -775,8 +802,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         throw err
       }
     }
+    timings.serializableTransaction = performance.now() - transactionStartedAt
     if (!result) return serverError()
 
+    const serializationStartedAt = performance.now()
     if (!result.duplicate) {
       invalidateShopPaymentMutation(shopId)
     }
@@ -792,6 +821,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       ),
     )
 
+    timings.serialization = performance.now() - serializationStartedAt
+    const durationMs = performance.now() - startedAt
+    if (process.env.PERFORMANCE_TIMING_LOGS === 'true' || durationMs >= 800) {
+      logger.info('Nasiya payment performance timing', {
+        event: 'performance.nasiya_payment',
+        shopId: measuredShopId,
+        durationMs: Math.round(durationMs),
+        phasesMs: Object.fromEntries(Object.entries(timings).map(([phase, value]) => [phase, Math.round(value)])),
+        status: result.duplicate ? 'idempotent_replay' : 'confirmed',
+      })
+    }
     return ok(result, result.duplicate ? "To'lov allaqachon qabul qilingan" : "To'lov muvaffaqiyatli qabul qilindi")
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'status' in err) {

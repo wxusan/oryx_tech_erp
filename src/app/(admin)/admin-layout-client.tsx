@@ -1,11 +1,13 @@
 'use client'
 
 import Link from 'next/link'
+import { useEffect } from 'react'
 import { usePathname } from 'next/navigation'
 import { Activity, BarChart3, LayoutDashboard, Store, CreditCard, ScrollText, Settings } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
 import { useAdminCurrency } from '@/lib/use-admin-currency'
+import { measureAuthenticatedShellUsable } from '@/lib/login-performance'
 
 const navItems = [
   { label: 'Boshqaruv', href: '/admin', icon: LayoutDashboard, prefetch: true },
@@ -28,6 +30,9 @@ function initials(name: string) {
 
 export function AdminLayoutClient({ children, adminName }: { children: React.ReactNode; adminName: string }) {
   const pathname = usePathname()
+  useEffect(() => {
+    measureAuthenticatedShellUsable('admin')
+  }, [])
   const displayName = adminName.trim() || 'Admin'
   const { currency, saving: currencySaving, error: currencyError, setDisplayCurrency } = useAdminCurrency()
 

@@ -27,7 +27,8 @@ import {
 import { ArrowLeft, Check, Eye, EyeOff, FileImage, Loader2, X } from 'lucide-react'
 import { convertUsdToUzs, convertUzsToUsd, currencyLabel, formatMoneyByCurrency } from '@/lib/currency'
 import { displayImei } from '@/lib/device-display'
-import { formatUzPhoneDisplay, isValidPhone, PHONE_ERROR } from '@/lib/phone'
+import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
+import { formatUzPhoneDisplay } from '@/lib/phone'
 import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { InStockDevicePicker, type InStockPickerDevice } from '@/components/shop/in-stock-device-picker'
@@ -217,6 +218,10 @@ function AuthorizedNewNasiyaPage() {
   // Step 2 → Step 3: validate customer name + phone here so the error appears
   // under the field on this step, not only at final save. Server still
   // re-validates on submit (source of truth).
+  function hasValidNewCustomerPassportIdentifier() {
+    return !canManageCustomerPassport || !customerPassportIdentifier.trim() || isValidPassportIdentifier(customerPassportIdentifier)
+  }
+
   function handleContinueToTerms() {
     let ok = true
     if (customerMode === 'PICK') return
@@ -228,12 +233,7 @@ function AuthorizedNewNasiyaPage() {
       setPhoneError(PHONE_ERROR)
       ok = false
     }
-    if (
-      customerMode === 'NEW' &&
-      canManageCustomerPassport &&
-      customerPassportIdentifier.trim() &&
-      !isValidPassportIdentifier(customerPassportIdentifier)
-    ) {
+    if (customerMode === 'NEW' && !hasValidNewCustomerPassportIdentifier()) {
       setCustomerPassportIdentifierError("Pasport seriya/raqami AA 1234567 formatida bo'lishi kerak")
       ok = false
     }

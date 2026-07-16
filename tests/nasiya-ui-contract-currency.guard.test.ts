@@ -25,41 +25,37 @@ describe('GET /api/nasiya/[id] returns the contract-currency ledger for the UI',
   })
 })
 
-describe('nasiya detail page shows only the selected display currency', () => {
+describe('nasiya detail page keeps contract currency primary and labels any current-rate approximation', () => {
   const page = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
 
-  it('does not show a native "Shartnoma: ..." money hint when contract currency differs', () => {
-    expect(page).not.toContain('nasiya.contractCurrency !== currency.currency')
-    expect(page).not.toContain('Shartnoma:')
-    expect(page).not.toContain('formatContractMoney(nasiya.contractFinalAmount, nasiya.contractCurrency)')
+  it('keeps native MoneyDto values primary and only adds a clearly approximate secondary amount', () => {
+    expect(page).toContain('const primary = formatMoneyDto(amount)')
+    expect(page).toContain('convertMoneyDto(amount, currency.currency, currency.fxQuote)')
+    expect(page).toContain('Joriy kurs bo\'yicha ≈')
   })
 
-  it("paymentAmountDisplay is called with the nasiya's contractCurrency", () => {
+  it('payment history preserves the recorded input and native applied amounts', () => {
     const history = read('src/components/shop/nasiya-history-sections.tsx')
-    expect(page).toContain('contractCurrency={nasiya.contractCurrency}')
-    expect(history).toContain('paymentAmountDisplay(payment, contractCurrency, currency)')
+    expect(history).toContain('paymentAmountDisplay(payment)')
+    expect(history).toContain('formatMoneyDto(part.amount)')
   })
 })
 
 describe('nasiya payment modal previews the applied amount without leaking a second currency', () => {
   const modal = read('src/components/shop/nasiya-payment-modal.tsx')
 
-  it("fetches and stores the deal's contractCurrency", () => {
-    expect(modal).toContain("setContractCurrency((json.data.contractCurrency as CurrencyCode) ?? 'UZS')")
+  it('reads the deal contract currency from the shared operation context', () => {
+    expect(modal).toContain("const contractCurrency = contextQuery.data?.contractCurrency ?? 'UZS'")
+    expect(modal).toContain('useNasiyaOperationContext')
   })
 
-  it('shows a "Shartnomaga qo\'llanadi" preview only when payment currency differs from contract currency, formatted through dfmt', () => {
-    expect(modal).toContain('contractCurrency !== currency.currency && currency.usdUzsRate')
-    // Reads from `effectiveAmountNumber` (the single field in non-split
-    // mode, or the split total in split mode) — see
-    // docs/product-feature-fixes.md's split-payment amount-entry fix.
-    expect(modal).toContain(
-      'convertPaymentToContractCurrency(effectiveAmountNumber, currency.currency, contractCurrency, currency.usdUzsRate)',
-    )
-    expect(modal).toContain('Shartnomaga qo&apos;llanadi: {dfmt(contractPreviewAmount)}')
+  it('shows a native applied preview only for genuine cross-currency payments', () => {
+    expect(modal).toContain('convertMoneyDto(enteredMoney, contractCurrency, currency.fxQuote)')
+    expect(modal).toContain('payAmountContract && enteredMoney?.currency !== contractCurrency')
+    expect(modal).toContain('Shartnomaga qo&apos;llanadi: {moneyView(payAmountContract)}')
   })
 
-  it('does NOT change the existing UZS-based overpayment/exceeds-remaining validation (still correct via the dual-ledger lockstep)', () => {
-    expect(modal).toContain('const exceedsRemaining = payAmountUzs > nasiyaRemainingAmount')
+  it('validates overpayment in exact native contract minor units', () => {
+    expect(modal).toContain('payAmountContract.minorUnits > ledgerRemaining.minorUnits')
   })
 })

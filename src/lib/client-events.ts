@@ -60,23 +60,43 @@ function broadcastSuccessfulMutation(message: NavigationMutationBroadcast) {
   }
 }
 
-/** Call only after the API mutation has returned a confirmed success. */
-export async function commitNavigationMutation(mutation: NavigationMutation) {
+/**
+ * Call only after the API mutation has returned a confirmed success.
+ *
+ * Local invalidation and cross-tab notification are synchronous. Durable
+ * `/api/sync` reconciliation intentionally continues in the background so a
+ * slow read model can never hold a confirmed financial dialog open.
+ */
+export function commitNavigationMutation(mutation: NavigationMutation): Promise<boolean> {
   const scopeKey = activeIncrementalSyncScopeKey()
-  if (!scopeKey) return false
+  if (!scopeKey) return Promise.resolve(false)
   const impact = navigationImpactForMutation(mutation)
   dispatchSuccessfulMutation(mutation, impact)
-  const cursor = await requestIncrementalSync()
   const message: NavigationMutationBroadcast = {
     id: mutationId(),
     sourceId: navigationClientInstanceId(),
     scopeKey,
     mutation,
     createdAt: Date.now(),
-    cursor,
   }
   broadcastSuccessfulMutation(message)
-  return true
+  const syncMark = `oryx:client-sync:${message.id}`
+  const canMeasureSync = typeof performance !== 'undefined'
+    && typeof performance.mark === 'function'
+    && typeof performance.measure === 'function'
+    && typeof performance.clearMarks === 'function'
+  if (canMeasureSync) performance.mark(syncMark)
+  void requestIncrementalSync().finally(() => {
+    if (!canMeasureSync) return
+    try {
+      performance.measure('oryx:client-sync', syncMark)
+    } catch {
+      // User Timing is observability only; it must not affect reconciliation.
+    } finally {
+      performance.clearMarks(syncMark)
+    }
+  })
+  return Promise.resolve(true)
 }
 
 export interface NavigationRouter {

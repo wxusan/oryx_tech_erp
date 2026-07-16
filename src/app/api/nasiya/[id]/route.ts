@@ -70,7 +70,7 @@ function mapPaymentBreakdown(value: unknown, currency: 'UZS' | 'USD') {
   })
 }
 
-export async function GET(_req: NextRequest, ctx: RouteContext) {
+export async function GET(req: NextRequest, ctx: RouteContext) {
   try {
     const guarded = await requireShopAnyPermission([
       'NASIYA_VIEW',
@@ -115,12 +115,21 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     const canViewPassportPhoto = session.user.role === 'SUPER_ADMIN' || Boolean(
       guarded.principal && principalHasPermission(guarded.principal, 'CUSTOMER_PASSPORT_PHOTO_VIEW'),
     )
+    // The detail screen uses this explicit lightweight view for its first
+    // render. Keep the default response complete for existing API consumers
+    // and only defer histories/trust/audit-sensitive projections when the
+    // caller knowingly asks for the summary.
+    const summaryOnly = req.nextUrl.searchParams.get('view') === 'summary'
+    const includeResolutionEvents = includeResolutionData && !summaryOnly
+    const includePaymentDetails = includePaymentHistory && !summaryOnly
+    const includeCustomerTrustData = includeCustomerTrust && !summaryOnly
+    const includePaymentScore = includeProfileData && !summaryOnly
 
     const { id: nasiyaId } = await ctx.params
     // Do not query the additive column until its migration is applied. This
     // keeps older local/prod databases readable during the review-only repair
     // phase; after a deployment the process restarts and detects the column.
-    const paymentFxQuoteColumnsAvailable = includePaymentHistory
+    const paymentFxQuoteColumnsAvailable = includePaymentDetails
       ? await hasNasiyaPaymentFxQuoteColumns()
       : false
 
@@ -174,7 +183,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             name: true,
             phone: true,
             ...(canViewPassportPhoto ? { passportPhotoUrl: true } : {}),
-            ...(includeCustomerTrust ? { trustOverride: true } : {}),
+            ...(includeCustomerTrustData ? { trustOverride: true } : {}),
           },
         },
         device: {
@@ -206,7 +215,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
             contractAmount: true,
           },
         },
-        ...(includePaymentHistory ? { payments: {
+        ...(includePaymentDetails ? { payments: {
           where: { deletedAt: null },
           orderBy: { paidAt: 'desc' },
           select: {
@@ -236,7 +245,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     // Resolution events contain write-off/archive amounts and immutable
     // financial/audit context. Staff may operate active Nasiyas but must not
     // receive this owner-only ledger payload even through a direct URL.
-    const resolutionEvents = includeResolutionData
+    const resolutionEvents = includeResolutionEvents
       ? await prisma.nasiyaResolutionEvent.findMany({
           where: { shopId: nasiya.shopId, nasiyaId: nasiya.id },
           orderBy: { createdAt: 'desc' },
@@ -291,7 +300,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     // hardcode UZS — see docs/nasiya-payment-scoring.md. The score itself
     // must read the deal's own contract-currency amounts (never the legacy
     // UZS snapshot) — see docs/currency-accounting-model.md.
-    const paymentScore = includeProfileData
+    const paymentScore = includePaymentScore
       ? computeNasiyaPaymentScore(
           {
             schedules: nasiya.schedules.map((s) => ({
@@ -311,7 +320,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
 
     // Item 12 — customer trust rating, aggregated across ALL of this
     // customer's nasiyas in this shop (not just this one deal).
-    const customerNasiyas = includeCustomerTrust
+    const customerNasiyas = includeCustomerTrustData
       ? await prisma.nasiya.findMany({
           where: { customerId: nasiya.customer.id, shopId: nasiya.shopId, deletedAt: null },
           select: {
@@ -346,7 +355,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     }))
     const trustOverrideValue = 'trustOverride' in nasiya.customer ? nasiya.customer.trustOverride : null
     const trustOverride = isValidTrustTier(trustOverrideValue) ? trustOverrideValue : null
-    const customerTrust = includeCustomerTrust
+    const customerTrust = includeCustomerTrustData
       ? computeCustomerTrustRating(customerTrustInputs, new Date(), trustOverride)
       : null
     const passportPhotoUrl = 'passportPhotoUrl' in nasiya.customer ? nasiya.customer.passportPhotoUrl : null
@@ -382,7 +391,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         legacyPaid: createMoneyDto('UZS', schedule.paidAmount.toString()),
       }
     })
-    const responsePayments = includePaymentHistory
+    const responsePayments = includePaymentDetails
       ? (nasiya.payments ?? []).map((payment) => ({
           id: payment.id,
           paymentMethod: payment.paymentMethod,
@@ -460,7 +469,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
         overdueAmount: ledger.overdue,
         ...(paymentScore ? { paymentScore } : {}),
         ...(customerTrust ? { customerTrust } : {}),
-        ...(includeResolutionData
+        ...(includeResolutionData && !summaryOnly
           ? {
               resolutionEvents: resolutionEvents.map((event) => ({
                 id: event.id,

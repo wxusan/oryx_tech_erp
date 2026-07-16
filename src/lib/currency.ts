@@ -260,18 +260,24 @@ export function normalizeMoneyInput(
   inputCurrency: CurrencyCode
   exchangeRateUsed: number | null
 } {
-  assertMinorUnits(amount, currency)
+  // Every persisted money command goes through the exact minor-unit boundary
+  // first. In particular, do not use `amount * rate` here: a USD-cent input
+  // and a four-decimal governed rate must produce the same rounded UZS value
+  // on every runtime, without IEEE-754 drift.
+  const input = createMoneyDto(currency, amount)
   if (currency === 'UZS') {
-    assertMoney(amount, 'UZS amount')
     return {
-      amountUzs: Math.round(amount),
+      amountUzs: moneyDtoToAmount(input),
       inputCurrency: 'UZS',
       exchangeRateUsed: null,
     }
   }
   if (!rate) throw new Error('USD kursi mavjud emas')
+  const quote = createFxQuoteDto({ rate, source: 'INPUT_CONVERSION', freshness: 'FROZEN' })
+  const converted = convertMoneyDto(input, 'UZS', quote)
+  if (!converted) throw new Error('USD kursi mavjud emas')
   return {
-    amountUzs: convertUsdToUzs(amount, rate),
+    amountUzs: moneyDtoToAmount(converted),
     inputCurrency: 'USD',
     exchangeRateUsed: rate,
   }

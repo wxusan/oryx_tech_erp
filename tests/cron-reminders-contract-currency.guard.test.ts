@@ -10,9 +10,10 @@ function read(rel: string): string {
 describe('cron reminders use contract-currency remaining amounts', () => {
   const cron = read('src/app/api/cron/reminders/route.ts')
 
-  it('due-today, overdue, and early reminders all pass contractCurrency + a contractScheduleOutstanding-derived amountDue', () => {
-    const occurrences = cron.split('contractScheduleOutstanding(Number(schedule.contractExpectedAmount)').length - 1
+  it('due-today, overdue, and early reminders all use the authoritative schedule remaining amount', () => {
+    const occurrences = cron.split('amountDue: Number(schedule.contractRemainingAmount)').length - 1
     expect(occurrences).toBe(3)
+    expect(cron.split('contractRemainingAmount: { gt: 0 }').length - 1).toBe(3)
     const contractCurrencyFields = cron.split('contractCurrency: ').length - 1
     expect(contractCurrencyFields).toBeGreaterThanOrEqual(3)
   })

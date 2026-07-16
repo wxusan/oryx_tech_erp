@@ -196,6 +196,7 @@ async function getShopOperationalStatsFresh(role: StatsRole, shopId: string): Pr
       paidAmount: 0,
       contractExpectedAmount: 0,
       contractPaidAmount: 0,
+      contractRemainingAmount: 0,
     })),
   })
 
@@ -261,6 +262,7 @@ export function redactFinancialShopStats(stats: ShopStatsResult): ShopStatsResul
       paidAmount: 0,
       contractExpectedAmount: 0,
       contractPaidAmount: 0,
+      contractRemainingAmount: 0,
     })),
   }
 }
@@ -410,6 +412,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
           status: true,
           contractExpectedAmount: true,
           contractPaidAmount: true,
+          contractRemainingAmount: true,
           nasiya: {
             select: {
               id: true,

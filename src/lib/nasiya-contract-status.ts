@@ -10,7 +10,12 @@
  */
 
 import { contractScheduleOutstanding } from '@/lib/nasiya-contract'
-import { isCurrencyCode, type CurrencyCode } from '@/lib/currency'
+import {
+  createMoneyDto,
+  isCurrencyCode,
+  moneyDtoToAmount,
+  type CurrencyCode,
+} from '@/lib/currency'
 import { isBeforeTashkentToday } from '@/lib/timezone'
 import {
   deriveNasiyaOverdue,
@@ -29,6 +34,8 @@ export interface ContractStatusScheduleInput {
   paidAmount: MoneyValue
   contractExpectedAmount: MoneyValue
   contractPaidAmount: MoneyValue
+  /** Authoritative current debt in the frozen contract currency. */
+  contractRemainingAmount?: MoneyValue
 }
 
 export interface ContractNasiyaStatusInput {
@@ -57,7 +64,21 @@ function finiteMoney(value: MoneyValue): number | null {
 }
 
 function hasContractScheduleAmounts(schedule: ContractStatusScheduleInput): boolean {
-  return finiteMoney(schedule.contractExpectedAmount) != null && finiteMoney(schedule.contractPaidAmount) != null
+  return finiteMoney(schedule.contractRemainingAmount) != null ||
+    (finiteMoney(schedule.contractExpectedAmount) != null && finiteMoney(schedule.contractPaidAmount) != null)
+}
+
+/**
+ * Native schedule balances must obey the precision of their contract currency.
+ * Do not silently round a malformed value while deciding whether a debt is paid.
+ */
+function exactMoney(value: MoneyValue, currency: CurrencyCode): number | null {
+  if (value == null) return null
+  try {
+    return moneyDtoToAmount(createMoneyDto(currency, String(value)))
+  } catch {
+    return null
+  }
 }
 
 /**
@@ -73,8 +94,22 @@ export function deriveContractScheduleStatus(
   if (schedule.status === 'CANCELLED') {
     return { displayStatus: 'CANCELLED', outstanding: 0, isOverdue: false }
   }
-  const expected = finiteMoney(schedule.contractExpectedAmount)
-  const paid = finiteMoney(schedule.contractPaidAmount)
+  const expected = exactMoney(schedule.contractExpectedAmount, currency)
+  const paid = exactMoney(schedule.contractPaidAmount, currency)
+  const storedRemaining = exactMoney(schedule.contractRemainingAmount, currency)
+
+  // `contractRemainingAmount` is the schedule ledger's current-debt column.
+  // Older rows/callers without it retain the explicit expected-minus-paid
+  // compatibility path below; new ledger reads never recompute it in React.
+  if (storedRemaining != null) {
+    if (storedRemaining <= 0) return { displayStatus: 'PAID', outstanding: 0, isOverdue: false }
+    const isOverdue = isBeforeTashkentToday(new Date(scheduleEffectiveDueTime(schedule)), now)
+    return {
+      displayStatus: isOverdue ? 'OVERDUE' : (paid ?? 0) > 0 ? 'PARTIAL' : schedule.status === 'DEFERRED' ? 'DEFERRED' : 'PENDING',
+      outstanding: storedRemaining,
+      isOverdue,
+    }
+  }
 
   // This function is called only after contract-field presence is established
   // by the parent derivation. A direct defensive fallback keeps malformed old

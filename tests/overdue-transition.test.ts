@@ -87,12 +87,13 @@ describe('transitionNasiyaToOverdue', () => {
         id: 'schedule-1',
         nasiyaId: 'nasiya-1',
         shopId: 'shop-1',
-        status: { in: ['PENDING', 'PARTIAL', 'DEFERRED'] },
+        status: { not: 'CANCELLED' },
+        contractRemainingAmount: { gt: 0 },
       }),
       data: { status: 'OVERDUE' },
     }))
     expect(tx.nasiya.updateMany).toHaveBeenCalledWith({
-      where: { id: 'nasiya-1', shopId: 'shop-1', status: 'ACTIVE', resolutionState: 'ACTIVE', deletedAt: null },
+      where: { id: 'nasiya-1', shopId: 'shop-1', status: { not: 'CANCELLED' }, resolutionState: 'ACTIVE', deletedAt: null },
       data: { status: 'OVERDUE' },
     })
     expect(tx.changeEvent.create).toHaveBeenCalledWith(expect.objectContaining({

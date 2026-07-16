@@ -250,8 +250,9 @@ export default function NasiyalarClient({
     placeholderData: keepPreviousData,
   })
 
-  // Keep the existing list visible while the affected page refetches. The
-  // incremental coordinator updates other query-backed surfaces separately.
+  // Refresh only the active list. TanStack Query shares an in-flight request
+  // with the central mutation invalidation rather than issuing a second HTTP
+  // read, while inactive filter/page caches remain untouched.
   function handlePaymentSuccess() {
     void nasiyalarQuery.refetch()
   }

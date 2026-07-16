@@ -26,7 +26,7 @@ describe('nasiya payment modal: recommended-amount button is visually prominent'
   })
 
   it('keeps the same click behavior (fills in the suggested payment amount)', () => {
-    expect(source).toContain('setPayAmount(String(selectedScheduleOutstanding))')
-    expect(source).toContain('convertPaymentToContractCurrency(')
+    expect(source).toContain('setPayAmount(formatAmountForInput(suggestedMoney))')
+    expect(source).toContain('convertMoneyDto(selectedScheduleRemaining, currency.currency, currency.fxQuote)')
   })
 })

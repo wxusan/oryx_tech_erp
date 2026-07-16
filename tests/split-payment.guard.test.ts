@@ -149,11 +149,11 @@ describe('Telegram messages show the split breakdown when present', () => {
 })
 
 describe('payment history UI shows each split part with its own amount, inline (not hidden in a hover-only tooltip)', () => {
-  it('nasiya detail page renders one line per part with formatUserFacingMoney, using the payment\'s own input currency', () => {
+  it('nasiya detail page renders one exact MoneyDto line per payment part', () => {
     const source = read('src/components/shop/nasiya-history-sections.tsx')
     expect(source).toContain('payment.paymentBreakdown?.length')
     expect(source).toContain('payment.paymentBreakdown.map((part, index) =>')
-    expect(source).toContain('amountCurrency: payment.paymentInputCurrency ?? \'UZS\'')
+    expect(source).toContain('formatMoneyDto(part.amount)')
     // The old bug's "Naqd + Karta" (method names only, amounts hidden in a
     // `title=` tooltip) must be gone.
     expect(source).not.toMatch(/payment\.paymentBreakdown\.map\(\(p\) => paymentMethodLabel\(p\.method\)\)\.join\(' \+ '\)/)
@@ -180,10 +180,9 @@ describe('nasiya payment modal: split-payment UI has two independent amount fiel
     expect(source).toContain("const [splitAmount2Input, setSplitAmount2Input] = useState('')")
   })
 
-  it('the total is calculated as part 1 + part 2 (never a total-minus-second-part subtraction)', () => {
-    expect(source).toContain(
-      'const splitTotal = Math.round((Number(splitAmount1Input || 0) + Number(splitAmount2Input || 0)) * 100) / 100',
-    )
+  it('the total is calculated as exact part-1 + part-2 minor units (never a subtraction)', () => {
+    expect(source).toContain('const splitMoney = splitPart1Money && splitPart2Money')
+    expect(source).toContain('? addMoneyDto(splitPart1Money, splitPart2Money)')
     // The old buggy formula must be gone.
     expect(source).not.toMatch(/Number\(payAmount \|\| 0\) - Number\(splitAmount1Input \|\| 0\)/)
   })
@@ -194,31 +193,31 @@ describe('nasiya payment modal: split-payment UI has two independent amount fiel
 
   it('both parts require their own method and a positive amount, and the two methods must differ', () => {
     expect(source).toContain('splitAmount1Input.trim().length > 0')
-    expect(source).toContain('Number(splitAmount1Input) > 0')
+    expect(source).toContain('splitPart1Money && splitPart1Money.minorUnits > 0')
     expect(source).toContain('splitAmount2Input.trim().length > 0')
-    expect(source).toContain('Number(splitAmount2Input) > 0')
+    expect(source).toContain('splitPart2Money && splitPart2Money.minorUnits > 0')
     expect(source).toContain('splitMethod2 !== payMethod')
   })
 
   it('the recommended-amount button fills PART 1 and clears part 2, rather than filling a "total" field', () => {
-    const btnIndex = source.lastIndexOf('Tavsiya etilgan summa: {dfmt(selectedScheduleContractOutstanding)}')
+    const btnIndex = source.lastIndexOf('Tavsiya etilgan summa: {moneyView(selectedScheduleRemaining)}')
     const btnRegion = source.slice(Math.max(0, btnIndex - 900), btnIndex)
     expect(btnRegion).toContain('setSplitAmount1Input(')
     expect(btnRegion).toContain("setSplitAmount2Input('')")
   })
 
   it('submits paymentBreakdown with BOTH parts\' real typed amounts (not a computed remainder)', () => {
-    expect(source).toContain('{ method: payMethod, amount: Number(splitAmount1Input) }')
-    expect(source).toContain('{ method: splitMethod2, amount: Number(splitAmount2Input) }')
+    expect(source).toContain('{ method: payMethod, amount: moneyDtoToAmount(splitPart1Money!) }')
+    expect(source).toContain('{ method: splitMethod2, amount: moneyDtoToAmount(splitPart2Money!) }')
   })
 
   it('the submitted total in split mode is the split total, and single-mode amount entry is untouched', () => {
-    expect(source).toContain('amount: splitPayment ? splitTotal : Number(payAmount)')
+    expect(source).toContain('amount: moneyDtoToAmount(enteredMoney!)')
   })
 
   it('displays a calculated (read-only) "Jami to\'lov" total, never an editable total field in split mode', () => {
     expect(source).toContain('Jami to&apos;lov')
-    expect(source).toContain('{currencyLabel(currency.currency)} {splitTotal.toLocaleString(\'ru-RU\')}')
+    expect(source).toContain("{splitMoney ? formatMoneyDto(splitMoney) : '—'}")
   })
 })
 
@@ -287,7 +286,7 @@ describe('single (non-split) payment mode is unaffected by the split-mode fix', 
     const source = read('src/components/shop/nasiya-payment-modal.tsx')
     expect(source.replace(/\s+/g, ' ')).toContain('paymentBreakdown: splitPayment')
     // Single-mode canSubmit path still requires the plain amount field.
-    expect(source).toContain('const hasEffectiveAmount = splitPayment ? splitTotal > 0 : payAmount.trim().length > 0')
+    expect(source).toContain('const hasEffectiveAmount = Boolean(enteredMoney && enteredMoney.minorUnits > 0)')
   })
 
   it('sale modal: single mode still submits the plain "Miqdor" field with no paymentBreakdown', () => {
@@ -316,8 +315,8 @@ describe('nasiya payment modal: remaining-amount auto-fill UX', () => {
   })
 
   it('resets the touched flag (and all split fields) when the modal opens for a fresh load', () => {
-    const loadIndex = source.indexOf('const load = async () => {')
-    const loadBlock = source.slice(loadIndex, loadIndex + 700)
+    const loadIndex = source.indexOf('useEffect(() => {\n    if (!open || !nasiyaId) return')
+    const loadBlock = source.slice(loadIndex, loadIndex + 900)
     expect(loadBlock).toContain("setSplitAmount1Input('')")
     expect(loadBlock).toContain("setSplitAmount2Input('')")
     expect(loadBlock).toContain('setSplitAmount2Touched(false)')
@@ -333,14 +332,15 @@ describe('nasiya payment modal: remaining-amount auto-fill UX', () => {
   })
 
   it('computes a shared suggested/target amount for the split card', () => {
-    expect(source).toContain('const suggestedAmountNumber: number | null =')
+    expect(source).toContain('const suggestedMoney = selectedScheduleRemaining')
   })
 
   it('auto-fills the second amount from suggestedAmount - firstAmount when untouched, on every first-amount change', () => {
     const idx = source.indexOf('value={splitAmount1Input}')
     const block = source.slice(idx, idx + 600)
-    expect(block).toContain('if (!splitAmount2Touched && suggestedAmountNumber != null)')
-    expect(block).toContain('Math.max(0, roundDisplayAmount(suggestedAmountNumber) - Number(v || 0))')
+    expect(block).toContain('if (!splitAmount2Touched)')
+    expect(block).toContain('const remaining = suggestedRemainderAfterFirstPart(v)')
+    expect(block).toContain("setSplitAmount2Input(remaining ? formatAmountForInput(remaining) : '')")
   })
 
   it('marks the second amount as touched as soon as the user edits it directly, so auto-fill stops overwriting it', () => {
@@ -353,14 +353,14 @@ describe('nasiya payment modal: remaining-amount auto-fill UX', () => {
     const idx = source.indexOf("Qolganini qo&apos;yish")
     expect(idx).toBeGreaterThan(-1)
     const block = source.slice(Math.max(0, idx - 900), idx)
-    expect(block).toContain('Math.max(0, roundDisplayAmount(suggestedAmountNumber) - Number(splitAmount1Input || 0))')
+    expect(block).toContain('const remaining = suggestedRemainderAfterFirstPart(splitAmount1Input)')
     expect(block).toContain('setSplitAmount2Touched(false)')
   })
 
-  it('shows "Qolgan"/"Ortiqcha" against the suggested amount, hidden when within currency dust tolerance', () => {
-    expect(source).toContain('isContractCurrencyDust(splitTotal - roundDisplayAmount(suggestedAmountNumber), currency.currency)')
-    expect(source).toContain('Qolgan: {currencyLabel(currency.currency)}')
-    expect(source).toContain('Ortiqcha: {currencyLabel(currency.currency)}')
+  it('shows "Qolgan"/"Ortiqcha" from exact MoneyDto comparison against the suggested amount', () => {
+    expect(source).toContain('const splitComparison = splitMoney && suggestedMoney && !moneyDtoEquals(splitMoney, suggestedMoney)')
+    expect(source).toContain('Qolgan: {formatMoneyDto(splitComparison.amount)}')
+    expect(source).toContain('Ortiqcha: {formatMoneyDto(splitComparison.amount)}')
   })
 })
 

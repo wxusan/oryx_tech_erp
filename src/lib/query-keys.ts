@@ -19,6 +19,7 @@ function scopeRoot(scope: AuthenticatedQueryScope) {
     scope.memberKind,
     scope.authorizationVersion,
     scope.permissionVersion,
+    scope.packageVersionId,
   ] as const
 }
 
@@ -42,6 +43,14 @@ export const queryKeys = {
     },
     detail(scope: AuthenticatedQueryScope, id: string) {
       return [...this.root(scope), 'detail', id] as const
+    },
+  },
+  nasiyas: {
+    root(scope: AuthenticatedQueryScope) {
+      return [...scopeRoot(scope), 'nasiyas'] as const
+    },
+    operationContext(scope: AuthenticatedQueryScope, id: string, intent: 'payment' | 'defer') {
+      return [...this.root(scope), 'operation-context', id, intent] as const
     },
   },
 }
