@@ -170,9 +170,9 @@ function AuthorizedImportNasiyaPage() {
 
   return (
     <div className="max-w-3xl space-y-5 p-6">
-      <Link href="/shop/import" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
+      <Link href="/shop/nasiyalar" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
         <ArrowLeft size={14} />
-        Importga qaytish
+        Nasiyalarga qaytish
       </Link>
 
       <div>
