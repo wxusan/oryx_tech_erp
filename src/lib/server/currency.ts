@@ -1,12 +1,15 @@
 import 'server-only'
 
 import { cache } from 'react'
+import { after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { createFxQuoteDto, type CurrencyCode, type CurrencyContext, type FxQuoteFreshness } from '@/lib/currency'
+import { timeRequestPhase } from '@/lib/server/request-context'
 
 const CBU_USD_URL = 'https://cbu.uz/uz/arkhiv-kursov-valyut/json/USD/'
 const RATE_TTL_MS = 12 * 60 * 60 * 1000
 const MAX_FALLBACK_RATE_AGE_MS = 7 * 24 * 60 * 60 * 1000
+const CBU_TIMEOUT_MS = 2_000
 export const MIN_USD_UZS_RATE = 1_000
 export const MAX_USD_UZS_RATE = 100_000
 
@@ -77,8 +80,31 @@ export async function getUsdUzsRateSnapshot(): Promise<UsdUzsRateSnapshot> {
     }
   }
 
+  const fallback = latestCbu &&
+    isOperationalUsdUzsRate(latestCbu.rate) &&
+    Date.now() - latestCbu.fetchedAt.getTime() <= MAX_FALLBACK_RATE_AGE_MS
+    ? latestCbu
+    : await latestStoredUsdRate()
+
+  // A list route should never wait for the CBU network when a governed stored
+  // quote is available. Return it immediately and refresh after the response.
+  if (
+    fallback &&
+    isOperationalUsdUzsRate(fallback.rate) &&
+    Date.now() - fallback.fetchedAt.getTime() <= MAX_FALLBACK_RATE_AGE_MS
+  ) {
+    scheduleUsdUzsRateRefresh()
+    return {
+      rate: Number(fallback.rate),
+      source: fallback.source,
+      effectiveAt: fallback.effectiveDate,
+      fetchedAt: fallback.fetchedAt,
+      freshness: 'FALLBACK',
+    }
+  }
+
   try {
-    const rate = await refreshUsdUzsRate()
+    const rate = await timeRequestPhase('currency-refresh', () => refreshUsdUzsRate())
     const refreshed = await latestStoredUsdRate('CBU')
     return {
       rate,
@@ -109,6 +135,7 @@ export async function refreshUsdUzsRate(): Promise<number> {
   const response = await fetch(CBU_USD_URL, {
     headers: { accept: 'application/json' },
     cache: 'no-store',
+    signal: AbortSignal.timeout(CBU_TIMEOUT_MS),
   })
   if (!response.ok) throw new Error(`CBU rate fetch failed: ${response.status}`)
 
@@ -129,6 +156,26 @@ export async function refreshUsdUzsRate(): Promise<number> {
   })
 
   return rate
+}
+
+let refreshInFlight: Promise<void> | null = null
+
+function scheduleUsdUzsRateRefresh() {
+  const refresh = async () => {
+    if (refreshInFlight) return refreshInFlight
+    refreshInFlight = refreshUsdUzsRate()
+      .then(() => undefined)
+      .catch(logRateFailure)
+      .finally(() => { refreshInFlight = null })
+    return refreshInFlight
+  }
+
+  try {
+    after(refresh)
+  } catch {
+    // Direct service tests do not have a Next request lifecycle.
+    void refresh()
+  }
 }
 
 export function isOperationalUsdUzsRate(value: unknown): boolean {

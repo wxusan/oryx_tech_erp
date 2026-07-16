@@ -2,10 +2,9 @@
 
 import { CalendarRange, CircleDollarSign, Download, RotateCcw, TrendingUp, WalletCards } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
-import { buttonVariants } from '@/components/ui/button'
+import { ExportDownloadButton } from '@/components/shop/export-download-button'
 import { formatMoneyByCurrency, formatPartitionedMoney, type CurrencyContext } from '@/lib/currency'
 import type { ShopRangeReport } from '@/lib/server/shop-report-range'
-import { cn } from '@/lib/utils'
 
 const UZ_MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr']
 
@@ -153,12 +152,12 @@ export default function ShopRangeReportPanel({
         </div>
         {canExport && (
           <div className="flex shrink-0 gap-2">
-            <a href={exportHref('csv')} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8')}>
+            <ExportDownloadButton href={exportHref('csv')} fallbackFilename="report.csv" variant="outline" size="sm" className="h-8">
               <Download data-icon="inline-start" /> CSV
-            </a>
-            <a href={exportHref('xlsx')} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-8')}>
+            </ExportDownloadButton>
+            <ExportDownloadButton href={exportHref('xlsx')} fallbackFilename="report.xlsx" variant="outline" size="sm" className="h-8">
               <Download data-icon="inline-start" /> Excel
-            </a>
+            </ExportDownloadButton>
           </div>
         )}
       </div>

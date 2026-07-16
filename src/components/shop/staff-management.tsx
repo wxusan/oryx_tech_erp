@@ -31,6 +31,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { AsyncButton } from '@/components/ui/async-button'
+import { QueryActivity } from '@/components/query-activity'
+import { markQueryIntent } from '@/lib/client-performance'
 
 const assignablePermissions = SHOP_PERMISSION_CATALOG.filter(
   (item) => !item.ownerOnly && !item.retired &&
@@ -106,7 +109,7 @@ async function apiError(response: Response) {
   }
 }
 
-export function StaffManagement() {
+export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[] }) {
   const { can, enabledFeatures, memberKind } = useShopAccess()
   const scope = useAuthenticatedQueryScope()
   const queryClient = useQueryClient()
@@ -135,10 +138,11 @@ export function StaffManagement() {
       return (payload.data ?? []) as ShopStaffDto[]
     },
     enabled: hasRosterWorkflow,
+    initialData: hasRosterWorkflow ? initialStaff : undefined,
   })
   const staff = staffQuery.data ?? []
   const loading = hasRosterWorkflow && staffQuery.isPending && !staffQuery.data
-  const error = staffQuery.error instanceof Error ? staffQuery.error.message : ''
+  const error = staffQuery.error instanceof Error ? staffQuery.error.message : null
 
   const isOwner = memberKind === 'SHOP_OWNER'
   const permissionGroups = useMemo(() => {
@@ -337,8 +341,15 @@ export function StaffManagement() {
         Har bir ruxsat mustaqil ishlaydi. Telegram xabarlari yangi xodim uchun avvaldan o&apos;chirilgan bo&apos;ladi.
       </div>
 
-      {hasRosterWorkflow && error && <div className="rounded border border-red-200 bg-red-50 p-3 text-sm text-red-700">{error}</div>}
-      {hasRosterWorkflow && (loading ? (
+      {hasRosterWorkflow && <QueryActivity
+        isFetching={staffQuery.isFetching}
+        isInitialLoading={loading}
+        error={error}
+        onRetry={() => { markQueryIntent('staff'); void staffQuery.refetch() }}
+        label="Xodimlar yangilanmoqda"
+        metricId="staff"
+      >
+      {loading ? (
         <div className="flex items-center gap-2 py-12 text-sm text-zinc-500"><Loader2 className="size-4 animate-spin" /> Yuklanmoqda...</div>
       ) : staff.length === 0 ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white p-10 text-center">
@@ -375,7 +386,8 @@ export function StaffManagement() {
             </button>
           ))}
         </div>
-      ))}
+      )}
+      </QueryActivity>}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
@@ -446,11 +458,11 @@ export function StaffManagement() {
             </>
           )}
           <DialogFooter>
-            {editing && canDelete && <Button type="button" variant="destructive" disabled={saving} onClick={() => void deleteStaff()}><Trash2 className="size-4" /> O&apos;chirish</Button>}
-            <Button type="button" variant="outline" onClick={() => setDialogOpen(false)}>Bekor qilish</Button>
-            {(!editing || canUpdate) && <Button type="submit" disabled={saving} className="bg-zinc-900 text-white hover:bg-zinc-800">
-              {saving && <Loader2 className="size-4 animate-spin" />} Saqlash
-            </Button>}
+            {editing && canDelete && <AsyncButton type="button" variant="destructive" pending={saving} pendingLabel="O'chirilmoqda..." onClick={deleteStaff}><Trash2 className="size-4" /> O&apos;chirish</AsyncButton>}
+            <Button type="button" variant="outline" disabled={saving} onClick={() => setDialogOpen(false)}>Bekor qilish</Button>
+            {(!editing || canUpdate) && <AsyncButton type="submit" pending={saving} pendingLabel="Saqlanmoqda..." className="bg-zinc-900 text-white hover:bg-zinc-800">
+              Saqlash
+            </AsyncButton>}
           </DialogFooter>
           </form>
         </DialogContent>

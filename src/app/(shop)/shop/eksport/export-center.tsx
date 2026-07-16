@@ -1,9 +1,9 @@
 'use client'
 
 import { Download, FileSpreadsheet } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { ExportDownloadButton } from '@/components/shop/export-download-button'
 import { useShopAccess } from '@/components/shop/shop-access-context'
-import { exportUrl, type ExportEntity, type ExportFormat } from '@/lib/export-url'
+import { exportUrl, type ExportEntity } from '@/lib/export-url'
 import type { ShopPermissionCode } from '@/lib/access-control'
 
 const exports = [
@@ -21,10 +21,6 @@ export default function ExportCenter() {
   const { can } = useShopAccess()
   const available = exports.filter((item) => can(item.permission))
 
-  function download(entity: ExportEntity, format: ExportFormat) {
-    window.location.assign(exportUrl(entity, format))
-  }
-
   return (
     <div className="mx-auto max-w-5xl space-y-5 p-6">
       <div>
@@ -40,12 +36,19 @@ export default function ExportCenter() {
               <span className="truncate text-sm font-medium text-zinc-900">{item.label}</span>
             </div>
             <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={() => download(item.entity, 'csv')}>
+              <ExportDownloadButton
+                href={exportUrl(item.entity, 'csv')}
+                fallbackFilename={`${item.entity}.csv`}
+                variant="outline"
+              >
                 <Download size={15} aria-hidden="true" /> CSV
-              </Button>
-              <Button type="button" onClick={() => download(item.entity, 'xlsx')}>
+              </ExportDownloadButton>
+              <ExportDownloadButton
+                href={exportUrl(item.entity, 'xlsx')}
+                fallbackFilename={`${item.entity}.xlsx`}
+              >
                 <Download size={15} aria-hidden="true" /> Excel
-              </Button>
+              </ExportDownloadButton>
             </div>
           </div>
         ))}

@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Button } from '@/components/ui/button'
+import { AsyncButton } from '@/components/ui/async-button'
 import { Input } from '@/components/ui/input'
 import { StorageInput } from '@/components/ui/storage-input'
 import { PhoneInput } from '@/components/ui/phone-input'
@@ -13,7 +13,7 @@ import { Field } from '@/components/ui/field'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { currencyLabel } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
-import { ArrowLeft, Loader2 } from 'lucide-react'
+import { ArrowLeft } from 'lucide-react'
 import { navigateAfterMutation } from '@/lib/client-events'
 import { useQueryClient } from '@tanstack/react-query'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
@@ -280,20 +280,15 @@ function AuthorizedNewDevicePage() {
           </div>
         </div>
 
-        <Button
+        <AsyncButton
           type="submit"
-          disabled={!isValid || loading}
+          disabled={!isValid}
+          pending={loading}
+          pendingLabel="Saqlanmoqda..."
           className="w-full h-10 bg-zinc-900 hover:bg-zinc-800 text-white text-sm font-medium rounded disabled:opacity-40"
         >
-          {loading ? (
-            <span className="inline-flex items-center gap-2">
-              <Loader2 size={15} className="animate-spin" />
-              Saqlanmoqda...
-            </span>
-          ) : (
-            'Qurilmani saqlash'
-          )}
-        </Button>
+          Qurilmani saqlash
+        </AsyncButton>
       </form>
     </div>
   )

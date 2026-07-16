@@ -4,6 +4,7 @@ import Image from 'next/image'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { AsyncButton } from '@/components/ui/async-button'
 import { Input } from '@/components/ui/input'
 import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
@@ -1152,13 +1153,15 @@ function AuthorizedNewNasiyaPage() {
             >
               Orqaga
             </Button>
-            <Button
+            <AsyncButton
               type="submit"
-              disabled={!step3Valid || submitting}
+              disabled={!step3Valid}
+              pending={submitting}
+              pendingLabel="Saqlanmoqda..."
               className="flex-1 h-10 bg-zinc-900 hover:bg-zinc-800 text-white text-sm font-medium rounded disabled:opacity-40"
             >
-              {submitting ? 'Saqlanmoqda...' : 'Nasiyani saqlash'}
-            </Button>
+              Nasiyani saqlash
+            </AsyncButton>
           </div>
         </form>
       )}
@@ -1322,17 +1325,19 @@ function AuthorizedNewNasiyaPage() {
               >
                 Bekor qilish
               </Button>
-              <Button
+              <AsyncButton
                 type="submit"
+                pending={savingCustomerEdit}
+                pendingLabel="Saqlanmoqda..."
                 disabled={
-                  savingCustomerEdit || loadingCustomerEdit ||
+                  loadingCustomerEdit ||
                   (canEditCustomer && (editedCustomerName.trim().length < 2 || !isValidPhone(editedCustomerPhone))) ||
                   (canManageCustomerPassport && customerEditPassportSelection.hasBlockingErrors) ||
                   (!canEditCustomer && !canManageCustomerPassport && !canOverrideCustomerTrust)
                 }
               >
-                {savingCustomerEdit ? 'Saqlanmoqda...' : 'Saqlash'}
-              </Button>
+                Saqlash
+              </AsyncButton>
             </DialogFooter>
           </form>
         </DialogContent>

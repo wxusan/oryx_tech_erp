@@ -68,7 +68,9 @@ describe('navigation cache integration guards', () => {
       'src/app/(shop)/shop/olib-sotdim/olib-sotdim-client.tsx',
       'src/app/(shop)/shop/qurilmalar/[id]/page.tsx',
       'src/app/(shop)/shop/qurilmalar/new/page.tsx',
-      'src/app/(shop)/shop/settings/page.tsx',
+      'src/app/(shop)/shop/settings/settings-account-section.tsx',
+      'src/app/(shop)/shop/settings/settings-shop-section.tsx',
+      'src/app/(shop)/shop/settings/settings-telegram-section.tsx',
       'src/app/(shop)/shop/sotuv/new/page.tsx',
       'src/components/shop/nasiya-payment-modal.tsx',
     ]

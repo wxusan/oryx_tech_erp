@@ -3,7 +3,12 @@ import { cache } from 'react'
 import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { badRequest, forbidden, unauthorized } from '@/lib/api-helpers'
-import { initializeRequestAuditContext } from '@/lib/server/request-context'
+import {
+  initializeRequestAuditContext,
+  requestPerformanceSummary,
+  timeRequestPhase,
+} from '@/lib/server/request-context'
+import { logger } from '@/lib/logger'
 import {
   buildShopPrincipal,
   getActiveShopPackage,
@@ -26,14 +31,14 @@ function subscriptionCutoff() {
 
 async function requireApiSessionUncached(): Promise<GuardResult> {
   await initializeRequestAuditContext()
-  const session = await auth()
+  const session = await timeRequestPhase('auth', () => auth())
   if (!session?.user) return { ok: false, response: unauthorized() }
   if (!session.user.sessionId) {
     return { ok: false, response: unauthorized('Sessiya yangilanishi kerak. Qayta kiring.') }
   }
 
   const now = new Date()
-  const liveSession = await prisma.authSession.findUnique({
+  const liveSession = await timeRequestPhase('session', () => prisma.authSession.findUnique({
     where: { id: session.user.sessionId },
     select: {
       actorId: true,
@@ -47,7 +52,7 @@ async function requireApiSessionUncached(): Promise<GuardResult> {
       expiresAt: true,
       revokedAt: true,
     },
-  })
+  }))
   const idleExpired = liveSession?.policy === 'IDLE_10_MINUTES' &&
     liveSession.lastUserActivityAt.getTime() <= now.getTime() - ADMIN_IDLE_TIMEOUT_MS
   const invalidSession = !liveSession || liveSession.revokedAt !== null || liveSession.expiresAt <= now || idleExpired ||
@@ -74,34 +79,37 @@ async function requireApiSessionUncached(): Promise<GuardResult> {
     if (!session.user.shopId) {
       return { ok: false, response: forbidden("Do'kon ma'lumotlari topilmadi") }
     }
+    const shopId = session.user.shopId
 
-    const activeAdmin = await prisma.shopAdmin.findFirst({
-      where: {
-        id: session.user.id,
-        shopId: session.user.shopId,
-        isActive: true,
-        deletedAt: null,
-        shop: {
-          status: 'ACTIVE',
+    const [activeAdmin, activePackage] = await timeRequestPhase('permissions', () => Promise.all([
+      prisma.shopAdmin.findFirst({
+        where: {
+          id: session.user.id,
+          shopId,
+          isActive: true,
           deletedAt: null,
-          subscriptionDue: { gte: subscriptionCutoff() },
+          shop: {
+            status: 'ACTIVE',
+            deletedAt: null,
+            subscriptionDue: { gte: subscriptionCutoff() },
+          },
         },
-      },
-      select: {
-        shopId: true,
-        sessionVersion: true,
-        permissionVersion: true,
-        legacyFullAccess: true,
-        permissions: { select: { permissionCode: true } },
-        shop: { select: { ownerAdminId: true, authorizationVersion: true } },
-      },
-    })
+        select: {
+          shopId: true,
+          sessionVersion: true,
+          permissionVersion: true,
+          legacyFullAccess: true,
+          permissions: { select: { permissionCode: true } },
+          shop: { select: { ownerAdminId: true, authorizationVersion: true } },
+        },
+      }),
+      getActiveShopPackage(shopId, now),
+    ] as const))
 
     if (!activeAdmin || activeAdmin.sessionVersion !== session.user.sessionVersion) {
       return { ok: false, response: forbidden("Do'kon faol emas yoki ruxsat bekor qilingan") }
     }
 
-    const activePackage = await getActiveShopPackage(session.user.shopId, now)
     if (!activePackage) {
       return { ok: false, response: forbidden("Do'kon paketi sozlanmagan") }
     }
@@ -134,14 +142,26 @@ async function requireApiSessionUncached(): Promise<GuardResult> {
   }
 
   if (session.user.role === 'SUPER_ADMIN') {
-    const activeSuperAdmin = await prisma.superAdmin.findFirst({
+    const activeSuperAdmin = await timeRequestPhase('permissions', () => prisma.superAdmin.findFirst({
       where: { id: session.user.id, deletedAt: null },
       select: { id: true, sessionVersion: true },
-    })
+    }))
 
     if (!activeSuperAdmin || activeSuperAdmin.sessionVersion !== session.user.sessionVersion) {
       return { ok: false, response: forbidden("Bosh admin ruxsati bekor qilingan") }
     }
+  }
+
+  const summary = requestPerformanceSummary()
+  if (summary && (process.env.PERFORMANCE_TIMING_LOGS === 'true' || summary.durationMs >= 500)) {
+    logger.info('API authorization performance timing', {
+      event: 'performance.api_authorization',
+      durationMs: Math.round(summary.durationMs),
+      phasesMs: Object.fromEntries(
+        Object.entries(summary.phasesMs).map(([phase, value]) => [phase, Math.round(value)]),
+      ),
+      actorType: session.user.role,
+    })
   }
 
   return { ok: true, session, shopId: session.user.shopId ?? undefined, principal: shopPrincipal }

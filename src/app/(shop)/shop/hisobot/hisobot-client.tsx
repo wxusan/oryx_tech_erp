@@ -4,7 +4,7 @@ import { useQuery } from '@tanstack/react-query'
 import { AlertTriangle, Boxes, CalendarClock, CircleDollarSign, Download, RotateCcw, TrendingUp, WalletCards } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { buttonVariants } from '@/components/ui/button'
+import { ExportDownloadButton } from '@/components/shop/export-download-button'
 import type { ChartConfig } from '@/components/ui/chart'
 import type { getShopStats } from '@/lib/server/shop-stats'
 import type { ShopRangeReport } from '@/lib/server/shop-report-range'
@@ -16,7 +16,6 @@ import ShopRangeReportPanel from './shop-range-report-panel'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { useShopAccess } from '@/components/shop/shop-access-context'
-import { cn } from '@/lib/utils'
 
 type ShopStats = Awaited<ReturnType<typeof getShopStats>>
 type ShopAdminOption = { id: string; name: string }
@@ -221,12 +220,12 @@ export default function HisobotClient({
           </div>
           {preset === 'single' && rangeReport && can('EXPORT_REPORTS') && (
             <div className="flex gap-2">
-              <a href={singleExportHref('csv')} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-9')}>
+              <ExportDownloadButton href={singleExportHref('csv')} fallbackFilename="report.csv" variant="outline" size="sm" className="h-9">
                 <Download data-icon="inline-start" /> CSV
-              </a>
-              <a href={singleExportHref('xlsx')} className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'h-9')}>
+              </ExportDownloadButton>
+              <ExportDownloadButton href={singleExportHref('xlsx')} fallbackFilename="report.xlsx" variant="outline" size="sm" className="h-9">
                 <Download data-icon="inline-start" /> Excel
-              </a>
+              </ExportDownloadButton>
             </div>
           )}
         </div>

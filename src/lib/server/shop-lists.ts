@@ -16,6 +16,7 @@ import type { DeviceListItem, DeviceListSaleInfo } from '@/lib/device-list-contr
 import { deviceConditionLabel, formatDeviceStorage } from '@/lib/device-specs'
 import { tashkentDayRange } from '@/lib/timezone'
 import type { DeviceStatus, NasiyaStatus } from '@/lib/domain-types'
+import { logCategoryWhere, type LogCategory } from '@/lib/log-categories'
 
 /**
  * Real page/skip/take pagination envelope for the devices/nasiyalar list
@@ -144,8 +145,27 @@ export interface ShopLogsPayload {
   total: number
 }
 
-export function initialLogsRequestKey() {
-  return new URLSearchParams({ skip: '0', take: '10' }).toString()
+export interface ShopLogsQuery {
+  search?: string
+  dateFrom?: string
+  dateTo?: string
+  category?: LogCategory
+  actorId?: string
+  page?: number
+  take?: number
+}
+
+export function initialLogsRequestKey(query: ShopLogsQuery = {}) {
+  const params = new URLSearchParams()
+  if (query.search?.trim()) params.set('search', query.search.trim())
+  if (query.category && query.category !== 'all') params.set('category', query.category)
+  if (query.actorId) params.set('actorId', query.actorId)
+  if (query.dateFrom) params.set('from', query.dateFrom)
+  if (query.dateTo) params.set('to', query.dateTo)
+  const take = query.take ?? 10
+  params.set('skip', String(((query.page ?? 1) - 1) * take))
+  params.set('take', String(take))
+  return params.toString()
 }
 
 export type DeviceStatusFilter = DeviceStatus
@@ -1116,20 +1136,51 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
 export async function getShopLogsInitial(
   shopId: string,
   visibility: { includeOwnerFinancials: boolean },
+  query: ShopLogsQuery = {},
 ): Promise<ShopLogsPayload> {
+  const take = Math.max(1, Math.min(100, query.take ?? 10))
+  const skip = Math.max(0, ((query.page ?? 1) - 1) * take)
+  const fromDate = query.dateFrom ? new Date(query.dateFrom) : null
+  const toDate = query.dateTo ? new Date(`${query.dateTo}T23:59:59.999Z`) : null
+  const categoryWhere = logCategoryWhere(query.category ?? 'all')
+  const search = query.search?.trim()
+  const searchWhere: Prisma.LogWhereInput = search
+    ? {
+        OR: [
+          { action: { contains: search, mode: 'insensitive' } },
+          { targetType: { contains: search, mode: 'insensitive' } },
+          { targetId: { contains: search, mode: 'insensitive' } },
+          { note: { contains: search, mode: 'insensitive' } },
+          { shop: { name: { contains: search, mode: 'insensitive' } } },
+        ],
+      }
+    : {}
   const where: Prisma.LogWhereInput = {
     shopId,
     actorType: 'SHOP_ADMIN' as const,
     // Historic RESTOCK rows are retained for platform audit but intentionally
     // absent from the shop-facing log bootstrap and its visible total.
     NOT: { action: 'RESTOCK', targetType: 'Device' },
+    ...(query.actorId ? { actorId: query.actorId } : {}),
+    ...(fromDate || toDate
+      ? {
+          createdAt: {
+            ...(fromDate && !Number.isNaN(fromDate.getTime()) ? { gte: fromDate } : {}),
+            ...(toDate && !Number.isNaN(toDate.getTime()) ? { lte: toDate } : {}),
+          },
+        }
+      : {}),
+    ...(Object.keys(categoryWhere).length > 0 || Object.keys(searchWhere).length > 0
+      ? { AND: [categoryWhere, searchWhere].filter((item) => Object.keys(item).length > 0) }
+      : {}),
   }
 
   const [logs, total] = await Promise.all([
     prisma.log.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      take: 10,
+      skip,
+      take,
       select: {
         id: true,
         createdAt: true,

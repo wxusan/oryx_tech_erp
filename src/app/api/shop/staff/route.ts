@@ -19,6 +19,7 @@ import {
   withStaffLogsPermission,
 } from '@/lib/shop-staff-contract'
 import {
+  getShopStaffRoster,
   principalNeedsStaffTargets,
   projectShopStaff,
   shopStaffProjectionSelect,
@@ -75,18 +76,7 @@ export async function GET() {
     const { shopId, principal } = guarded
     if (!shopId || !principal) return serverError()
     if (!principalNeedsStaffTargets(principal)) return ok([])
-
-    const shop = await prisma.shop.findUnique({ where: { id: shopId }, select: { ownerAdminId: true } })
-    const staff = await prisma.shopAdmin.findMany({
-      where: {
-        shopId,
-        id: { notIn: [principal.actorId, shop?.ownerAdminId].filter((id): id is string => Boolean(id)) },
-        deletedAt: null,
-      },
-      orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
-      select: shopStaffProjectionSelect,
-    })
-    return ok(staff.map((row) => projectShopStaff(row, principal)))
+    return ok(await getShopStaffRoster(shopId, principal))
   } catch (error) {
     logger.error('[GET /api/shop/staff]', { event: 'api.route_error', error })
     return serverError()

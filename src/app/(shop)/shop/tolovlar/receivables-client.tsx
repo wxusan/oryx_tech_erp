@@ -1,7 +1,7 @@
 'use client'
 
-import Link from 'next/link'
-import { useQuery } from '@tanstack/react-query'
+import { useCallback, useEffect, useState } from 'react'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import { AlertTriangle, CalendarCheck2, ChevronLeft, ChevronRight } from 'lucide-react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -13,6 +13,9 @@ import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { useShopAccess } from '@/components/shop/shop-access-context'
 import type { ReceivableCohort } from '@/lib/server/shop-stats-queries'
+import { QueryActivity } from '@/components/query-activity'
+import { replaceListUrlState } from '@/lib/list-url-state'
+import { markQueryIntent } from '@/lib/client-performance'
 
 interface ReceivableItem {
   cohort: ReceivableCohort
@@ -54,28 +57,66 @@ function amountText(item: ReceivableItem, currency: CurrencyContext) {
 export default function ReceivablesClient({ initialData }: { initialData: ReceivablePageData }) {
   const { can } = useShopAccess()
   const scope = useAuthenticatedQueryScope()
-  const query = useQuery({
-    queryKey: queryKeys.list(scope, 'overdue', {
-      view: 'receivables',
-      cohort: initialData.cohort,
-      skip: initialData.skip,
-      take: initialData.take,
-    }),
-    queryFn: async ({ signal }) => {
-      const params = new URLSearchParams({
-        cohort: initialData.cohort,
-        skip: String(initialData.skip),
-        take: String(initialData.take),
-      })
-      const response = await fetch(`/api/receivables?${params.toString()}`, { signal, cache: 'no-store' })
-      const json = await response.json() as { success: boolean; data?: ReceivablePageData; error?: string }
-      if (!response.ok || !json.success || !json.data) throw new Error(json.error || "To'lovlar yuklanmadi")
-      return json.data
-    },
-    initialData,
+  const queryClient = useQueryClient()
+  const [cohort, setCohort] = useState<ReceivableCohort>(initialData.cohort)
+  const [skip, setSkip] = useState(initialData.skip)
+  const queryKey = queryKeys.list(scope, 'overdue', {
+    view: 'receivables',
+    cohort,
+    skip,
+    take: initialData.take,
   })
-  const data = query.data
-  const isOverdue = data.cohort === 'OVERDUE'
+  const fetchPage = useCallback(async (nextCohort: ReceivableCohort, nextSkip: number, signal?: AbortSignal) => {
+    const params = new URLSearchParams({
+      cohort: nextCohort,
+      skip: String(nextSkip),
+      take: String(initialData.take),
+    })
+    const response = await fetch(`/api/receivables?${params.toString()}`, { signal, cache: 'no-store' })
+    const json = await response.json() as { success: boolean; data?: ReceivablePageData; error?: string }
+    if (!response.ok || !json.success || !json.data) throw new Error(json.error || "To'lovlar yuklanmadi")
+    return json.data
+  }, [initialData.take])
+  const query = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => fetchPage(cohort, skip, signal),
+    initialData: cohort === initialData.cohort && skip === initialData.skip ? initialData : undefined,
+    placeholderData: keepPreviousData,
+  })
+  const data = query.data ?? initialData
+  const isOverdue = cohort === 'OVERDUE'
+  const error = query.error instanceof Error ? query.error.message : null
+
+  useEffect(() => {
+    replaceListUrlState({ cohort, skip })
+  }, [cohort, skip])
+
+  useEffect(() => {
+    const adjacent: ReceivableCohort = cohort === 'OVERDUE' ? 'DUE_TODAY' : 'OVERDUE'
+    const adjacentKey = queryKeys.list(scope, 'overdue', {
+      view: 'receivables',
+      cohort: adjacent,
+      skip: 0,
+      take: initialData.take,
+    })
+    void queryClient.prefetchQuery({
+      queryKey: adjacentKey,
+      queryFn: ({ signal }) => fetchPage(adjacent, 0, signal),
+      staleTime: 120_000,
+    })
+  }, [cohort, fetchPage, initialData.take, queryClient, scope])
+
+  function selectCohort(next: ReceivableCohort) {
+    if (next === cohort) return
+    markQueryIntent('receivables')
+    setCohort(next)
+    setSkip(0)
+  }
+
+  function changePage(nextSkip: number) {
+    markQueryIntent('receivables')
+    setSkip(Math.max(0, nextSkip))
+  }
   const canOpenSaleDetails = [
     'INVENTORY_VIEW',
     'SALE_VIEW',
@@ -110,31 +151,36 @@ export default function ReceivablesClient({ initialData }: { initialData: Receiv
       </div>
 
       <div className="flex flex-wrap gap-2" role="tablist" aria-label="To'lov muddati filtri">
-        <Link
+        <button
+          type="button"
           role="tab"
           aria-selected={isOverdue}
-          href="/shop/tolovlar?cohort=OVERDUE"
+          onClick={() => selectCohort('OVERDUE')}
           className={`rounded-lg border px-4 py-2 text-sm font-medium ${isOverdue ? 'border-red-300 bg-red-50 text-red-800' : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'}`}
         >
           Muddati o'tgan
-        </Link>
-        <Link
+        </button>
+        <button
+          type="button"
           role="tab"
           aria-selected={!isOverdue}
-          href="/shop/tolovlar?cohort=DUE_TODAY"
+          onClick={() => selectCohort('DUE_TODAY')}
           className={`rounded-lg border px-4 py-2 text-sm font-medium ${!isOverdue ? 'border-emerald-300 bg-emerald-50 text-emerald-800' : 'border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50'}`}
         >
           Bugun to'lanadi
-        </Link>
+        </button>
       </div>
 
-      {query.isError && (
-        <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {query.error instanceof Error ? query.error.message : "To'lovlar yuklanmadi"}
-        </div>
-      )}
+      <QueryActivity
+        isFetching={query.isFetching}
+        isInitialLoading={query.isPending && !query.data}
+        error={error}
+        onRetry={() => { markQueryIntent('receivables'); void query.refetch() }}
+        label="To‘lovlar yangilanmoqda"
+        metricId="receivables"
+      >
 
-      {!query.isError && data.items.length === 0 ? (
+      {!error && data.items.length === 0 ? (
         <div className="rounded-lg border border-dashed border-zinc-300 bg-white px-6 py-12 text-center">
           <h2 className="text-base font-semibold text-zinc-900">{isOverdue ? "Muddati o'tgan to'lov yo'q" : "Bugungi to'lov yo'q"}</h2>
           <p className="mt-2 text-sm text-zinc-500">To'lov yoki muddat o'zgarsa, ro'yxat faqat tegishli ma'lumotlarni yangilaydi.</p>
@@ -209,24 +255,25 @@ export default function ReceivablesClient({ initialData }: { initialData: Receiv
           <span className="text-xs text-zinc-500">{data.skip + 1}–{Math.min(data.skip + data.take, data.total)} / {data.total}</span>
           <div className="flex gap-2">
             <Button
-              render={<Link href={`/shop/tolovlar?cohort=${data.cohort}&skip=${Math.max(0, data.skip - data.take)}`} />}
-              nativeButton={false}
+              type="button"
               variant="outline"
-              disabled={data.skip === 0}
+              disabled={skip === 0 || query.isFetching}
+              onClick={() => changePage(skip - data.take)}
             >
               <ChevronLeft /> Oldingi
             </Button>
             <Button
-              render={<Link href={`/shop/tolovlar?cohort=${data.cohort}&skip=${data.skip + data.take}`} />}
-              nativeButton={false}
+              type="button"
               variant="outline"
-              disabled={data.skip + data.take >= data.total}
+              disabled={skip + data.take >= data.total || query.isFetching}
+              onClick={() => changePage(skip + data.take)}
             >
               Keyingi <ChevronRight />
             </Button>
           </div>
         </div>
       )}
+      </QueryActivity>
     </div>
   )
 }

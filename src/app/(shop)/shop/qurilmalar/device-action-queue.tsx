@@ -1,12 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
-import { useQuery } from '@tanstack/react-query'
-import { Pencil, Search, Trash2, Undo2 } from 'lucide-react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { Pencil, Trash2, Undo2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useShopAccess } from '@/components/shop/shop-access-context'
+import { QueryActivity } from '@/components/query-activity'
+import { markQueryIntent } from '@/lib/client-performance'
 
 interface DeviceActionItem {
   id: string
@@ -29,6 +31,14 @@ export default function DeviceActionQueue() {
   const { can } = useShopAccess()
   const [search, setSearch] = useState('')
   const [committedSearch, setCommittedSearch] = useState('')
+  useEffect(() => {
+    if (search.trim() === committedSearch) return
+    const timer = window.setTimeout(() => {
+      markQueryIntent('device-action-queue')
+      setCommittedSearch(search.trim())
+    }, 275)
+    return () => window.clearTimeout(timer)
+  }, [committedSearch, search])
   const query = useQuery({
     queryKey: ['device-action-queue', committedSearch],
     queryFn: async ({ signal }) => {
@@ -39,6 +49,7 @@ export default function DeviceActionQueue() {
       if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Qurilmalar yuklanmadi')
       return json.data.items
     },
+    placeholderData: keepPreviousData,
   })
   const actions = [
     ...(can('DEVICE_EDIT') ? [{ icon: Pencil, label: 'Tahrirlash' }] : []),
@@ -55,11 +66,16 @@ export default function DeviceActionQueue() {
           {actions.map(({ icon: Icon, label }) => <span key={label} className="inline-flex items-center gap-1"><Icon size={13} aria-hidden="true" />{label}</span>)}
         </div>
       </div>
-      <form className="flex max-w-xl gap-2" onSubmit={(event) => { event.preventDefault(); setCommittedSearch(search.trim()) }}>
+      <div className="max-w-xl">
         <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Model yoki IMEI" />
-        <Button type="submit" variant="outline" aria-label="Qidirish"><Search size={16} aria-hidden="true" /></Button>
-      </form>
-      {query.isError && <div className="border border-red-200 bg-red-50 p-3 text-sm text-red-700">{query.error instanceof Error ? query.error.message : 'Xatolik'}</div>}
+      </div>
+      <QueryActivity
+        isFetching={query.isFetching}
+        isInitialLoading={query.isPending && !query.data}
+        error={query.error instanceof Error ? query.error.message : null}
+        onRetry={() => void query.refetch()}
+        metricId="device-action-queue"
+      >
       <div className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 bg-white">
         {query.isPending ? (
           <div className="p-8 text-center text-sm text-zinc-500">Yuklanmoqda...</div>
@@ -76,6 +92,7 @@ export default function DeviceActionQueue() {
           <div className="p-8 text-center text-sm text-zinc-500">Mos qurilma topilmadi</div>
         )}
       </div>
+      </QueryActivity>
     </div>
   )
 }

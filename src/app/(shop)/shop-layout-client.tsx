@@ -15,19 +15,21 @@ import {
 } from '@/lib/access-control'
 import { ShopAccessProvider } from '@/components/shop/shop-access-context'
 import { measureAuthenticatedShellUsable } from '@/lib/login-performance'
+import { NavigationLinkStatus } from '@/components/navigation-link-status'
+import { markNavigationIntent, markNavigationSettled } from '@/lib/client-performance'
 
 const navLinks = [
   { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard, prefetch: true, permission: null, anyPermissions: ['DASHBOARD_OPERATIONAL_VIEW', 'DASHBOARD_FINANCIAL_VIEW'], ownerOnly: false, sidebar: true, header: false },
-  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus, prefetch: false, permission: null, anyPermissions: ['DEVICE_CREATE', 'SALE_CREATE', 'NASIYA_CREATE', 'OLIB_CREATE', 'SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE'], ownerOnly: false, sidebar: true, header: true },
+  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus, prefetch: true, permission: null, anyPermissions: ['DEVICE_CREATE', 'SALE_CREATE', 'NASIYA_CREATE', 'OLIB_CREATE', 'SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE'], ownerOnly: false, sidebar: true, header: true },
   { href: '/shop/qurilmalar', label: 'Qurilmalar', icon: Smartphone, prefetch: true, permission: null, anyPermissions: ['INVENTORY_VIEW', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_RETURN_REFUND'], ownerOnly: false, sidebar: true, header: false },
-  { href: '/shop/sotuvlar', label: 'Sotuvlar', icon: ShoppingBag, prefetch: false, permission: null, anyPermissions: ['SALE_VIEW', 'SALE_EDIT', 'SALE_REMINDER_MANAGE'], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/sotuvlar', label: 'Sotuvlar', icon: ShoppingBag, prefetch: true, permission: null, anyPermissions: ['SALE_VIEW', 'SALE_EDIT', 'SALE_REMINDER_MANAGE'], ownerOnly: false, sidebar: true, header: false },
   { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard, prefetch: true, permission: null, anyPermissions: ['NASIYA_VIEW', 'NASIYA_EDIT', 'NASIYA_REMINDER_MANAGE', 'NASIYA_ARCHIVE', 'NASIYA_REOPEN'], ownerOnly: false, sidebar: true, header: false },
-  { href: '/shop/tolovlar', label: "To'lovlar", icon: WalletCards, prefetch: false, permission: null, anyPermissions: ['RECEIVABLES_VIEW', 'SALE_VIEW', 'SALE_PAYMENT_RECEIVE', 'NASIYA_VIEW', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER'], ownerOnly: false, sidebar: true, header: false },
-  { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users, prefetch: false, permission: null, anyPermissions: ['CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_PHOTO_VIEW', 'CUSTOMER_PASSPORT_REVEAL', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'], ownerOnly: false, sidebar: true, header: false },
-  { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3, prefetch: false, permission: 'REPORT_VIEW', anyPermissions: [], ownerOnly: false, sidebar: false, header: true },
-  { href: '/shop/logs', label: 'Loglar', icon: ScrollText, prefetch: false, permission: 'LOG_VIEW', anyPermissions: [], ownerOnly: false, sidebar: true, header: false },
-  { href: '/shop/xodimlar', label: 'Xodimlar', icon: UserCog, prefetch: false, permission: null, anyPermissions: ['STAFF_VIEW', 'STAFF_CREATE', 'STAFF_EDIT_PROFILE', 'STAFF_RESET_PASSWORD', 'STAFF_STATUS_MANAGE', 'STAFF_DELETE', 'STAFF_PERMISSION_MANAGE', 'STAFF_NOTIFICATION_MANAGE'], ownerOnly: false, sidebar: true, header: false },
-  { href: '/shop/settings', label: 'Sozlamalar', icon: Settings, prefetch: false, permission: null, anyPermissions: [], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/tolovlar', label: "To'lovlar", icon: WalletCards, prefetch: true, permission: null, anyPermissions: ['RECEIVABLES_VIEW', 'SALE_VIEW', 'SALE_PAYMENT_RECEIVE', 'NASIYA_VIEW', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER'], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users, prefetch: true, permission: null, anyPermissions: ['CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_PHOTO_VIEW', 'CUSTOMER_PASSPORT_REVEAL', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/hisobot', label: 'Hisobot', icon: BarChart3, prefetch: true, permission: 'REPORT_VIEW', anyPermissions: [], ownerOnly: false, sidebar: false, header: true },
+  { href: '/shop/logs', label: 'Loglar', icon: ScrollText, prefetch: true, permission: 'LOG_VIEW', anyPermissions: [], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/xodimlar', label: 'Xodimlar', icon: UserCog, prefetch: true, permission: null, anyPermissions: ['STAFF_VIEW', 'STAFF_CREATE', 'STAFF_EDIT_PROFILE', 'STAFF_RESET_PASSWORD', 'STAFF_STATUS_MANAGE', 'STAFF_DELETE', 'STAFF_PERMISSION_MANAGE', 'STAFF_NOTIFICATION_MANAGE'], ownerOnly: false, sidebar: true, header: false },
+  { href: '/shop/settings', label: 'Sozlamalar', icon: Settings, prefetch: true, permission: null, anyPermissions: [], ownerOnly: false, sidebar: true, header: false },
 ] satisfies Array<{
   href: string
   label: string
@@ -71,6 +73,9 @@ export function ShopLayoutClient({
   useEffect(() => {
     measureAuthenticatedShellUsable('shop')
   }, [])
+  useEffect(() => {
+    markNavigationSettled(pathname)
+  }, [pathname])
   const principal = {
     memberKind,
     legacyFullAccess,
@@ -120,6 +125,7 @@ export function ShopLayoutClient({
                 key={href}
                 href={href}
                 prefetch={prefetch}
+                onClick={() => markNavigationIntent(href)}
                 className={`flex shrink-0 items-center gap-2.5 rounded-lg px-3 py-2.5 text-sm transition-colors ${
                   isActive
                     ? 'bg-zinc-900 font-medium text-white shadow-sm'
@@ -127,7 +133,8 @@ export function ShopLayoutClient({
                 }`}
               >
                 <Icon size={16} className="flex-shrink-0" />
-                {label}
+                <span>{label}</span>
+                <NavigationLinkStatus href={href} />
               </Link>
             )
           })}
@@ -155,6 +162,7 @@ export function ShopLayoutClient({
                       key={href}
                       href={href}
                       prefetch={prefetch}
+                      onClick={() => markNavigationIntent(href)}
                       aria-label={label}
                       title={label}
                       className={`inline-flex h-8 items-center gap-1.5 rounded-md px-2 text-xs font-medium transition-colors sm:px-2.5 ${
@@ -167,6 +175,7 @@ export function ShopLayoutClient({
                     >
                       <Icon size={15} aria-hidden="true" />
                       <span className="hidden sm:inline">{label}</span>
+                      <NavigationLinkStatus href={href} />
                     </Link>
                   )
                 })}

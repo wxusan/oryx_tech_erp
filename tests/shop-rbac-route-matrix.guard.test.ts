@@ -61,7 +61,7 @@ const uiMatrix = [
   ['src/app/(shop)/shop/import/import-center.tsx', 'IMPORT_CUSTOMERS', 'IMPORT_OLD_NASIYA'],
   ['src/app/(shop)/shop/eksport/export-center.tsx', 'EXPORT_DEVICES', 'EXPORT_CUSTOMERS', 'EXPORT_SALES', 'EXPORT_NASIYA', 'EXPORT_OLIB', 'EXPORT_RETURNS', 'EXPORT_LOGS', 'EXPORT_REPORTS'],
   ['src/components/shop/staff-management.tsx', 'STAFF_CREATE', 'STAFF_EDIT_PROFILE', 'STAFF_RESET_PASSWORD', 'STAFF_STATUS_MANAGE', 'STAFF_DELETE', 'STAFF_PERMISSION_MANAGE', 'STAFF_NOTIFICATION_MANAGE'],
-  ['src/app/(shop)/shop/settings/page.tsx', 'SHOP_PROFILE_EDIT', 'SHOP_CURRENCY_MANAGE', 'SHOP_TELEGRAM_MANAGE'],
+  ['src/app/(shop)/shop/settings/settings-client.tsx', 'SHOP_PROFILE_EDIT', 'SHOP_CURRENCY_MANAGE', 'SHOP_TELEGRAM_MANAGE'],
 ] as const
 
 const liveGuardPattern = /require(?:ShopPermission|ShopAnyPermission|ShopPermissionAndFeature|CurrentShopPermission|CurrentShopAnyPermission)\s*\(/

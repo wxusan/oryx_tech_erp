@@ -2,7 +2,7 @@ import { z, ZodError } from 'zod'
 import { requireShopAnyPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { badRequest, ok, payloadTooLarge, serverError } from '@/lib/api-helpers'
 import { logger } from '@/lib/logger'
-import { getCustomerList } from '@/lib/server/customer-list'
+import { getCustomerList, scopeCustomerList } from '@/lib/server/customer-list'
 import { principalHasPermission } from '@/lib/server/shop-access'
 import {
   isInvalidRequestBody,
@@ -66,19 +66,12 @@ export async function POST(request: Request) {
     const canOverrideTrust = guarded.session.user.role === 'SUPER_ADMIN' || Boolean(
       guarded.principal && principalHasPermission(guarded.principal, 'CUSTOMER_TRUST_OVERRIDE'),
     )
-    const scopedData = canViewCustomers ? data : {
-      ...data,
-      items: data.items.map((item) => ({
-        id: item.id,
-        name: item.name,
-        phone: item.phone,
-        phoneNormalizationNeedsReview: item.phoneNormalizationNeedsReview,
-        createdAt: item.createdAt,
-        ...(canEditCustomer ? { additionalPhones: item.additionalPhones, note: item.note } : {}),
-        ...(canUsePassport ? { passportMasked: item.passportMasked, hasPassportPhoto: item.hasPassportPhoto } : {}),
-        ...(canOverrideTrust ? { trust: item.trust } : {}),
-      })),
-    }
+    const scopedData = scopeCustomerList(data, {
+      canViewCustomers,
+      canEditCustomer,
+      canUsePassport,
+      canOverrideTrust,
+    })
     const response = ok(scopedData, 'Mijoz qidiruvi')
     response.headers.set('Cache-Control', 'private, no-store')
     return response

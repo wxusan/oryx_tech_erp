@@ -247,14 +247,14 @@ export const FORM_SURFACE_CONTRACT = [
   },
   {
     id: 'shop.account.update',
-    source: 'src/app/(shop)/shop/settings/page.tsx',
+    source: 'src/app/(shop)/shop/settings/settings-account-section.tsx',
     endpoint: 'PATCH /api/shop-admin/profile',
     schemaSource: 'src/app/api/shop-admin/profile/route.ts#updateProfileSchema',
     fields: [always('shop.account.update', 'name', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Self-profile field; member roster is bounded.' }), always('shop.account.update', 'phone', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Self-profile field; member roster is bounded.' })],
   },
   {
     id: 'shop.profile.update',
-    source: 'src/app/(shop)/shop/settings/page.tsx',
+    source: 'src/app/(shop)/shop/settings/settings-shop-section.tsx',
     endpoint: 'PATCH /api/shop/profile',
     schemaSource: 'src/app/api/shop/profile/route.ts#updateShopProfileSchema',
     fields: [
@@ -268,14 +268,14 @@ export const FORM_SURFACE_CONTRACT = [
   },
   {
     id: 'shop.telegram.update',
-    source: 'src/app/(shop)/shop/settings/page.tsx',
+    source: 'src/app/(shop)/shop/settings/settings-telegram-section.tsx',
     endpoint: 'PATCH /api/shop-admin/profile',
     schemaSource: 'src/app/api/shop-admin/profile/route.ts#updateTelegramSchema',
     fields: [optional('shop.telegram.update', 'telegramId', 'SECRET', { noSearchReason: 'Private delivery identity.' })],
   },
   {
     id: 'shop.password.change',
-    source: 'src/app/(shop)/shop/settings/page.tsx',
+    source: 'src/app/(shop)/shop/settings/settings-password-section.tsx',
     endpoint: 'PATCH /api/shop-admin/profile',
     schemaSource: 'src/app/api/shop-admin/profile/route.ts#changePasswordSchema',
     fields: [

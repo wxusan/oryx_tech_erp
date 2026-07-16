@@ -13,7 +13,10 @@ vi.mock('@/lib/api-auth', () => ({
   requireShopAnyPermission: mocks.requireShopAnyPermission,
   resolveActiveShopId: mocks.resolveActiveShopId,
 }))
-vi.mock('@/lib/server/customer-list', () => ({ getCustomerList: mocks.getCustomerList }))
+vi.mock('@/lib/server/customer-list', () => ({
+  getCustomerList: mocks.getCustomerList,
+  scopeCustomerList: (data: unknown) => data,
+}))
 vi.mock('@/lib/logger', () => ({ logger: { error: mocks.loggerError } }))
 
 function request(body: unknown) {

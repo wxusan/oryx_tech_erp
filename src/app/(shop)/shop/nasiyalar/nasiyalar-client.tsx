@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -18,6 +18,10 @@ import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import type { NasiyaStatus } from '@/lib/domain-types'
 import { useShopAccess } from '@/components/shop/shop-access-context'
 import type { NasiyaLedgerDto } from '@/lib/nasiya-ledger'
+import { QueryActivity } from '@/components/query-activity'
+import { markQueryIntent } from '@/lib/client-performance'
+import { nasiyaOperationContextQueryOptions } from '@/lib/use-nasiya-operation-context'
+import { ExportDownloadButton } from '@/components/shop/export-download-button'
 
 type VisibleNasiyaStatus = Exclude<NasiyaStatus, 'CANCELLED'>
 type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan'
@@ -192,6 +196,7 @@ export default function NasiyalarClient({
   currency: CurrencyContext
 }) {
   const scope = useAuthenticatedQueryScope()
+  const queryClient = useQueryClient()
   const { can, memberKind } = useShopAccess()
   const canCreate = can('NASIYA_CREATE')
   const canImport = can('IMPORT_OLD_NASIYA')
@@ -252,9 +257,34 @@ export default function NasiyalarClient({
 
   const nasiyalar = nasiyalarQuery.data?.items ?? []
   const total = nasiyalarQuery.data?.total ?? 0
-  const error = nasiyalarQuery.error instanceof Error ? nasiyalarQuery.error.message : ''
+  const error = nasiyalarQuery.error instanceof Error ? nasiyalarQuery.error.message : null
   const loading = nasiyalarQuery.isPending && !nasiyalarQuery.data
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
+
+  function prefetchFilter(filter: ListFilter) {
+    const key = buildRequestKey(debouncedSearch, filter, 1)
+    const queryKey = queryKeys.list(scope, 'nasiyas', {
+      search: debouncedSearch,
+      tab: filter,
+      page: 1,
+      take: PER_PAGE,
+      sort: 'createdAt-desc',
+    })
+    void queryClient.prefetchQuery({
+      queryKey,
+      queryFn: async ({ signal }) => {
+        const response = await fetch(`/api/nasiya?${key}`, { signal, cache: 'no-store' })
+        const json = await response.json() as ApiResponse<NasiyalarPayload>
+        if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Nasiyalar yuklanmadi')
+        return json.data
+      },
+      staleTime: 120_000,
+    })
+  }
+
+  function prefetchOperation(nasiyaId: string, intent: 'payment' | 'defer') {
+    void queryClient.prefetchQuery(nasiyaOperationContextQueryOptions(scope, nasiyaId, intent))
+  }
 
   return (
     <div className="p-6 space-y-4">
@@ -265,14 +295,14 @@ export default function NasiyalarClient({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canExport && (
-            <Button
-              type="button"
+            <ExportDownloadButton
+              href="/api/export/nasiya?format=xlsx"
+              fallbackFilename="nasiya.xlsx"
               size="lg"
               variant="outline"
-              onClick={() => { window.location.href = '/api/export/nasiya?format=xlsx' }}
             >
               Excel yuklab olish
-            </Button>
+            </ExportDownloadButton>
           )}
           {canImport && (
             <Button render={<Link href="/shop/nasiyalar/import" />} nativeButton={false} size="lg" variant="outline">
@@ -288,13 +318,18 @@ export default function NasiyalarClient({
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200">
+      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200" role="tablist" aria-label="Nasiya holati">
         {filterTabs
           .filter((tab) => canViewResolutionHistory || tab.value !== 'ARCHIVED')
           .map((tab) => (
           <button
             key={tab.value}
-            onClick={() => { setActiveFilter(tab.value); setPage(1) }}
+            role="tab"
+            aria-selected={activeFilter === tab.value}
+            onMouseEnter={() => prefetchFilter(tab.value)}
+            onFocus={() => prefetchFilter(tab.value)}
+            onTouchStart={() => prefetchFilter(tab.value)}
+            onClick={() => { markQueryIntent('nasiyas'); setActiveFilter(tab.value); setPage(1) }}
             className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors ${
               activeFilter === tab.value
                 ? 'border-zinc-900 text-zinc-900 font-medium'
@@ -309,16 +344,19 @@ export default function NasiyalarClient({
       {/* Search */}
       <Input
         value={search}
-        onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+        onChange={(e) => { markQueryIntent('nasiyas'); setSearch(e.target.value); setPage(1) }}
         placeholder="Mijoz, telefon, qurilma yoki IMEI bo'yicha qidirish..."
         className="max-w-md h-9 text-sm border-zinc-200 rounded"
       />
 
-      {error && (
-        <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">
-          {error}
-        </div>
-      )}
+      <QueryActivity
+        isFetching={nasiyalarQuery.isFetching}
+        isInitialLoading={loading}
+        error={error}
+        onRetry={() => { markQueryIntent('nasiyas'); void nasiyalarQuery.refetch() }}
+        label="Nasiyalar yangilanmoqda"
+        metricId="nasiyas"
+      >
 
       {loading ? (
         <div className="text-sm text-zinc-400 py-8 text-center">Yuklanmoqda...</div>
@@ -403,12 +441,12 @@ export default function NasiyalarClient({
                     {(canPay || canDefer) && (
                       <div className="mt-auto grid grid-cols-2 gap-2 pt-4">
                         {canPay && (
-                          <Button type="button" size="sm" onClick={() => setPayFor(n)} className="pointer-events-auto w-full whitespace-nowrap">
+                          <Button type="button" size="sm" onMouseEnter={() => prefetchOperation(n.id, 'payment')} onFocus={() => prefetchOperation(n.id, 'payment')} onTouchStart={() => prefetchOperation(n.id, 'payment')} onPointerDown={() => prefetchOperation(n.id, 'payment')} onClick={() => setPayFor(n)} className="pointer-events-auto w-full whitespace-nowrap">
                             To&apos;lov qabul qilish
                           </Button>
                         )}
                         {canDefer && (
-                          <Button type="button" size="sm" variant="outline" onClick={() => setDeferFor(n)} className="pointer-events-auto w-full whitespace-nowrap">
+                          <Button type="button" size="sm" variant="outline" onMouseEnter={() => prefetchOperation(n.id, 'defer')} onFocus={() => prefetchOperation(n.id, 'defer')} onTouchStart={() => prefetchOperation(n.id, 'defer')} onPointerDown={() => prefetchOperation(n.id, 'defer')} onClick={() => setDeferFor(n)} className="pointer-events-auto w-full whitespace-nowrap">
                             Muddatni uzaytirish
                           </Button>
                         )}
@@ -494,6 +532,10 @@ export default function NasiyalarClient({
                       <Button
                         type="button"
                         size="sm"
+                        onMouseEnter={() => prefetchOperation(n.id, 'payment')}
+                        onFocus={() => prefetchOperation(n.id, 'payment')}
+                        onTouchStart={() => prefetchOperation(n.id, 'payment')}
+                        onPointerDown={() => prefetchOperation(n.id, 'payment')}
                         onClick={() => setPayFor(n)}
                         className="pointer-events-auto flex-1 whitespace-nowrap"
                       >
@@ -505,6 +547,10 @@ export default function NasiyalarClient({
                         type="button"
                         size="sm"
                         variant="outline"
+                        onMouseEnter={() => prefetchOperation(n.id, 'defer')}
+                        onFocus={() => prefetchOperation(n.id, 'defer')}
+                        onTouchStart={() => prefetchOperation(n.id, 'defer')}
+                        onPointerDown={() => prefetchOperation(n.id, 'defer')}
                         onClick={() => setDeferFor(n)}
                         className="pointer-events-auto flex-1 whitespace-nowrap"
                       >
@@ -531,7 +577,7 @@ export default function NasiyalarClient({
             <Button
               variant="outline"
               disabled={page === 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => { markQueryIntent('nasiyas'); setPage((p) => Math.max(1, p - 1)) }}
               className="h-8 rounded border-zinc-200 px-3 text-xs disabled:opacity-40"
             >
               Oldingi
@@ -540,7 +586,7 @@ export default function NasiyalarClient({
             <Button
               variant="outline"
               disabled={page === totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => { markQueryIntent('nasiyas'); setPage((p) => Math.min(totalPages, p + 1)) }}
               className="h-8 rounded border-zinc-200 px-3 text-xs disabled:opacity-40"
             >
               Keyingi
@@ -548,6 +594,7 @@ export default function NasiyalarClient({
           </div>
         </div>
       )}
+      </QueryActivity>
 
       {canReceivePayment && (
         <NasiyaPaymentModal

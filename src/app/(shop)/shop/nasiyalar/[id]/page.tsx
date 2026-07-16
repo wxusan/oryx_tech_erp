@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { useParams } from 'next/navigation'
 import { commitNavigationMutation } from '@/lib/client-events'
 import { Button } from '@/components/ui/button'
+import { AsyncButton } from '@/components/ui/async-button'
 import { Input } from '@/components/ui/input'
 import { PhoneInput } from '@/components/ui/phone-input'
 import { formatUzPhoneDisplay, isValidPhone } from '@/lib/phone'
@@ -799,9 +800,10 @@ function AuthorizedNasiyaDetailPage() {
           </div>
         </div>
         {canManageReminder && isOperationallyActive && (
-          <Button
+          <AsyncButton
             onClick={handleToggleReminder}
-            disabled={reminderSubmitting}
+            pending={reminderSubmitting}
+            pendingLabel="Saqlanmoqda..."
             variant={nasiya.reminderEnabled ? 'outline' : 'default'}
             className={
               nasiya.reminderEnabled
@@ -809,8 +811,8 @@ function AuthorizedNasiyaDetailPage() {
                 : 'h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40'
             }
           >
-            {reminderSubmitting ? 'Saqlanmoqda...' : nasiya.reminderEnabled ? "Eslatmani o'chirish" : 'Eslatmani yoqish'}
-          </Button>
+            {nasiya.reminderEnabled ? "Eslatmani o'chirish" : 'Eslatmani yoqish'}
+          </AsyncButton>
         )}
       </div>}
 
@@ -936,17 +938,15 @@ function AuthorizedNasiyaDetailPage() {
           </div>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setResolutionAction(null)}>Bekor qilish</Button>
-            <Button
+            <AsyncButton
               variant="default"
-              disabled={resolutionSubmitting || resolutionReason.trim().length < 5}
+              disabled={resolutionReason.trim().length < 5}
+              pending={resolutionSubmitting}
+              pendingLabel="Saqlanmoqda..."
               onClick={handleResolution}
             >
-              {resolutionSubmitting
-                ? 'Saqlanmoqda...'
-                : resolutionAction === 'ARCHIVE'
-                    ? 'Arxivlash'
-                    : 'Qayta ochish'}
-            </Button>
+              {resolutionAction === 'ARCHIVE' ? 'Arxivlash' : 'Qayta ochish'}
+            </AsyncButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1081,13 +1081,14 @@ function AuthorizedNasiyaDetailPage() {
             >
               Bekor qilish
             </Button>
-            <Button
-              disabled={editSaving}
+            <AsyncButton
+              pending={editSaving}
+              pendingLabel="Saqlanmoqda..."
               onClick={handleEditSave}
               className="rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
             >
-              {editSaving ? 'Saqlanmoqda...' : 'Saqlash'}
-            </Button>
+              Saqlash
+            </AsyncButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

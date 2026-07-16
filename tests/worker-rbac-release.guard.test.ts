@@ -79,14 +79,14 @@ describe('worker server boundary release guard', () => {
 
   it('keeps worker settings personal-only and enforces Telegram authorization in the route handler', () => {
     const api = source('src/app/api/shop-admin/profile/route.ts')
-    const page = source('src/app/(shop)/shop/settings/page.tsx')
+    const page = source('src/app/(shop)/shop/settings/settings-client.tsx')
     expect(api).toContain('function profileDto(')
     expect(api).toContain('telegramAllowed')
     expect(api).toContain('if (isStaff && (!telegramFeatureEnabled || !admin.telegramNotificationsEnabled || !admin.shop.telegramNotificationsEnabled))')
     expect(api).toContain('if (isStaff) {\n        return forbidden("Xodim ism yoki telefonini o\'zgartira olmaydi')
     expect(page).toContain('const isStaff = memberKind === \'SHOP_STAFF\'')
-    expect(page).toContain('{profile.telegramAllowed && <Card')
-    expect(page).toContain('{canManageShop && shop && (')
+    expect(page).toContain('{settings.profile.telegramAllowed && (')
+    expect(page).toContain('{canManageShop && settings.shop && (')
   })
 
   it('filters RESTOCK from every shop-log response while retaining the underlying audit event', () => {

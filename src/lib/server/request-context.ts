@@ -7,6 +7,8 @@ export interface RequestAuditContext {
   requestId: string
   /** One-way, deployment-secret-scoped fingerprint. Never a raw IP address. */
   networkId: string | null
+  performanceStartedAt?: number
+  performanceTimings?: Map<string, number>
 }
 
 type HeaderReader = Pick<Headers, 'get'>
@@ -50,6 +52,8 @@ export function requestAuditContextFromHeaders(headers: HeaderReader): RequestAu
       ?? safeRequestId(headers.get('x-vercel-id'))
       ?? randomUUID(),
     networkId: networkFingerprint(headers),
+    performanceStartedAt: performance.now(),
+    performanceTimings: new Map(),
   }
 }
 
@@ -80,6 +84,60 @@ export function currentBusinessLogContext() {
   return context
     ? { requestId: context.requestId, ipAddress: context.networkId }
     : { requestId: null, ipAddress: null }
+}
+
+function timingName(value: string) {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '-').slice(0, 40)
+}
+
+/** Additive timings let nested helpers contribute without logging request data. */
+export function recordRequestTiming(name: string, durationMs: number) {
+  const context = currentRequestAuditContext()
+  if (!context || !Number.isFinite(durationMs)) return
+  const safeName = timingName(name)
+  context.performanceTimings ??= new Map()
+  context.performanceTimings.set(
+    safeName,
+    (context.performanceTimings.get(safeName) ?? 0) + Math.max(0, durationMs),
+  )
+}
+
+export async function timeRequestPhase<T>(name: string, operation: () => Promise<T>): Promise<T> {
+  const startedAt = performance.now()
+  try {
+    return await operation()
+  } finally {
+    recordRequestTiming(name, performance.now() - startedAt)
+  }
+}
+
+export function timeRequestPhaseSync<T>(name: string, operation: () => T): T {
+  const startedAt = performance.now()
+  try {
+    return operation()
+  } finally {
+    recordRequestTiming(name, performance.now() - startedAt)
+  }
+}
+
+export function requestPerformanceSummary() {
+  const context = currentRequestAuditContext()
+  if (!context) return null
+  return {
+    durationMs: Math.max(0, performance.now() - (context.performanceStartedAt ?? performance.now())),
+    phasesMs: Object.fromEntries(context.performanceTimings ?? []),
+  }
+}
+
+export function requestServerTimingHeader() {
+  if (process.env.NODE_ENV === 'production' && process.env.PERFORMANCE_TIMING_HEADERS !== 'true') {
+    return null
+  }
+  const summary = requestPerformanceSummary()
+  if (!summary) return null
+  const phases = Object.entries(summary.phasesMs)
+    .map(([name, duration]) => `${name};dur=${duration.toFixed(1)}`)
+  return [...phases, `total;dur=${summary.durationMs.toFixed(1)}`].join(', ')
 }
 
 /** Test/service helper for code that does not start in a Next.js request. */

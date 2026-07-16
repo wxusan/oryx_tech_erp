@@ -1,7 +1,7 @@
 'use client'
 
 import { memo, useEffect, useMemo, useState } from 'react'
-import { keepPreviousData, useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -20,6 +20,9 @@ import { queryKeys, type DeviceListQuery } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { adoptIncrementalSnapshotCursor, requestIncrementalSync } from '@/lib/client-sync-runtime'
 import { useShopAccess } from '@/components/shop/shop-access-context'
+import { QueryActivity } from '@/components/query-activity'
+import { markQueryIntent } from '@/lib/client-performance'
+import { ExportDownloadButton } from '@/components/shop/export-download-button'
 
 type DisplayStatus = 'Omborda' | 'Sotilgan' | 'Qarz' | 'Nasiyada' | 'Qaytarilgan (eski holat)' | "O'chirilgan"
 type Device = DeviceListItem
@@ -226,6 +229,7 @@ export default function QurilmalarClient({
   initialSyncCursor: string
 }) {
   const scope = useAuthenticatedQueryScope()
+  const queryClient = useQueryClient()
   const { can, memberKind } = useShopAccess()
   const canCreateDevice = can('DEVICE_CREATE')
   const canExport = can('EXPORT_DEVICES')
@@ -294,9 +298,31 @@ export default function QurilmalarClient({
 
   const devices = devicesQuery.data?.items ?? []
   const total = devicesQuery.data?.total ?? 0
-  const error = devicesQuery.error instanceof Error ? devicesQuery.error.message : ''
+  const error = devicesQuery.error instanceof Error ? devicesQuery.error.message : null
   const loading = devicesQuery.isPending && !devicesQuery.data
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
+
+  function prefetchStatus(status: DeviceStatus | 'Barchasi') {
+    const query: DeviceListQuery = {
+      search: debouncedSearch,
+      status,
+      condition,
+      page: 1,
+      take: PER_PAGE,
+      sort: 'createdAt-desc',
+    }
+    const key = buildRequestKey(debouncedSearch, status, condition, 1)
+    void queryClient.prefetchQuery({
+      queryKey: queryKeys.devices.list(scope, query),
+      queryFn: async ({ signal }) => {
+        const response = await fetch(`/api/devices?${key}`, { signal, cache: 'no-store' })
+        const json = await response.json() as ApiResponse<DeviceListPage>
+        if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Qurilmalar yuklanmadi')
+        return json.data
+      },
+      staleTime: 120_000,
+    })
+  }
 
   return (
     <div className="p-6 space-y-4">
@@ -307,16 +333,14 @@ export default function QurilmalarClient({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           {canExport && (
-            <Button
-              type="button"
+            <ExportDownloadButton
+              href={exportUrl('devices', 'xlsx')}
+              fallbackFilename="devices.xlsx"
               size="lg"
               variant="outline"
-              onClick={() => {
-                window.location.href = exportUrl('devices', 'xlsx')
-              }}
             >
               Excel yuklab olish
-            </Button>
+            </ExportDownloadButton>
           )}
           {canCreateDevice && (
             <Button render={<Link href="/shop/qurilmalar/new" />} nativeButton={false} size="lg">
@@ -327,11 +351,16 @@ export default function QurilmalarClient({
       </div>
 
       {/* Filter tabs */}
-      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200">
+      <div className="flex gap-1 overflow-x-auto border-b border-zinc-200" role="tablist" aria-label="Qurilma holati">
         {filterTabs.map((tab) => (
           <button
             key={tab.value}
-            onClick={() => { setActiveStatus(tab.value); setPage(1) }}
+            role="tab"
+            aria-selected={activeStatus === tab.value}
+            onMouseEnter={() => prefetchStatus(tab.value)}
+            onFocus={() => prefetchStatus(tab.value)}
+            onTouchStart={() => prefetchStatus(tab.value)}
+            onClick={() => { markQueryIntent('devices'); setActiveStatus(tab.value); setPage(1) }}
             className={`-mb-px shrink-0 border-b-2 px-3 py-2 text-sm transition-colors ${
               activeStatus === tab.value
                 ? 'border-zinc-900 text-zinc-900 font-medium'
@@ -358,14 +387,21 @@ export default function QurilmalarClient({
 
       {/* Search */}
       <div className="flex flex-col gap-2 sm:flex-row">
-        <Input value={search} onChange={(e) => { setSearch(e.target.value); setPage(1) }} placeholder="Model, IMEI, rang, xotira yoki yetkazib beruvchi bo'yicha qidirish..." className="max-w-md h-9 text-sm border-zinc-200 rounded" />
-        <Select value={condition} onValueChange={(value) => { if (value) { setCondition(value as 'ALL' | 'NEW' | 'USED'); setPage(1) } }}>
+        <Input value={search} onChange={(e) => { markQueryIntent('devices'); setSearch(e.target.value); setPage(1) }} placeholder="Model, IMEI, rang, xotira yoki yetkazib beruvchi bo'yicha qidirish..." className="max-w-md h-9 text-sm border-zinc-200 rounded" />
+        <Select value={condition} onValueChange={(value) => { if (value) { markQueryIntent('devices'); setCondition(value as 'ALL' | 'NEW' | 'USED'); setPage(1) } }}>
           <SelectTrigger className="h-9 w-full sm:w-40"><SelectValue /></SelectTrigger>
           <SelectContent><SelectItem value="ALL">Barcha holatlar</SelectItem><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
         </Select>
       </div>
 
-      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">{error}</div>}
+      <QueryActivity
+        isFetching={devicesQuery.isFetching}
+        isInitialLoading={loading}
+        error={error}
+        onRetry={() => { markQueryIntent('devices'); void devicesQuery.refetch() }}
+        label="Qurilmalar yangilanmoqda"
+        metricId="devices"
+      >
 
       {/* Desktop table — unchanged rendering, just gated to sm: and up. */}
       <div className="hidden sm:block border border-zinc-200 rounded overflow-x-auto">
@@ -436,7 +472,7 @@ export default function QurilmalarClient({
             <Button
               variant="outline"
               disabled={page === 1}
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              onClick={() => { markQueryIntent('devices'); setPage((p) => Math.max(1, p - 1)) }}
               className="h-8 rounded border-zinc-200 px-3 text-xs disabled:opacity-40"
             >
               Oldingi
@@ -445,7 +481,7 @@ export default function QurilmalarClient({
             <Button
               variant="outline"
               disabled={page === totalPages}
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              onClick={() => { markQueryIntent('devices'); setPage((p) => Math.min(totalPages, p + 1)) }}
               className="h-8 rounded border-zinc-200 px-3 text-xs disabled:opacity-40"
             >
               Keyingi
@@ -453,6 +489,7 @@ export default function QurilmalarClient({
           </div>
         </div>
       )}
+      </QueryActivity>
     </div>
   )
 }

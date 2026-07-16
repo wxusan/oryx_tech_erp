@@ -64,9 +64,13 @@ declare global {
 }
 
 function getPrisma(): PrismaClient {
-  if (global.prisma) return global.prisma
+  if (globalThis.prisma) return globalThis.prisma
   const client = createPrismaClient() as unknown as PrismaClient
-  if (process.env.NODE_ENV !== 'production') global.prisma = client
+  // Next's standalone production server may load the shared Prisma module in
+  // multiple route chunks within one process. Cache in every environment so
+  // those chunks share one bounded adapter pool instead of multiplying it.
+  // Serverless isolates still receive their own process-local singleton.
+  globalThis.prisma = client
   return client
 }
 

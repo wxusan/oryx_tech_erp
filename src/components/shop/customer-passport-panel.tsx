@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react'
 import Image from 'next/image'
 import { Eye, EyeOff, FileImage } from 'lucide-react'
-import { Button } from '@/components/ui/button'
+import { AsyncButton } from '@/components/ui/async-button'
 import { useShopAccess } from '@/components/shop/shop-access-context'
 
 type PassportPhotoCheck = {
@@ -123,16 +123,16 @@ export function CustomerPassportPanel({
       <div className="mt-3 flex flex-wrap items-center gap-2">
         <span className="font-mono text-sm text-zinc-700">{identifier ?? passportMasked ?? 'Kiritilmagan'}</span>
         {passportMasked && canReveal && (
-          <Button type="button" variant="outline" size="sm" onClick={revealIdentifier} disabled={loading === 'identifier'}>
+          <AsyncButton type="button" variant="outline" size="sm" onClick={revealIdentifier} pending={loading === 'identifier'} pendingLabel="Ochilmoqda…">
             {identifier ? <EyeOff className="mr-1.5 size-4" aria-hidden="true" /> : <Eye className="mr-1.5 size-4" aria-hidden="true" />}
-            {loading === 'identifier' ? 'Ochilmoqda…' : identifier ? 'Yashirish' : "To'liq ko'rish"}
-          </Button>
+            {identifier ? 'Yashirish' : "To'liq ko'rish"}
+          </AsyncButton>
         )}
         {photoStatus === 'available' && canViewPhoto && (
-          <Button type="button" variant="outline" size="sm" onClick={showImage} disabled={loading === 'image'}>
+          <AsyncButton type="button" variant="outline" size="sm" onClick={showImage} pending={loading === 'image'} pendingLabel="Ochilmoqda…">
             <FileImage className="mr-1.5 size-4" aria-hidden="true" />
-            {loading === 'image' ? 'Ochilmoqda…' : imageUrl ? 'Rasmni yopish' : "Rasmni ko'rish"}
-          </Button>
+            {imageUrl ? 'Rasmni yopish' : "Rasmni ko'rish"}
+          </AsyncButton>
         )}
       </div>
       {canViewPhoto && photoStatus === 'checking' && (

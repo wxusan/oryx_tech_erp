@@ -11,6 +11,7 @@ import {
   type ShopStaffDto,
 } from '@/lib/shop-staff-contract'
 import { principalHasPermission, type ShopPrincipal } from '@/lib/server/shop-access'
+import { prisma } from '@/lib/prisma'
 
 export const shopStaffProjectionSelect = {
   id: true,
@@ -84,4 +85,24 @@ export function projectShopStaff(
       ? visiblePermissions.filter((code) => code !== STAFF_LOGS_PERMISSION)
       : null,
   }
+}
+
+/** Permission-scoped roster shared by the server page seed and API refresh. */
+export async function getShopStaffRoster(shopId: string, principal: ShopPrincipal): Promise<ShopStaffDto[]> {
+  if (!principalNeedsStaffTargets(principal)) return []
+  const [shop, rows] = await Promise.all([
+    prisma.shop.findUnique({ where: { id: shopId }, select: { ownerAdminId: true } }),
+    prisma.shopAdmin.findMany({
+      where: {
+        shopId,
+        id: { not: principal.actorId },
+        deletedAt: null,
+      },
+      orderBy: [{ isActive: 'desc' }, { createdAt: 'asc' }],
+      select: shopStaffProjectionSelect,
+    }),
+  ])
+  return rows
+    .filter((row) => row.id !== shop?.ownerAdminId)
+    .map((row) => projectShopStaff(row, principal))
 }
