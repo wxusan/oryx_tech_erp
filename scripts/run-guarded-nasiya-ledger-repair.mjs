@@ -72,7 +72,11 @@ const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
 const { error: uploadError } = await supabase.storage
   .from(backupBucket)
   .upload(remotePath, readFileSync(snapshotFile), { contentType: 'application/gzip', upsert: false })
-if (uploadError) throw new Error('Guarded Nasiya ledger repair could not archive its recovery snapshot')
+if (uploadError) {
+  // Storage error text contains no ledger data; retaining it in the protected
+  // release log is necessary for an operator to correct the backup target.
+  throw new Error(`Guarded Nasiya ledger repair could not archive its recovery snapshot: ${uploadError.message}`)
+}
 rmSync(snapshotFile, { force: true })
 
 const archiveReference = `supabase-storage://${backupBucket}/${remotePath}#${checksum}`
