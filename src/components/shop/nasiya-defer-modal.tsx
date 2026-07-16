@@ -16,6 +16,7 @@ import { useNasiyaOperationContext } from '@/lib/use-nasiya-operation-context'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { queryKeys } from '@/lib/query-keys'
 import type { NasiyaDeferMutationResult, NasiyaOperationContext, NasiyaOperationSchedule } from '@/lib/nasiya-operation-context'
+import { AsyncButton } from '@/components/ui/async-button'
 
 type Schedule = NasiyaOperationSchedule
 
@@ -160,7 +161,10 @@ export function NasiyaDeferModal({
     .join(' · ')
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      if (!nextOpen && submitting) return
+      onOpenChange(nextOpen)
+    }}>
       <DialogContent className="w-[calc(100vw-2rem)] max-w-md rounded-xl sm:w-full">
         <DialogHeader>
           <DialogTitle>To&apos;lov muddatini uzaytirish</DialogTitle>
@@ -171,7 +175,12 @@ export function NasiyaDeferModal({
         <div className="space-y-4">
           {(error || contextError) && <div role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{error || contextError}</div>}
           {loading ? (
-            <div className="py-6 text-center text-sm text-zinc-400">Yuklanmoqda...</div>
+            <div className="space-y-3 py-2" role="status" aria-live="polite" aria-label="Muddat jadvali yuklanmoqda">
+              <span className="sr-only">Muddat jadvali yuklanmoqda</span>
+              {Array.from({ length: 3 }).map((_, index) => (
+                <div key={index} className="h-14 animate-pulse rounded-lg border border-zinc-200 bg-zinc-50" />
+              ))}
+            </div>
           ) : (
             <>
               <div className="space-y-1.5">
@@ -215,10 +224,10 @@ export function NasiyaDeferModal({
           )}
         </div>
         <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Bekor qilish</Button>
-          <Button disabled={!canSubmit || submitting || loading} onClick={submit}>
-            {submitting ? 'Saqlanmoqda...' : 'Muddatni uzaytirish'}
-          </Button>
+          <Button variant="outline" disabled={submitting} onClick={() => onOpenChange(false)}>Bekor qilish</Button>
+          <AsyncButton pending={submitting} pendingLabel="Saqlanmoqda..." disabled={!canSubmit || loading} onClick={submit}>
+            Muddatni uzaytirish
+          </AsyncButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { navigateAfterMutation } from '@/lib/client-events'
 import { Button } from '@/components/ui/button'
+import { AsyncButton } from '@/components/ui/async-button'
 import { Input } from '@/components/ui/input'
 import { StorageInput } from '@/components/ui/storage-input'
 import { DateInput } from '@/components/ui/date-input'
@@ -17,7 +18,7 @@ import { currencyLabel, formatUserFacingMoney } from '@/lib/currency'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { isValidPhone, PHONE_ERROR } from '@/lib/phone'
 import { tashkentTodayInputValue } from '@/lib/timezone'
-import { ArrowLeft, Loader2, Check } from 'lucide-react'
+import { ArrowLeft, Check } from 'lucide-react'
 import type { PaymentMethod } from '@/lib/domain-types'
 
 type CustomerPaymentMode = 'FULL' | 'PARTIAL' | 'LATER'
@@ -698,24 +699,16 @@ function AuthorizedNewOlibSotdimPage() {
             <Button type="button" variant="outline" onClick={() => setStep(1)} className="border-zinc-200 text-zinc-700 rounded">
               Orqaga
             </Button>
-            <Button
+            <AsyncButton
               type="button"
-              disabled={submitting}
+              pending={submitting}
+              pendingLabel="Saqlanmoqda..."
               onClick={handleSave}
               className="flex-1 h-10 bg-zinc-900 hover:bg-zinc-800 text-white text-sm font-medium rounded disabled:opacity-40"
             >
-              {submitting ? (
-                <span className="inline-flex items-center gap-2">
-                  <Loader2 size={15} className="animate-spin" />
-                  Saqlanmoqda...
-                </span>
-              ) : (
-                <span className="inline-flex items-center gap-2">
-                  <Check size={15} />
-                  Olib-sotishni saqlash
-                </span>
-              )}
-            </Button>
+              <Check size={15} />
+              Olib-sotishni saqlash
+            </AsyncButton>
           </div>
         </div>
       )}

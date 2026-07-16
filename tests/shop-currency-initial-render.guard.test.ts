@@ -45,7 +45,7 @@ describe('shop currency initial render', () => {
   })
 
   it('updates the current provider after a preferred-currency settings save', () => {
-    const settings = read('src/app/(shop)/shop/settings/page.tsx')
+    const settings = read('src/app/(shop)/shop/settings/settings-shop-section.tsx')
 
     expect(settings).toContain('setCurrency({ currency: json.data.preferredCurrency, usdUzsRate: json.data.usdUzsRate })')
   })

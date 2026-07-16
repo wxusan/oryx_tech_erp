@@ -9,6 +9,7 @@ import {
 import { customerSearchWhere } from '@/lib/server/customer-search'
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
 import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
+import { timeRequestPhase, timeRequestPhaseSync } from '@/lib/server/request-context'
 
 const EMPTY_TRUST_FACTORS: CustomerTrustFactors = {
   totalNasiyaCount: 0,
@@ -30,6 +31,13 @@ export interface CustomerListInput {
   take: number
 }
 
+export interface CustomerListVisibility {
+  canViewCustomers: boolean
+  canEditCustomer: boolean
+  canUsePassport: boolean
+  canOverrideTrust: boolean
+}
+
 /**
  * Authoritative paginated customer-list query shared by the unfiltered GET
  * and privacy-preserving POST search endpoints. The caller owns permission
@@ -37,7 +45,7 @@ export interface CustomerListInput {
  */
 export async function getCustomerList(input: CustomerListInput) {
   const where = customerSearchWhere(input.shopId, input.search, { includeNote: true })
-  const [customers, total] = await Promise.all([
+  const [customers, total] = await timeRequestPhase('database', () => Promise.all([
     prisma.customer.findMany({
       where,
       orderBy: { createdAt: 'desc' },
@@ -64,27 +72,50 @@ export async function getCustomerList(input: CustomerListInput) {
       },
     }),
     prisma.customer.count({ where }),
-  ])
+  ]))
 
-  const trustFactors = await getCustomerTrustFactorsForList({
+  const trustFactors = await timeRequestPhase('database', () => getCustomerTrustFactorsForList({
     shopId: input.shopId,
     customerIds: customers.map((customer) => customer.id),
-  })
-  const items = customers.map(({ trustOverride, ...rest }) => {
-    const override = isValidTrustTier(trustOverride) ? trustOverride : null
-    const trust = computeCustomerTrustRatingFromFactors(
-      trustFactors.get(rest.id) ?? EMPTY_TRUST_FACTORS,
-      override,
-    )
-    return {
-      ...rest,
-      passportMasked: rest.passportIdentifierLast4 ? `••••${rest.passportIdentifierLast4}` : null,
-      hasPassportPhoto: isPrivateUploadStoredKey({ key: rest.passportPhotoUrl, shopId: rest.shopId, kind: 'passport' }),
-      passportIdentifierLast4: undefined,
-      passportPhotoUrl: undefined,
-      trust: { tier: trust.tier, label: trust.label, color: trust.color },
-    }
-  })
+  }))
+  return timeRequestPhaseSync('dto', () => {
+    const items = customers.map(({ trustOverride, ...rest }) => {
+      const override = isValidTrustTier(trustOverride) ? trustOverride : null
+      const trust = computeCustomerTrustRatingFromFactors(
+        trustFactors.get(rest.id) ?? EMPTY_TRUST_FACTORS,
+        override,
+      )
+      return {
+        ...rest,
+        createdAt: rest.createdAt.toISOString(),
+        passportMasked: rest.passportIdentifierLast4 ? `••••${rest.passportIdentifierLast4}` : null,
+        hasPassportPhoto: isPrivateUploadStoredKey({ key: rest.passportPhotoUrl, shopId: rest.shopId, kind: 'passport' }),
+        passportIdentifierLast4: undefined,
+        passportPhotoUrl: undefined,
+        trust: { tier: trust.tier, label: trust.label, color: trust.color },
+      }
+    })
 
-  return { items, total, skip: input.skip, take: input.take }
+    return { items, total, skip: input.skip, take: input.take }
+  })
+}
+
+export function scopeCustomerList(
+  data: Awaited<ReturnType<typeof getCustomerList>>,
+  visibility: CustomerListVisibility,
+) {
+  if (visibility.canViewCustomers) return data
+  return {
+    ...data,
+    items: data.items.map((item) => ({
+      id: item.id,
+      name: item.name,
+      phone: item.phone,
+      phoneNormalizationNeedsReview: item.phoneNormalizationNeedsReview,
+      createdAt: item.createdAt,
+      ...(visibility.canEditCustomer ? { additionalPhones: item.additionalPhones, note: item.note } : {}),
+      ...(visibility.canUsePassport ? { passportMasked: item.passportMasked, hasPassportPhoto: item.hasPassportPhoto } : {}),
+      ...(visibility.canOverrideTrust ? { trust: item.trust } : {}),
+    })),
+  }
 }

@@ -34,7 +34,7 @@ describe('customer list query: real pagination envelope', () => {
   })
 })
 
-describe('mijozlar page: page state, total, and a submit-triggered search that resets to page 1', () => {
+describe('mijozlar page: page state, total, and a debounced live search that resets to page 1', () => {
   const page = read('src/app/(shop)/shop/mijozlar/customers-client.tsx')
 
   it('keys the query cache by page and reads the real total', () => {
@@ -44,8 +44,10 @@ describe('mijozlar page: page state, total, and a submit-triggered search that r
   })
 
   it('a new search always resets to page 1', () => {
-    expect(page).toContain('function submitSearch() {\n    setCommittedSearch(search.trim())')
-    expect(page).toContain('loadPage(1)')
+    expect(page).toContain('const SEARCH_DEBOUNCE_MS = 275')
+    expect(page).toContain('setDebouncedSearch(nextSearch)')
+    expect(page).toContain('setPage(1)')
+    expect(page).not.toContain('Qidirish</Button>')
   })
 
   it('keeps the private search in a POST body and out of URL/history/query keys', () => {
@@ -53,7 +55,7 @@ describe('mijozlar page: page state, total, and a submit-triggered search that r
     expect(page).toContain('customerSearchRequest({')
     expect(read('src/lib/customer-search-transport.ts')).toContain("method: 'POST'")
     expect(page).toContain('requestRevision: searchRevision')
-    expect(page).not.toContain('search: committedSearch,\n      page,')
+    expect(page).not.toContain('search: debouncedSearch,\n      page,')
     expect(page).toContain('replaceListUrlState({ q: null, page')
     expect(page).not.toContain('replaceListUrlState({ q: query')
   })

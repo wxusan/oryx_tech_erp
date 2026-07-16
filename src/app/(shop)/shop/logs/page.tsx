@@ -16,35 +16,36 @@ export default async function ShopLogsPage({
   const guarded = await requireCurrentShopPermission('LOG_VIEW')
   if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
 
-  const cursor = await latestChangeCursorForSession(guarded.session)
-  const [payload, currency] = await Promise.all([
-    getShopLogsInitial(guarded.shopId, {
-      includeOwnerFinancials: guarded.principal?.memberKind === 'SHOP_OWNER',
-    }),
-    getShopCurrencyContext(guarded.shopId),
-  ])
-
   const params = await searchParams
   const requestedCategory = scalarParam(params?.category)
   const category = logCategoryOptions.some((option) => option.value === requestedCategory)
     ? (requestedCategory as LogCategory)
     : 'all'
+  const initialState = {
+    search: scalarParam(params?.q).slice(0, 100),
+    dateFrom: scalarParam(params?.from),
+    dateTo: scalarParam(params?.to),
+    category,
+    actorId: scalarParam(params?.actorId),
+    page: positivePage(params?.page),
+  }
+  const requestKey = initialLogsRequestKey({ ...initialState, take: 10 })
+  const [cursor, payload, currency] = await Promise.all([
+    latestChangeCursorForSession(guarded.session),
+    getShopLogsInitial(guarded.shopId, {
+      includeOwnerFinancials: guarded.principal?.memberKind === 'SHOP_OWNER',
+    }, { ...initialState, take: 10 }),
+    getShopCurrencyContext(guarded.shopId),
+  ])
 
   return (
     <>
     <IncrementalSnapshotBoundary cursor={cursor} />
     <ShopLogsClient
       initialPayload={payload}
-      initialRequestKey={initialLogsRequestKey()}
+      initialRequestKey={requestKey}
       currency={currency}
-      initialState={{
-        search: scalarParam(params?.q).slice(0, 100),
-        dateFrom: scalarParam(params?.from),
-        dateTo: scalarParam(params?.to),
-        category,
-        actorId: scalarParam(params?.actorId),
-        page: positivePage(params?.page),
-      }}
+      initialState={initialState}
     />
     </>
   )

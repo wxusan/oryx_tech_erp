@@ -30,6 +30,7 @@ import { useNasiyaOperationContext } from '@/lib/use-nasiya-operation-context'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { queryKeys } from '@/lib/query-keys'
 import type { NasiyaOperationContext, NasiyaOperationSchedule, NasiyaPaymentMutationResult } from '@/lib/nasiya-operation-context'
+import { AsyncButton } from '@/components/ui/async-button'
 
 /**
  * The single receive-payment modal used by BOTH the nasiya detail page and the
@@ -342,7 +343,10 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
   const subtitleDevice = contextQuery.data?.device.model || deviceName || ''
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={(nextOpen) => {
+      if (!nextOpen && submitting) return
+      onOpenChange(nextOpen)
+    }}>
       <DialogContent className="w-[calc(100vw-2rem)] max-w-xl gap-0 overflow-hidden rounded-xl p-0 sm:w-full">
         <DialogHeader className="border-b border-zinc-100 px-5 py-4">
           <DialogTitle className="text-base font-semibold text-zinc-900">To&apos;lov qabul qilish</DialogTitle>
@@ -355,7 +359,20 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
           {(payError || contextError) && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600">{payError || contextError}</div>}
 
           {loadingData ? (
-            <div className="py-6 text-center text-sm text-zinc-400">Yuklanmoqda...</div>
+            <div
+              className="space-y-3 py-2"
+              role="status"
+              aria-live="polite"
+              aria-label="To‘lov jadvali yuklanmoqda"
+            >
+              <span className="sr-only">To‘lov jadvali yuklanmoqda</span>
+              {Array.from({ length: 4 }).map((_, index) => (
+                <div key={index} className="animate-pulse rounded-lg border border-zinc-200 p-3">
+                  <div className="h-4 w-32 rounded bg-zinc-200" />
+                  <div className="mt-2 h-3 w-48 max-w-full rounded bg-zinc-100" />
+                </div>
+              ))}
+            </div>
           ) : (
             <>
               {pendingSchedules.length > 0 && (
@@ -663,6 +680,7 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
         <DialogFooter className="gap-2 border-t border-zinc-100 px-5 py-4">
           <Button
             variant="outline"
+            disabled={submitting}
             onClick={() => {
               onOpenChange(false)
               setPayError('')
@@ -671,13 +689,15 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
           >
             Bekor qilish
           </Button>
-          <Button
-            disabled={!canSubmit || submitting || loadingData}
+          <AsyncButton
+            pending={submitting}
+            pendingLabel="To'lov saqlanmoqda..."
+            disabled={!canSubmit || loadingData}
             onClick={handleSubmit}
             className="rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
           >
-            {submitting ? 'Saqlanmoqda...' : "To'lovni saqlash"}
-          </Button>
+            To&apos;lovni saqlash
+          </AsyncButton>
         </DialogFooter>
       </DialogContent>
     </Dialog>

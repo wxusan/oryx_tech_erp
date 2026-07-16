@@ -12,7 +12,8 @@ describe('Uzbek phone input consistency', () => {
     'src/app/(shop)/shop/qurilmalar/[id]/page.tsx',
     'src/app/(shop)/shop/nasiyalar/import/page.tsx',
     'src/app/(shop)/shop/nasiyalar/[id]/page.tsx',
-    'src/app/(shop)/shop/settings/page.tsx',
+    'src/app/(shop)/shop/settings/settings-account-section.tsx',
+    'src/app/(shop)/shop/settings/settings-shop-section.tsx',
     'src/app/(admin)/admin/shops/new/page.tsx',
     'src/app/(admin)/admin/shops/[id]/page.tsx',
   ])('%s uses the shared PhoneInput for editable phone fields', (file) => {

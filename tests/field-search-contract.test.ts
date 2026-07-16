@@ -124,9 +124,10 @@ describe('ERP 2.0 field/search contract', () => {
     expect(admin).toContain('<Field label="1 USD uchun UZS" required controlId="manual-usd-rate"')
     expect(admin).toContain("document.getElementById('admin-confirm-password')?.focus()")
 
-    const shop = readFileSync(resolve(process.cwd(), 'src/app/(shop)/shop/settings/page.tsx'), 'utf8')
-    expect(shop).toContain('<Field label="Ism" required controlId="account-name"')
-    expect(shop).toContain('<Field label="Telefon" required controlId="account-phone"')
+    const account = readFileSync(resolve(process.cwd(), 'src/app/(shop)/shop/settings/settings-account-section.tsx'), 'utf8')
+    expect(account).toContain('<Field label="Ism" required controlId="account-name"')
+    expect(account).toContain('<Field label="Telefon" required controlId="account-phone"')
+    const shop = readFileSync(resolve(process.cwd(), 'src/app/(shop)/shop/settings/settings-shop-section.tsx'), 'utf8')
     expect(shop).toContain('<Field label="Do\'kon nomi" required controlId="shop-name"')
     expect(shop).toContain("document.getElementById('shop-owner-phone')?.focus()")
 

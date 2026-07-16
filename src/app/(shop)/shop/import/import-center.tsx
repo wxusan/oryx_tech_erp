@@ -4,6 +4,7 @@ import { useRef, useState } from 'react'
 import Link from 'next/link'
 import { FileUp, Plus, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { AsyncButton } from '@/components/ui/async-button'
 import { Input } from '@/components/ui/input'
 import { useShopAccess } from '@/components/shop/shop-access-context'
 import { parseCustomerImportCsv, type CustomerImportRow } from '@/lib/csv-import'
@@ -142,7 +143,7 @@ export default function ImportCenter() {
 
           {error && <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</div>}
           {result && <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">{result}</div>}
-          <Button type="button" disabled={saving} onClick={() => void submit()}>{saving ? 'Import qilinmoqda...' : 'Mijozlarni import qilish'}</Button>
+          <AsyncButton type="button" pending={saving} pendingLabel="Import qilinmoqda..." onClick={() => void submit()}>Mijozlarni import qilish</AsyncButton>
         </section>
       )}
 

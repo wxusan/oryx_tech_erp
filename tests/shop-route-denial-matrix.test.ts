@@ -78,6 +78,7 @@ const routes: Array<{ path: string; load: () => Promise<RouteModule> }> = [
   { path: 'src/app/api/reports/shop/route.ts', load: () => import('@/app/api/reports/shop/route') },
   { path: 'src/app/api/sales/[id]/payment/route.ts', load: () => import('@/app/api/sales/[id]/payment/route') },
   { path: 'src/app/api/sales/[id]/route.ts', load: () => import('@/app/api/sales/[id]/route') },
+  { path: 'src/app/api/sales/route.ts', load: () => import('@/app/api/sales/route') },
   { path: 'src/app/api/shop-admin/profile/route.ts', load: () => import('@/app/api/shop-admin/profile/route') },
   { path: 'src/app/api/shop/profile/route.ts', load: () => import('@/app/api/shop/profile/route') },
   { path: 'src/app/api/shop/staff/[id]/route.ts', load: () => import('@/app/api/shop/staff/[id]/route') },

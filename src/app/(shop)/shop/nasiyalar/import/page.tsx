@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
+import { AsyncButton } from '@/components/ui/async-button'
 import { Input } from '@/components/ui/input'
 import { StorageInput } from '@/components/ui/storage-input'
 import { Field } from '@/components/ui/field'
@@ -285,9 +286,15 @@ function AuthorizedImportNasiyaPage() {
         <Link href="/shop/nasiyalar">
           <Button variant="outline" className="rounded-lg border-zinc-200 text-zinc-700">Bekor qilish</Button>
         </Link>
-        <Button onClick={handleSubmit} disabled={!canSubmit} className="rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40">
-          {saving ? 'Import qilinmoqda...' : 'Import qilish'}
-        </Button>
+        <AsyncButton
+          pending={saving}
+          pendingLabel="Import qilinmoqda..."
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          className="rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
+        >
+          Import qilish
+        </AsyncButton>
       </div>
     </div>
   )

@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { Button } from '@/components/ui/button'
+import { AsyncButton } from '@/components/ui/async-button'
 import { Input } from '@/components/ui/input'
 import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
@@ -518,13 +519,15 @@ function AuthorizedNewSotuvPage() {
             </div>
           )}
 
-          <Button
+          <AsyncButton
             type="submit"
-            disabled={!canSubmit || submitting}
+            disabled={!canSubmit}
+            pending={submitting}
+            pendingLabel="Saqlanmoqda..."
             className="w-full h-10 bg-zinc-900 hover:bg-zinc-800 text-white text-sm font-medium rounded disabled:opacity-40"
           >
-            {submitting ? 'Saqlanmoqda...' : 'Sotuvni saqlash'}
-          </Button>
+            Sotuvni saqlash
+          </AsyncButton>
         </form>
       )}
     </div>

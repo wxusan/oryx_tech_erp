@@ -5,6 +5,7 @@ import Image from 'next/image'
 import Link from 'next/link'
 import { useParams, useRouter } from 'next/navigation'
 import { Button, buttonVariants } from '@/components/ui/button'
+import { AsyncButton } from '@/components/ui/async-button'
 import { Input } from '@/components/ui/input'
 import { DateInput } from '@/components/ui/date-input'
 import { PhoneInput } from '@/components/ui/phone-input'
@@ -1362,13 +1363,15 @@ function AuthorizedQurilmaDetailPage() {
             <Button variant="outline" onClick={() => setEditOpen(false)} className="rounded-lg border-zinc-200 text-zinc-700">
               Bekor qilish
             </Button>
-            <Button
-              disabled={editSaving || editImageSelection.hasBlockingErrors}
+            <AsyncButton
+              disabled={editImageSelection.hasBlockingErrors}
+              pending={editSaving}
+              pendingLabel="Saqlanmoqda..."
               onClick={handleEditSave}
               className="rounded-lg bg-zinc-900 text-white hover:bg-zinc-800 disabled:opacity-40"
             >
-              {editSaving ? 'Saqlanmoqda...' : 'Saqlash'}
-            </Button>
+              Saqlash
+            </AsyncButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1405,13 +1408,15 @@ function AuthorizedQurilmaDetailPage() {
             >
               Bekor qilish
             </Button>
-            <Button
-              disabled={!deleteNote.trim() || deleting}
+            <AsyncButton
+              disabled={!deleteNote.trim()}
+              pending={deleting}
+              pendingLabel="O'chirilmoqda..."
               onClick={handleDelete}
               className="bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-40"
             >
-              {deleting ? "O'chirilmoqda..." : "O'chirish"}
-            </Button>
+              O'chirish
+            </AsyncButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1490,9 +1495,9 @@ function AuthorizedQurilmaDetailPage() {
             <Button variant="outline" onClick={() => setSaleEditOpen(false)} className="rounded border-zinc-200 text-zinc-700">
               Bekor qilish
             </Button>
-            <Button disabled={saleEditSaving} onClick={handleSaleEdit} className="rounded bg-zinc-900 text-white hover:bg-zinc-800">
-              {saleEditSaving ? 'Saqlanmoqda...' : 'Saqlash'}
-            </Button>
+            <AsyncButton pending={saleEditSaving} pendingLabel="Saqlanmoqda..." onClick={handleSaleEdit} className="rounded bg-zinc-900 text-white hover:bg-zinc-800">
+              Saqlash
+            </AsyncButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1674,13 +1679,15 @@ function AuthorizedQurilmaDetailPage() {
             <Button variant="outline" onClick={() => setSalePaymentOpen(false)} className="border-zinc-200 text-zinc-700 rounded">
               Bekor qilish
             </Button>
-            <Button
-              disabled={!saleHasEffectiveAmount || !salePayMethod || salePayLoading || !saleSplitValid}
+            <AsyncButton
+              disabled={!saleHasEffectiveAmount || !salePayMethod || !saleSplitValid}
+              pending={salePayLoading}
+              pendingLabel="Saqlanmoqda..."
               onClick={handleSalePayment}
               className="bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
             >
-              {salePayLoading ? 'Saqlanmoqda...' : 'Saqlash'}
-            </Button>
+              Saqlash
+            </AsyncButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1737,13 +1744,14 @@ function AuthorizedQurilmaDetailPage() {
             <Button variant="outline" onClick={() => setReturnModalOpen(false)} className="border-zinc-200 text-zinc-700 rounded">
               Bekor qilish
             </Button>
-            <Button
-              disabled={returning}
+            <AsyncButton
+              pending={returning}
+              pendingLabel="Saqlanmoqda..."
               onClick={handleReturnDevice}
               className="bg-red-600 hover:bg-red-700 text-white rounded disabled:opacity-40"
             >
-              {returning ? 'Saqlanmoqda...' : 'Qaytarishni tasdiqlash'}
-            </Button>
+              Qaytarishni tasdiqlash
+            </AsyncButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -1780,13 +1788,14 @@ function AuthorizedQurilmaDetailPage() {
             >
               Bekor qilish
             </Button>
-            <Button
-              disabled={restocking}
+            <AsyncButton
+              pending={restocking}
+              pendingLabel="Saqlanmoqda..."
               onClick={handleRestockDevice}
               className="bg-zinc-900 hover:bg-zinc-800 text-white rounded disabled:opacity-40"
             >
-              {restocking ? 'Saqlanmoqda...' : "Sotuvga qo'yish"}
-            </Button>
+              Sotuvga qo'yish
+            </AsyncButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

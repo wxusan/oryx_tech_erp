@@ -35,6 +35,9 @@ import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import type { PaymentMethod, SupplierPayableStatus } from '@/lib/domain-types'
 import { useShopAccess } from '@/components/shop/shop-access-context'
+import { QueryActivity } from '@/components/query-activity'
+import { AsyncButton } from '@/components/ui/async-button'
+import { markQueryIntent } from '@/lib/client-performance'
 
 type PayableStatus = SupplierPayableStatus
 
@@ -105,6 +108,16 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
   const [payError, setPayError] = useState('')
   const [paySubmitting, setPaySubmitting] = useState(false)
 
+  useEffect(() => {
+    if (search.trim() === committedSearch) return
+    const timer = window.setTimeout(() => {
+      markQueryIntent('olib-sotdim-list')
+      setCommittedSearch(search.trim())
+      setPage(0)
+    }, 275)
+    return () => window.clearTimeout(timer)
+  }, [committedSearch, search])
+
   function fmt(n: number, valueCurrency: 'UZS' | 'USD' = currency.currency) {
     return formatUserFacingMoney({ amount: n, amountCurrency: valueCurrency, displayCurrency: currency.currency, rate: currency.usdUzsRate })
   }
@@ -132,9 +145,9 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
     placeholderData: keepPreviousData,
   })
 
-  function load(query = search, nextPage = page) {
-    replaceListUrlState({ q: query, page: nextPage + 1 })
-    setCommittedSearch(query)
+  function load(nextPage: number) {
+    markQueryIntent('olib-sotdim-list')
+    replaceListUrlState({ q: committedSearch, page: nextPage + 1 })
     setPage(nextPage)
   }
 
@@ -203,33 +216,35 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
         )}
       </div>
 
-      <div className="flex max-w-md gap-2">
+      <div className="max-w-md">
         <Input
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Yetkazib beruvchi, mijoz, model yoki IMEI bo'yicha qidirish..."
           className="h-9 text-sm border-zinc-200 rounded"
         />
-        <Button onClick={() => load(search, 0)} className="h-9 rounded bg-zinc-900 px-4 text-sm text-white">
-          Qidirish
-        </Button>
       </div>
 
       <div className="flex items-center justify-between text-xs text-zinc-500">
         <span>{total} ta operatsiya</span>
         <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm" disabled={loading || page === 0} onClick={() => load(search, page - 1)}>
+          <Button variant="outline" size="sm" disabled={loading || page === 0} onClick={() => load(page - 1)}>
             Oldingi
           </Button>
           <span>{page + 1} / {Math.max(1, Math.ceil(total / pageSize))}</span>
-          <Button variant="outline" size="sm" disabled={loading || (page + 1) * pageSize >= total} onClick={() => load(search, page + 1)}>
+          <Button variant="outline" size="sm" disabled={loading || (page + 1) * pageSize >= total} onClick={() => load(page + 1)}>
             Keyingi
           </Button>
         </div>
       </div>
 
-      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">{error}</div>}
-
+      <QueryActivity
+        isFetching={rowsQuery.isFetching}
+        isInitialLoading={loading}
+        error={error}
+        onRetry={() => void rowsQuery.refetch()}
+        metricId="olib-sotdim-list"
+      >
       <div className="space-y-3 md:hidden">
         {loading ? (
           <div className="rounded border border-zinc-200 bg-white px-4 py-8 text-center text-sm text-zinc-400">Yuklanmoqda...</div>
@@ -381,8 +396,9 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
           </tbody>
         </table>
       </div>
+      </QueryActivity>
 
-      <Dialog open={!!payFor} onOpenChange={(open) => !open && setPayFor(null)}>
+      <Dialog open={!!payFor} onOpenChange={(open) => !open && !paySubmitting && setPayFor(null)}>
         <DialogContent className="max-w-md rounded">
           <DialogHeader>
             <DialogTitle>Yetkazib beruvchiga to&apos;lovni qayd etish</DialogTitle>
@@ -418,12 +434,18 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
             </div>
           )}
           <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setPayFor(null)} className="border-zinc-200 text-zinc-700 rounded">
+            <Button variant="outline" disabled={paySubmitting} onClick={() => setPayFor(null)} className="border-zinc-200 text-zinc-700 rounded">
               Bekor qilish
             </Button>
-            <Button disabled={!payMethod || paySubmitting} onClick={handleMarkPaid} className="bg-zinc-900 text-white rounded">
-              {paySubmitting ? 'Saqlanmoqda...' : 'Saqlash'}
-            </Button>
+            <AsyncButton
+              pending={paySubmitting}
+              pendingLabel="Saqlanmoqda..."
+              disabled={!payMethod}
+              onClick={handleMarkPaid}
+              className="bg-zinc-900 text-white rounded"
+            >
+              Saqlash
+            </AsyncButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

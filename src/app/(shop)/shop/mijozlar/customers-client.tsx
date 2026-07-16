@@ -34,6 +34,10 @@ import { CustomerPassportPanel } from '@/components/shop/customer-passport-panel
 import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
 import { customerSearchRequest } from '@/lib/customer-search-transport'
 import { formatPassportIdentifierInput } from '@/lib/passport-identifier-format'
+import { QueryActivity } from '@/components/query-activity'
+import { AsyncButton } from '@/components/ui/async-button'
+import { markQueryIntent } from '@/lib/client-performance'
+import { ExportDownloadButton } from '@/components/shop/export-download-button'
 
 const TRUST_TIER_LABELS: Record<TrustTier, string> = {
   NEW: 'Yangi mijoz',
@@ -53,7 +57,7 @@ interface Customer {
   phone: string
   phoneNormalizationNeedsReview?: boolean
   additionalPhones?: string[]
-  note: string | null
+  note?: string | null
   createdAt: string
   trustOverride?: TrustTier | null
   trust?: CustomerTrust
@@ -64,8 +68,22 @@ interface Customer {
 
 // Item 2 — real page/skip/take pagination (matches /api/logs' established envelope).
 const PER_PAGE = 25
+const SEARCH_DEBOUNCE_MS = 275
 
-export default function CustomersClient({ initialPage }: { initialPage: number }) {
+interface CustomersPageData {
+  items: Customer[]
+  total: number
+  skip: number
+  take: number
+}
+
+export default function CustomersClient({
+  initialPage,
+  initialData,
+}: {
+  initialPage: number
+  initialData: CustomersPageData
+}) {
   const scope = useAuthenticatedQueryScope()
   const { can } = useShopAccess()
   const canViewCustomers = can('CUSTOMER_VIEW')
@@ -79,7 +97,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
   const canExport = can('EXPORT_CUSTOMERS')
   const [page, setPage] = useState(initialPage)
   const [search, setSearch] = useState('')
-  const [committedSearch, setCommittedSearch] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
   const [searchRevision, setSearchRevision] = useState(0)
   const [editing, setEditing] = useState<Customer | null>(null)
   const [creating, setCreating] = useState(false)
@@ -95,6 +113,17 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
     mode: 'single',
     uploadEndpoint: '/api/uploads/passport',
   })
+  useEffect(() => {
+    if (search.trim() === debouncedSearch) return
+    const timer = window.setTimeout(() => {
+      const nextSearch = search.trim()
+      setDebouncedSearch(nextSearch)
+      setSearchRevision((revision) => revision + 1)
+      setPage(1)
+    }, SEARCH_DEBOUNCE_MS)
+    return () => window.clearTimeout(timer)
+  }, [debouncedSearch, search])
+
   const customersQuery = useQuery({
     queryKey: queryKeys.list(scope, 'customers', {
       surface: 'list',
@@ -107,7 +136,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
       const response = await fetch(
         '/api/customers/search',
         customerSearchRequest({
-          search: committedSearch,
+          search: debouncedSearch,
           skip: (page - 1) * PER_PAGE,
           take: PER_PAGE,
         }, signal),
@@ -117,6 +146,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
       return json.data
     },
     placeholderData: keepPreviousData,
+    initialData: searchRevision === 0 && page === initialPage ? initialData : undefined,
     enabled: canBrowseCustomers,
   })
 
@@ -131,16 +161,10 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
     replaceListUrlState({ q: null, page })
   }, [page])
 
-  function submitSearch() {
-    setCommittedSearch(search.trim())
-    setSearchRevision((revision) => revision + 1)
-    loadPage(1)
-  }
-
   const customers = customersQuery.data?.items ?? []
   const total = customersQuery.data?.total ?? 0
   const loading = customersQuery.isPending && !customersQuery.data
-  const error = customersQuery.error instanceof Error ? customersQuery.error.message : ''
+  const error = customersQuery.error instanceof Error ? customersQuery.error.message : null
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
 
   function openEdit(customer: Customer) {
@@ -228,37 +252,48 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
         <div className="flex flex-wrap gap-2">
           {canCreateCustomer && <Button type="button" size="lg" onClick={openCreate}>Yangi mijoz</Button>}
           {canExport && (
-            <Button
-              type="button"
+            <ExportDownloadButton
+              href="/api/export/customers"
+              fallbackFilename="customers.csv"
               size="lg"
               variant="outline"
-              onClick={() => window.location.assign('/api/export/customers')}
             >
               CSV eksport
-            </Button>
+            </ExportDownloadButton>
           )}
         </div>
       </div>
 
-      <div className="flex max-w-md gap-2">
+      <div className="max-w-md">
         <Input
           name="customer-search"
           aria-label="Mijoz qidiruvi"
           value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && submitSearch()}
+          onChange={(e) => {
+            markQueryIntent('customers')
+            setSearch(e.target.value)
+          }}
           autoComplete="off"
           autoCapitalize="none"
           spellCheck={false}
           placeholder="Ism, telefon yoki pasport bo'yicha qidirish..."
           className="h-9 text-sm border-zinc-200 rounded"
         />
-        <Button onClick={submitSearch} className="h-9 rounded bg-zinc-900 px-4 text-sm text-white">
-          Qidirish
-        </Button>
+        <p className="mt-1 min-h-4 text-xs text-zinc-400" aria-live="polite">
+          {search.trim() !== debouncedSearch || customersQuery.isFetching
+            ? 'Qidiruv yangilanmoqda…'
+            : 'Natijalar avtomatik yangilanadi'}
+        </p>
       </div>
 
-      {error && <div className="text-sm text-red-600 bg-red-50 border border-red-200 rounded px-4 py-3">{error}</div>}
+      <QueryActivity
+        isFetching={customersQuery.isFetching}
+        isInitialLoading={loading}
+        error={error}
+        onRetry={() => { markQueryIntent('customers'); void customersQuery.refetch() }}
+        label="Mijozlar yangilanmoqda"
+        metricId="customers"
+      >
 
       {/* Desktop table */}
       <div className="hidden sm:block border border-zinc-200 rounded overflow-x-auto">
@@ -393,6 +428,7 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
           </div>
         </div>
       )}
+      </QueryActivity>
 
       <Dialog open={!!editing || creating} onOpenChange={(open) => {
         if (!open) {
@@ -519,17 +555,18 @@ export default function CustomersClient({ initialPage }: { initialPage: number }
           </div>
           <DialogFooter className="mx-0 mb-0 gap-2">
             <Button variant="outline" onClick={() => { setEditing(null); setCreating(false) }} className="border-zinc-200 rounded">Bekor qilish</Button>
-            <Button
+            <AsyncButton
+              pending={saving}
+              pendingLabel="Saqlanmoqda..."
               disabled={
-                saving ||
                 (canManagePassport && passportSelection.hasBlockingErrors) ||
                 ((!editing || canEditCustomer) && (name.trim().length < 2 || !isValidPhone(phone)))
               }
               onClick={saveCustomer}
               className="bg-zinc-900 text-white rounded"
             >
-              {saving ? 'Saqlanmoqda...' : 'Saqlash'}
-            </Button>
+              Saqlash
+            </AsyncButton>
           </DialogFooter>
         </DialogContent>
       </Dialog>

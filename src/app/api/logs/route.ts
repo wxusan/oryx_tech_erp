@@ -16,6 +16,7 @@ import { resolveShopLogTargetHrefs, shopLogTargetKey } from '@/lib/server/log-li
 import { isLogCategory, logCategoryWhere } from '@/lib/log-categories'
 import { redactShopStaffLogValue } from '@/lib/log-financial-redaction'
 import { logger } from '@/lib/logger'
+import { timeRequestPhase, timeRequestPhaseSync } from '@/lib/server/request-context'
 
 function parseDateParam(value: string | null | undefined, endOfDay = false) {
   if (!value) return null
@@ -108,7 +109,7 @@ export async function GET(req: NextRequest) {
         : {}),
     }
 
-    const [logs, total] = await Promise.all([
+    const [logs, total] = await timeRequestPhase('database', () => Promise.all([
       prisma.log.findMany({
         where,
         orderBy: { createdAt: 'desc' },
@@ -128,25 +129,25 @@ export async function GET(req: NextRequest) {
         },
       }),
       prisma.log.count({ where }),
-    ])
+    ]))
 
-    const [logsWithActors, hrefs] = await Promise.all([
+    const [logsWithActors, hrefs] = await timeRequestPhase('database', () => Promise.all([
       enrichLogsWithActors(logs),
       shopId && shopId !== 'all'
         ? resolveShopLogTargetHrefs(shopId, logs)
         : Promise.resolve(new Map<string, string>()),
-    ])
+    ]))
 
-    return ok({
-      logs: logsWithActors.map((log) => ({
-        ...log,
-        ...(isShopStaff ? { newValue: redactShopStaffLogValue(log.newValue) } : {}),
-        href: hrefs.get(shopLogTargetKey(log)) ?? null,
-      })),
-      total,
-      skip,
-      take,
-    }, "Loglar ro'yxati")
+    return ok(timeRequestPhaseSync('dto', () => ({
+        logs: logsWithActors.map((log) => ({
+          ...log,
+          ...(isShopStaff ? { newValue: redactShopStaffLogValue(log.newValue) } : {}),
+          href: hrefs.get(shopLogTargetKey(log)) ?? null,
+        })),
+        total,
+        skip,
+        take,
+      })), "Loglar ro'yxati")
   } catch (err) {
     logger.error('[GET /api/logs]', { event: 'api.route_error', error: err })
     return serverError()

@@ -14,6 +14,7 @@
     "test": "vitest run",
     "test:integration": "node scripts/run-integration-tests.mjs",
     "benchmark:shop-stats": "node scripts/benchmark-shop-stats.mjs",
+    "benchmark:shop-portal": "node scripts/benchmark-shop-portal-readonly.mjs",
     "env:validate:production": "node scripts/validate-production-env.mjs",
     "release:preflight": "node scripts/production-release-preflight.mjs",
     "nasiya:ledger:snapshot": "node scripts/create-nasiya-ledger-recovery-snapshot.mjs",

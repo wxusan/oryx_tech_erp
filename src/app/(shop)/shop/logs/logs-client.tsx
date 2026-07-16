@@ -20,6 +20,8 @@ import { replaceListUrlState } from '@/lib/list-url-state'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { StretchedLink } from '@/components/ui/stretched-link'
+import { QueryActivity } from '@/components/query-activity'
+import { markQueryIntent } from '@/lib/client-performance'
 
 type ActorType = 'SUPER_ADMIN' | 'SHOP_ADMIN'
 
@@ -200,16 +202,10 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
         <span className="text-xs text-zinc-400">{totalLogs} ta yozuv</span>
       </div>
 
-      {error && (
-        <div className="rounded border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-600">
-          {error}
-        </div>
-      )}
-
       <div className="flex flex-wrap items-center gap-3">
         <Input
           value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(1) }}
+          onChange={(e) => { markQueryIntent('logs'); setSearch(e.target.value); setPage(1) }}
           placeholder="Amal, eslatma yoki ID bo'yicha qidirish..."
           className="h-8 w-full rounded border-zinc-200 text-xs sm:w-72"
         />
@@ -218,14 +214,14 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
           <DateInput
             aria-label="Boshlanish sanasi"
             value={dateFrom}
-            onValueChange={(value) => { setDateFrom(value); setPage(1) }}
+            onValueChange={(value) => { markQueryIntent('logs'); setDateFrom(value); setPage(1) }}
             className="h-8 w-36 rounded border-zinc-200 text-xs"
           />
           <span className="text-xs text-zinc-400">—</span>
           <DateInput
             aria-label="Tugash sanasi"
             value={dateTo}
-            onValueChange={(value) => { setDateTo(value); setPage(1) }}
+            onValueChange={(value) => { markQueryIntent('logs'); setDateTo(value); setPage(1) }}
             className="h-8 w-36 rounded border-zinc-200 text-xs"
           />
         </div>
@@ -234,7 +230,7 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
             logs loaded so far (Log.actorId), never invented. */}
         <select
           value={actorId}
-          onChange={(e) => { setActorId(e.target.value); setPage(1) }}
+          onChange={(e) => { markQueryIntent('logs'); setActorId(e.target.value); setPage(1) }}
           className="h-8 rounded border border-zinc-200 bg-white px-2 text-xs text-zinc-700"
         >
           <option value="">Barcha adminlar</option>
@@ -249,7 +245,7 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
           <button
             key={option.value}
             type="button"
-            onClick={() => { setCategory(option.value); setPage(1) }}
+            onClick={() => { markQueryIntent('logs'); setCategory(option.value); setPage(1) }}
             className={[
               'shrink-0 border-b-2 px-3 py-2 text-xs font-medium transition-colors',
               category === option.value
@@ -262,6 +258,14 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
         ))}
       </div>
 
+      <QueryActivity
+        isFetching={logsQuery.isFetching}
+        isInitialLoading={loading}
+        error={error}
+        onRetry={() => { markQueryIntent('logs'); void logsQuery.refetch() }}
+        label="Loglar yangilanmoqda"
+        metricId="logs"
+      >
       <div className="overflow-x-auto rounded border border-zinc-200 bg-white">
         <Table>
           <TableHeader>
@@ -344,7 +348,7 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
         <div className="flex items-center gap-0 overflow-hidden rounded border border-zinc-200">
           <button
             type="button"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            onClick={() => { markQueryIntent('logs'); setPage((p) => Math.max(1, p - 1)) }}
             disabled={page === 1}
             className="h-8 border-r border-zinc-200 px-4 text-xs text-zinc-600 transition-colors hover:bg-zinc-50 disabled:pointer-events-none disabled:opacity-40"
           >
@@ -355,7 +359,7 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
           </span>
           <button
             type="button"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+            onClick={() => { markQueryIntent('logs'); setPage((p) => Math.min(totalPages, p + 1)) }}
             disabled={page === totalPages}
             className="h-8 border-l border-zinc-200 px-4 text-xs text-zinc-600 transition-colors hover:bg-zinc-50 disabled:pointer-events-none disabled:opacity-40"
           >
@@ -363,6 +367,7 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
           </button>
         </div>
       </div>
+      </QueryActivity>
     </div>
   )
 }
