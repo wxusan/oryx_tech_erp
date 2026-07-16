@@ -71,7 +71,7 @@ const supabase = createClient(supabaseUrl, supabaseServiceRoleKey, {
 })
 const { error: uploadError } = await supabase.storage
   .from(backupBucket)
-  .upload(remotePath, readFileSync(snapshotFile), { contentType: 'application/gzip', upsert: false })
+  .upload(remotePath, readFileSync(snapshotFile), { contentType: 'application/octet-stream', upsert: false })
 if (uploadError) {
   // Storage error text contains no ledger data; retaining it in the protected
   // release log is necessary for an operator to correct the backup target.
