@@ -75,7 +75,12 @@ describe('production release guard', () => {
   })
 
   it('uses a remote production build so sensitive Vercel variables stay available', () => {
-    expect(releaseWorkflow).toContain('vercel@51.7.0 deploy --yes --prod')
+    expect(releaseWorkflow).toContain('npx vercel@51.7.0 deploy "${deploy_args[@]}"')
+    expect(releaseWorkflow).toContain('--no-wait')
+    expect(releaseWorkflow).toContain('--force')
+    expect(releaseWorkflow).toContain('releaseAttempt=$release_attempt')
+    expect(releaseWorkflow).toContain('deployment_count > 1')
+    expect(releaseWorkflow).toContain('deployment_state" != "READY"')
     expect(releaseWorkflow).not.toContain('deploy --prebuilt')
     expect(releaseWorkflow).not.toContain('PRODUCTION_DATABASE_URL')
     expect(releaseWorkflow).not.toContain('PRODUCTION_DIRECT_URL')

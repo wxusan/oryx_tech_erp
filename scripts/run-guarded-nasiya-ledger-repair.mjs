@@ -51,6 +51,16 @@ function runNode(args, extraEnv = {}) {
 }
 
 const audit = runNode(['scripts/reconcile-nasiya-ledgers.mjs', '--verbose'])
+if (audit.repairable === 0 && audit.ambiguous === 0 && audit.examples?.length === 0) {
+  console.log(JSON.stringify({
+    repaired: 0,
+    remainingRepairable: 0,
+    remainingAmbiguous: 0,
+    snapshotArchived: false,
+    alreadyClean: true,
+  }))
+  process.exit(0)
+}
 if (audit.repairable !== 1 || audit.ambiguous !== 0 || audit.examples?.length !== 1) {
   throw new Error('Guarded Nasiya ledger repair requires exactly one repairable and no ambiguous ledgers')
 }

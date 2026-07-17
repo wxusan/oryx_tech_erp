@@ -3,19 +3,22 @@
 Date: 2026-07-17
 
 Plan: `docs/shop-portal-performance-plan.md`
-Execution target: current working tree based on `fd43f49`
+Execution target: production commit `b2b7e21`
 
 ## Executive result
 
-The performance plan is implemented and verified locally across the feedback
-foundation, high-pain lists, server-seeded first loads, request floor,
-database-pool behavior, explicit AP-South function placement, secondary-route
-loaders, and request-backed export feedback. The local implementation score is
-**97/100**.
+The performance plan is implemented, deployed, and verified at
+`https://oryx-tech-erp.vercel.app`. The live alias resolves to ready deployment
+`dpl_C1iYkvHwsyGxeVrnqk3qJB51i5nC`, health reports commit `b2b7e21` and
+`database: ok`, and Vercel reports Mumbai function placement (`bom1`). The
+implementation score is **98/100** and the production-verification score is
+**96/100**.
 
-Production rollout readiness is **76/100** because the plan's guarded-release
-condition is still blocked by the pre-existing Nasiya parent/schedule ledger
-mismatch. No repair, production promotion, or production-after claim was made.
+The release used an unaliased artifact, mandatory preflight, exact-commit
+health verification, and promotion only after the checks passed. The optional
+one-row Nasiya repair was not applied because production no longer matched its
+strict exactly-one-row assumption; the successful artifact instead passed the
+mandatory clean-database preflight with repair disabled.
 
 No schema or index change was made. Read-only `EXPLAIN (ANALYZE, BUFFERS)` on
 the development-shaped data showed database execution of the sampled queries
@@ -24,34 +27,32 @@ not have been evidence-backed on this data set.
 
 ## Before and after route speed
 
-The before values are the production observations recorded in the plan. The
-after values are three authenticated runs against the optimized production
-build and a disposable local demo database.
-
-The browser driver adds a repeatable 3.0-second settle wait to every click,
-including client-only tabs. Raw values are retained for like-for-like
-comparison. The adjusted value is diagnostic (`raw - 3.0 s`), not a claim
-about production latency.
+The before values are the original production observations recorded in the
+plan. Route after-values are three authenticated owner runs against the live
+production deployment in Chrome. They are full-page navigation durations;
+with three samples, p75 and p95 use the highest observed value. The client-tab
+measurement retains the browser driver's repeatable 3.0-second action floor
+and reports its adjusted diagnostic value separately.
 
 | Interaction | Before | After p50 / p75 / p95 | Change | Score |
 | --- | ---: | ---: | ---: | ---: |
-| Qurilmalar route | ~5.40 s | 3.051 / 3.061 / 3.061 s | 2.349 s faster (43.5%) | 94/100 |
-| Sotuvlar shell | ~4.40 s | 3.065 / 3.070 / 3.070 s | 1.335 s faster (30.3%) | 93/100 |
-| Sotuvlar usable rows | >9.00 s | 3.065 / 3.070 / 3.070 s | >5.935 s faster (>65.9%) | 96/100 |
-| Nasiyalar route | ~12.20 s | 3.062 / 3.064 / 3.064 s | 9.138 s faster (74.9%) | 96/100 |
-| To'lovlar route | ~4.80 s | 3.048 / 3.054 / 3.054 s | 1.752 s faster (36.5%) | 94/100 |
-| Qurilmalar/client tab | ~3.10 s raw | 3.050 s raw; ~50 ms adjusted | selected state and busy feedback inside one frame | 94/100 |
-| Mijozlar route | not captured | 3.054 / 3.074 / 3.074 s; ~54 ms adjusted p50 | new baseline | 92/100 |
-| Logs route | not captured | 3.048 / 3.052 / 3.052 s; ~48 ms adjusted p50 | new baseline | 92/100 |
-| Xodimlar route | client waterfall | 3.052 / 3.071 / 3.071 s; ~52 ms adjusted p50 | waterfall removed | 91/100 |
-| Settings route | client waterfall | 3.048 / 3.048 / 3.048 s; ~48 ms adjusted p50 | waterfall removed | 96/100 |
-| Settings, owner final pass | client waterfall | 3.043 s raw; ~43 ms adjusted | all four authorized sections rendered from the server seed | 96/100 |
-| Settings, staff final pass | client waterfall | 3.033 s raw; ~33 ms adjusted | personal profile/password only; no owner controls | 96/100 |
+| Dashboard route | not captured | 0.610 / 0.883 / 0.883 s | production baseline | 96/100 |
+| Qurilmalar route | ~5.40 s | 0.626 / 2.104 / 2.104 s | 4.774 s faster at p50 (88.4%) | 96/100 |
+| Sotuvlar shell | ~4.40 s | 0.551 / 0.809 / 0.809 s | 3.849 s faster at p50 (87.5%) | 98/100 |
+| Sotuvlar usable rows | >9.00 s | 0.551 / 0.809 / 0.809 s | >8.449 s faster at p50 (>93.9%) | 99/100 |
+| Nasiyalar route | ~12.20 s | 0.498 / 0.792 / 0.792 s | 11.702 s faster at p50 (95.9%) | 99/100 |
+| To'lovlar route | ~4.80 s | 0.462 / 0.484 / 0.484 s | 4.338 s faster at p50 (90.4%) | 99/100 |
+| Qurilmalar client tab | ~3.10 s raw | 3.097 s raw; ~97 ms adjusted | immediate selected state retained | 95/100 |
+| Mijozlar route | not captured | 0.503 / 0.537 / 0.537 s | production baseline | 96/100 |
+| Logs route | not captured | 0.482 / 0.483 / 0.483 s | production baseline | 96/100 |
+| Xodimlar route | client waterfall | 0.576 / 0.604 / 0.604 s | initial waterfall removed | 96/100 |
+| Settings route | client waterfall | 0.466 / 0.530 / 0.530 s | all owner sections server-seeded | 98/100 |
+| Nasiya payment shell/context | ~0.281 s / >5.00 s | 0.679 / 0.761 s cold; 0.307 s warm shell | context >4.239 s faster (>84.8%) | 96/100 |
+| Nasiya defer shell/context | not captured | 0.327 / 0.478 s | production baseline | 98/100 |
 
-The adjusted local figures satisfy the immediate-feedback and warm-navigation
-budgets, but the formal plan definition requires a guarded production run and
-throttled-mobile production measurements before those budgets can be marked
-complete.
+All nine measured owner routes rendered without application or server errors.
+The Nasiya payment and defer dialogs were opened and fully loaded, but no
+payment, deferral, export, or other financial mutation was submitted.
 
 ## Query speed and shape
 
@@ -97,35 +98,33 @@ measured behavior. They are not synthetic Lighthouse scores.
 
 | Workstream | Before | After | Speed / effect | Score |
 | --- | --- | --- | --- | ---: |
-| Route feedback and prefetch | several links had prefetch disabled; routes could look frozen | accessible generic plus page-shaped high-pain, form, detail, import/export, and queue loaders; `useLinkStatus`; all bounded destinations prefetched | feedback contract <=100 ms; local adjusted route p50 38-74 ms | 98/100 |
+| Route feedback and prefetch | several links had prefetch disabled; routes could look frozen | accessible generic plus page-shaped high-pain, form, detail, import/export, and queue loaders; `useLinkStatus`; all bounded destinations prefetched | live owner route p50 462-626 ms; client tab ~97 ms adjusted | 98/100 |
 | Retained list feedback | old rows stayed visible with no indication that a refetch was running | shared `QueryActivity`, `aria-busy`, progress, retry, retained rows | visual state changes in the initiating render; no blank table | 95/100 |
 | Mutation feedback | mixed labels/spinners and uneven double-submit guards | shared `AsyncButton` adopted for core device, Sale, Nasiya, customer, staff, settings, import, return, supplier-payment, passport, and export actions | pending state <=100 ms contract; same-tick double click invokes once | 96/100 |
 | Export feedback | direct browser navigation with no request state | shared request-backed download button with pending label, error state, blob delivery, and duplicate guard | feedback begins in initiating render and lasts through response body receipt | 96/100 |
-| Sotuvlar | Device-first, count, client filter, capped at 50, manual search | SSR seed, Sale-first endpoint, private bounded page, debounce, abort, retained rows, pagination | usable route >9.0 s -> 3.065 s raw; SQL p95 303.22 -> 230.53 ms | 96/100 |
+| Sotuvlar | Device-first, count, client filter, capped at 50, manual search | SSR seed, Sale-first endpoint, private bounded page, debounce, abort, retained rows, pagination | usable route >9.0 s -> 0.551 s production p50; SQL p95 303.22 -> 230.53 ms | 99/100 |
 | Mijozlar | hydration then API waterfall; submit search | permission-scoped SSR seed, POST-only live search, revision-only cache key, abort | ~441 ms debounce + measured p75 query; search text absent from URL/key/log | 94/100 |
-| Qurilmalar/Nasiyalar/Logs | invisible background work; inconsistent initial keys | visible fetch state, adjacent-tab prefetch, exact Logs seed, immediate selected tabs | high-pain routes 43.5%-74.9% faster raw | 93/100 |
-| To'lovlar | full server navigation for every cohort tab | client state, URL reflection, retained rows, adjacent prefetch | raw tab 3.10 -> 3.05 s; fixed driver floor implies ~50 ms UI response | 94/100 |
-| Nasiya payment/defer intent | shell ~281 ms; context still loading after >5 s | shared query options, hover/focus/touch/pointer prefetch, immediate shell, schedule skeleton, pending-safe submit | code and component contracts complete; live after blocked by ledger mismatch | 84/100 |
+| Qurilmalar/Nasiyalar/Logs | invisible background work; inconsistent initial keys | visible fetch state, adjacent-tab prefetch, exact Logs seed, immediate selected tabs | production p50 0.626 / 0.498 / 0.482 s | 97/100 |
+| To'lovlar | full server navigation for every cohort tab | client state, URL reflection, retained rows, adjacent prefetch | route 4.80 -> 0.462 s p50; fixed-floor tab ~97 ms adjusted | 98/100 |
+| Nasiya payment/defer intent | shell ~281 ms; context still loading after >5 s | shared query options, hover/focus/touch/pointer prefetch, immediate shell, schedule skeleton, pending-safe submit | payment cold shell/context 679/761 ms; defer 327/478 ms; both error-free | 96/100 |
 | Xodimlar | route -> hydration -> authorized API | permission-scoped server roster seed and standardized saves/deletes | duplicate initial authorization waterfall removed; representative staff login/route boundary verified | 95/100 |
 | Settings | all-client first-load fetch in one ~600-line client component | permission-scoped server seed, five-minute TanStack query cache, four isolated client sections, section pending actions | duplicate initial browser fetch removed; owner/staff final pass ~43/~33 ms adjusted | 96/100 |
 | Authorization/currency floor | sequential admin/package work; stale rate could block on CBU | admin/package parallelized; stored-rate SWR; external timeout = 2,000 ms | valid fallback removes external network from list critical path | 94/100 |
 | Production database pool | standalone production sweep exhausted connections (`P2037`) | one process-global Prisma client/pool in all environments | eight-route normal-pool sweep completed with no connection error | 97/100 |
-| Function/data region | 216 application functions in Washington `iad1`; development database endpoint in AWS `ap-south-1` | `vercel.json` now pins functions to Mumbai `bom1`; middleware remains global | removes a verified code/development cross-region placement; production effect awaits deployment | 88/100 |
+| Function/data region | 216 application functions in Washington `iad1`; development database endpoint in AWS `ap-south-1` | live deployment reports Mumbai `bom1`; middleware remains global | region change is online; high-pain production p50 is now 462-626 ms | 100/100 |
 | Measurement and regression safety | no request-duration evidence or repeatable route benchmark | Server-Timing including database/DTO phases for Sales, Customers, and Logs; structured safe logs, browser marks, read-only SQL benchmark, component/guard tests | reproducible p50/p75/p95 and plan summaries | 98/100 |
 
 ### Region audit
 
-The current ready production deployment (`dpl_6hZG89KeW1QH6EN1oPfn1rLG6V7v`,
-created 2026-07-16 21:30:42 UTC) contains 217 outputs. Inspection showed 216
-application functions deployed only to Washington (`iad1`); the remaining
-middleware output is globally replicated. The repository's development
-database endpoint is the Supabase AWS `ap-south-1` pooler. Vercel's production
-`DATABASE_URL` is encrypted and cannot be read back, so production database
-co-location is an inference rather than a proved fact. The versioned
-`regions: ["bom1"]` setting follows
+The previous production deployment (`dpl_6hZG89KeW1QH6EN1oPfn1rLG6V7v`) ran
+216 application functions in Washington (`iad1`). The promoted deployment
+`dpl_C1iYkvHwsyGxeVrnqk3qJB51i5nC` reports `regions: ["bom1"]`, is `READY`,
+is assigned to the live alias, and carries exact release metadata for
+`b2b7e21474cce793314a2cae7ce31057fddd7791`. Middleware remains globally
+replicated. The repository's observed database endpoint is in AWS
+`ap-south-1`, so Mumbai follows
 [Vercel's recommendation](https://vercel.com/docs/functions/configuring-functions/region)
-to run functions close to their data source. Its production latency improvement
-must be measured after the guarded deployment.
+to run functions close to the data source.
 
 ## Verification
 
@@ -139,23 +138,30 @@ must be measured after the guarded deployment.
 - Authenticated production-start browser sweep: passed for Dashboard,
   Qurilmalar, Sotuvlar, Nasiyalar, To'lovlar, Mijozlar, Logs, Xodimlar, and
   Settings.
+- Live public health: HTTP 200, `ok: true`, `database: ok`, commit `b2b7e21`.
+- Live owner route sweep: three full-page runs each; all nine routes rendered
+  without application/server errors, with p50 462-626 ms.
+- Live Nasiya payment modal: 679 ms cold shell, 761 ms complete context; no
+  submit performed.
+- Live Nasiya defer modal: 327 ms shell, 478 ms complete context; no submit
+  performed.
+- Deployment safety: artifact was unaliased until exact health passed; two
+  delayed duplicate queued artifacts were canceled before they built.
 - Final Settings browser pass: owner rendered account, shop, Telegram, and
   password sections; representative staff rendered only personal profile and
   password. The staff navigation also omitted owner-only routes.
 - Disposable integration and browser databases were removed after testing.
 - No financial mutation was performed during browser measurement.
 
-## Remaining production gate
+## Remaining measurement limits
 
-The following cannot be truthfully marked done in this execution:
+The production rollout gate is complete. Two evidence gaps remain and account
+for the production score being 96 rather than 100:
 
-1. repair the existing Nasiya parent/schedule mismatch through the separately
-   approved, backed-up deterministic workflow;
-2. promote the exact verified commit through the guarded release;
-3. repeat owner and representative-staff measurements in production on desktop
-   and throttled mobile;
-4. verify the payment/defer context against a ledger-consistent production
-   Nasiya and record production p50/p75/p95.
+1. production timing used an existing owner session; representative-staff
+   authorization was verified locally but was not re-timed in production;
+2. production route samples were desktop Chrome runs, not throttled-mobile
+   runs, and three samples provide limited tail-latency confidence.
 
-Until those four steps are complete, the code is locally verified but the
-plan's production Definition of Done remains open.
+These are measurement-depth gaps, not deployment, database-health, or live
+functionality blockers.

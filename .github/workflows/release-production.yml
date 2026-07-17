@@ -63,19 +63,63 @@ jobs:
       - name: Build, migrate, and create an unaliased production deployment
         id: deploy
         run: |
+          release_attempt="${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           resolve_args=()
           if [[ "${{ inputs.resolve_failed_accounting_migration }}" == "true" ]]; then
             resolve_args+=(--build-env ORYX_FAILED_MIGRATION_RESOLUTION=resolve-failed-202607150004_complete_accounting_redesign)
           fi
+          deploy_args=(
+            --yes
+            --prod
+            --skip-domain
+            --no-wait
+            --force
+            --build-env ORYX_GUARDED_RELEASE=github-actions
+            "${resolve_args[@]}"
+            --meta "releaseCommit=$GITHUB_SHA"
+            --meta "releaseAttempt=$release_attempt"
+            --token="${{ secrets.VERCEL_TOKEN }}"
+          )
           if [[ "${{ inputs.repair_malika_owner }}" == "true" ]]; then
             test -n "$MALIKA_OWNER_REPAIR_PASSWORD"
-            deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions "${resolve_args[@]}" --build-env ORYX_MALIKA_OWNER_REPAIR=1 --build-env "ORYX_MALIKA_OWNER_REPAIR_PASSWORD=$MALIKA_OWNER_REPAIR_PASSWORD" --meta "releaseCommit=$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
+            deploy_args+=(--build-env ORYX_MALIKA_OWNER_REPAIR=1 --build-env "ORYX_MALIKA_OWNER_REPAIR_PASSWORD=$MALIKA_OWNER_REPAIR_PASSWORD")
           else
-            repair_args=()
             if [[ "${{ inputs.repair_nasiya_ledger }}" == "true" ]]; then
-              repair_args+=(--build-env ORYX_NASIYA_LEDGER_REPAIR=1 --build-env ORYX_NASIYA_LEDGER_REPAIR_APPROVER_LOGIN=wxusan)
+              deploy_args+=(--build-env ORYX_NASIYA_LEDGER_REPAIR=1 --build-env ORYX_NASIYA_LEDGER_REPAIR_APPROVER_LOGIN=wxusan)
             fi
-            deployment_url="$(npx vercel@51.7.0 deploy --yes --prod --skip-domain --build-env ORYX_GUARDED_RELEASE=github-actions "${resolve_args[@]}" "${repair_args[@]}" --meta "releaseCommit=$GITHUB_SHA" --token="${{ secrets.VERCEL_TOKEN }}")"
+          fi
+
+          set +e
+          npx vercel@51.7.0 deploy "${deploy_args[@]}"
+          create_status=$?
+          set -e
+
+          deployment_url=""
+          deployment_state=""
+          for poll in {1..60}; do
+            if ! deployments_json="$(npx vercel@51.7.0 list --scope="$VERCEL_ORG_ID" --meta "releaseCommit=$GITHUB_SHA" --meta "releaseAttempt=$release_attempt" --format=json --no-color --token="${{ secrets.VERCEL_TOKEN }}")"; then
+              sleep 10
+              continue
+            fi
+            deployment_count="$(jq '.deployments | length' <<< "$deployments_json")"
+            if (( deployment_count > 1 )); then
+              echo "Release attempt resolved to multiple deployments; refusing ambiguous promotion" >&2
+              exit 1
+            fi
+            deployment_url="$(jq -r '.deployments[0].url // empty' <<< "$deployments_json")"
+            deployment_state="$(jq -r '.deployments[0].state // empty' <<< "$deployments_json")"
+            case "$deployment_state" in
+              READY) break ;;
+              ERROR|CANCELED)
+                echo "Unaliased deployment ended in $deployment_state" >&2
+                exit 1
+                ;;
+            esac
+            sleep 10
+          done
+          if [[ -z "$deployment_url" || "$deployment_state" != "READY" ]]; then
+            echo "Vercel did not produce one ready deployment (create exit $create_status)" >&2
+            exit 1
           fi
           echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
       - name: Inspect and smoke the exact production artifact
