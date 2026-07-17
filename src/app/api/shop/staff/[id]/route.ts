@@ -28,6 +28,10 @@ import {
 } from '@/lib/server/request-limits'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { logger } from '@/lib/logger'
+import {
+  isPrismaUniqueConstraintOnField,
+  SHOP_LOGIN_TAKEN_MESSAGE,
+} from '@/lib/shop-login-conflict'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -287,9 +291,10 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       if (error.code === 'DELEGATION_FORBIDDEN') return forbidden('Bu amalni boshqa foydalanuvchi nomidan bajarishga ruxsat yo‘q.')
       if (error.code === 'LOGS_OWNER_ONLY') return forbidden('Faoliyat tarixini faqat do‘kon egasi ko‘ra oladi.')
       if (error.code === 'LOGIN_OWNER_ONLY') return forbidden('Tizimga faqat do‘kon egasi kira oladi.')
-      if (error.code === 'LOGIN_TAKEN') return conflict('Bu login allaqachon band.')
+      if (error.code === 'LOGIN_TAKEN') return conflict(SHOP_LOGIN_TAKEN_MESSAGE)
       if (error.code === 'TELEGRAM_DISABLED') return badRequest('Telegram funksiyasi o‘chirilgan.')
-      if (error.code === 'P2002') return conflict('Bu telefon yoki login allaqachon mavjud')
+      if (isPrismaUniqueConstraintOnField(error, 'login')) return conflict(SHOP_LOGIN_TAKEN_MESSAGE)
+      if (error.code === 'P2002') return conflict('Bu ma’lumot allaqachon mavjud.')
     }
     logger.error('[PATCH /api/shop/staff/[id]]', { event: 'api.route_error', error })
     return serverError()

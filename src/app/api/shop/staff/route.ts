@@ -32,6 +32,10 @@ import {
 } from '@/lib/server/request-limits'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { logger } from '@/lib/logger'
+import {
+  isPrismaUniqueConstraintOnField,
+  SHOP_LOGIN_TAKEN_MESSAGE,
+} from '@/lib/shop-login-conflict'
 
 const STAFF_ADMIN_PERMISSIONS = [
   'STAFF_VIEW',
@@ -208,7 +212,8 @@ export async function POST(request: NextRequest) {
       if (error.code === 'PERMISSION_INVALID') return badRequest('Tanlangan ruxsat noto‘g‘ri.')
       if (error.code === 'TELEGRAM_DISABLED') return badRequest('Telegram funksiyasi o‘chirilgan.')
       if (error.code === 'TELEGRAM_TAKEN') return conflict('Bu Telegram hisobi boshqa foydalanuvchiga biriktirilgan.')
-      if (error.code === 'P2002') return conflict('Login yoki Telegram ID allaqachon mavjud')
+      if (isPrismaUniqueConstraintOnField(error, 'login')) return conflict(SHOP_LOGIN_TAKEN_MESSAGE)
+      if (error.code === 'P2002') return conflict('Bu login yoki Telegram ID allaqachon mavjud.')
     }
     if (error instanceof Error && error.message === 'SERIALIZABLE_TRANSACTION_FAILED') return serverError('Amalni yakunlab bo‘lmadi. Iltimos, qayta urinib ko‘ring.')
     logger.error('[POST /api/shop/staff]', { event: 'api.route_error', error })

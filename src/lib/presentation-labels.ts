@@ -5,6 +5,8 @@
  * return a safe, readable fallback instead of exposing an unknown raw code.
  */
 
+import { SHOP_LOGIN_TAKEN_MESSAGE } from '@/lib/shop-login-conflict'
+
 function labelFrom(
   labels: Readonly<Record<string, string>>,
   value: string | null | undefined,
@@ -725,7 +727,7 @@ export const INTERNAL_ERROR_MESSAGES: Readonly<Record<string, string>> = {
   DELEGATED_CREATE_SCOPE: 'Ushbu amal faqat ruxsat berilgan doirada bajarilishi mumkin.',
   DELEGATION_FORBIDDEN: 'Bu amalni boshqa foydalanuvchi nomidan bajarishga ruxsat yo‘q.',
   LOGIN_OWNER_ONLY: 'Tizimga faqat do‘kon egasi kira oladi.',
-  LOGIN_TAKEN: 'Bu login allaqachon band.',
+  LOGIN_TAKEN: SHOP_LOGIN_TAKEN_MESSAGE,
   LOGS_OWNER_ONLY: 'Faoliyat tarixini faqat do‘kon egasi ko‘ra oladi.',
   PERMISSION_INVALID: 'Tanlangan ruxsat noto‘g‘ri.',
   REMINDER_GENERATION_LEASE_LOST: 'Eslatmalarni yaratish jarayoni to‘xtatildi. Qayta urinib ko‘ring.',

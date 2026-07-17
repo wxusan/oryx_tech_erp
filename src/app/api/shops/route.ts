@@ -15,6 +15,10 @@ import { isTelegramIdTaken, normalizeTelegramId } from '@/lib/telegram-id'
 import type { ZodError } from 'zod'
 import { logger } from '@/lib/logger'
 import {
+  isPrismaUniqueConstraintOnField,
+  SHOP_LOGIN_TAKEN_MESSAGE,
+} from '@/lib/shop-login-conflict'
+import {
   isInvalidRequestBody,
   isRequestBodyTooLarge,
   readLimitedJsonBody,
@@ -135,7 +139,7 @@ export async function POST(req: NextRequest) {
       admins.some((other, otherIndex) => otherIndex !== index && other.login === admin.login),
     )
     if (duplicateLogin) {
-      return conflict(`Admin login takrorlangan: ${duplicateLogin.login}`)
+      return conflict(SHOP_LOGIN_TAKEN_MESSAGE)
     }
 
     const existingLogin = await prisma.shopAdmin.findFirst({
@@ -143,7 +147,7 @@ export async function POST(req: NextRequest) {
       select: { login: true },
     })
     if (existingLogin) {
-      return conflict(`Bu login allaqachon mavjud: ${existingLogin.login}`)
+      return conflict(SHOP_LOGIN_TAKEN_MESSAGE)
     }
 
     const normalizedAdmins = admins.map((admin) => ({
@@ -268,6 +272,7 @@ export async function POST(req: NextRequest) {
     if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
     if (err && typeof err === 'object' && 'code' in err) {
       if (err.code === 'TELEGRAM_TAKEN') return conflict('Bu Telegram hisobi boshqa foydalanuvchiga biriktirilgan.')
+      if (isPrismaUniqueConstraintOnField(err, 'login')) return conflict(SHOP_LOGIN_TAKEN_MESSAGE)
       if (err.code === 'P2002') return conflict('Bu ma’lumot allaqachon mavjud.')
     }
     if (err instanceof Error && err.message === 'OWNER_ADMIN_REQUIRED') return badRequest('Do‘kon egasi administrator huquqiga ega bo‘lishi kerak.')

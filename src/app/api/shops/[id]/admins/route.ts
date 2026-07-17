@@ -21,6 +21,10 @@ import {
   readLimitedJsonBody,
 } from '@/lib/server/request-limits'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
+import {
+  isPrismaUniqueConstraintOnField,
+  SHOP_LOGIN_TAKEN_MESSAGE,
+} from '@/lib/shop-login-conflict'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -106,14 +110,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     const existingLogin = await prisma.shopAdmin.findFirst({
       where: { login: parsed.data.login },
-      select: { id: true, deletedAt: true },
+      select: { id: true },
     })
     if (existingLogin) {
-      return conflict(
-        existingLogin.deletedAt
-          ? "Bu login oldin ishlatilgan. Iltimos, boshqa login tanlang"
-          : 'Bu login allaqachon mavjud',
-      )
+      return conflict(SHOP_LOGIN_TAKEN_MESSAGE)
     }
 
     const telegramId = normalizeTelegramId(parsed.data.telegramId)
@@ -195,6 +195,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
     if (err && typeof err === 'object' && 'code' in err && err.code === 'TELEGRAM_TAKEN') {
       return conflict('Bu Telegram hisobi boshqa foydalanuvchiga biriktirilgan.')
+    }
+    if (isPrismaUniqueConstraintOnField(err, 'login')) {
+      return conflict(SHOP_LOGIN_TAKEN_MESSAGE)
     }
     if (err instanceof Error && err.message === 'SERIALIZABLE_TRANSACTION_FAILED') return serverError('Amalni yakunlab bo‘lmadi. Iltimos, qayta urinib ko‘ring.')
     logger.error('[POST /api/shops/[id]/admins]', { event: 'api.route_error', error: err })
