@@ -21,9 +21,9 @@ interface DeviceActionItem {
 
 const statusLabels: Record<DeviceActionItem['status'], string> = {
   IN_STOCK: 'Omborda',
-  SOLD_CASH: 'Sotilgan',
+  SOLD_CASH: 'Naqdga sotilgan',
   SOLD_DEBT: 'Qarzga sotilgan',
-  SOLD_NASIYA: 'Nasiyada',
+  SOLD_NASIYA: 'Nasiyaga sotilgan',
   RETURNED: 'Qaytarilgan',
 }
 

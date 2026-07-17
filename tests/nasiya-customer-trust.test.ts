@@ -31,10 +31,10 @@ function overdueUnpaid(dueDate: Date, amount = 100000): CustomerNasiyaInput['sch
 describe('Uzbek labels — exact strings required by the ticket', () => {
   it('matches the 5 specified labels exactly', () => {
     expect(TRUST_TIER_LABELS.NEW).toBe('Yangi mijoz')
-    expect(TRUST_TIER_LABELS.LOW).toBe('Past ishonch')
-    expect(TRUST_TIER_LABELS.MEDIUM).toBe("O'rtacha ishonch")
-    expect(TRUST_TIER_LABELS.HIGH).toBe('Ishonchli')
-    expect(TRUST_TIER_LABELS.VERY_HIGH).toBe('Juda ishonchli')
+    expect(TRUST_TIER_LABELS.LOW).toBe('Past')
+    expect(TRUST_TIER_LABELS.MEDIUM).toBe('O‘rtacha')
+    expect(TRUST_TIER_LABELS.HIGH).toBe('Yuqori')
+    expect(TRUST_TIER_LABELS.VERY_HIGH).toBe('Juda yuqori')
   })
 })
 

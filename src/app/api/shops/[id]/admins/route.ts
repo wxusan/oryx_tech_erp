@@ -188,14 +188,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (isRequestBodyTooLarge(err)) return payloadTooLarge()
     if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
     if (err && typeof err === 'object' && 'code' in err && err.code === 'SHOP_NOT_FOUND') {
-      return notFound("Do'kon topilmadi")
+      return notFound('Do‘kon topilmadi.')
     }
     if (err && typeof err === 'object' && 'code' in err && err.code === 'OWNER_ALREADY_RESOLVED') {
-      return conflict("Do'konda ega bor. Xodimlarni faqat do'kon egasi yaratadi")
+      return conflict('Do‘kon egasi allaqachon biriktirilgan.')
     }
     if (err && typeof err === 'object' && 'code' in err && err.code === 'TELEGRAM_TAKEN') {
-      return conflict('Bu Telegram ID allaqachon mavjud')
+      return conflict('Bu Telegram hisobi boshqa foydalanuvchiga biriktirilgan.')
     }
+    if (err instanceof Error && err.message === 'SERIALIZABLE_TRANSACTION_FAILED') return serverError('Amalni yakunlab bo‘lmadi. Iltimos, qayta urinib ko‘ring.')
     logger.error('[POST /api/shops/[id]/admins]', { event: 'api.route_error', error: err })
     return serverError()
   }

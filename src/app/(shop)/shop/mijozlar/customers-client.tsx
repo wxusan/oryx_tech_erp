@@ -41,10 +41,10 @@ import { ExportDownloadButton } from '@/components/shop/export-download-button'
 
 const TRUST_TIER_LABELS: Record<TrustTier, string> = {
   NEW: 'Yangi mijoz',
-  LOW: 'Past ishonch',
-  MEDIUM: "O'rtacha ishonch",
-  HIGH: 'Ishonchli',
-  VERY_HIGH: 'Juda ishonchli',
+  LOW: 'Past',
+  MEDIUM: 'O‘rtacha',
+  HIGH: 'Yuqori',
+  VERY_HIGH: 'Juda yuqori',
 }
 
 interface CustomerTrust extends TrustBadgeData {

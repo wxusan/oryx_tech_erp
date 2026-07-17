@@ -60,7 +60,7 @@ export function SettingsTelegramSection({
       await commitNavigationMutation({ kind: 'shopAdmin.profileUpdated' })
       onProfileChange(json.data)
       setTelegramId(json.data.telegramId ?? '')
-      setSuccess(json.message ?? 'Telegram ID yangilandi.')
+      setSuccess(json.message ?? 'Telegram ulanishi yangilandi.')
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Xatolik yuz berdi')
     } finally {

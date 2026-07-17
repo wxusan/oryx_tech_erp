@@ -115,7 +115,7 @@ export default function DashboardPage() {
         <Card className="rounded-lg lg:col-span-5">
           <CardHeader className="border-b border-zinc-100">
             <CardTitle>Bu oy obuna tushumi</CardTitle>
-            <CardDescription>Bosh admin uchun do'kon obunalaridan tushum</CardDescription>
+            <CardDescription>Bosh administrator uchun do‘kon obunalaridan tushum</CardDescription>
             <CardAction><CreditCard className="size-5 text-zinc-400" /></CardAction>
           </CardHeader>
           <CardContent className="space-y-5">
@@ -208,7 +208,7 @@ export default function DashboardPage() {
               <TableHead className="text-xs text-zinc-500 font-medium">Egalik qiluvchi</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">Tel</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">Do&apos;kon raqami</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">Status</TableHead>
+              <TableHead className="text-xs text-zinc-500 font-medium">Holat</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">To&apos;lov sanasi</TableHead>
             </TableRow>
           </TableHeader>

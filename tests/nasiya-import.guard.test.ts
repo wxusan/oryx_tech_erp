@@ -80,10 +80,10 @@ describe('import UI + docs wiring', () => {
     expect(existsSync(resolve(process.cwd(), 'src/app/(shop)/shop/nasiyalar/import/page.tsx'))).toBe(true)
   })
 
-  it('the nasiyalar list links to the import page and shows an "Eski nasiya" badge', () => {
+  it('the nasiyalar list links to the import page and shows an "Avvalgi nasiya" badge', () => {
     const src = read('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')
     expect(src).toContain('/shop/nasiyalar/import')
-    expect(src).toContain('Eski nasiya')
+    expect(src).toContain('Avvalgi nasiya')
     expect(src).toContain('n.isImported')
   })
 

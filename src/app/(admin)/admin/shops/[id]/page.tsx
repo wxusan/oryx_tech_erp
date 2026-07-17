@@ -28,6 +28,7 @@ import type { ShopPackageDraft, ShopPackageDto } from '@/lib/shop-package-contra
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import { formatUserFacingMoney } from '@/lib/currency'
 import { useAdminCurrency } from '@/lib/use-admin-currency'
+import { shopOwnershipLabel } from '@/lib/presentation-labels'
 
 interface PackageResponse {
   active: ShopPackageDto | null
@@ -612,7 +613,7 @@ export default function ShopDetailPage() {
               className="h-8 px-3 text-xs rounded-none border-zinc-200 text-zinc-700 hover:bg-zinc-50"
               onClick={() => setSuspendModalOpen(true)}
             >
-              {shop.status === 'ACTIVE' ? "To'xtatish" : "Faollashtirish"}
+              {shop.status === 'ACTIVE' ? 'To‘xtatish' : 'Faollashtirish'}
             </Button>
           )}
           {!isDeleted && (
@@ -647,7 +648,7 @@ export default function ShopDetailPage() {
         </div>
         {shop.ownershipStatus !== 'RESOLVED' && (
           <div className="mb-4 border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-            Eski ma&apos;lumotdan do&apos;kon egasini xavfsiz aniqlab bo&apos;lmadi ({shop.ownershipStatus}). Xodimlarni o&apos;chirishdan oldin egani tanlang.
+            Avvalgi ma&apos;lumotdan do&apos;kon egasini xavfsiz aniqlab bo&apos;lmadi ({shopOwnershipLabel(shop.ownershipStatus)}). Xodimlarni o&apos;chirishdan oldin egani tanlang.
           </div>
         )}
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-3">
@@ -670,7 +671,7 @@ export default function ShopDetailPage() {
             <h2 className="text-sm font-semibold text-zinc-900">Paket va kirish turi</h2>
             {activePackage ? (
               <div className="mt-1 text-sm text-zinc-500">
-                <p>{staffAccessEnabled ? 'Egasi va xodimlar' : 'Faqat do\'kon egasi'} · {activePackageDisplay}/oy</p>
+                <p>{staffAccessEnabled ? 'Do‘kon egasi va xodimlar' : 'Faqat do‘kon egasi'} · {activePackageDisplay}/oy</p>
                 <p className="text-xs text-zinc-400">Paketning asl valyutasi: {activePackageNative}/oy</p>
               </div>
             ) : (
@@ -795,13 +796,13 @@ export default function ShopDetailPage() {
         <DialogContent className="max-w-md rounded-none">
           <DialogHeader>
             <DialogTitle className="text-base font-semibold text-zinc-900">
-              {shop.status === 'ACTIVE' ? "Do'konni to'xtatish" : "Do'konni faollashtirish"}
+              {shop.status === 'ACTIVE' ? 'Do‘konni to‘xtatish' : 'Do‘konni faollashtirish'}
             </DialogTitle>
           </DialogHeader>
           <p className="text-sm text-zinc-500 mt-1">
             {shop.status === 'ACTIVE'
-              ? "Rostdan to'xtatmoqchimisiz? Do'kon adminlari tizimga kira olmaydi."
-              : "Do'konni faollashtirmoqchimisiz? Adminlar yana tizimga kira oladi."}
+              ? 'Rostdan to‘xtatmoqchimisiz? Do‘kon foydalanuvchilari tizimga kira olmaydi.'
+              : 'Do‘konni faollashtirmoqchimisiz? Do‘kon foydalanuvchilari yana tizimga kira oladi.'}
           </p>
           {suspendError && (
             <p className="text-xs text-red-500 mt-2">{suspendError}</p>
@@ -830,7 +831,7 @@ export default function ShopDetailPage() {
               onClick={handleSuspendToggle}
               className="h-8 px-4 text-sm bg-zinc-900 text-white hover:bg-zinc-700 disabled:opacity-40 disabled:pointer-events-none transition-colors"
             >
-              {suspendLoading ? 'Yuklanmoqda...' : shop.status === 'ACTIVE' ? "To'xtatish" : "Faollashtirish"}
+              {suspendLoading ? 'Yuklanmoqda...' : shop.status === 'ACTIVE' ? 'To‘xtatish' : 'Faollashtirish'}
             </button>
           </DialogFooter>
         </DialogContent>
@@ -964,9 +965,9 @@ export default function ShopDetailPage() {
                 className="w-full h-8 text-sm border border-zinc-200 bg-white px-2 focus:outline-none focus:ring-1 focus:ring-zinc-400"
               >
                 <option value="">Tanlang...</option>
-                <option value="CASH">Naqd</option>
-                <option value="CARD">Karta</option>
-                <option value="TRANSFER">Bank</option>
+                <option value="CASH">Naqd pul</option>
+                <option value="CARD">Karta orqali</option>
+                <option value="TRANSFER">Pul o‘tkazmasi</option>
                 <option value="OTHER">Boshqa</option>
               </select>
             </Field>

@@ -202,14 +202,15 @@ export async function POST(request: NextRequest) {
     if (isRequestBodyTooLarge(error)) return payloadTooLarge()
     if (isInvalidRequestBody(error)) return badRequest("So'rov ma'lumoti noto'g'ri")
     if (error && typeof error === 'object' && 'code' in error) {
-      if (error.code === 'STAFF_ACCESS_DISABLED') return conflict("Xodimlar profili o'chirilgan")
-      if (error.code === 'AUTHORIZATION_CHANGED') return forbidden("Ruxsat o'zgargan. Sahifani yangilang")
-      if (error.code === 'DELEGATED_CREATE_SCOPE') return forbidden("Xodim yangi profilga ruxsat yoki Telegram bera olmaydi")
-      if (error.code === 'PERMISSION_INVALID') return badRequest(error instanceof Error ? error.message : "Ruxsat noto'g'ri")
-      if (error.code === 'TELEGRAM_DISABLED') return badRequest("Telegram moduli yoqilmagan")
-      if (error.code === 'TELEGRAM_TAKEN') return conflict('Bu Telegram ID allaqachon mavjud')
+      if (error.code === 'STAFF_ACCESS_DISABLED') return conflict('Xodimlar uchun kirish o‘chirilgan.')
+      if (error.code === 'AUTHORIZATION_CHANGED') return forbidden('Ruxsatlaringiz o‘zgargan. Sahifani yangilab, qayta urinib ko‘ring.')
+      if (error.code === 'DELEGATED_CREATE_SCOPE') return forbidden('Ushbu amal faqat ruxsat berilgan doirada bajarilishi mumkin.')
+      if (error.code === 'PERMISSION_INVALID') return badRequest('Tanlangan ruxsat noto‘g‘ri.')
+      if (error.code === 'TELEGRAM_DISABLED') return badRequest('Telegram funksiyasi o‘chirilgan.')
+      if (error.code === 'TELEGRAM_TAKEN') return conflict('Bu Telegram hisobi boshqa foydalanuvchiga biriktirilgan.')
       if (error.code === 'P2002') return conflict('Login yoki Telegram ID allaqachon mavjud')
     }
+    if (error instanceof Error && error.message === 'SERIALIZABLE_TRANSACTION_FAILED') return serverError('Amalni yakunlab bo‘lmadi. Iltimos, qayta urinib ko‘ring.')
     logger.error('[POST /api/shop/staff]', { event: 'api.route_error', error })
     return serverError()
   }

@@ -24,7 +24,7 @@ import { nasiyaOperationContextQueryOptions } from '@/lib/use-nasiya-operation-c
 import { ExportDownloadButton } from '@/components/shop/export-download-button'
 
 type VisibleNasiyaStatus = Exclude<NasiyaStatus, 'CANCELLED'>
-type DisplayStatus = 'Faol' | "Muddati o'tgan" | 'Yakunlangan'
+type DisplayStatus = 'Faol' | 'Muddati o‘tgan' | 'To‘liq yopilgan'
 type ResolutionState = 'ACTIVE' | 'ARCHIVED'
 /** `DUE_TODAY` and `UPCOMING` are schedule-derived work-queue tabs. */
 type NasiyaCohortTab = 'DUE_TODAY' | 'UPCOMING'
@@ -90,16 +90,16 @@ interface NasiyalarPayload {
 
 const statusMap: Record<VisibleNasiyaStatus, DisplayStatus> = {
   ACTIVE: 'Faol',
-  OVERDUE: "Muddati o'tgan",
-  COMPLETED: 'Yakunlangan',
+  OVERDUE: 'Muddati o‘tgan',
+  COMPLETED: 'To‘liq yopilgan',
 }
 
 const filterTabs: { label: string; value: ListFilter }[] = [
   { label: 'Barcha faol', value: 'ACTIVE' },
-  { label: "Muddati o'tgan", value: 'OVERDUE' },
-  { label: "Bugun to'lanadi", value: 'DUE_TODAY' },
-  { label: 'Kutilmoqda', value: 'UPCOMING' },
-  { label: 'Yakunlangan', value: 'COMPLETED' },
+  { label: 'Muddati o‘tgan', value: 'OVERDUE' },
+  { label: 'Bugun to‘lanishi kerak', value: 'DUE_TODAY' },
+  { label: 'Yaqin kunlardagi to‘lovlar', value: 'UPCOMING' },
+  { label: 'To‘liq yopilgan', value: 'COMPLETED' },
   { label: 'Arxivlangan', value: 'ARCHIVED' },
   { label: 'Barchasi', value: 'Barchasi' },
 ]
@@ -108,8 +108,8 @@ function StatusBadge({ status }: { status: VisibleNasiyaStatus }) {
   const label = statusMap[status]
   const styles: Record<DisplayStatus, string> = {
     'Faol': 'bg-zinc-100 text-zinc-700',
-    "Muddati o'tgan": 'bg-red-100 text-red-700',
-    'Yakunlangan': 'bg-zinc-900 text-white',
+    'Muddati o‘tgan': 'bg-red-100 text-red-700',
+    'To‘liq yopilgan': 'bg-zinc-900 text-white',
   }
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${styles[label]}`}>
@@ -119,9 +119,9 @@ function StatusBadge({ status }: { status: VisibleNasiyaStatus }) {
 }
 
 const collectionCohortLabels: Record<CollectionWorkItem['cohort'], string> = {
-  OVERDUE: "Muddati o'tgan",
-  DUE_TODAY: "Bugun to'lanadi",
-  UPCOMING: 'Kutilmoqda',
+  OVERDUE: 'Muddati o‘tgan',
+  DUE_TODAY: 'Bugun to‘lanishi kerak',
+  UPCOMING: 'Yaqin kunlardagi to‘lovlar',
 }
 
 function CollectionCohortBadge({ cohort }: { cohort: CollectionWorkItem['cohort'] }) {
@@ -306,7 +306,7 @@ export default function NasiyalarClient({
           )}
           {canImport && (
             <Button render={<Link href="/shop/nasiyalar/import" />} nativeButton={false} size="lg" variant="outline">
-              + Eski nasiya kiritish
+              + Avvalgi nasiya kiritish
             </Button>
           )}
           {canCreate && (
@@ -410,7 +410,7 @@ export default function NasiyalarClient({
                           {n.resolutionState !== 'ACTIVE' && <ResolutionBadge />}
                           <PaymentScoreBadge score={n.paymentScore} />
                           {ledgerQuarantined && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Hisob tekshiruvi kerak</span>}
-                          {n.isImported && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Eski nasiya</span>}
+                          {n.isImported && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Avvalgi nasiya</span>}
                         </div>
                         <div className="text-xs text-zinc-500">
                           {n.device.model} · {formatUzPhoneDisplay(n.customer.phone)}
@@ -506,7 +506,7 @@ export default function NasiyalarClient({
                     {ledgerQuarantined && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Tekshiruv kerak</span>}
                     {n.isImported && (
                       <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-amber-100 text-amber-800">
-                        Eski nasiya
+                        Avvalgi nasiya
                       </span>
                     )}
                     {n.resolutionState !== 'ACTIVE' && <ResolutionBadge />}

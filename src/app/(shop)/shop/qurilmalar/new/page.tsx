@@ -215,9 +215,9 @@ function AuthorizedNewDevicePage() {
               />
             </Field>
             <Field
-              label="Ikkinchi IMEI"
+              label="Qo‘shimcha IMEI"
               help="Ixtiyoriy, 15 ta raqam"
-              error={form.secondaryImei && !/^\d{15}$/.test(form.secondaryImei) ? 'Ikkinchi IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
+              error={form.secondaryImei && !/^\d{15}$/.test(form.secondaryImei) ? 'Qo‘shimcha IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
             >
               <Input value={form.secondaryImei} onChange={set('secondaryImei')} placeholder="351234560012346" inputMode="numeric" maxLength={15} className="h-9 text-sm border-zinc-200 rounded font-mono" />
             </Field>
@@ -227,7 +227,7 @@ function AuthorizedNewDevicePage() {
               </label>
               <Select value={form.conditionCode} onValueChange={(value) => value && setForm((prev) => ({ ...prev, conditionCode: value as 'NEW' | 'USED' }))}>
                 <SelectTrigger id="device-condition" aria-required="true" className="h-9 w-full"><SelectValue placeholder="Tanlang" /></SelectTrigger>
-                <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
+                <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">Ishlatilgan</SelectItem></SelectContent>
               </Select>
             </div>
           </div>

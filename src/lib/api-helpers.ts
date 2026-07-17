@@ -46,7 +46,7 @@ export function payloadTooLarge(
   return withRequestTiming(NextResponse.json({ success: false, error }, { status: 413 }))
 }
 
-export function serverError(error = "Server xatosi yuz berdi"): NextResponse<ApiResponse> {
+export function serverError(error = 'Amalni bajarib bo‘lmadi. Iltimos, qayta urinib ko‘ring.'): NextResponse<ApiResponse> {
   return withRequestTiming(NextResponse.json({ success: false, error }, { status: 500 }))
 }
 

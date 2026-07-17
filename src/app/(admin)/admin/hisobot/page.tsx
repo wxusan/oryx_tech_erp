@@ -132,7 +132,7 @@ export default function AdminReportsPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Hisobot</h1>
-          <p className="mt-0.5 text-sm text-zinc-500">Bosh admin uchun obuna tushumi va do'konlar holati</p>
+          <p className="mt-0.5 text-sm text-zinc-500">Bosh administrator uchun obuna tushumi va do‘konlar holati</p>
         </div>
         <Link href="/admin/payments" className="text-sm font-medium text-zinc-500 hover:text-zinc-900">
           To'lovlar tarixi

@@ -6,6 +6,7 @@ import { formatAdminPaymentRow } from '@/lib/admin-money'
 import { formatUserFacingMoney } from '@/lib/currency'
 import { useAdminCurrency } from '@/lib/use-admin-currency'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { accountingReconstructionLabel, packagePaymentAllocationLabel } from '@/lib/presentation-labels'
 
 export function ShopPaymentsTable({ payments }: { payments: AdminShopPayment[] }) {
   const { currency } = useAdminCurrency()
@@ -26,9 +27,9 @@ export function ShopPaymentsTable({ payments }: { payments: AdminShopPayment[] }
               {formatAdminPaymentRow(payment, currency)}
               <span className="block text-[10px] font-normal text-zinc-400">
                 Asl summa: {formatUserFacingMoney({ amount: payment.amount, amountCurrency: payment.currency, displayCurrency: payment.currency })}
-                {payment.currencyReconstructionStatus !== 'COMPLETE' && ' · tarixiy kurs mavjud emas'}
+                {' · '}{accountingReconstructionLabel(payment.currencyReconstructionStatus)}
               </span>
-              {payment.allocationStatus === 'LEGACY_UNALLOCATED' && <span className="ml-2 bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">Eski, paketga bog&apos;lanmagan</span>}
+              {payment.allocationStatus === 'LEGACY_UNALLOCATED' && <span className="ml-2 bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-900">{packagePaymentAllocationLabel(payment.allocationStatus)}</span>}
             </TableCell>
             <TableCell className="text-sm text-zinc-500">
               {payment.months} oy

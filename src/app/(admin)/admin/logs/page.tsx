@@ -54,8 +54,8 @@ interface LogsPayload {
 
 const tabs: { key: TabFilter; label: string }[] = [
   { key: 'barchasi', label: 'Barchasi' },
-  { key: 'SUPER_ADMIN', label: 'Bosh admin' },
-  { key: 'SHOP_ADMIN', label: "Do'kon" },
+  { key: 'SUPER_ADMIN', label: 'Bosh administrator' },
+  { key: 'SHOP_ADMIN', label: 'Do‘kon foydalanuvchisi' },
 ]
 
 function formatDateTime(value: string) {
@@ -227,7 +227,7 @@ export default function LogsPage() {
                           ? 'bg-zinc-900 text-white'
                           : 'bg-zinc-100 text-zinc-500',
                       ].join(' ')}>
-                        {log.actorType === 'SUPER_ADMIN' ? 'Bosh admin' : "Do'kon"}
+                        {actorLabel(log.actorType)}
                       </span>
                     </div>
                   </TableCell>

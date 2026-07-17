@@ -42,10 +42,10 @@ import { markQueryIntent } from '@/lib/client-performance'
 type PayableStatus = SupplierPayableStatus
 
 const statusLabels: Record<PayableStatus, string> = {
-  PENDING: 'Kutilmoqda',
-  PAID: "To'landi",
+  PENDING: 'To‘lanmagan',
+  PAID: 'To‘langan',
   CANCELLED: 'Bekor qilingan',
-  OVERDUE: "Muddati o'tgan",
+  OVERDUE: 'To‘lov muddati o‘tgan',
 }
 
 const statusStyles: Record<PayableStatus, string> = {
@@ -265,7 +265,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                 <div className="font-medium text-zinc-900">{row.device.model}</div>
                 <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'}</div>
                 <DeviceConditionBadge label={row.device.conditionLabel} className="mt-1" />
-                <div className="font-mono text-xs text-zinc-400">IMEI 1: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · IMEI 2: ${displayImei(row.device.secondaryImei)}` : ''}</div>
+                <div className="font-mono text-xs text-zinc-400">Asosiy IMEI: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · Qo‘shimcha IMEI: ${displayImei(row.device.secondaryImei)}` : ''}</div>
               </div>
               <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${statusStyles[row.status]}`}>
                 {statusLabels[row.status]}
@@ -340,7 +340,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                     <div className="font-medium text-zinc-900">{row.device.model}</div>
                     <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'}</div>
                     <DeviceConditionBadge label={row.device.conditionLabel} className="mt-1" />
-                    <div className="text-xs text-zinc-400 font-mono">IMEI 1: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · IMEI 2: ${displayImei(row.device.secondaryImei)}` : ''}</div>
+                    <div className="text-xs text-zinc-400 font-mono">Asosiy IMEI: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · Qo‘shimcha IMEI: ${displayImei(row.device.secondaryImei)}` : ''}</div>
                   </td>
                   <td className="px-4 py-3">
                     <div className="text-zinc-900">{row.supplierName}</div>
@@ -369,7 +369,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                       {row.profit != null && (
                         <span className={row.profit < 0 ? 'text-red-600 font-medium' : 'text-emerald-700 font-medium'}>{fmt(row.profit, row.contractCurrency)}</span>
                       )}
-                      {row.status !== 'PAID' && <div className="text-[10px] text-amber-600 mt-0.5">Kutilayotgan</div>}
+                      {row.status !== 'PAID' && <div className="text-[10px] text-amber-600 mt-0.5">{statusLabels[row.status]}</div>}
                     </td>
                   )}
                   <td className="px-4 py-3">
@@ -416,9 +416,9 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                     <SelectValue placeholder="Tanlang" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="CASH">Naqd</SelectItem>
-                    <SelectItem value="CARD">Karta</SelectItem>
-                    <SelectItem value="TRANSFER">Bank o&apos;tkazma</SelectItem>
+                    <SelectItem value="CASH">Naqd pul</SelectItem>
+                    <SelectItem value="CARD">Karta orqali</SelectItem>
+                    <SelectItem value="TRANSFER">Pul o‘tkazmasi</SelectItem>
                     <SelectItem value="OTHER">Boshqa</SelectItem>
                   </SelectContent>
                 </Select>

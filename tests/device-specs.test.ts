@@ -33,7 +33,7 @@ describe('device specs', () => {
       batteryHealth: 98,
       imei: '351234560012345',
       secondaryImei: '351234560012346',
-      conditionLabel: 'B/U',
+      conditionLabel: 'Ishlatilgan',
     })
   })
 
@@ -50,7 +50,7 @@ describe('device specs', () => {
 
   it('uses the exact requested condition labels', () => {
     expect(deviceConditionLabel('NEW')).toBe('Yangi')
-    expect(deviceConditionLabel('USED')).toBe('B/U')
+    expect(deviceConditionLabel('USED')).toBe('Ishlatilgan')
     expect(deviceConditionLabel(null)).toBe('Belgilanmagan')
   })
 

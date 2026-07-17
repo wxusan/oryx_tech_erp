@@ -109,7 +109,7 @@ describe('Telegram HTML message style', () => {
         { method: 'CARD', amount: 500_000 },
       ],
     })
-    expect(message).toContain('💳 To‘lov usuli:\n• Naqd: 500')
-    expect(message).toContain('\n• Karta: 500')
+    expect(message).toContain('💳 To‘lov usuli:\n• Naqd pul: 500')
+    expect(message).toContain('\n• Karta orqali: 500')
   })
 })

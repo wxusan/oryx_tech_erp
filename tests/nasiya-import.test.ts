@@ -92,13 +92,13 @@ describe('nasiyaImportedMessage', () => {
     adminName: 'Dilshod',
   })
 
-  it('is titled "Eski nasiya import qilindi" and NOT "Yangi nasiya"', () => {
-    expect(msg).toContain('Eski nasiya import qilindi')
+  it('is titled "Avvalgi nasiya import qilindi" and NOT "Yangi nasiya"', () => {
+    expect(msg).toContain('Avvalgi nasiya import qilindi')
     expect(msg).not.toContain('Yangi nasiya')
   })
 
   it('shows original, already-paid and remaining amounts distinctly', () => {
-    expect(msg).toMatch(/Eski nasiya summasi: 5.?200.?000 so‘m/)
+    expect(msg).toMatch(/Avvalgi nasiya summasi: 5.?200.?000 so‘m/)
     expect(msg).toMatch(/Importgacha to‘langan: 1.?500.?000 so‘m/)
     expect(msg).toMatch(/Qolgan qarz: 3.?700.?000 so‘m/)
   })

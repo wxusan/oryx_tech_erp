@@ -53,7 +53,7 @@ function deviceMeta(device: InStockPickerDevice) {
     device.batteryHealth != null ? `${device.batteryHealth}%` : null,
     device.conditionLabel,
     `IMEI: ${displayImei(device.imei)}`,
-    device.secondaryImei ? `IMEI 2: ${displayImei(device.secondaryImei)}` : null,
+    device.secondaryImei ? `Qo‘shimcha IMEI: ${displayImei(device.secondaryImei)}` : null,
   ]
     .filter(Boolean)
     .join(' · ')

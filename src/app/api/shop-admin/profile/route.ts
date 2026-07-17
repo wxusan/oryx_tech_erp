@@ -198,7 +198,7 @@ export async function PATCH(req: NextRequest) {
         })
       })
 
-      return ok(profileDto(updated, { isStaff, telegramFeatureEnabled }), telegramId ? 'Telegram ID yangilandi.' : "Telegram ID o'chirildi.")
+      return ok(profileDto(updated, { isStaff, telegramFeatureEnabled }), telegramId ? 'Telegram ulanishi yangilandi.' : 'Telegram ulanishi o‘chirildi.')
     }
 
     if (typeof body === 'object' && body !== null && ('name' in body || 'phone' in body)) {

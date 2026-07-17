@@ -24,7 +24,7 @@ import { QueryActivity } from '@/components/query-activity'
 import { markQueryIntent } from '@/lib/client-performance'
 import { ExportDownloadButton } from '@/components/shop/export-download-button'
 
-type DisplayStatus = 'Omborda' | 'Sotilgan' | 'Qarz' | 'Nasiyada' | 'Qaytarilgan (eski holat)' | "O'chirilgan"
+type DisplayStatus = 'Omborda' | 'Naqdga sotilgan' | 'Qarzga sotilgan' | 'Nasiyaga sotilgan' | 'Qaytarilgan' | 'O‘chirilgan'
 type Device = DeviceListItem
 
 interface ApiResponse<T> {
@@ -35,31 +35,31 @@ interface ApiResponse<T> {
 
 const statusMap: Record<DeviceStatus, DisplayStatus> = {
   IN_STOCK: 'Omborda',
-  SOLD_CASH: 'Sotilgan',
-  SOLD_DEBT: 'Qarz',
-  SOLD_NASIYA: 'Nasiyada',
-  RETURNED: 'Qaytarilgan (eski holat)',
-  DELETED: "O'chirilgan",
+  SOLD_CASH: 'Naqdga sotilgan',
+  SOLD_DEBT: 'Qarzga sotilgan',
+  SOLD_NASIYA: 'Nasiyaga sotilgan',
+  RETURNED: 'Qaytarilgan',
+  DELETED: 'O‘chirilgan',
 }
 
 const filterTabs: { label: string; value: DeviceStatus | 'Barchasi' }[] = [
   { label: 'Barchasi', value: 'Barchasi' },
   { label: 'Omborda', value: 'IN_STOCK' },
-  { label: 'Sotilgan', value: 'SOLD_CASH' },
-  { label: 'Qarz', value: 'SOLD_DEBT' },
-  { label: 'Nasiyada', value: 'SOLD_NASIYA' },
-  { label: 'Qaytarilgan (eski)', value: 'RETURNED' },
+  { label: 'Naqdga sotilgan', value: 'SOLD_CASH' },
+  { label: 'Qarzga sotilgan', value: 'SOLD_DEBT' },
+  { label: 'Nasiyaga sotilgan', value: 'SOLD_NASIYA' },
+  { label: 'Qaytarilgan', value: 'RETURNED' },
 ]
 
 function StatusBadge({ status }: { status: DeviceStatus }) {
   const label = statusMap[status]
   const styles: Record<DisplayStatus, string> = {
     'Omborda': 'bg-zinc-100 text-zinc-700',
-    'Sotilgan': 'bg-zinc-900 text-white',
-    'Qarz': 'bg-amber-100 text-amber-800',
-    'Nasiyada': 'bg-zinc-800 text-zinc-100',
-    'Qaytarilgan (eski holat)': 'bg-blue-100 text-blue-700',
-    "O'chirilgan": 'bg-zinc-200 text-zinc-500',
+    'Naqdga sotilgan': 'bg-zinc-900 text-white',
+    'Qarzga sotilgan': 'bg-amber-100 text-amber-800',
+    'Nasiyaga sotilgan': 'bg-zinc-800 text-zinc-100',
+    'Qaytarilgan': 'bg-blue-100 text-blue-700',
+    'O‘chirilgan': 'bg-zinc-200 text-zinc-500',
   }
   return (
     <span className={`inline-block px-2 py-0.5 rounded text-xs font-medium ${styles[label]}`}>
@@ -390,7 +390,7 @@ export default function QurilmalarClient({
         <Input value={search} onChange={(e) => { markQueryIntent('devices'); setSearch(e.target.value); setPage(1) }} placeholder="Model, IMEI, rang, xotira yoki yetkazib beruvchi bo'yicha qidirish..." className="max-w-md h-9 text-sm border-zinc-200 rounded" />
         <Select value={condition} onValueChange={(value) => { if (value) { markQueryIntent('devices'); setCondition(value as 'ALL' | 'NEW' | 'USED'); setPage(1) } }}>
           <SelectTrigger className="h-9 w-full sm:w-40"><SelectValue /></SelectTrigger>
-          <SelectContent><SelectItem value="ALL">Barcha holatlar</SelectItem><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
+          <SelectContent><SelectItem value="ALL">Barcha holatlar</SelectItem><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">Ishlatilgan</SelectItem></SelectContent>
         </Select>
       </div>
 
@@ -415,7 +415,7 @@ export default function QurilmalarClient({
                   'Batareya',
                   ...(showOwnerFinancials ? ['Kelish narxi'] : []),
                   'IMEI',
-                  'Status',
+                  'Holat',
                   'Sotuv narxi',
                   ...(showOwnerFinancials ? ['Farq'] : []),
                   'Mijoz',

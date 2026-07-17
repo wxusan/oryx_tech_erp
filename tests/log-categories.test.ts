@@ -18,8 +18,8 @@ describe('log categories', () => {
     expect(isLogCategory('sale')).toBe(true)
     expect(isLogCategory('restock')).toBe(false)
     expect(isLogCategory('bad-value')).toBe(false)
-    expect(logCategoryLabel('payment')).toBe("Sotuv to'lovlari")
-    expect(logCategoryLabel('nasiya_payment')).toBe("Nasiya to'lovlari")
+    expect(logCategoryLabel('payment')).toBe('Sotuv qarzi to‘lovlari')
+    expect(logCategoryLabel('nasiya_payment')).toBe('Nasiya to‘lovlari')
   })
 
   it('builds server-side where filters without leaking undefined fields', () => {

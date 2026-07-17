@@ -54,7 +54,7 @@ const updateDeviceSchema = z.object({
   // USD is converted to UZS server-side — UZS remains the stored value.
   inputCurrency: z.enum(['UZS', 'USD']).optional(),
   imei: z.string().trim().refine((value) => normalizeImei(value) !== null, 'IMEI 15 ta raqamdan iborat bo\'lishi kerak').optional(),
-  secondaryImei: z.string().trim().refine((value) => !value || normalizeImei(value) !== null, 'Ikkinchi IMEI 15 ta raqamdan iborat bo\'lishi kerak').optional(),
+  secondaryImei: z.string().trim().refine((value) => !value || normalizeImei(value) !== null, 'Qo‘shimcha IMEI 15 ta raqamdan iborat bo‘lishi kerak').optional(),
   supplierPhone: phoneSchema.or(z.literal('')).optional(),
   imageUrls: z.array(z.string().trim().min(1).max(500)).max(10).optional(),
   note: z.string().optional(),
@@ -513,7 +513,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     }
     // Backstop for the active-IMEI partial unique index if two edits race.
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
-      return conflict('Bu IMEI bilan faol qurilma allaqachon mavjud')
+      return conflict('Bu IMEI allaqachon mavjud.')
+    }
+    if (err instanceof Error && err.message === 'UPDATED_DEVICE_DTO_NOT_FOUND') {
+      return serverError('Qurilma yangilandi, ammo yangilangan ma’lumotni yuklab bo‘lmadi. Sahifani yangilang.')
     }
     logger.error('[PATCH /api/devices/[id]]', { event: 'api.route_error', error: err })
     return serverError()

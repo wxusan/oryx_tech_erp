@@ -1,9 +1,9 @@
 export type DeviceStorageUnit = 'GB' | 'TB'
 export type DeviceConditionCode = 'NEW' | 'USED'
 
-export const DEVICE_CONDITION_LABELS: Record<DeviceConditionCode, 'Yangi' | 'B/U'> = {
+export const DEVICE_CONDITION_LABELS: Record<DeviceConditionCode, 'Yangi' | 'Ishlatilgan'> = {
   NEW: 'Yangi',
-  USED: 'B/U',
+  USED: 'Ishlatilgan',
 }
 
 export function parseDeviceStorage(input: string | null | undefined, defaultUnit?: DeviceStorageUnit) {
@@ -84,8 +84,8 @@ export function validateImeiPair(primary: string, secondary?: string | null) {
   const primaryImei = normalizeImei(primary)
   if (!primaryImei) return { ok: false as const, message: 'Asosiy IMEI 15 ta raqamdan iborat bo\'lishi kerak' }
   const secondaryImei = secondary?.trim() ? normalizeImei(secondary) : null
-  if (secondary?.trim() && !secondaryImei) return { ok: false as const, message: 'Ikkinchi IMEI 15 ta raqamdan iborat bo\'lishi kerak' }
-  if (secondaryImei === primaryImei) return { ok: false as const, message: 'Asosiy va ikkinchi IMEI bir xil bo\'lishi mumkin emas' }
+  if (secondary?.trim() && !secondaryImei) return { ok: false as const, message: 'Qo‘shimcha IMEI 15 ta raqamdan iborat bo‘lishi kerak' }
+  if (secondaryImei === primaryImei) return { ok: false as const, message: 'Asosiy va qo‘shimcha IMEI bir xil bo‘lishi mumkin emas' }
   return { ok: true as const, primaryImei, secondaryImei }
 }
 

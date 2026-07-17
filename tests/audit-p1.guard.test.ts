@@ -71,7 +71,7 @@ describe('P1 imported old nasiya duplicate guard', () => {
     expect(src).toContain('isImported: true')
     expect(src).toContain('remainingAtImport: Math.round(remainingDebtInput.amountUzs)')
     expect(src).toContain('monthlyPayment: Math.round(monthlyPaymentInput.amountUzs)')
-    expect(src).toContain("Bu mijoz va qurilma uchun shunga o'xshash eski nasiya")
+    expect(src).toContain('Bu mijoz va qurilma uchun shunga o‘xshash avvalgi nasiya')
   })
 })
 

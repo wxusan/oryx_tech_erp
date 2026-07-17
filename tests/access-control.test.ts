@@ -61,7 +61,7 @@ describe('shop package price', () => {
       discountAmount: 0,
       currency: 'UZS',
       features: features({ INVENTORY: { enabled: false } }),
-    })).toThrow('Qurilmalar va ombor')
+    })).toThrow('Ombor boshqaruvi')
   })
 
   it('uses exact native-currency minor units and never permits an excessive discount', () => {

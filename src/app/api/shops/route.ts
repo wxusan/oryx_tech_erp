@@ -267,9 +267,11 @@ export async function POST(req: NextRequest) {
     if (isRequestBodyTooLarge(err)) return payloadTooLarge()
     if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
     if (err && typeof err === 'object' && 'code' in err) {
-      if (err.code === 'TELEGRAM_TAKEN') return conflict('Bu Telegram ID allaqachon mavjud')
-      if (err.code === 'P2002') return conflict('Login yoki boshqa noyob ma\'lumot allaqachon mavjud')
+      if (err.code === 'TELEGRAM_TAKEN') return conflict('Bu Telegram hisobi boshqa foydalanuvchiga biriktirilgan.')
+      if (err.code === 'P2002') return conflict('Bu ma’lumot allaqachon mavjud.')
     }
+    if (err instanceof Error && err.message === 'OWNER_ADMIN_REQUIRED') return badRequest('Do‘kon egasi administrator huquqiga ega bo‘lishi kerak.')
+    if (err instanceof Error && err.message === 'SERIALIZABLE_TRANSACTION_FAILED') return serverError('Amalni yakunlab bo‘lmadi. Iltimos, qayta urinib ko‘ring.')
     logger.error('[POST /api/shops]', { event: 'api.route_error', error: err })
     return serverError()
   }

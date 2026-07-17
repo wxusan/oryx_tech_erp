@@ -53,11 +53,11 @@ const groupLabels: Record<ShopPermissionGroup, string> = {
 }
 
 const riskLabels = {
-  ROUTINE: 'Oddiy',
-  FINANCIAL: 'Moliyaviy',
-  PRIVATE: 'Maxfiy',
-  DESTRUCTIVE: 'Muhim',
-  ADMINISTRATIVE: 'Admin',
+  ROUTINE: 'Oddiy amal',
+  FINANCIAL: 'Moliyaviy amal',
+  PRIVATE: 'Maxfiy ma’lumot',
+  DESTRUCTIVE: 'Qaytarib bo‘lmaydigan amal',
+  ADMINISTRATIVE: 'Ma’muriy amal',
 } as const
 
 const loginPattern = /^[a-zA-Z0-9_]+$/

@@ -21,6 +21,7 @@ import { DateInput } from '@/components/ui/date-input'
 import { Field } from '@/components/ui/field'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Textarea } from '@/components/ui/textarea'
+import { SHOP_ACCESS_MODE_LABELS, shopFeatureLabel } from '@/lib/presentation-labels'
 
 interface EditableFeature {
   featureCode: ShopFeatureCode
@@ -205,8 +206,8 @@ export function ShopPackageEditor({
         : feature),
     }))
     setDependencyNotice(mode === 'OWNER_AND_STAFF'
-      ? "Xodimlar profili yoqildi. Bu bepul va paket narxini o'zgartirmadi."
-      : "Faqat do'kon egasi kirishi mumkin. Xodimlar profili paket narxiga ta'sir qilmadi.")
+      ? 'Xodimlar uchun kirish yoqildi. Bu bepul va paket narxini o‘zgartirmadi.'
+      : 'Faqat do‘kon egasi kirishi mumkin. Xodimlar uchun kirish paket narxiga ta’sir qilmadi.')
     onAccessModeChange?.(mode)
   }
 
@@ -220,7 +221,7 @@ export function ShopPackageEditor({
       const prerequisites = requiredFeaturesFor(featureCode)
       const newlyEnabled = state.features
         .filter((feature) => prerequisites.has(feature.featureCode) && !feature.enabled)
-        .map((feature) => featureByCode.get(feature.featureCode)?.label ?? feature.featureCode)
+        .map((feature) => featureByCode.get(feature.featureCode)?.label ?? shopFeatureLabel(feature.featureCode))
       setDependencyNotice(newlyEnabled.length
         ? `${featureByCode.get(featureCode)?.label} uchun bog'liq modullar ham yoqildi: ${newlyEnabled.join(', ')}.`
         : null)
@@ -237,7 +238,7 @@ export function ShopPackageEditor({
     }
 
     const dependents = findEnabledDependents(state.features, featureCode)
-    const disabledNames = [...dependents].map((code) => featureByCode.get(code)?.label ?? code)
+    const disabledNames = [...dependents].map((code) => featureByCode.get(code)?.label ?? shopFeatureLabel(code))
     setDependencyNotice(disabledNames.length
       ? `${featureByCode.get(featureCode)?.label} o'chirilgani uchun bog'liq modullar ham o'chirildi: ${disabledNames.join(', ')}.`
       : null)
@@ -350,13 +351,13 @@ export function ShopPackageEditor({
             {([
               {
                 value: 'OWNER_ONLY' as const,
-                label: 'Faqat do‘kon egasi',
-                description: 'OWNER_ONLY — xodim profillari kira olmaydi.',
+                label: SHOP_ACCESS_MODE_LABELS.OWNER_ONLY,
+                description: 'Xodim profillari kira olmaydi.',
               },
               {
                 value: 'OWNER_AND_STAFF' as const,
-                label: 'Egasi va xodimlar',
-                description: 'OWNER_AND_STAFF — qo‘shimcha xodim profillari ham kiradi.',
+                label: SHOP_ACCESS_MODE_LABELS.OWNER_AND_STAFF,
+                description: 'Qo‘shimcha xodim profillari ham kiradi.',
               },
             ]).map((option) => (
               <label
@@ -388,8 +389,8 @@ export function ShopPackageEditor({
         <div className="mt-4 flex gap-3 rounded-xl border-2 border-emerald-300 bg-emerald-50 p-4 text-emerald-950" role="note">
           <ShieldCheck className="mt-0.5 size-5 shrink-0" aria-hidden="true" />
           <div>
-            <p className="font-semibold">Xodimlar profili doimo bepul</p>
-            <p className="mt-1 text-sm leading-5">STAFF_ACCESS narxi 0. Uni yoqish yoki o‘chirish paketning oylik jami narxini hech qachon o‘zgartirmaydi.</p>
+            <p className="font-semibold">Xodimlar uchun kirish doimo bepul</p>
+            <p className="mt-1 text-sm leading-5">Xodimlar uchun kirish narxi 0. Uni yoqish yoki o‘chirish paketning oylik jami narxini hech qachon o‘zgartirmaydi.</p>
           </div>
         </div>
       </section>
@@ -416,7 +417,7 @@ export function ShopPackageEditor({
           {SHOP_FEATURE_CATALOG.map((definition) => {
             const feature = state.features.find((item) => item.featureCode === definition.code)!
             const featurePriceError = definition.billable ? moneyError(feature.recurringPrice, state.currency) : null
-            const prerequisites = definition.prerequisites.map((code) => featureByCode.get(code)?.label ?? code)
+            const prerequisites = definition.prerequisites.map((code) => featureByCode.get(code)?.label ?? shopFeatureLabel(code))
             const descriptionId = `package-feature-${definition.code.toLowerCase()}-description`
             return (
               <div key={definition.code} className="grid gap-3 p-3 sm:grid-cols-[minmax(0,1fr)_minmax(13rem,18rem)] sm:items-center sm:p-4">
@@ -527,7 +528,7 @@ export function ShopPackageEditor({
             )}
             <p className="mt-3 flex items-center gap-1.5 text-xs text-emerald-300">
               <CheckCircle2 className="size-4" aria-hidden="true" />
-              STAFF_ACCESS: 0 {state.currency}; jami narxga ta’sir qilmaydi.
+              Xodimlar uchun kirish: 0 {state.currency}; jami narxga ta’sir qilmaydi.
             </p>
           </div>
 

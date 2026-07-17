@@ -29,7 +29,7 @@ describe('qurilmalar list: sold tab, columns, and IMEI privacy', () => {
 
   it('has the required status tabs, including the explicit Qarz state', () => {
     const tabsBlock = client.slice(client.indexOf('filterTabs'), client.indexOf('filterTabs') + 400)
-    for (const tab of ["'Barchasi'", "'Omborda'", "'Sotilgan'", "'Qarz'", "'Nasiyada'", "'Qaytarilgan (eski)'"]) {
+    for (const tab of ["'Barchasi'", "'Omborda'", "'Naqdga sotilgan'", "'Qarzga sotilgan'", "'Nasiyaga sotilgan'", "'Qaytarilgan'"]) {
       expect(tabsBlock).toContain(tab)
     }
     expect(tabsBlock).not.toContain('RESERVED')

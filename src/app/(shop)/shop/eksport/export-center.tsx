@@ -12,9 +12,9 @@ const exports = [
   { entity: 'sales', permission: 'EXPORT_SALES', label: 'Sotuvlar' },
   { entity: 'nasiya', permission: 'EXPORT_NASIYA', label: 'Nasiyalar' },
   { entity: 'olib', permission: 'EXPORT_OLIB', label: 'Olib-sotdim' },
-  { entity: 'returns', permission: 'EXPORT_RETURNS', label: 'Qaytarish va refundlar' },
-  { entity: 'logs', permission: 'EXPORT_LOGS', label: 'Faoliyat loglari' },
-  { entity: 'report', permission: 'EXPORT_REPORTS', label: 'Moliyaviy hisobot' },
+  { entity: 'returns', permission: 'EXPORT_RETURNS', label: 'Qaytarishlar' },
+  { entity: 'logs', permission: 'EXPORT_LOGS', label: 'Faoliyat tarixi' },
+  { entity: 'report', permission: 'EXPORT_REPORTS', label: 'Hisobot' },
 ] satisfies Array<{ entity: ExportEntity; permission: ShopPermissionCode; label: string }>
 
 export default function ExportCenter() {

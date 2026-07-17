@@ -27,7 +27,7 @@ describe('paymentAmountDisplay — historical payment display is native-first an
       recordedUzs: createMoneyDto('UZS', 2_500_000),
       input: createMoneyDto('UZS', 2_500_000),
       applied: createMoneyDto('USD', 200),
-      paymentFxQuote: createFxQuoteDto({ rate: '12500.0000', source: 'PAYMENT_FROZEN', freshness: 'FRESH' }),
+      paymentFxQuote: createFxQuoteDto({ rate: '12500.0000', source: 'RECORDED_FROZEN', freshness: 'FRESH' }),
     })
     const display = paymentAmountDisplay(p)
     expect(display.primary).toMatch(/2.?500.?000 so'm/)
@@ -39,11 +39,11 @@ describe('paymentAmountDisplay — historical payment display is native-first an
     const p = payment({
       input: createMoneyDto('USD', 160),
       applied: createMoneyDto('UZS', 2_000_000),
-      paymentFxQuote: createFxQuoteDto({ rate: '12500.0000', source: 'PAYMENT_FROZEN', freshness: 'FRESH' }),
+      paymentFxQuote: createFxQuoteDto({ rate: '12500.0000', source: 'RECORDED_FROZEN', freshness: 'FRESH' }),
     })
     expect(paymentAmountDisplay(p)).toEqual({
       primary: '$160.00',
-      secondary: "Shartnomaga: 2 000 000 so'm · Kurs: 1 USD = 12500.0000 so'm · PAYMENT_FROZEN",
+      secondary: "Shartnomaga: 2 000 000 so'm · Kurs: 1 USD = 12500.0000 so'm · To‘lov vaqtida saqlangan kurs",
     })
   })
 

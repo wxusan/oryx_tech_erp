@@ -115,7 +115,7 @@ export async function GET(req: NextRequest, context: RouteContext) {
     const take = Number.isFinite(requestedTake) ? Math.min(Math.max(Math.trunc(requestedTake), 1), 100) : 20
 
     const shop = await prisma.shop.findFirst({ where: { id, deletedAt: null }, select: { id: true } })
-    if (!shop) return notFound("Do'kon topilmadi")
+    if (!shop) return notFound('Do‘kon topilmadi.')
 
     const [active, versions] = await Promise.all([
       getActiveShopPackage(id),
@@ -167,17 +167,17 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const nextStaffEnabled = parsed.data.features.find((item) => item.featureCode === 'STAFF_ACCESS')!.enabled
     const staffChanged = current !== null && currentStaffEnabled !== nextStaffEnabled
     if (staffChanged && parsed.data.effectiveOn !== today) {
-      return badRequest("Xodimlar profilini yoqish yoki o'chirish bugungi sana bilan amalga oshiriladi")
+      return badRequest('Xodim uchun kiritilgan sana noto‘g‘ri.')
     }
     if (staffChanged && !nextStaffEnabled && (shop.ownershipStatus !== 'RESOLVED' || !shop.ownerAdminId)) {
-      return conflict("Xodimlar profilini o'chirishdan oldin do'kon egasi aniq biriktirilishi kerak")
+      return conflict('Do‘kon egasi hali biriktirilmagan.')
     }
 
     if (current) {
       const changesPrice = priceAffectingChange(current, parsed.data)
       const nextServiceBoundary = shop.subscriptionDue > new Date() ? businessDay(shop.subscriptionDue) : today
       if (changesPrice && parsed.data.effectiveOn < nextServiceBoundary) {
-        return badRequest(`Narxga ta'sir qiladigan paket o'zgarishi ${nextServiceBoundary} sanasidan oldin kuchga kira olmaydi`)
+        return badRequest('Kiritilgan narx ruxsat etilgan chegaradan tashqarida.')
       }
     }
 
@@ -305,16 +305,16 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return conflict('Bu kuchga kirish sanasi uchun paket versiyasi allaqachon mavjud')
     }
     if (error && typeof error === 'object' && 'code' in error && error.code === 'SHOP_NOT_FOUND') {
-      return notFound("Do'kon topilmadi")
+      return notFound('Do‘kon topilmadi.')
     }
     if (error && typeof error === 'object' && 'code' in error) {
-      if (error.code === 'STAFF_DATE_INVALID') return badRequest("Xodimlar profilini yoqish yoki o'chirish bugungi sana bilan amalga oshiriladi")
-      if (error.code === 'OWNER_UNRESOLVED') return conflict("Xodimlar profilini o'chirishdan oldin do'kon egasi aniq biriktirilishi kerak")
+      if (error.code === 'STAFF_DATE_INVALID') return badRequest('Xodim uchun kiritilgan sana noto‘g‘ri.')
+      if (error.code === 'OWNER_UNRESOLVED') return conflict('Do‘kon egasi hali biriktirilmagan.')
       if (error.code === 'PRICE_BOUNDARY') {
-        const boundary = 'boundary' in error && typeof error.boundary === 'string' ? error.boundary : 'keyingi to\'lov davri'
-        return badRequest(`Narxga ta'sir qiladigan paket o'zgarishi ${boundary} sanasidan oldin kuchga kira olmaydi`)
+        return badRequest('Kiritilgan narx ruxsat etilgan chegaradan tashqarida.')
       }
     }
+    if (error instanceof Error && error.message === 'SERIALIZABLE_TRANSACTION_FAILED') return serverError('Amalni yakunlab bo‘lmadi. Iltimos, qayta urinib ko‘ring.')
     logger.error('[POST /api/shops/[id]/package]', { event: 'api.route_error', error })
     return serverError()
   }

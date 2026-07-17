@@ -20,6 +20,7 @@ import {
 } from '@/lib/admin-money'
 import { formatUserFacingMoney, type CurrencyCode } from '@/lib/currency'
 import { Download } from 'lucide-react'
+import { paymentMethodLabel } from '@/lib/presentation-labels'
 
 interface Payment {
   id: string
@@ -72,16 +73,9 @@ interface ApiResponse<T> {
 }
 
 const methodStyle: Record<string, string> = {
-  Naqd: 'bg-zinc-100 text-zinc-600',
-  Karta: 'bg-zinc-900 text-white',
-  Bank: 'bg-zinc-200 text-zinc-700',
-}
-
-function methodFromEnum(m: string) {
-  if (m === 'CASH') return 'Naqd'
-  if (m === 'CARD') return 'Karta'
-  if (m === 'TRANSFER') return 'Bank'
-  return m
+  'Naqd pul': 'bg-zinc-100 text-zinc-600',
+  'Karta orqali': 'bg-zinc-900 text-white',
+  'Pul o‘tkazmasi': 'bg-zinc-200 text-zinc-700',
 }
 
 function formatDate(value: string) {
@@ -117,7 +111,7 @@ export default function PaymentsPage() {
       displayCurrency: payment.currency,
     }),
     months: payment.months,
-    method: methodFromEnum(payment.paymentMethod),
+    method: paymentMethodLabel(payment.paymentMethod),
     date: payment.paidAt,
     nextPaymentDate: payment.nextPaymentDate,
     addedBy: `${payment.recordedBy.name} (${payment.recordedBy.login})`,

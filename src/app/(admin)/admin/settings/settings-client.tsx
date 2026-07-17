@@ -18,6 +18,7 @@ import { Input } from '@/components/ui/input'
 import { MoneyInput } from '@/components/ui/money-input'
 import { Label } from '@/components/ui/label'
 import { Field } from '@/components/ui/field'
+import { actorTypeLabel } from '@/lib/presentation-labels'
 import type { ApiResponse } from '@/types'
 
 interface EnvCheck {
@@ -246,7 +247,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       await commitNavigationMutation({ kind: 'admin.profileUpdated' })
       setProfile(json.data ?? null)
       setTelegramId(json.data?.telegramId ?? '')
-      setTelegramSuccess(json.message ?? 'Telegram ID yangilandi.')
+      setTelegramSuccess(json.message ?? 'Telegram ulanishi yangilandi.')
     } catch (err) {
       setTelegramError(err instanceof Error ? err.message : 'Xatolik yuz berdi')
     } finally {
@@ -271,7 +272,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       const response = await fetch('/api/admin/currency-rate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rate, note: 'Manual USD/UZS fallback rate updated from admin settings' }),
+        body: JSON.stringify({ rate, note: 'Qo‘lda kiritilgan USD/UZS zaxira kursi administrator sozlamalaridan yangilandi' }),
       })
       if (!response.ok) throw new Error(await readApiError(response))
       const json: ApiResponse<CurrencyRateRecord> = await response.json()
@@ -285,7 +286,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
         }))
         setManualRate(String(Number(savedRate.rate)))
       }
-      setRateSuccess(json.message ?? 'Manual USD kursi saqlandi.')
+      setRateSuccess(json.message ?? 'Qo‘lda kiritilgan USD kursi saqlandi.')
     } catch (err) {
       setRateError(err instanceof Error ? err.message : 'USD kursini saqlashda xatolik')
     } finally {
@@ -298,7 +299,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-zinc-900">Sozlamalar</h1>
-          <p className="mt-0.5 text-sm text-zinc-500">Bosh admin profili, xavfsizlik va tizim holati</p>
+          <p className="mt-0.5 text-sm text-zinc-500">Bosh administrator profili, xavfsizlik va tizim holati</p>
         </div>
         <Badge variant="secondary" className="h-6 w-fit rounded-md">
           Platforma nazorati
@@ -321,7 +322,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
           <Card className="rounded-lg">
             <CardHeader className="border-b border-zinc-100">
               <CardTitle>Profil</CardTitle>
-              <CardDescription>Bosh admin hisob ma'lumotlari</CardDescription>
+              <CardDescription>Bosh administrator hisob ma’lumotlari</CardDescription>
               <CardAction>
                 <UserRound className="size-5 text-zinc-400" />
               </CardAction>
@@ -362,7 +363,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
                   </form>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Info label="Login" value={profile.login || '-'} mono />
-                    <Info label="Rol" value={profile.role} />
+                    <Info label="Rol" value={actorTypeLabel(profile.role)} />
                     <Info label="Telegram ID" value={profile.telegramId || '-'} mono />
                     <Info label="Yaratilgan" value={formatDate(profile.createdAt)} />
                     <Info label="Telegram ulangan" value={formatDate(profile.telegramVerifiedAt)} />
@@ -401,7 +402,7 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
           <Card className="rounded-lg lg:col-span-2">
             <CardHeader className="border-b border-zinc-100">
               <CardTitle>USD kursi</CardTitle>
-              <CardDescription>CBU ishlamasa, tizim oxirgi saqlangan manual kursdan foydalanadi</CardDescription>
+              <CardDescription>Markaziy bank kursi olinmasa, tizim oxirgi saqlangan qo‘lda kiritilgan kursdan foydalanadi</CardDescription>
               <CardAction>
                 <CircleDollarSign className="size-5 text-zinc-400" />
               </CardAction>
@@ -422,8 +423,8 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
 
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                   <Info label="Amaldagi" value={rateLoading ? 'Yuklanmoqda...' : formatRate(currencyRate?.latest)} />
-                  <Info label="CBU oxirgi" value={rateLoading ? 'Yuklanmoqda...' : formatRate(currencyRate?.latestCbu)} />
-                  <Info label="Manual oxirgi" value={rateLoading ? 'Yuklanmoqda...' : formatRate(currencyRate?.latestManual)} />
+                  <Info label="Markaziy bankning oxirgi kursi" value={rateLoading ? 'Yuklanmoqda...' : formatRate(currencyRate?.latestCbu)} />
+                  <Info label="Qo‘lda kiritilgan oxirgi kurs" value={rateLoading ? 'Yuklanmoqda...' : formatRate(currencyRate?.latestManual)} />
                 </div>
 
                 <div className="flex items-end gap-2">

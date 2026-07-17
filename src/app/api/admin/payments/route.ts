@@ -15,6 +15,7 @@ import { prisma } from '@/lib/prisma'
 import { tashkentMonthRange, tashkentMonthRangeFromKey } from '@/lib/timezone'
 import { adminReportingContext, summarizeShopPaymentGroups } from '@/lib/admin-money'
 import { getSuperAdminCurrencyContext } from '@/lib/server/currency'
+import { accountingReconstructionLabel, currencyLabel, paymentMethodLabel } from '@/lib/presentation-labels'
 
 const DEFAULT_TAKE = 25
 const MAX_TAKE = 100
@@ -81,13 +82,13 @@ export async function GET(req: NextRequest) {
         row.id,
         row.shop.name,
         row.amount.toString(),
-        row.currency,
+        currencyLabel(row.currency),
         row.exchangeRateAtPayment?.toString() ?? '',
         row.amountUzsSnapshot?.toString() ?? '',
         row.amountUsdSnapshot?.toString() ?? '',
-        row.currencyReconstructionStatus,
+        accountingReconstructionLabel(row.currencyReconstructionStatus),
         row.months,
-        row.paymentMethod,
+        paymentMethodLabel(row.paymentMethod),
         row.paidAt.toISOString(),
         row.recordedBy.name,
         row.recordedBy.login,

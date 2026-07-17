@@ -81,8 +81,8 @@ describe('helpers', () => {
   })
 
   it('formatPaymentMethod maps known values and returns null otherwise', () => {
-    expect(formatPaymentMethod('CASH')).toBe('Naqd')
-    expect(formatPaymentMethod('TRANSFER')).toBe('O‘tkazma')
+    expect(formatPaymentMethod('CASH')).toBe('Naqd pul')
+    expect(formatPaymentMethod('TRANSFER')).toBe('Pul o‘tkazmasi')
     expect(formatPaymentMethod('???')).toBeNull()
     expect(formatPaymentMethod(null)).toBeNull()
   })
@@ -203,7 +203,7 @@ describe('device messages', () => {
     expect(msg).toMatch(/Sotilish narxi: 8.?500.?000 so‘m/)
     expect(msg).toMatch(/To‘langan: 5.?000.?000 so‘m/)
     expect(msg).toMatch(/Qolgan qarz: 3.?500.?000 so‘m/)
-    expect(msg).toContain('To‘lov usuli: Naqd')
+    expect(msg).toContain('To‘lov usuli: Naqd pul')
   })
 
   it('device sold shows Foyda (profit) when provided, omitted when not (item 14)', () => {
@@ -416,7 +416,7 @@ describe('nasiya messages', () => {
 
     expect(msg).not.toContain('IMPORT-')
     expect(msg).not.toContain('IMEI')
-    expect(msg).toContain('Eski nasiya summasi: $200.00')
+    expect(msg).toContain('Avvalgi nasiya summasi: $200.00')
     expect(msg).not.toContain('so‘m')
     expect(msg).not.toContain('(~')
     expect(msg).toContain('Oylik to‘lov: $50.00')

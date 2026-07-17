@@ -8,6 +8,7 @@ import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
 import { useAdminCurrency } from '@/lib/use-admin-currency'
 import { measureAuthenticatedShellUsable } from '@/lib/login-performance'
+import { exchangeRateSourceLabel } from '@/lib/presentation-labels'
 
 const navItems = [
   { label: 'Boshqaruv', href: '/admin', icon: LayoutDashboard, prefetch: true },
@@ -105,7 +106,7 @@ export function AdminLayoutClient({ children, adminName }: { children: React.Rea
           {currency.usdUzsRate && (
             <span className="hidden text-[11px] text-zinc-400 xl:inline" title="Kutilayotgan summalar uchun joriy boshqariladigan kurs">
               1 USD = {currency.usdUzsRate.toLocaleString('ru-RU')} so&apos;m
-              {currency.usdUzsRateSource ? ` · ${currency.usdUzsRateSource}` : ''}
+              {currency.usdUzsRateSource ? ` · ${exchangeRateSourceLabel(currency.usdUzsRateSource)}` : ''}
               {currency.usdUzsRateFetchedAt ? ` · ${currency.usdUzsRateFetchedAt.replace('T', ' ').slice(0, 19)} UTC` : ''}
             </span>
           )}

@@ -101,7 +101,7 @@ export interface ShopNasiyaListItem {
   /** Operational collection state; separate from the immutable financial ledger. */
   resolutionState: 'ACTIVE' | 'ARCHIVED'
   resolutionUpdatedAt: string | null
-  /** True for imported (pre-Oryx) nasiyas — shown with an "Eski nasiya" badge. */
+  /** True for imported (pre-Oryx) nasiyas — shown with an "Avvalgi nasiya" badge. */
   isImported: boolean
   /** Live display status derived from schedules (matches the dashboard). */
   displayStatus: Exclude<NasiyaDisplayStatus, 'CANCELLED'>
@@ -381,7 +381,7 @@ function mapShopDeviceListRow(device: ShopDeviceListRow): ShopDeviceListItem {
     storageUnit: device.storageUnit,
     storageDisplay: formatDeviceStorage(device),
     conditionCode: device.conditionCode,
-    conditionLabel: deviceConditionLabel(device.conditionCode) as 'Yangi' | 'B/U' | 'Belgilanmagan',
+    conditionLabel: deviceConditionLabel(device.conditionCode) as 'Yangi' | 'Ishlatilgan' | 'Belgilanmagan',
     batteryHealth: device.batteryHealth,
     purchasePrice: Number(device.purchasePrice),
     imei: primaryImei,

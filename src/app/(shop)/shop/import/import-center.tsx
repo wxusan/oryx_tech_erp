@@ -150,10 +150,10 @@ export default function ImportCenter() {
       {canImportNasiya && (
         <section className="flex flex-col gap-3 border-t border-zinc-200 pt-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h2 className="text-base font-semibold text-zinc-900">Eski nasiya</h2>
-            <p className="mt-1 text-sm text-zinc-500">Bitta eski nasiya shartnomasini kiritish</p>
+            <h2 className="text-base font-semibold text-zinc-900">Avvalgi nasiya</h2>
+            <p className="mt-1 text-sm text-zinc-500">Bitta avvalgi nasiya shartnomasini kiritish</p>
           </div>
-          <Button render={<Link href="/shop/nasiyalar/import" />} nativeButton={false}>Eski nasiya kiritish</Button>
+          <Button render={<Link href="/shop/nasiyalar/import" />} nativeButton={false}>Avvalgi nasiya kiritish</Button>
         </section>
       )}
     </div>

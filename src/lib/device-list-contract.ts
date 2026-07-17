@@ -34,7 +34,7 @@ export interface DeviceListItem {
   storageUnit: 'GB' | 'TB' | null
   storageDisplay: string
   conditionCode: 'NEW' | 'USED' | null
-  conditionLabel: 'Yangi' | 'B/U' | 'Belgilanmagan'
+  conditionLabel: 'Yangi' | 'Ishlatilgan' | 'Belgilanmagan'
   batteryHealth: number | null
   /** Owner-only inventory cost; omitted from SHOP_STAFF DTOs. */
   purchasePrice?: number

@@ -15,18 +15,18 @@ export type LogCategory =
 
 export const logCategoryOptions: { value: LogCategory; label: string }[] = [
   { value: 'all', label: 'Barchasi' },
-  { value: 'nasiya', label: 'Nasiya' },
-  { value: 'nasiya_payment', label: "Nasiya to'lovlari" },
-  { value: 'sale', label: 'Sotuv' },
-  { value: 'device', label: 'Yangi mahsulot' },
-  { value: 'payment', label: "Sotuv to'lovlari" },
-  { value: 'supplier_payment', label: "Yetkazib beruvchi to'lovi" },
-  { value: 'return', label: 'Qaytarish' },
-  { value: 'import_nasiya', label: 'Eski nasiya import' },
+  { value: 'nasiya', label: 'Nasiyalar' },
+  { value: 'nasiya_payment', label: 'Nasiya to‘lovlari' },
+  { value: 'sale', label: 'Sotuvlar' },
+  { value: 'device', label: 'Qurilmalar' },
+  { value: 'payment', label: 'Sotuv qarzi to‘lovlari' },
+  { value: 'supplier_payment', label: 'Yetkazib beruvchi to‘lovlari' },
+  { value: 'return', label: 'Qaytarishlar' },
+  { value: 'import_nasiya', label: 'Avvalgi nasiyalar importi' },
   { value: 'customer', label: 'Mijozlar' },
   { value: 'settings', label: 'Sozlamalar' },
   { value: 'telegram', label: 'Telegram' },
-  { value: 'account', label: 'Admin/account' },
+  { value: 'account', label: 'Hisob va xavfsizlik' },
 ]
 
 export function isLogCategory(value: string | null | undefined): value is LogCategory {

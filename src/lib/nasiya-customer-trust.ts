@@ -21,10 +21,10 @@ export const TRUST_TIERS: TrustTier[] = ['NEW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_H
 /** Exact Uzbek labels as specified for this feature — never "kredit reytingi" / "credit score". */
 export const TRUST_TIER_LABELS: Record<TrustTier, string> = {
   NEW: 'Yangi mijoz',
-  LOW: 'Past ishonch',
-  MEDIUM: "O'rtacha ishonch",
-  HIGH: 'Ishonchli',
-  VERY_HIGH: 'Juda ishonchli',
+  LOW: 'Past',
+  MEDIUM: 'O‘rtacha',
+  HIGH: 'Yuqori',
+  VERY_HIGH: 'Juda yuqori',
 }
 
 export type TrustColor = 'gray' | 'red' | 'yellow' | 'green' | 'emerald'

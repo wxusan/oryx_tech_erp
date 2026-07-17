@@ -50,11 +50,11 @@ export function formatUzDate(value: Date | string | number | null | undefined): 
 export function formatPaymentMethod(value?: string | null): string | null {
   switch (value) {
     case 'CASH':
-      return 'Naqd'
+      return 'Naqd pul'
     case 'TRANSFER':
-      return 'O‘tkazma'
+      return 'Pul o‘tkazmasi'
     case 'CARD':
-      return 'Karta'
+      return 'Karta orqali'
     case 'OTHER':
       return 'Boshqa'
     default:
@@ -108,7 +108,7 @@ export function formatDeviceSpecs(device: DeviceSpecs, opts: { battery?: boolean
     optionalLine('Rang', device.color, '🎨'),
     includeBattery && typeof device.batteryHealth === 'number' ? `🔋 Batareya: ${escapeTelegramHtml(device.batteryHealth)}%` : null,
     optionalLine('IMEI', telegramImei(device.imei), '🔢'),
-    optionalLine('IMEI 2', telegramImei(device.secondaryImei), '🔢'),
+    optionalLine('Qo‘shimcha IMEI', telegramImei(device.secondaryImei), '🔢'),
     optionalLine('Holati', device.conditionLabel, '🏷️'),
   ].filter((line): line is string => line !== null)
 }
@@ -454,7 +454,7 @@ export function nasiyaOverdueMessage(data: {
 }
 
 /**
- * Imported (pre-Oryx) nasiya. Deliberately titled "Eski nasiya import qilindi"
+ * Imported (pre-Oryx) nasiya. Deliberately titled "Avvalgi nasiya import qilindi"
  * (NOT "Yangi nasiya") and shows the original/already-paid amounts as context so
  * no admin mistakes it for a new sale. Old amounts are informational only.
  */
@@ -472,12 +472,12 @@ export function nasiyaImportedMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    '<b>📥 Eski nasiya import qilindi</b>',
+    '<b>📥 Avvalgi nasiya import qilindi</b>',
     optionalLine('Do‘kon', data.shopName, '🏪'),
     block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),
     block(
-      `💵 Eski nasiya summasi: ${telegramMoney(data.originalTotalAmount, data.currency)}`,
+      `💵 Avvalgi nasiya summasi: ${telegramMoney(data.originalTotalAmount, data.currency)}`,
       `💰 Importgacha to‘langan: ${telegramMoney(data.alreadyPaidBeforeImport, data.currency)}`,
       `⏳ Qolgan qarz: ${telegramMoney(data.remainingDebt, data.currency)}`,
     ),
@@ -671,7 +671,7 @@ export function nasiyaCompletedMessage(data: {
   currency?: CurrencyContext | null
 }): string {
   return compose(
-    '<b>✅ Nasiya yakunlandi</b>',
+    '<b>✅ Nasiya to‘liq yopildi</b>',
     optionalLine('Do‘kon', data.shopName, '🏪'),
     block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     formatDeviceSpecs(data.device, { battery: false }),

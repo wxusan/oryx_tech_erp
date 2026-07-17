@@ -31,6 +31,7 @@ import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { queryKeys } from '@/lib/query-keys'
 import type { NasiyaOperationContext, NasiyaOperationSchedule, NasiyaPaymentMutationResult } from '@/lib/nasiya-operation-context'
 import { AsyncButton } from '@/components/ui/async-button'
+import { scheduleStatusLabel } from '@/lib/presentation-labels'
 
 /**
  * The single receive-payment modal used by BOTH the nasiya detail page and the
@@ -45,12 +46,12 @@ type Schedule = NasiyaOperationSchedule
 type RowStatus = 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
 
 const scheduleStatusLabels: Record<RowStatus, string> = {
-  PAID: "To'landi",
-  PENDING: 'Kutilmoqda',
-  PARTIAL: "Qisman to'landi",
-  OVERDUE: "Muddati o'tgan",
-  DEFERRED: "Keyinga o'tkazilgan",
-  CANCELLED: 'Bekor qilingan',
+  PAID: scheduleStatusLabel('PAID'),
+  PENDING: scheduleStatusLabel('PENDING'),
+  PARTIAL: scheduleStatusLabel('PARTIAL'),
+  OVERDUE: scheduleStatusLabel('OVERDUE'),
+  DEFERRED: scheduleStatusLabel('DEFERRED'),
+  CANCELLED: scheduleStatusLabel('CANCELLED'),
 }
 
 function rowDisplayStatus(row: Schedule): RowStatus {
@@ -491,9 +492,9 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                           <SelectValue placeholder="Usulni tanlang" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="CASH">Naqd</SelectItem>
-                          <SelectItem value="CARD">Karta</SelectItem>
-                          <SelectItem value="TRANSFER">Bank o&apos;tkazmasi</SelectItem>
+                          <SelectItem value="CASH">Naqd pul</SelectItem>
+                          <SelectItem value="CARD">Karta orqali</SelectItem>
+                          <SelectItem value="TRANSFER">Pul o‘tkazmasi</SelectItem>
                           <SelectItem value="OTHER">Boshqa</SelectItem>
                         </SelectContent>
                       </Select>
@@ -562,9 +563,9 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                           <SelectValue placeholder="Usulni tanlang" />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="CASH">Naqd</SelectItem>
-                          <SelectItem value="CARD">Karta</SelectItem>
-                          <SelectItem value="TRANSFER">Bank o&apos;tkazmasi</SelectItem>
+                          <SelectItem value="CASH">Naqd pul</SelectItem>
+                          <SelectItem value="CARD">Karta orqali</SelectItem>
+                          <SelectItem value="TRANSFER">Pul o‘tkazmasi</SelectItem>
                           <SelectItem value="OTHER">Boshqa</SelectItem>
                         </SelectContent>
                       </Select>
@@ -644,9 +645,9 @@ export function NasiyaPaymentModal({ nasiyaId, open, onOpenChange, onSuccess, cu
                         <SelectValue placeholder="Usulni tanlang" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="CASH">Naqd</SelectItem>
-                        <SelectItem value="CARD">Karta</SelectItem>
-                        <SelectItem value="TRANSFER">Bank o&apos;tkazmasi</SelectItem>
+                        <SelectItem value="CASH">Naqd pul</SelectItem>
+                        <SelectItem value="CARD">Karta orqali</SelectItem>
+                        <SelectItem value="TRANSFER">Pul o‘tkazmasi</SelectItem>
                         <SelectItem value="OTHER">Boshqa</SelectItem>
                       </SelectContent>
                     </Select>

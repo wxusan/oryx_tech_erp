@@ -141,13 +141,13 @@ export async function GET(req: NextRequest) {
       : 0
     const notificationWarnings = [
       notificationCounts.PENDING > 100
-        ? `Bildirishnoma navbati katta: ${notificationCounts.PENDING} ta PENDING`
+        ? `Xabarnoma navbati katta: ${notificationCounts.PENDING} ta xabarnoma navbatda`
         : null,
       notificationCounts.FAILED > 0
-        ? `FAILED bildirishnomalar bor: ${notificationCounts.FAILED} ta`
+        ? `Yuborilmagan xabarnomalar bor: ${notificationCounts.FAILED} ta`
         : null,
       notificationCounts.CANCELLED > 0
-        ? `CANCELLED bildirishnomalar bor: ${notificationCounts.CANCELLED} ta`
+        ? `Bekor qilingan xabarnomalar bor: ${notificationCounts.CANCELLED} ta`
         : null,
       oldestActionableAgeSeconds > 15 * 60
         ? `Eng eski yuborilishi kerak bo'lgan bildirishnoma ${Math.floor(oldestActionableAgeSeconds / 60)} daqiqadan beri navbatda`

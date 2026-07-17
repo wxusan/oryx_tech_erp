@@ -120,7 +120,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       if (currentLedger.health === 'QUARANTINED') {
         throw { status: 409, message: "Nasiya hisob-kitobida tekshiruv talab qilinadigan tafovut bor" }
       }
-      if (currentLedger.status === 'COMPLETED') throw { status: 409, message: 'Yakunlangan nasiya kechiktirilmaydi' }
+      if (currentLedger.status === 'COMPLETED') throw { status: 409, message: 'To‘liq yopilgan nasiya to‘lovi muddatini uzaytirib bo‘lmaydi' }
 
       await tx.$queryRaw(Prisma.sql`
         SELECT "id" FROM "NasiyaSchedule"
