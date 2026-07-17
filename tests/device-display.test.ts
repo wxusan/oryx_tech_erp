@@ -57,30 +57,30 @@ describe('device IMEI display helpers', () => {
 describe('deviceStatusLabel', () => {
   it('maps every known device status to its Uzbek label', () => {
     expect(deviceStatusLabel('IN_STOCK')).toBe('Omborda')
-    expect(deviceStatusLabel('SOLD_CASH')).toBe('Naqd sotildi')
+    expect(deviceStatusLabel('SOLD_CASH')).toBe('Naqdga sotilgan')
     expect(deviceStatusLabel('SOLD_DEBT')).toBe('Qarzga sotilgan')
-    expect(deviceStatusLabel('SOLD_NASIYA')).toBe('Nasiyada')
-    expect(deviceStatusLabel('RETURNED')).toBe('Qaytarilgan (eski holat)')
-    expect(deviceStatusLabel('DELETED')).toBe("O'chirilgan")
+    expect(deviceStatusLabel('SOLD_NASIYA')).toBe('Nasiyaga sotilgan')
+    expect(deviceStatusLabel('RETURNED')).toBe('Qaytarilgan')
+    expect(deviceStatusLabel('DELETED')).toBe('O‘chirilgan')
   })
 
-  it('falls back to the raw status for an unknown value, never blank', () => {
-    expect(deviceStatusLabel('SOMETHING_NEW')).toBe('SOMETHING_NEW')
+  it('uses a readable fallback for an unknown value', () => {
+    expect(deviceStatusLabel('SOMETHING_NEW')).toBe('Holat noma’lum')
   })
 })
 
 describe('deviceActionLabel', () => {
   it('maps every known device log action to its Uzbek label', () => {
-    expect(deviceActionLabel('CREATE')).toBe("Qurilma qo'shildi")
-    expect(deviceActionLabel('SELL')).toBe('Naqd sotildi')
-    expect(deviceActionLabel('CREATE_NASIYA')).toBe('Nasiyaga berildi')
-    expect(deviceActionLabel('RETURN')).toBe('Qaytarildi')
-    expect(deviceActionLabel('RESTOCK')).toBe('Omborga qaytarildi')
-    expect(deviceActionLabel('UPDATE')).toBe("Ma'lumot o'zgartirildi")
-    expect(deviceActionLabel('DELETE')).toBe("O'chirildi")
+    expect(deviceActionLabel('CREATE')).toBe('Qurilma qo‘shildi')
+    expect(deviceActionLabel('SELL')).toBe('Qurilma sotildi')
+    expect(deviceActionLabel('CREATE_NASIYA')).toBe('Yangi nasiya yaratildi')
+    expect(deviceActionLabel('RETURN')).toBe('Qurilma qaytarildi')
+    expect(deviceActionLabel('RESTOCK')).toBe('Qurilma qayta omborga qo‘shildi')
+    expect(deviceActionLabel('UPDATE')).toBe('Qurilma ma’lumotlari yangilandi')
+    expect(deviceActionLabel('DELETE')).toBe('Qurilma o‘chirildi')
   })
 
-  it('falls back to the raw action for an unknown value', () => {
-    expect(deviceActionLabel('SOMETHING_NEW')).toBe('SOMETHING_NEW')
+  it('uses a readable fallback for an unknown value', () => {
+    expect(deviceActionLabel('SOMETHING_NEW')).toBe('Noma’lum amal')
   })
 })

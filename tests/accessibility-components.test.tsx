@@ -35,6 +35,6 @@ describe('extracted accessible presentation components', () => {
 
   it('renders the centralized shop status label', () => {
     render(<ShopStatusBadge status="SUSPENDED" />)
-    expect(screen.getByText("To'xtatilgan")).toBeTruthy()
+    expect(screen.getByText('Vaqtincha to‘xtatilgan')).toBeTruthy()
   })
 })

@@ -27,7 +27,7 @@ describe('P0-02 sale payment route guard: contract currency is authoritative', (
   it('never rejects because the UZS snapshot payment is larger than legacy remainingAmount', () => {
     expect(route).not.toContain('if (amount > oldRemaining)')
     expect(route).not.toContain("message: \"To'lov qolgan qarzdan oshib ketdi\"")
-    expect(route).toContain("message: \"To'lov qolgan shartnoma qarzidan oshib ketdi\"")
+    expect(route).toContain("message: 'To‘lov summasi qolgan qarzdan oshib ketdi.'")
   })
 
   it('preserves input history and applied native amount on SalePayment', () => {

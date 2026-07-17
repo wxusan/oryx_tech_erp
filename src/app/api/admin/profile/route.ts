@@ -62,7 +62,7 @@ export async function GET() {
       select: profileSelect(),
     })
 
-    if (!admin) return notFound('Bosh admin topilmadi')
+    if (!admin) return notFound('Bosh administrator topilmadi')
 
     return ok(admin)
   } catch (err) {
@@ -88,7 +88,7 @@ export async function PATCH(req: NextRequest) {
         where: { id: guarded.session.user.id, deletedAt: null },
         select: { id: true, preferredCurrency: true },
       })
-      if (!admin) return notFound('Bosh admin topilmadi')
+      if (!admin) return notFound('Bosh administrator topilmadi')
 
       const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         await tx.superAdmin.update({
@@ -136,7 +136,7 @@ export async function PATCH(req: NextRequest) {
         },
       })
 
-      if (!admin) return notFound('Bosh admin topilmadi')
+      if (!admin) return notFound('Bosh administrator topilmadi')
       if (telegramId && (await isTelegramIdTaken(telegramId, { type: 'SUPER_ADMIN', id: admin.id }))) {
         return conflict(`Bu Telegram ID allaqachon tizimda bor: ${telegramId}`)
       }
@@ -169,7 +169,7 @@ export async function PATCH(req: NextRequest) {
         })
       })
 
-      return ok(updated, telegramId ? 'Telegram ID yangilandi.' : "Telegram ID o'chirildi.")
+      return ok(updated, telegramId ? 'Telegram ulanishi yangilandi.' : 'Telegram ulanishi o‘chirildi.')
     }
 
     if (typeof body === 'object' && body !== null && 'name' in body) {
@@ -183,7 +183,7 @@ export async function PATCH(req: NextRequest) {
         where: { id: guarded.session.user.id, deletedAt: null },
         select: { id: true, name: true, login: true },
       })
-      if (!admin) return notFound('Bosh admin topilmadi')
+      if (!admin) return notFound('Bosh administrator topilmadi')
 
       const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
         await tx.superAdmin.update({ where: { id: admin.id }, data: { name: parsed.data.name } })
@@ -225,7 +225,7 @@ export async function PATCH(req: NextRequest) {
       },
     })
 
-    if (!admin) return notFound('Bosh admin topilmadi')
+    if (!admin) return notFound('Bosh administrator topilmadi')
 
     const currentPasswordMatches = await bcrypt.compare(parsed.data.currentPassword, admin.passwordHash)
     if (!currentPasswordMatches) {

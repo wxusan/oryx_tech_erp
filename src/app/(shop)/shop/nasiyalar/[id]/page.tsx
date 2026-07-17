@@ -36,6 +36,12 @@ import type {
   NasiyaOperationContext,
   NasiyaPaymentMutationResult,
 } from '@/lib/nasiya-operation-context'
+import {
+  exchangeRateSourceLabel,
+  nasiyaResolutionEventLabel,
+  nasiyaResolutionLabel,
+  nasiyaStatusLabel,
+} from '@/lib/presentation-labels'
 
 type NasiyaPayment = NasiyaPaymentDisplayRecord
 type ResolutionState = 'ACTIVE' | 'ARCHIVED'
@@ -527,11 +533,11 @@ function AuthorizedNasiyaDetailPage() {
   const currentFxCaption = nasiya.contractCurrency !== currency.currency && currency.fxQuote?.rate
     ? [
         `Joriy kurs bo'yicha ≈ · 1 USD = ${currency.fxQuote.rate} so'm`,
-        currency.fxQuote.source ?? 'manba noma’lum',
+        exchangeRateSourceLabel(currency.fxQuote.source),
         currency.fxQuote.effectiveAt || currency.fxQuote.fetchedAt
           ? uzDate(currency.fxQuote.effectiveAt ?? currency.fxQuote.fetchedAt)
           : null,
-        currency.fxQuote.freshness === 'FALLBACK' ? 'oxirgi mavjud kurs' : null,
+        currency.fxQuote.freshness === 'FALLBACK' ? exchangeRateSourceLabel('FALLBACK') : null,
       ].filter(Boolean).join(' · ')
     : null
 
@@ -562,11 +568,6 @@ function AuthorizedNasiyaDetailPage() {
     OVERDUE: 'bg-red-100 text-red-700',
     COMPLETED: 'bg-emerald-100 text-emerald-700',
   }
-  const statusBadgeLabels: Record<string, string> = {
-    ACTIVE: 'Faol',
-    OVERDUE: "Muddati o'tgan",
-    COMPLETED: 'Yakunlangan',
-  }
 
   return (
     <div className="p-6 space-y-5 max-w-4xl">
@@ -580,7 +581,7 @@ function AuthorizedNasiyaDetailPage() {
           <div className="flex items-center gap-2 flex-wrap">
             <h1 className="text-2xl font-bold text-zinc-900">{nasiya.customer.name}</h1>
             <span className={`inline-block px-2.5 py-1 rounded text-xs font-medium ${statusBadgeStyles[displayStatus]}`}>
-              {statusBadgeLabels[displayStatus]}
+              {nasiyaStatusLabel(displayStatus)}
             </span>
             {nasiya.resolutionState === 'ARCHIVED' && (
               <span className="inline-block rounded bg-blue-100 px-2.5 py-1 text-xs font-medium text-blue-800">
@@ -659,17 +660,17 @@ function AuthorizedNasiyaDetailPage() {
       {canBrowseNasiyas && nasiya.importData?.isImported && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-4">
           <div className="flex items-center gap-2">
-            <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Eski nasiya</span>
+            <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Avvalgi nasiya</span>
             <span className="text-sm font-semibold text-amber-900">Import qilingan nasiya</span>
           </div>
           <p className="mt-1 text-xs text-amber-800/80">
-            Bu Oryx'dan oldingi eski nasiya. Importgacha to'langan pul joriy oy daromadiga qo'shilmaydi.
+            Bu Oryx’dan avvalgi nasiya. Importgacha to‘langan pul joriy oy daromadiga qo‘shilmaydi.
           </p>
           <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
-            <ImportField label="Manba" value={nasiya.importData.source === 'MANUAL' ? "Qo'lda" : (nasiya.importData.source ?? '—')} />
+            <ImportField label="Manba" value={exchangeRateSourceLabel(nasiya.importData.source)} />
             <ImportField label="Import sanasi" value={nasiya.importData.importedAt ? uzDate(nasiya.importData.importedAt) : '—'} />
             <ImportField label="Eski sotuv sanasi" value={nasiya.importData.originalSaleDate ? uzDate(nasiya.importData.originalSaleDate) : '—'} />
-            <ImportField label="Eski nasiya summasi" value={nasiya.importData.originalTotal ? mfmt(nasiya.importData.originalTotal) : '—'} />
+            <ImportField label="Avvalgi nasiya summasi" value={nasiya.importData.originalTotal ? mfmt(nasiya.importData.originalTotal) : '—'} />
             <ImportField label="Importgacha to'langan" value={mfmt(nasiya.importData.alreadyPaid)} />
             <ImportField label="Import paytidagi qarz" value={nasiya.importData.remainingAtImport ? mfmt(nasiya.importData.remainingAtImport) : '—'} />
           </div>
@@ -757,7 +758,7 @@ function AuthorizedNasiyaDetailPage() {
               <CardTitle>{isCompleted ? "To'lov tarixi bahosi" : "To'lov ishonchi"}</CardTitle>
               <CardDescription>
                 {isCompleted
-                  ? "Yakunlangan nasiya bo'yicha tarixiy to'lov xatti-harakati"
+                  ? 'To‘liq yopilgan nasiya bo‘yicha tarixiy to‘lov xatti-harakati'
                   : "Mijozning to'lov tarixiga asoslangan baho"}
               </CardDescription>
             </CardHeader>
@@ -827,12 +828,12 @@ function AuthorizedNasiyaDetailPage() {
               <div key={event.id} className="rounded-lg border border-zinc-200 p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <span className="font-medium text-zinc-900">
-                    {event.eventType === 'ARCHIVE' ? 'Arxivlandi' : 'Qayta ochildi'}
+                    {nasiyaResolutionEventLabel(event.eventType)}
                   </span>
                   <span className="text-xs text-zinc-500">{uzDate(event.createdAt)}</span>
                 </div>
                 <div className="mt-1 text-xs text-zinc-500">
-                  {event.previousState} → {event.newState} · {formatMoneyDto(event.nativeRemaining)}
+                  {nasiyaResolutionLabel(event.previousState)} → {nasiyaResolutionLabel(event.newState)} · {formatMoneyDto(event.nativeRemaining)}
                   {' · '}muzlatilgan UZS: {formatMoneyDto(event.frozenUzs)}
                 </div>
                 <p className="mt-2 whitespace-pre-wrap text-zinc-700">{event.reason}</p>

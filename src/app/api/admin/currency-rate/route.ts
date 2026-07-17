@@ -87,14 +87,14 @@ export async function POST(req: NextRequest) {
             rate: parsed.data.rate,
             source: 'MANUAL',
           },
-          note: parsed.data.note || 'Manual USD/UZS fallback rate updated',
+          note: parsed.data.note || 'Qo‘lda kiritilgan USD/UZS zaxira kursi yangilandi',
         },
       })
 
       return createdRate
     })
 
-    return created(rate, 'Manual USD kursi saqlandi.')
+    return created(rate, 'Qo‘lda kiritilgan USD kursi saqlandi.')
   } catch (err) {
     logger.error('[POST /api/admin/currency-rate]', { event: 'api.route_error', error: err })
     return serverError()

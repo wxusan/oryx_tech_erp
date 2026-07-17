@@ -339,7 +339,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       result.device,
       result.duplicate
         ? 'Qaytarish avval muvaffaqiyatli saqlangan'
-        : "Qurilma omborga qaytarildi; asl shartnoma va to'lov tarixi saqlandi",
+        : 'Qurilma qaytarildi; asl shartnoma va to‘lov tarixi saqlandi',
     )
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
@@ -358,6 +358,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict('Qaytarish amali avval saqlangan. Sahifani yangilang.')
+    }
+    if (err instanceof Error && err.message === 'RETURN_TRANSACTION_RETRY_EXHAUSTED') {
+      return serverError('Qaytarishni yakunlab bo‘lmadi. Iltimos, qayta urinib ko‘ring.')
     }
     logger.error('[POST /api/devices/[id]/return]', { event: 'api.route_error', error: err })
     return serverError()

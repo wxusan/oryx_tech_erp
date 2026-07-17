@@ -2000,7 +2000,7 @@ describe('real-PostgreSQL route evidence', () => {
     expect(csv).toContain('purchaseAmountUzsSnapshot')
     expect(csv).toContain('purchasePriceCurrentShopDisplay')
     expect(csv).toContain('USD purchase export phone')
-    expect(csv).toContain('"100","USD","12500","1250000","1250000"')
+    expect(csv).toContain('"100","AQSH dollari","12500","1250000","1250000"')
   })
 
   it('exports the frozen native Sale ledger alongside clearly labelled UZS snapshots', async () => {

@@ -42,7 +42,7 @@ function deviceMeta(device: Device) {
     device.batteryHealth != null ? `${device.batteryHealth}%` : null,
     device.conditionLabel,
     `IMEI 1: ${displayImei(device.imei)}`,
-    device.secondaryImei ? `IMEI 2: ${displayImei(device.secondaryImei)}` : null,
+    device.secondaryImei ? `Qo‘shimcha IMEI: ${displayImei(device.secondaryImei)}` : null,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -370,9 +370,9 @@ function AuthorizedNewSotuvPage() {
                     <SelectValue placeholder="Tanlang" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="CASH">Naqd</SelectItem>
-                    <SelectItem value="CARD">Karta</SelectItem>
-                    <SelectItem value="TRANSFER">Bank o&apos;tkazma</SelectItem>
+                    <SelectItem value="CASH">Naqd pul</SelectItem>
+                    <SelectItem value="CARD">Karta orqali</SelectItem>
+                    <SelectItem value="TRANSFER">Pul o‘tkazmasi</SelectItem>
                     <SelectItem value="OTHER">Boshqa</SelectItem>
                   </SelectContent>
                 </Select>
@@ -397,7 +397,7 @@ function AuthorizedNewSotuvPage() {
                     : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'
                 }`}
               >
-                To&apos;liq to&apos;laydi
+                To‘liq to‘lov
               </button>
               <button
                 type="button"
@@ -409,7 +409,7 @@ function AuthorizedNewSotuvPage() {
                     : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'
                 }`}
               >
-                Qisman to&apos;laydi
+                Qisman to‘lov
               </button>
               <button
                 type="button"
@@ -421,7 +421,7 @@ function AuthorizedNewSotuvPage() {
                     : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'
                 }`}
               >
-                Hammasini keyin to&apos;laydi
+                Keyinroq to‘lash
               </button>
             </div>
 

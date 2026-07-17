@@ -8,6 +8,25 @@ import { uzDateTime } from '@/lib/dates'
 import type { ApiResponse } from '@/types'
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import {
+  INTERNAL_ERROR_MESSAGES,
+  actorTypeLabel,
+  exchangeRateSourceLabel,
+  logActionLabel,
+  logTargetLabel,
+  internalErrorMessage,
+  navigationDomainLabel,
+  mutationCodeLabel,
+  notificationCancellationLabel,
+  notificationStatusLabel,
+  notificationTypeLabel,
+  operationsEventLabel,
+  operationsLevelLabel,
+  operationsStatusLabel,
+  reminderPhaseLabel,
+  shopFeatureLabel,
+  shopPermissionLabel,
+} from '@/lib/presentation-labels'
 
 interface OpsEvent {
   id: string
@@ -63,8 +82,48 @@ function metaSummary(metadata: unknown) {
   if (!metadata || typeof metadata !== 'object') return ''
   return Object.entries(metadata as Record<string, unknown>)
     .slice(0, 6)
-    .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+    .map(([k, v]) => `${k}=${metaValueLabel(k, v)}`)
     .join(' · ')
+}
+
+function metaValueLabel(key: string, value: unknown): string {
+  if (value == null) return 'Ko‘rsatilmagan'
+  if (typeof value === 'object') return JSON.stringify(value)
+  if (typeof value !== 'string') return String(value)
+  if (key === 'event') return operationsEventLabel(value)
+  if (key === 'level') return operationsLevelLabel(value)
+  if (key === 'status') {
+    const notificationStatus = notificationStatusLabel(value)
+    return notificationStatus === 'Holat noma’lum' ? operationsStatusLabel(value) : notificationStatus
+  }
+  if (key === 'type' || key === 'notificationType') return notificationTypeLabel(value)
+  if (key === 'reason' || key === 'cancellationReason') return notificationCancellationLabel(value)
+  if (key === 'source') return exchangeRateSourceLabel(value)
+  if (key === 'actorType') return actorTypeLabel(value)
+  if (key === 'targetType' || key === 'entityType') return logTargetLabel(value)
+  if (key === 'action') return logActionLabel(value)
+  if (key === 'permissionCode') return shopPermissionLabel(value)
+  if (key === 'featureCode') return shopFeatureLabel(value)
+  if (key === 'mutationCode' || key === 'mutationKind') return mutationCodeLabel(value)
+  if (key === 'phase') return reminderPhaseLabel(value)
+  if ((key === 'error' || key === 'errorCode') && value in INTERNAL_ERROR_MESSAGES) return internalErrorMessage(value)
+  if (key === 'domain' || key === 'navigationDomain') return navigationDomainLabel(value)
+  return value
+}
+
+function notificationErrorLabel(value: string | null) {
+  if (!value) return '—'
+  return [
+    'legacy_recipient_unbound',
+    'recipient_revoked_or_unverified',
+    'recipient_not_entitled_or_notifications_disabled',
+    'reminders_not_entitled',
+    'invalid_reminder_reference',
+    'debt_resolved_or_changed',
+  ].reduce(
+    (message, reason) => message.replaceAll(reason, notificationCancellationLabel(reason)),
+    value,
+  )
 }
 
 function queueAge(seconds: number) {
@@ -182,10 +241,10 @@ export default function AdminOpsPage() {
           {/* Level + queue counts */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
             {(['INFO', 'WARN', 'ERROR'] as const).map((lvl) => (
-              <Stat key={lvl} label={lvl} value={data.levelCounts[lvl] ?? 0} tone={lvl} />
+              <Stat key={lvl} label={operationsLevelLabel(lvl)} value={data.levelCounts[lvl] ?? 0} tone={lvl} />
             ))}
             {(['PENDING', 'PROCESSING', 'SENT', 'FAILED', 'CANCELLED'] as const).map((s) => (
-              <Stat key={s} label={s} value={data.notificationCounts[s] ?? 0} />
+              <Stat key={s} label={notificationStatusLabel(s)} value={data.notificationCounts[s] ?? 0} />
             ))}
           </div>
 
@@ -194,7 +253,7 @@ export default function AdminOpsPage() {
             <div className="mb-2 text-sm font-semibold text-zinc-900">Oxirgi cron</div>
             {data.lastCron ? (
               <div className="text-sm text-zinc-600">
-                <span className="font-medium text-zinc-900">{data.lastCron.event}</span> ·{' '}
+                <span className="font-medium text-zinc-900">{operationsEventLabel(data.lastCron.event)}</span> ·{' '}
                 {uzDateTime(data.lastCron.createdAt)}
                 <div className="mt-1 text-xs text-zinc-500">{metaSummary(data.lastCron.metadata)}</div>
               </div>
@@ -214,7 +273,7 @@ export default function AdminOpsPage() {
               {data.queueHealth.oldestActionableCreatedAt ? (
                 <>
                   {queueAge(data.queueHealth.oldestActionableAgeSeconds)} ·{' '}
-                  {data.queueHealth.oldestActionableStatus} ·{' '}
+                  {notificationStatusLabel(data.queueHealth.oldestActionableStatus)} ·{' '}
                   {uzDateTime(data.queueHealth.oldestActionableCreatedAt)}
                 </>
               ) : (
@@ -229,15 +288,15 @@ export default function AdminOpsPage() {
               <TableWrap head={['Turi', 'Holat', 'Urinish', 'Xatolik', 'Sana']}>
                 {data.recentFailedNotifications.map((n) => (
                   <tr key={n.id} className="border-b border-zinc-100 last:border-0">
-                    <td className="px-4 py-2.5 text-zinc-700">{n.type}</td>
+                    <td className="px-4 py-2.5 text-zinc-700">{notificationTypeLabel(n.type)}</td>
                     <td className="px-4 py-2.5">
                       <span className={`rounded px-2 py-0.5 text-xs font-medium ${n.status === 'CANCELLED' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}`}>
-                        {n.status}
+                        {notificationStatusLabel(n.status)}
                       </span>
                     </td>
                     <td className="px-4 py-2.5 text-zinc-500">{n.attemptCount}</td>
-                    <td className="max-w-xs truncate px-4 py-2.5 text-zinc-500" title={n.lastError ?? ''}>
-                      {n.lastError ?? '—'}
+                    <td className="max-w-xs truncate px-4 py-2.5 text-zinc-500" title={notificationErrorLabel(n.lastError)}>
+                      {notificationErrorLabel(n.lastError)}
                     </td>
                     <td className="px-4 py-2.5 whitespace-nowrap text-zinc-400">{uzDateTime(n.lastAttemptAt ?? n.createdAt)}</td>
                   </tr>
@@ -255,9 +314,9 @@ export default function AdminOpsPage() {
                 {data.events.map((e) => (
                   <tr key={e.id} className="border-b border-zinc-100 last:border-0 align-top">
                     <td className="px-4 py-2.5">
-                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${levelStyles[e.level]}`}>{e.level}</span>
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${levelStyles[e.level]}`}>{operationsLevelLabel(e.level)}</span>
                     </td>
-                    <td className="px-4 py-2.5 font-mono text-xs text-zinc-700">{e.event}</td>
+                    <td className="px-4 py-2.5 text-xs font-medium text-zinc-700">{operationsEventLabel(e.event)}</td>
                     <td className="px-4 py-2.5 text-zinc-600">
                       {e.message}
                       {metaSummary(e.metadata) && (

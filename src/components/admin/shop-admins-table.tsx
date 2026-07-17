@@ -38,14 +38,14 @@ export function ShopAdminsTable({
           <TableHead className="pr-5 text-right text-xs font-medium text-zinc-500">Amallar</TableHead>
         </TableRow></TableHeader>
         <TableBody>{admins.length === 0 ? (
-          <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-zinc-400">Admin topilmadi</TableCell></TableRow>
+          <TableRow><TableCell colSpan={6} className="py-8 text-center text-sm text-zinc-400">Do‘kon foydalanuvchisi topilmadi</TableCell></TableRow>
         ) : admins.map((admin) => (
           <TableRow key={admin.id} className="border-zinc-100 hover:bg-zinc-50">
             <TableCell className="pl-5 text-sm font-medium text-zinc-900">
               <div className="flex flex-wrap items-center gap-2">
                 <span>{admin.name}</span>
                 <span className={admin.memberKind === 'SHOP_OWNER' ? 'bg-emerald-100 px-1.5 py-0.5 text-[10px] text-emerald-800' : 'bg-zinc-100 px-1.5 py-0.5 text-[10px] text-zinc-600'}>
-                  {admin.memberKind === 'SHOP_OWNER' ? 'Egasi' : 'Xodim'}
+                  {admin.memberKind === 'SHOP_OWNER' ? 'Do‘kon egasi' : 'Xodim'}
                 </span>
               </div>
             </TableCell>

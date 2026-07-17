@@ -280,15 +280,15 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (isInvalidRequestBody(error)) return badRequest("So'rov ma'lumoti noto'g'ri")
     if (error && typeof error === 'object' && 'code' in error) {
       if (error.code === 'STAFF_NOT_FOUND') return notFound('Xodim topilmadi')
-      if (error.code === 'OWNER_TARGET') return conflict("Do'kon egasini xodim sifatida o'zgartirib bo'lmaydi")
-      if (error.code === 'STAFF_ACCESS_DISABLED') return conflict("Xodimlar profili o'chirilgan")
-      if (error.code === 'AUTHORIZATION_CHANGED') return forbidden("Ruxsat o'zgargan. Sahifani yangilang")
-      if (error.code === 'PERMISSION_INVALID') return badRequest(error instanceof Error ? error.message : "Ruxsat noto'g'ri")
-      if (error.code === 'DELEGATION_FORBIDDEN') return forbidden("Xodim boshqaruvchisi bu ruxsatni bera olmaydi")
-      if (error.code === 'LOGS_OWNER_ONLY') return forbidden("Log ruxsatini faqat do'kon egasi boshqaradi")
-      if (error.code === 'LOGIN_OWNER_ONLY') return forbidden("Xodim loginini faqat do'kon egasi o'zgartira oladi")
-      if (error.code === 'LOGIN_TAKEN') return conflict('Bu login allaqachon mavjud')
-      if (error.code === 'TELEGRAM_DISABLED') return badRequest("Telegram moduli yoqilmagan")
+      if (error.code === 'OWNER_TARGET') return conflict('Tanlangan foydalanuvchini do‘kon egasi sifatida biriktirib bo‘lmaydi.')
+      if (error.code === 'STAFF_ACCESS_DISABLED') return conflict('Xodimlar uchun kirish o‘chirilgan.')
+      if (error.code === 'AUTHORIZATION_CHANGED') return forbidden('Ruxsatlaringiz o‘zgargan. Sahifani yangilab, qayta urinib ko‘ring.')
+      if (error.code === 'PERMISSION_INVALID') return badRequest('Tanlangan ruxsat noto‘g‘ri.')
+      if (error.code === 'DELEGATION_FORBIDDEN') return forbidden('Bu amalni boshqa foydalanuvchi nomidan bajarishga ruxsat yo‘q.')
+      if (error.code === 'LOGS_OWNER_ONLY') return forbidden('Faoliyat tarixini faqat do‘kon egasi ko‘ra oladi.')
+      if (error.code === 'LOGIN_OWNER_ONLY') return forbidden('Tizimga faqat do‘kon egasi kira oladi.')
+      if (error.code === 'LOGIN_TAKEN') return conflict('Bu login allaqachon band.')
+      if (error.code === 'TELEGRAM_DISABLED') return badRequest('Telegram funksiyasi o‘chirilgan.')
       if (error.code === 'P2002') return conflict('Bu telefon yoki login allaqachon mavjud')
     }
     logger.error('[PATCH /api/shop/staff/[id]]', { event: 'api.route_error', error })
@@ -357,9 +357,10 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     if (isInvalidRequestBody(error)) return badRequest("So'rov ma'lumoti noto'g'ri")
     if (error && typeof error === 'object' && 'code' in error) {
       if (error.code === 'STAFF_NOT_FOUND') return notFound('Xodim topilmadi')
-      if (error.code === 'OWNER_TARGET') return conflict("Do'kon egasini o'chirib bo'lmaydi")
-      if (error.code === 'AUTHORIZATION_CHANGED') return forbidden("Ruxsat o'zgargan. Sahifani yangilang")
+      if (error.code === 'OWNER_TARGET') return conflict('Tanlangan foydalanuvchini do‘kon egasi sifatida biriktirib bo‘lmaydi.')
+      if (error.code === 'AUTHORIZATION_CHANGED') return forbidden('Ruxsatlaringiz o‘zgargan. Sahifani yangilab, qayta urinib ko‘ring.')
     }
+    if (error instanceof Error && error.message === 'SERIALIZABLE_TRANSACTION_FAILED') return serverError('Amalni yakunlab bo‘lmadi. Iltimos, qayta urinib ko‘ring.')
     logger.error('[DELETE /api/shop/staff/[id]]', { event: 'api.route_error', error })
     return serverError()
   }

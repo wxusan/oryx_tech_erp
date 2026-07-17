@@ -265,7 +265,7 @@ function AuthorizedNewOlibSotdimPage() {
                 <label htmlFor="olib-condition" className="block text-xs font-medium text-zinc-700 mb-1.5">Holati <span aria-hidden="true" className="text-red-500">*</span></label>
                 <Select value={conditionCode} onValueChange={(value) => value && setConditionCode(value as 'NEW' | 'USED')}>
                   <SelectTrigger id="olib-condition" aria-required="true" className="h-9 w-full"><SelectValue placeholder="Tanlang" /></SelectTrigger>
-                  <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
+                  <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">Ishlatilgan</SelectItem></SelectContent>
                 </Select>
               </div>}
               <Field
@@ -284,9 +284,9 @@ function AuthorizedNewOlibSotdimPage() {
                 />
               </Field>
               <Field
-                label="Ikkinchi IMEI"
+                label="Qo‘shimcha IMEI"
                 help="Ixtiyoriy, 15 ta raqam"
-                error={secondaryImei && !/^\d{15}$/.test(secondaryImei) ? 'Ikkinchi IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
+                error={secondaryImei && !/^\d{15}$/.test(secondaryImei) ? 'Qo‘shimcha IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
               >
                 <Input value={secondaryImei} onChange={(e) => setSecondaryImei(e.target.value)} placeholder="351234560012346" inputMode="numeric" maxLength={15} className="h-9 text-sm border-zinc-200 rounded font-mono" />
               </Field>
@@ -393,9 +393,9 @@ function AuthorizedNewOlibSotdimPage() {
                         <SelectValue placeholder="Tanlang" />
                       </SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="CASH">Naqd</SelectItem>
-                        <SelectItem value="CARD">Karta</SelectItem>
-                        <SelectItem value="TRANSFER">Bank o&apos;tkazma</SelectItem>
+                        <SelectItem value="CASH">Naqd pul</SelectItem>
+                        <SelectItem value="CARD">Karta orqali</SelectItem>
+                        <SelectItem value="TRANSFER">Pul o‘tkazmasi</SelectItem>
                         <SelectItem value="OTHER">Boshqa</SelectItem>
                       </SelectContent>
                     </Select>
@@ -546,9 +546,9 @@ function AuthorizedNewOlibSotdimPage() {
                     <SelectValue placeholder="Tanlang" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="CASH">Naqd</SelectItem>
-                    <SelectItem value="CARD">Karta</SelectItem>
-                    <SelectItem value="TRANSFER">Bank o&apos;tkazma</SelectItem>
+                    <SelectItem value="CASH">Naqd pul</SelectItem>
+                    <SelectItem value="CARD">Karta orqali</SelectItem>
+                    <SelectItem value="TRANSFER">Pul o‘tkazmasi</SelectItem>
                     <SelectItem value="OTHER">Boshqa</SelectItem>
                   </SelectContent>
                 </Select>
@@ -571,7 +571,7 @@ function AuthorizedNewOlibSotdimPage() {
                     onClick={() => setCustomerPaymentMode('FULL')}
                     className={`px-4 py-2 text-sm rounded border transition-colors ${customerPaymentMode === 'FULL' ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
                   >
-                    To&apos;liq to&apos;laydi
+                    To‘liq to‘lov
                   </button>
                   <button
                     type="button"
@@ -579,7 +579,7 @@ function AuthorizedNewOlibSotdimPage() {
                     onClick={() => setCustomerPaymentMode('PARTIAL')}
                     className={`px-4 py-2 text-sm rounded border transition-colors ${customerPaymentMode === 'PARTIAL' ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
                   >
-                    Qisman to&apos;laydi
+                    Qisman to‘lov
                   </button>
                   <button
                     type="button"
@@ -587,7 +587,7 @@ function AuthorizedNewOlibSotdimPage() {
                     onClick={() => { setCustomerPaymentMode('LATER'); setPartialAmount(''); setPaymentMethod('') }}
                     className={`px-4 py-2 text-sm rounded border transition-colors ${customerPaymentMode === 'LATER' ? 'bg-zinc-900 text-white border-zinc-900' : 'border-zinc-200 text-zinc-700 hover:bg-zinc-50'}`}
                   >
-                    Hammasini keyin to&apos;laydi
+                    Keyinroq to‘lash
                   </button>
                 </div>
               </fieldset>
@@ -660,9 +660,9 @@ function AuthorizedNewOlibSotdimPage() {
               <div>
                 <div className="text-xs font-semibold text-zinc-500 mb-1.5">Qurilma</div>
                 <div className="text-zinc-900">
-                  {model} {color && `· ${color}`} {storage && `· ${storage}${storageUnit}`} · {conditionCode === 'NEW' ? 'Yangi' : 'B/U'}
+                  {model} {color && `· ${color}`} {storage && `· ${storage}${storageUnit}`} · {conditionCode === 'NEW' ? 'Yangi' : 'Ishlatilgan'}
                 </div>
-                <div className="text-xs text-zinc-500 mt-0.5">IMEI 1: {imei}{secondaryImei && ` · IMEI 2: ${secondaryImei}`}</div>
+                <div className="text-xs text-zinc-500 mt-0.5">Asosiy IMEI: {imei}{secondaryImei && ` · Qo‘shimcha IMEI: ${secondaryImei}`}</div>
               </div>
               <div>
                 <div className="text-xs font-semibold text-zinc-500 mb-1.5">Kimdan olindi</div>

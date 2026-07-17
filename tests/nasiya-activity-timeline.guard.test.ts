@@ -25,26 +25,27 @@ describe('Amallar tarixi — data source audit', () => {
 
 describe('Amallar tarixi — event label coverage (the concrete gaps this ticket fixes)', () => {
   const source = read('src/components/shop/nasiya-history-sections.tsx')
+  const labels = read('src/lib/presentation-labels.ts')
 
-  it('shows "Nasiya yakunlandi" for the completion event (previously fell through to the raw action string)', () => {
-    expect(source).toContain("if (log.action === 'NASIYA_COMPLETED') return 'Nasiya yakunlandi'")
+  it('shows the approved completion label instead of the raw action string', () => {
+    expect(source).toContain('return logActionLabel(log.action, log.targetType)')
+    expect(labels).toContain("NASIYA_COMPLETED: 'Nasiya to‘liq yopildi'")
   })
 
-  it('shows "Muddat uzaytirildi" for a defer, distinct from a regular payment', () => {
-    expect(source).toContain("if (log.action === 'NASIYA_DEFER') return 'Muddat uzaytirildi'")
+  it('shows the approved defer label, distinct from a regular payment', () => {
+    expect(labels).toContain("NASIYA_DEFER: 'Nasiya to‘lovi muddati uzaytirildi'")
   })
 
   it('shows the old -> new due date under a defer event', () => {
     expect(source).toContain("`${uzDate(log.newValue.oldDueDate)} → ${uzDate(log.newValue.newDueDate)}`")
   })
 
-  it('shows the specific reminder toggle direction (yoqildi/o\'chirildi), not a generic "changed" label', () => {
-    expect(source).toContain("if (log.newValue?.reminderEnabled === true) return 'Eslatma yoqildi'")
-    expect(source).toContain("if (log.newValue?.reminderEnabled === false) return \"Eslatma o'chirildi\"")
+  it('shows the approved reminder-settings action label', () => {
+    expect(labels).toContain("UPDATE_REMINDER: 'Eslatma sozlamalari yangilandi'")
   })
 
-  it('still shows the regular payment label unchanged', () => {
-    expect(source).toContain("if (log.action === 'PAYMENT') return \"To'lov qabul qilindi\"")
+  it('uses the target-aware nasiya payment label', () => {
+    expect(labels).toContain("Nasiya: 'Nasiya to‘lovi qabul qilindi'")
   })
 })
 

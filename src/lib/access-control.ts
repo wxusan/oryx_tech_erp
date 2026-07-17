@@ -1,4 +1,5 @@
 import { hasValidMinorUnits, type CurrencyCode } from '@/lib/currency'
+import { shopFeatureLabel, shopPermissionLabel } from '@/lib/presentation-labels'
 
 export const SHOP_FEATURE_CODES = [
   'INVENTORY',
@@ -24,7 +25,7 @@ export interface ShopFeatureCatalogItem {
   prerequisites: readonly ShopFeatureCode[]
 }
 
-export const SHOP_FEATURE_CATALOG: readonly ShopFeatureCatalogItem[] = [
+const SHOP_FEATURE_CATALOG_DEFINITIONS: readonly ShopFeatureCatalogItem[] = [
   { code: 'INVENTORY', label: 'Qurilmalar va ombor', description: 'Qurilma kiritish, tahrirlash va ombor holati', billable: true, prerequisites: [] },
   { code: 'CASH_SALES', label: 'Naqd savdo va Qarz', description: "Naqd, aralash va keyinroq to'lanadigan savdolar", billable: true, prerequisites: ['INVENTORY'] },
   { code: 'NASIYA', label: 'Nasiya', description: "Nasiya shartnomalari, jadvallar va to'lovlar", billable: true, prerequisites: ['INVENTORY'] },
@@ -37,12 +38,17 @@ export const SHOP_FEATURE_CATALOG: readonly ShopFeatureCatalogItem[] = [
   { code: 'EXPORTS', label: 'Eksport', description: "Ma'lumotlarni faylga chiqarish", billable: true, prerequisites: [] },
   {
     code: 'STAFF_ACCESS',
-    label: 'Xodimlar profili',
+    label: 'Xodimlar uchun kirish',
     description: "Do'kon egasidan tashqari xodim profillari",
     billable: false,
     prerequisites: [],
   },
 ] as const
+
+export const SHOP_FEATURE_CATALOG: readonly ShopFeatureCatalogItem[] = SHOP_FEATURE_CATALOG_DEFINITIONS.map((item) => ({
+  ...item,
+  label: shopFeatureLabel(item.code),
+}))
 
 const featureByCode = new Map(SHOP_FEATURE_CATALOG.map((item) => [item.code, item]))
 
@@ -160,7 +166,7 @@ export interface ShopPermissionCatalogItem {
   legacyOperational: boolean
 }
 
-export const SHOP_PERMISSION_CATALOG: readonly ShopPermissionCatalogItem[] = [
+const SHOP_PERMISSION_CATALOG_DEFINITIONS: readonly ShopPermissionCatalogItem[] = [
   { code: 'INVENTORY_VIEW', label: "Qurilmalarni ko'rish", description: "Ombor ro'yxati va qurilma tafsilotlari", featureCode: 'INVENTORY', ownerOnly: false, retired: false, group: 'INVENTORY', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
   { code: 'DEVICE_CREATE', label: "Qurilma qo'shish", description: "Yangi qurilma va rasmlarini omborga kiritish", featureCode: 'INVENTORY', ownerOnly: false, retired: false, group: 'INVENTORY', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
   { code: 'DEVICE_EDIT', label: 'Qurilmani tahrirlash', description: "Mavjud qurilma ma'lumotlarini o'zgartirish", featureCode: 'INVENTORY', ownerOnly: false, retired: false, group: 'INVENTORY', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
@@ -179,7 +185,7 @@ export const SHOP_PERMISSION_CATALOG: readonly ShopPermissionCatalogItem[] = [
   { code: 'NASIYA_PAYMENT_RECEIVE', label: "Nasiya to'lovini qabul qilish", description: "Nasiya jadvali bo'yicha kirim to'lovini yozish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'FINANCIAL', staffManagerDelegable: true, legacyOperational: true },
   { code: 'NASIYA_DEFER', label: "Nasiya to'lovini kechiktirish", description: "Bitta jadval sanasini idempotent tarzda ko'chirish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'FINANCIAL', staffManagerDelegable: true, legacyOperational: true },
   { code: 'NASIYA_REMINDER_MANAGE', label: 'Nasiya eslatmalarini boshqarish', description: "Nasiya eslatmasini yoqish yoki o'chirish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
-  { code: 'NASIYA_ARCHIVE', label: 'Can archive Nasiya', description: 'Xodimga nasiyani arxivlash va qayta ochish ruxsatini beradi', featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
+  { code: 'NASIYA_ARCHIVE', label: 'Nasiyani arxivga olish', description: 'Xodimga nasiyani arxivlash va qayta ochish ruxsatini beradi', featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'NASIYA_REOPEN', label: 'Nasiyani qayta ochish', description: 'Arxivlangan yoki yopilgan nasiyani qayta ochish', featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'OLIB_VIEW', label: "Olib-sotdimni ko'rish", description: "Olib-sotdim ro'yxati va tafsilotlari", featureCode: 'OLIB_SOTDIM', ownerOnly: false, retired: false, group: 'OLIB', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
   { code: 'OLIB_CREATE', label: 'Olib-sotdim qilish', description: "Tashqi qurilma, yetkazuvchi va mijoz sotuvini yozish", featureCode: 'OLIB_SOTDIM', ownerOnly: false, retired: false, group: 'OLIB', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
@@ -196,7 +202,7 @@ export const SHOP_PERMISSION_CATALOG: readonly ShopPermissionCatalogItem[] = [
   { code: 'REPORT_VIEW', label: "Tarixiy hisobotlarni ko'rish", description: "Oy, oraliq va xodim filtrlari bilan hisobotlar", featureCode: 'REPORTS', ownerOnly: false, retired: false, group: 'INSIGHTS', risk: 'FINANCIAL', staffManagerDelegable: false, legacyOperational: false },
   { code: 'LOG_VIEW', label: "Faoliyat loglarini ko'rish", description: "Audit jurnalining xodimga xavfsiz ko'rinishi", featureCode: null, ownerOnly: false, retired: false, group: 'INSIGHTS', risk: 'PRIVATE', staffManagerDelegable: false, legacyOperational: true },
   { code: 'IMPORT_CUSTOMERS', label: 'Mijozlarni import qilish', description: 'Mijoz ma\'lumotlarini boshqariladigan import qilish', featureCode: 'IMPORTS', ownerOnly: false, retired: false, group: 'DATA', risk: 'ADMINISTRATIVE', staffManagerDelegable: false, legacyOperational: false },
-  { code: 'IMPORT_OLD_NASIYA', label: 'Eski nasiyalarni import qilish', description: 'Oldingi nasiya qoldiqlarini xavfsiz import qilish', featureCode: 'IMPORTS', ownerOnly: false, retired: false, group: 'DATA', risk: 'FINANCIAL', staffManagerDelegable: false, legacyOperational: false },
+  { code: 'IMPORT_OLD_NASIYA', label: 'Avvalgi nasiyalarni import qilish', description: 'Avvalgi nasiya qoldiqlarini xavfsiz import qilish', featureCode: 'IMPORTS', ownerOnly: false, retired: false, group: 'DATA', risk: 'FINANCIAL', staffManagerDelegable: false, legacyOperational: false },
   { code: 'EXPORT_DEVICES', label: 'Qurilmalarni eksport qilish', description: 'Qurilma eksport faylini olish', featureCode: 'EXPORTS', ownerOnly: false, retired: false, group: 'DATA', risk: 'PRIVATE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'EXPORT_CUSTOMERS', label: 'Mijozlarni eksport qilish', description: 'Mijoz eksport faylini olish', featureCode: 'EXPORTS', ownerOnly: false, retired: false, group: 'DATA', risk: 'PRIVATE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'EXPORT_SALES', label: 'Sotuvlarni eksport qilish', description: 'Sotuv eksport faylini olish', featureCode: 'EXPORTS', ownerOnly: false, retired: false, group: 'DATA', risk: 'FINANCIAL', staffManagerDelegable: false, legacyOperational: false },
@@ -219,7 +225,7 @@ export const SHOP_PERMISSION_CATALOG: readonly ShopPermissionCatalogItem[] = [
   { code: 'INVENTORY_MANAGE', label: 'Eski ombor boshqaruvi', description: 'V2 ruxsatlariga almashtirilgan', featureCode: 'INVENTORY', ownerOnly: true, retired: true, group: 'INVENTORY', risk: 'ADMINISTRATIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'CASH_SALE_CREATE', label: 'Eski sotuv yaratish', description: 'SALE_CREATE bilan almashtirilgan', featureCode: 'CASH_SALES', ownerOnly: true, retired: true, group: 'SALES', risk: 'ADMINISTRATIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'CASH_SALE_MANAGE', label: 'Eski sotuv boshqaruvi', description: 'V2 ruxsatlariga almashtirilgan', featureCode: 'CASH_SALES', ownerOnly: true, retired: true, group: 'SALES', risk: 'ADMINISTRATIVE', staffManagerDelegable: false, legacyOperational: false },
-  { code: 'NASIYA_MANAGE', label: 'Eski nasiya boshqaruvi', description: 'V2 ruxsatlariga almashtirilgan', featureCode: 'NASIYA', ownerOnly: true, retired: true, group: 'NASIYA', risk: 'ADMINISTRATIVE', staffManagerDelegable: false, legacyOperational: false },
+  { code: 'NASIYA_MANAGE', label: 'Nasiyalarni boshqarish', description: 'V2 ruxsatlariga almashtirilgan', featureCode: 'NASIYA', ownerOnly: true, retired: true, group: 'NASIYA', risk: 'ADMINISTRATIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'OLIB_MANAGE', label: 'Eski olib-sotdim boshqaruvi', description: 'OLIB_CREATE bilan almashtirilgan', featureCode: 'OLIB_SOTDIM', ownerOnly: true, retired: true, group: 'OLIB', risk: 'ADMINISTRATIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'PAYMENT_RECEIVE', label: "Eski umumiy to'lov ruxsati", description: "Kirim va chiqim to'lov ruxsatlariga ajratilgan", featureCode: null, ownerOnly: true, retired: true, group: 'SALES', risk: 'ADMINISTRATIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'CUSTOMER_MANAGE', label: 'Eski mijoz boshqaruvi', description: 'V2 ruxsatlariga almashtirilgan', featureCode: 'CUSTOMER_CRM', ownerOnly: true, retired: true, group: 'CUSTOMERS', risk: 'ADMINISTRATIVE', staffManagerDelegable: false, legacyOperational: false },
@@ -232,6 +238,11 @@ export const SHOP_PERMISSION_CATALOG: readonly ShopPermissionCatalogItem[] = [
   { code: 'MEMBER_MANAGE', label: 'Eski xodim boshqaruvi', description: 'V2 xodim ruxsatlariga ajratilgan', featureCode: 'STAFF_ACCESS', ownerOnly: true, retired: true, group: 'STAFF', risk: 'ADMINISTRATIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'TELEGRAM_MANAGE', label: 'Eski Telegram boshqaruvi', description: 'SHOP_TELEGRAM_MANAGE bilan almashtirilgan', featureCode: 'TELEGRAM', ownerOnly: true, retired: true, group: 'SETTINGS', risk: 'ADMINISTRATIVE', staffManagerDelegable: false, legacyOperational: false },
 ] as const
+
+export const SHOP_PERMISSION_CATALOG: readonly ShopPermissionCatalogItem[] = SHOP_PERMISSION_CATALOG_DEFINITIONS.map((item) => ({
+  ...item,
+  label: shopPermissionLabel(item.code),
+}))
 
 const permissionByCode = new Map(SHOP_PERMISSION_CATALOG.map((item) => [item.code, item]))
 
@@ -346,7 +357,7 @@ export function validateCompletePackageFeatures(features: readonly PackageFeatur
     if (!enabled.has(item.code)) continue
     const missing = item.prerequisites.filter((code) => !enabled.has(code))
     if (missing.length) {
-      throw new Error(`${item.label} uchun avval ${missing.map((code) => featureByCode.get(code)?.label ?? code).join(', ')} yoqilishi kerak`)
+      throw new Error(`${item.label} uchun avval ${missing.map((code) => featureByCode.get(code)?.label ?? shopFeatureLabel(code)).join(', ')} yoqilishi kerak`)
     }
   }
 }

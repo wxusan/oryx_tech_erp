@@ -2,6 +2,7 @@ import { formatMoneyDto, type MoneyDto } from '@/lib/currency'
 import { paymentMethodLabel } from '@/lib/labels'
 import { paymentAmountDisplay, type NasiyaPaymentDisplayRecord } from '@/lib/payment-history-display'
 import { uzDate, uzDateTime } from '@/lib/dates'
+import { logActionLabel, scheduleStatusLabel } from '@/lib/presentation-labels'
 
 export interface NasiyaScheduleRow {
   id: string
@@ -29,12 +30,12 @@ export interface NasiyaActionLog {
 type RowStatus = 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
 
 const schedulePresentation: Record<RowStatus, { label: string; className: string }> = {
-  PAID: { label: "To'landi", className: 'bg-zinc-900 text-white' },
-  PENDING: { label: 'Kutilmoqda', className: 'bg-zinc-100 text-zinc-600' },
-  PARTIAL: { label: "Qisman to'landi", className: 'bg-zinc-200 text-zinc-700' },
-  OVERDUE: { label: "Muddati o'tgan", className: 'bg-red-100 text-red-700' },
-  DEFERRED: { label: "Keyinga o'tkazilgan", className: 'bg-yellow-100 text-yellow-800' },
-  CANCELLED: { label: 'Bekor qilingan', className: 'bg-zinc-200 text-zinc-600' },
+  PAID: { label: scheduleStatusLabel('PAID'), className: 'bg-zinc-900 text-white' },
+  PENDING: { label: scheduleStatusLabel('PENDING'), className: 'bg-zinc-100 text-zinc-600' },
+  PARTIAL: { label: scheduleStatusLabel('PARTIAL'), className: 'bg-zinc-200 text-zinc-700' },
+  OVERDUE: { label: scheduleStatusLabel('OVERDUE'), className: 'bg-red-100 text-red-700' },
+  DEFERRED: { label: scheduleStatusLabel('DEFERRED'), className: 'bg-yellow-100 text-yellow-800' },
+  CANCELLED: { label: scheduleStatusLabel('CANCELLED'), className: 'bg-zinc-200 text-zinc-600' },
 }
 
 function RowBadge({ status }: { status: RowStatus }) {
@@ -51,20 +52,7 @@ function rowStatus(row: NasiyaScheduleRow): RowStatus {
 }
 
 function logLabel(log: NasiyaActionLog): string {
-  if (log.action === 'CREATE_NASIYA') return 'Nasiya yaratildi'
-  if (log.action === 'IMPORT_NASIYA') return 'Eski nasiya import qilindi'
-  if (log.action === 'PAYMENT') return "To'lov qabul qilindi"
-  if (log.action === 'NASIYA_DEFER') return 'Muddat uzaytirildi'
-  if (log.action === 'NASIYA_COMPLETED') return 'Nasiya yakunlandi'
-  if (log.action === 'UPDATE_REMINDER') {
-    if (log.newValue?.reminderEnabled === true) return 'Eslatma yoqildi'
-    if (log.newValue?.reminderEnabled === false) return "Eslatma o'chirildi"
-    return "Eslatma o'zgartirildi"
-  }
-  if (log.action === 'UPDATE') return 'Nasiya tahrirlandi'
-  if (log.action === 'DELETE') return "O'chirildi"
-  if (log.action === 'RETURN') return 'Qaytarildi'
-  return log.action
+  return logActionLabel(log.action, log.targetType)
 }
 
 function logDetail(log: NasiyaActionLog): string | null {
@@ -106,7 +94,7 @@ export function NasiyaHistorySections({
         <div className="overflow-x-auto">
           <table className="w-full min-w-[640px] text-sm">
             <caption className="sr-only">Nasiya bo&apos;yicha oylik to&apos;lov jadvali</caption>
-            <thead className="border-b border-zinc-200"><tr>{['#', 'Sana', 'Miqdor', "To'langan", 'Status'].map((heading) => <th key={heading} className="bg-zinc-50 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">{heading}</th>)}</tr></thead>
+            <thead className="border-b border-zinc-200"><tr>{['#', 'Sana', 'Miqdor', "To'langan", 'Holat'].map((heading) => <th key={heading} className="bg-zinc-50 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">{heading}</th>)}</tr></thead>
             <tbody>{sortedSchedules.map((row) => {
               const status = rowStatus(row)
               return <tr key={row.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">

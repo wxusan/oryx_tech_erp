@@ -127,10 +127,11 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (isRequestBodyTooLarge(error)) return payloadTooLarge()
     if (isInvalidRequestBody(error)) return badRequest("So'rov ma'lumoti noto'g'ri")
     if (error && typeof error === 'object' && 'code' in error) {
-      if (error.code === 'SHOP_NOT_FOUND') return notFound("Do'kon topilmadi")
-      if (error.code === 'OWNER_NOT_FOUND') return notFound("Tanlangan faol profil bu do'konga tegishli emas")
-      if (error.code === 'PACKAGE_NOT_FOUND') return conflict("Do'konning faol paketi topilmadi")
+      if (error.code === 'SHOP_NOT_FOUND') return notFound('Do‘kon topilmadi.')
+      if (error.code === 'OWNER_NOT_FOUND') return notFound('Do‘kon egasi topilmadi.')
+      if (error.code === 'PACKAGE_NOT_FOUND') return conflict('Paket topilmadi.')
     }
+    if (error instanceof Error && error.message === 'SERIALIZABLE_TRANSACTION_FAILED') return serverError('Amalni yakunlab bo‘lmadi. Iltimos, qayta urinib ko‘ring.')
     logger.error('[PATCH /api/shops/[id]/owner]', { event: 'api.route_error', error })
     return serverError()
   }

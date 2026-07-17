@@ -49,7 +49,7 @@ export function AsyncButton({
       onClick={handleClick}
     >
       <span className="grid place-items-center">
-        <span className={pending ? 'invisible col-start-1 row-start-1' : 'col-start-1 row-start-1'}>
+        <span className={pending ? 'invisible col-start-1 row-start-1 inline-flex items-center gap-1.5' : 'col-start-1 row-start-1 inline-flex items-center gap-1.5'}>
           {children}
         </span>
         <span className={pending ? 'col-start-1 row-start-1 inline-flex items-center gap-1.5' : 'invisible col-start-1 row-start-1 inline-flex items-center gap-1.5'}>

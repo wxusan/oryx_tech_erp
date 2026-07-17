@@ -29,7 +29,7 @@ describe('currency source guards', () => {
     expect(api).toContain('tx.currencyRate.create')
     expect(api).toContain('tx.log.create')
     expect(ui).toContain('/api/admin/currency-rate')
-    expect(ui).toContain('Manual oxirgi')
+    expect(ui).toContain('Qo‘lda kiritilgan oxirgi kurs')
   })
 
   it('stores currency preference and rates through an additive migration', () => {

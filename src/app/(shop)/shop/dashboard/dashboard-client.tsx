@@ -13,6 +13,7 @@ import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { useShopAccess } from '@/components/shop/shop-access-context'
+import { logActionLabel, scheduleStatusLabel } from '@/lib/presentation-labels'
 
 type ShopStats = Awaited<ReturnType<typeof getShopStats>>
 
@@ -50,18 +51,7 @@ function KoLink({ href, enabled, label = "Ko'rish" }: { href: string; enabled: b
 }
 
 function activityLabel(action: string) {
-  if (action === 'CREATE_NASIYA') return 'Nasiya yaratildi'
-  if (action === 'IMPORT_NASIYA') return 'Eski nasiya import qilindi'
-  if (action === 'CREATE') return "Yangi qo'shildi"
-  if (action === 'PAYMENT') return "To'lov qabul qilindi"
-  if (action === 'SELL') return 'Sotuv qilindi'
-  if (action === 'RETURN') return 'Qaytarildi'
-  if (action === 'RESTOCK') return 'Omborga qaytarildi'
-  if (action === 'UPDATE_REMINDER') return "Eslatma o'zgartirildi"
-  if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
-  if (action === 'DELETE') return "O'chirildi"
-  if (action === 'IMPORT') return 'Import qilindi'
-  return action
+  return logActionLabel(action)
 }
 
 function outstanding(payment: UpcomingPayment) {
@@ -69,11 +59,7 @@ function outstanding(payment: UpcomingPayment) {
 }
 
 function statusLabel(status: string) {
-  if (status === 'OVERDUE') return "Muddati o'tgan"
-  if (status === 'PARTIAL') return "Qisman to'langan"
-  if (status === 'DEFERRED') return 'Kechiktirilgan'
-  if (status === 'PAID') return "To'langan"
-  return 'Kutilmoqda'
+  return scheduleStatusLabel(status)
 }
 
 export default function DashboardClient({ initialStats, financialView }: { initialStats: ShopStats; financialView: boolean }) {

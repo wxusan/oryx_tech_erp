@@ -14,6 +14,16 @@ import { logger } from '@/lib/logger'
 import { isMonthKey, resolveReportRange, type ReportRangePreset } from '@/lib/report-range'
 import { getShopRangeReport, getShopReportDataMonths, type ShopRangeReport } from '@/lib/server/shop-report-range'
 import { tashkentMonthRange } from '@/lib/timezone'
+import {
+  actorTypeLabel,
+  currencyLabel,
+  exchangeRateSourceLabel,
+  logActionLabel,
+  logTargetLabel,
+  nasiyaResolutionEventLabel,
+  nasiyaResolutionLabel,
+  supplierPayableStatusLabel,
+} from '@/lib/presentation-labels'
 
 type RouteContext = { params: Promise<{ entity: string }> }
 type ExportCell = string | number | boolean | Date | null | undefined
@@ -182,7 +192,7 @@ function reportExportData(report: ShopRangeReport): ExportData {
     ],
     rows: [
       ...report.months.map((month) => row(month, month.monthKey)),
-      row({ ...report.totals, monthKey: 'TOTAL' }, 'TOTAL'),
+      row({ ...report.totals, monthKey: 'TOTAL' }, 'Jami'),
     ],
   }
 }
@@ -250,7 +260,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         deviceConditionLabel(d.conditionCode),
         d.batteryHealth,
         d.purchaseInputAmount.toString(),
-        d.purchaseCurrency,
+        currencyLabel(d.purchaseCurrency),
         d.purchaseExchangeRateAtCreation?.toString() ?? null,
         d.purchaseAmountUzsSnapshot.toString(),
         d.purchasePrice.toString(),
@@ -341,7 +351,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         s.customer.name,
         s.customer.phone,
         s.device.model,
-        s.contractCurrency,
+        currencyLabel(s.contractCurrency),
         s.contractExchangeRateAtCreation?.toString() ?? '',
         s.contractSalePrice.toString(),
         s.contractAmountPaid.toString(),
@@ -501,7 +511,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         n.customer.name,
         n.customer.phone,
         n.device.model,
-        n.contractCurrency,
+        currencyLabel(n.contractCurrency),
         n.contractExchangeRateAtCreation?.toString() ?? '',
         n.contractTotalAmount.toString(),
         n.contractDownPayment.toString(),
@@ -547,12 +557,12 @@ async function exportData(entity: string, shopId: string, role: string): Promise
             exportNow,
           ).displayStatus,
         ),
-        n.resolutionState,
+        nasiyaResolutionLabel(n.resolutionState),
         n.resolutionUpdatedAt,
-        resolution?.eventType ?? '',
+        resolution ? nasiyaResolutionEventLabel(resolution.eventType) : '',
         resolution?.reason ?? '',
         resolution?.nativeRemainingAmount.toString() ?? '',
-        resolution?.contractCurrency ?? '',
+        resolution ? currencyLabel(resolution.contractCurrency) : '',
         resolution?.frozenUzsAmount.toString() ?? '',
         resolution?.frozenUsdUzsRate.toString() ?? '',
         resolution?.reversesEventId ?? '',
@@ -560,7 +570,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         n.returnedAt,
         n.createdAt,
         n.isImported,
-        n.importSource ?? '',
+        n.importSource ? exchangeRateSourceLabel(n.importSource) : '',
         n.originalTotalAmount?.toString() ?? '',
         n.alreadyPaidBeforeImport.toString(),
         n.remainingAtImport?.toString() ?? '',
@@ -638,13 +648,13 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         displayImei(item.device.imei),
         item.sale.customer.name,
         item.sale.customer.phone,
-        item.contractCurrency,
+        currencyLabel(item.contractCurrency),
         item.contractExchangeRateAtCreation?.toString() ?? '',
         item.contractAmount.toString(),
         item.amount.toString(),
-        item.sale.contractCurrency,
+        currencyLabel(item.sale.contractCurrency),
         item.sale.contractSalePrice.toString(),
-        item.status,
+        supplierPayableStatusLabel(item.status),
         item.dueDate,
         item.paidAt,
         paymentMethodLabel(item.paymentMethod),
@@ -728,7 +738,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         item.sale?.customer.name ?? item.nasiya?.customer.name ?? '',
         item.refundAmount.toString(),
         (item.refundInputAmount ?? item.refundAmount).toString(),
-        item.refundInputCurrency ?? 'UZS',
+        currencyLabel(item.refundInputCurrency ?? 'UZS'),
         item.refundExchangeRateAtCreation?.toString() ?? '',
         formatUserFacingMoney({
           amount: (item.refundInputAmount ?? item.refundAmount).toString(),
@@ -736,7 +746,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
           displayCurrency: item.refundInputCurrency ?? 'UZS',
         }),
         paymentMethodLabel(item.refundMethod),
-        item.contractCurrency,
+        currencyLabel(item.contractCurrency),
         item.contractAmount.toString(),
         item.contractReceiptsAtReturn.toString(),
         item.contractRefundAmount.toString(),
@@ -746,7 +756,11 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         item.interestReversalAmountUzs.toString(),
         item.inventoryCostRecoveryUzs.toString(),
         item.retainedValueAmountUzs.toString(),
-        JSON.stringify(item.refundAllocations),
+        JSON.stringify(item.refundAllocations.map((allocation) => ({
+          ...allocation,
+          sourcePaymentMethod: paymentMethodLabel(allocation.sourcePaymentMethod),
+          refundMethod: paymentMethodLabel(allocation.refundMethod),
+        }))),
         item.note,
         item.createdAt,
       ]),
@@ -780,9 +794,9 @@ async function exportData(entity: string, shopId: string, role: string): Promise
       headers: ['actorId', 'actorType', 'action', 'targetType', 'targetId', 'note', 'createdAt'],
       rows: logs.map((log) => [
         log.actorId,
-        log.actorType,
-        log.action,
-        log.targetType,
+        actorTypeLabel(log.actorType),
+        logActionLabel(log.action, log.targetType),
+        logTargetLabel(log.targetType),
         log.targetId,
         log.note,
         log.createdAt,
@@ -807,13 +821,13 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       report: 'EXPORT_REPORTS',
     }
     const permission = entityPermission[entity]
-    if (!permission) return new Response('Unknown export entity', { status: 404 })
+    if (!permission) return new Response('Eksport turi topilmadi', { status: 404 })
     const guarded = await requireShopPermission(permission)
     if (!guarded.ok) return guarded.response
     const { session } = guarded
 
     const format = normalizeFormat(req.nextUrl.searchParams.get('format'))
-    if (!format) return new Response('Unsupported export format', { status: 400 })
+    if (!format) return new Response('Eksport formati qo‘llab-quvvatlanmaydi', { status: 400 })
 
     const resolved = await resolveActiveShopId(session, req.nextUrl.searchParams.get('shopId'))
     if (!resolved.ok) return resolved.response
@@ -861,7 +875,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     }
 
     const data = await exportData(entity, shopId, session.user.role)
-    if (!data) return new Response('Unknown export entity', { status: 404 })
+    if (!data) return new Response('Eksport turi topilmadi', { status: 404 })
 
     return exportResponse(entity, format, data)
   } catch (err) {

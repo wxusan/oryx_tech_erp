@@ -375,7 +375,7 @@ export async function POST(req: NextRequest) {
     ])
     const notificationMessage = deviceAddedMessage({
       shopName: shop?.name ?? '',
-      device: { deviceModel: model, storage, color, batteryHealth, imei, secondaryImei, conditionLabel: conditionCode === 'NEW' ? 'Yangi' : 'B/U' },
+      device: { deviceModel: model, storage, color, batteryHealth, imei, secondaryImei, conditionLabel: conditionCode === 'NEW' ? 'Yangi' : 'Ishlatilgan' },
       purchasePrice,
       purchaseCurrency: purchaseInput.inputCurrency,
       supplierPhone,
@@ -506,7 +506,10 @@ export async function POST(req: NextRequest) {
     // Handle the race where two concurrent adds both pass the IMEI pre-check
     // and one violates the active partial unique index (Prisma P2002).
     if (err && typeof err === 'object' && 'code' in err && (err as { code?: string }).code === 'P2002') {
-      return conflict("Bu IMEI raqami allaqachon mavjud")
+      return conflict('Bu IMEI allaqachon mavjud.')
+    }
+    if (err instanceof Error && err.message === 'CREATED_DEVICE_DTO_NOT_FOUND') {
+      return serverError('Qurilma yaratildi, ammo yangilangan ma’lumotni yuklab bo‘lmadi. Sahifani yangilang.')
     }
     logger.error('[POST /api/devices]', { event: 'api.route_error', error: err })
     return serverError()

@@ -13,7 +13,7 @@ describe('Nasiya archive: permission and accounting boundaries', () => {
     const resolutionRoute = read('src/app/api/nasiya/[id]/resolution/route.ts')
 
     expect(access).toContain("code: 'NASIYA_ARCHIVE'")
-    expect(access).toContain("label: 'Can archive Nasiya'")
+    expect(access).toContain("label: 'Nasiyani arxivga olish'")
     expect(access).toContain("staffManagerDelegable: false")
     expect(staffUi).toContain('type="checkbox"')
     expect(staffUi).toContain('staff-permission-${permission.code.toLowerCase()}')

@@ -67,10 +67,10 @@ interface CustomerEditDetailResponse {
 
 const TRUST_TIER_LABELS: Record<TrustTier, string> = {
   NEW: 'Yangi mijoz',
-  LOW: 'Past ishonch',
-  MEDIUM: "O'rtacha ishonch",
-  HIGH: 'Ishonchli',
-  VERY_HIGH: 'Juda ishonchli',
+  LOW: 'Past',
+  MEDIUM: 'O‘rtacha',
+  HIGH: 'Yuqori',
+  VERY_HIGH: 'Juda yuqori',
 }
 
 interface CustomerPassportImageResponse {
@@ -101,7 +101,7 @@ function deviceMeta(device: Device) {
     device.batteryHealth != null ? `${device.batteryHealth}%` : null,
     device.conditionLabel,
     `IMEI 1: ${displayImei(device.imei)}`,
-    device.secondaryImei ? `IMEI 2: ${displayImei(device.secondaryImei)}` : null,
+    device.secondaryImei ? `Qo‘shimcha IMEI: ${displayImei(device.secondaryImei)}` : null,
   ]
     .filter(Boolean)
     .join(' · ')
@@ -1092,9 +1092,9 @@ function AuthorizedNewNasiyaPage() {
                     <SelectValue placeholder="Tanlang" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="CASH">Naqd</SelectItem>
-                    <SelectItem value="CARD">Karta</SelectItem>
-                    <SelectItem value="TRANSFER">Bank o&apos;tkazma</SelectItem>
+                    <SelectItem value="CASH">Naqd pul</SelectItem>
+                    <SelectItem value="CARD">Karta orqali</SelectItem>
+                    <SelectItem value="TRANSFER">Pul o‘tkazmasi</SelectItem>
                     <SelectItem value="OTHER">Boshqa</SelectItem>
                   </SelectContent>
                 </Select>

@@ -47,8 +47,8 @@ describe('nasiya detail: completed profile', () => {
     expect(source).toContain("Bu nasiya to'liq yopilgan.")
   })
 
-  it('shows a Yakunlangan status badge in the header', () => {
-    expect(source).toContain('COMPLETED: \'Yakunlangan\'')
+  it('shows the approved completed status label in the header', () => {
+    expect(source).toContain('nasiyaStatusLabel(displayStatus)')
   })
 
   it('retitles the payment score card as historical once completed, never as an active risk signal', () => {

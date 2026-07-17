@@ -696,7 +696,7 @@ function AuthorizedQurilmaDetailPage() {
     { label: 'Rang', value: device.color ?? '—' },
     { label: 'Xotira', value: formatDeviceStorage(device) || '—' },
     { label: 'Holati', value: deviceConditionLabel(device.conditionCode) },
-    { label: 'Ikkinchi IMEI', value: device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? '—' },
+    { label: 'Qo‘shimcha IMEI', value: device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? '—' },
     {
       label: 'Batareya',
       value: device.batteryHealth != null ? `${device.batteryHealth}%` : '—',
@@ -716,7 +716,7 @@ function AuthorizedQurilmaDetailPage() {
     { label: 'Yetkazib beruvchi', value: device.supplier?.name ?? '—' },
     { label: 'Tel raqam', value: device.supplier?.phone ?? '—' },
     { label: "Qo'shilgan sana", value: uzDate(device.createdAt) },
-    { label: 'Status', value: deviceStatusLabel(device.status) },
+    { label: 'Holat', value: deviceStatusLabel(device.status) },
   ]
 
   const showSaleActions = device.status === 'IN_STOCK'
@@ -1184,7 +1184,7 @@ function AuthorizedQurilmaDetailPage() {
           <div className="p-4 space-y-2">
             <div className="flex gap-4 text-sm">
               <span className="text-zinc-500 w-32">Holat</span>
-              <span className="text-blue-700 font-medium">{device.status === 'IN_STOCK' ? 'Omborga qaytarildi' : 'Qaytarilgan (eski holat)'}</span>
+              <span className="text-blue-700 font-medium">{device.status === 'IN_STOCK' ? 'Qurilma qayta omborga qo‘shildi' : 'Qaytarilgan'}</span>
             </div>
             {latestReturn.refundAmount > 0 && (
               <div className="flex gap-4 text-sm">
@@ -1323,9 +1323,9 @@ function AuthorizedQurilmaDetailPage() {
               />
             </Field>
             <Field
-              label="Ikkinchi IMEI"
+              label="Qo‘shimcha IMEI"
               help="Ixtiyoriy, 15 ta raqam"
-              error={editForm.secondaryImei && !/^\d{15}$/.test(editForm.secondaryImei) ? 'Ikkinchi IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
+              error={editForm.secondaryImei && !/^\d{15}$/.test(editForm.secondaryImei) ? 'Qo‘shimcha IMEI 15 ta raqamdan iborat bo‘lishi kerak' : undefined}
             >
               <Input value={editForm.secondaryImei} onChange={(e) => setEditForm((f) => ({ ...f, secondaryImei: e.target.value }))} inputMode="numeric" maxLength={15} className="h-10 rounded-lg border-zinc-200 text-sm font-mono" />
             </Field>
@@ -1333,7 +1333,7 @@ function AuthorizedQurilmaDetailPage() {
               <label htmlFor="edit-device-condition" className="block text-xs font-medium text-zinc-700">Holati</label>
               <Select value={editForm.conditionCode} onValueChange={(value) => value && setEditForm((form) => ({ ...form, conditionCode: value as 'NEW' | 'USED' }))}>
                 <SelectTrigger id="edit-device-condition" className="h-10 w-full"><SelectValue placeholder="Tanlang" /></SelectTrigger>
-                <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
+                <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">Ishlatilgan</SelectItem></SelectContent>
               </Select>
             </div>
             <Field label="Yetkazib beruvchi tel">
@@ -1457,9 +1457,9 @@ function AuthorizedQurilmaDetailPage() {
                   onChange={(e) => setSaleEditPaymentMethod(e.target.value)}
                   className="h-9 w-full rounded border border-zinc-200 bg-white px-2 text-sm"
                 >
-                  <option value="CASH">Naqd</option>
-                  <option value="CARD">Karta</option>
-                  <option value="TRANSFER">Bank</option>
+                  <option value="CASH">Naqd pul</option>
+                  <option value="CARD">Karta orqali</option>
+                  <option value="TRANSFER">Pul o‘tkazmasi</option>
                   <option value="OTHER">Boshqa</option>
                 </select>
               </Field>
@@ -1546,9 +1546,9 @@ function AuthorizedQurilmaDetailPage() {
                     className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded"
                   >
                     <option value="">Tanlang...</option>
-                    <option value="CASH">Naqd</option>
-                    <option value="CARD">Karta</option>
-                    <option value="TRANSFER">Bank</option>
+                    <option value="CASH">Naqd pul</option>
+                    <option value="CARD">Karta orqali</option>
+                    <option value="TRANSFER">Pul o‘tkazmasi</option>
                     <option value="OTHER">Boshqa</option>
                   </select>
                 </Field>
@@ -1570,9 +1570,9 @@ function AuthorizedQurilmaDetailPage() {
                       className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded"
                     >
                       <option value="">Tanlang...</option>
-                      <option value="CASH">Naqd</option>
-                      <option value="CARD">Karta</option>
-                      <option value="TRANSFER">Bank</option>
+                      <option value="CASH">Naqd pul</option>
+                      <option value="CARD">Karta orqali</option>
+                      <option value="TRANSFER">Pul o‘tkazmasi</option>
                       <option value="OTHER">Boshqa</option>
                     </select>
                     <label htmlFor="sale-split-amount-1" className="sr-only">Birinchi to&apos;lov miqdori</label>
@@ -1623,9 +1623,9 @@ function AuthorizedQurilmaDetailPage() {
                       className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded"
                     >
                       <option value="">Tanlang...</option>
-                      <option value="CASH">Naqd</option>
-                      <option value="CARD">Karta</option>
-                      <option value="TRANSFER">Bank</option>
+                      <option value="CASH">Naqd pul</option>
+                      <option value="CARD">Karta orqali</option>
+                      <option value="TRANSFER">Pul o‘tkazmasi</option>
                       <option value="OTHER">Boshqa</option>
                     </select>
                     <label htmlFor="sale-split-amount-2" className="sr-only">Ikkinchi to&apos;lov miqdori</label>
@@ -1733,9 +1733,9 @@ function AuthorizedQurilmaDetailPage() {
                 className="w-full h-9 text-sm border border-zinc-200 bg-white px-2 rounded disabled:bg-zinc-50 disabled:text-zinc-400"
               >
                 <option value="">Tanlang...</option>
-                <option value="CASH">Naqd</option>
-                <option value="CARD">Karta</option>
-                <option value="TRANSFER">Bank o'tkazmasi</option>
+                <option value="CASH">Naqd pul</option>
+                <option value="CARD">Karta orqali</option>
+                <option value="TRANSFER">Pul o‘tkazmasi</option>
                 <option value="OTHER">Boshqa</option>
               </select>
             </Field>

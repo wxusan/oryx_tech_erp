@@ -1,9 +1,10 @@
 import type { ShopStatus } from '@/lib/domain-types'
+import { SHOP_STATUS_LABELS } from '@/lib/presentation-labels'
 
 const SHOP_STATUS_PRESENTATION: Record<ShopStatus, { label: string; className: string }> = {
-  ACTIVE: { label: 'Faol', className: 'bg-zinc-900 text-white' },
-  SUSPENDED: { label: "To'xtatilgan", className: 'bg-zinc-100 text-zinc-500' },
-  DELETED: { label: "O'chirilgan", className: 'bg-zinc-100 text-zinc-400' },
+  ACTIVE: { label: SHOP_STATUS_LABELS.ACTIVE, className: 'bg-zinc-900 text-white' },
+  SUSPENDED: { label: SHOP_STATUS_LABELS.SUSPENDED, className: 'bg-zinc-100 text-zinc-500' },
+  DELETED: { label: SHOP_STATUS_LABELS.DELETED, className: 'bg-zinc-100 text-zinc-400' },
 }
 
 export function ShopStatusBadge({ status }: { status: ShopStatus }) {

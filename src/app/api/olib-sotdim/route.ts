@@ -460,7 +460,7 @@ export async function POST(req: NextRequest) {
       })
       const message = olibSotdimCreatedMessage({
         shopName: shop?.name ?? '',
-        device: { deviceModel: d.model, storage, color: d.color, batteryHealth: d.batteryHealth, imei, secondaryImei, conditionLabel: d.conditionCode === 'NEW' ? 'Yangi' : 'B/U' },
+        device: { deviceModel: d.model, storage, color: d.color, batteryHealth: d.batteryHealth, imei, secondaryImei, conditionLabel: d.conditionCode === 'NEW' ? 'Yangi' : 'Ishlatilgan' },
         supplierName: d.supplierName,
         supplierPhone: d.supplierPhone,
         supplierLocation: d.supplierLocation,

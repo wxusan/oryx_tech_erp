@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
     const { session } = guarded
 
     if (session.user.role !== 'SHOP_ADMIN' || !session.user.shopId) {
-      return forbidden("Faqat do'kon adminlari eski nasiya import qila oladi")
+      return forbidden('Faqat do‘kon foydalanuvchilari avvalgi nasiyani import qila oladi')
     }
     const shopId = session.user.shopId
 
@@ -89,10 +89,10 @@ export async function POST(req: NextRequest) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
     if (remainingDebtInput.amountUzs > originalTotalInput.amountUzs) {
-      return badRequest("Qolgan qarz eski nasiya umumiy summasidan oshmasligi kerak")
+      return badRequest('Qolgan qarz avvalgi nasiya umumiy summasidan oshmasligi kerak')
     }
     if (alreadyPaidInput.amountUzs + remainingDebtInput.amountUzs !== originalTotalInput.amountUzs) {
-      return badRequest("Eski nasiya jami to'langan summa va qolgan qarz yig'indisiga teng bo'lishi kerak")
+      return badRequest('Avvalgi nasiya jami to‘langan summa va qolgan qarz yig‘indisiga teng bo‘lishi kerak')
     }
 
     // Native contract-currency ledger — computed from the RAW inputs (not
@@ -172,7 +172,7 @@ export async function POST(req: NextRequest) {
       select: { id: true },
     })
     if (duplicateImport) {
-      return conflict("Bu mijoz va qurilma uchun shunga o'xshash eski nasiya allaqachon import qilingan")
+      return conflict('Bu mijoz va qurilma uchun shunga o‘xshash avvalgi nasiya allaqachon import qilingan')
     }
 
     const storedImei = enteredImei || `IMPORT-${randomBytes(4).toString('hex').toUpperCase()}`
@@ -337,7 +337,7 @@ export async function POST(req: NextRequest) {
           color: data.color,
           imei: enteredImei || null,
           secondaryImei,
-          conditionLabel: data.conditionCode === 'NEW' ? 'Yangi' : 'B/U',
+          conditionLabel: data.conditionCode === 'NEW' ? 'Yangi' : 'Ishlatilgan',
         },
         originalTotalAmount: originalTotalInput.amountUzs,
         alreadyPaidBeforeImport: alreadyPaidInput.amountUzs,
@@ -373,7 +373,7 @@ export async function POST(req: NextRequest) {
       ),
     )
 
-    return created(result, 'Eski nasiya muvaffaqiyatli import qilindi')
+    return created(result, 'Avvalgi nasiya muvaffaqiyatli import qilindi')
   } catch (err) {
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict('Bu IMEI raqami allaqachon mavjud')

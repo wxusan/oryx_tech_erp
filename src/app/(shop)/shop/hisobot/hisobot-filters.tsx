@@ -71,11 +71,11 @@ export default function HisobotFilters({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="single">Bitta oy</SelectItem>
-            {monthOptions.length >= 3 && <SelectItem value="trailing3">Oxirgi 3 oy</SelectItem>}
-            {monthOptions.length >= 6 && <SelectItem value="trailing6">Oxirgi 6 oy</SelectItem>}
-            {monthOptions.length >= 12 && <SelectItem value="trailing12">Oxirgi 12 oy</SelectItem>}
-            <SelectItem value="custom">Maxsus oraliq</SelectItem>
+            <SelectItem value="single">Tanlangan davr</SelectItem>
+            {monthOptions.length >= 3 && <SelectItem value="trailing3">So‘nggi 3 oy</SelectItem>}
+            {monthOptions.length >= 6 && <SelectItem value="trailing6">So‘nggi 6 oy</SelectItem>}
+            {monthOptions.length >= 12 && <SelectItem value="trailing12">So‘nggi 12 oy</SelectItem>}
+            <SelectItem value="custom">Maxsus davr</SelectItem>
           </SelectContent>
         </Select>
 

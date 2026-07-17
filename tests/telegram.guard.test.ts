@@ -171,7 +171,7 @@ describe('canonical device identity in Telegram producers', () => {
     }
   })
 
-  it('the shared mapper exposes structured storage, Yangi/B/U, and both active IMEIs', () => {
+  it('the shared mapper exposes structured storage, approved condition wording, and both active IMEIs', () => {
     const specs = read('src/lib/device-specs.ts')
     expect(specs).toContain('storage: formatDeviceStorage(device) || null')
     expect(specs).toContain("entry.slot === 'SECONDARY'")

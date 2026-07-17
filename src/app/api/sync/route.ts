@@ -225,8 +225,11 @@ export async function GET(request: NextRequest) {
       headers: { ...PRIVATE_HEADERS, 'Server-Timing': `sync;dur=${durationMs}` },
     })
   } catch (error) {
-    if (error instanceof Error && ['INVALID_SYNC_CURSOR', 'INVALID_SYNC_DOMAINS'].includes(error.message)) {
-      return Response.json({ error: 'Sinxronlash so\'rovi noto\'g\'ri' }, { status: 400, headers: PRIVATE_HEADERS })
+    if (error instanceof Error && error.message === 'INVALID_SYNC_CURSOR') {
+      return Response.json({ error: 'Sinxronlash ma’lumoti yaroqsiz. Sahifani yangilang.' }, { status: 400, headers: PRIVATE_HEADERS })
+    }
+    if (error instanceof Error && error.message === 'INVALID_SYNC_DOMAINS') {
+      return Response.json({ error: 'Sinxronlash bo‘limlari noto‘g‘ri tanlangan.' }, { status: 400, headers: PRIVATE_HEADERS })
     }
     logger.error('incremental sync failed', { event: 'sync.failed', error })
     return Response.json({ error: 'Sinxronlash amalga oshmadi' }, { status: 500, headers: PRIVATE_HEADERS })

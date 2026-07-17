@@ -39,6 +39,19 @@ describe('AsyncButton pending contract', () => {
     fireEvent.click(button)
     expect(onClick).toHaveBeenCalledTimes(1)
   })
+
+  it('keeps an icon and label in one aligned row', () => {
+    render(
+      <AsyncButton pending={false} pendingLabel="Saqlanmoqda...">
+        <svg aria-hidden="true" />
+        Telegram ID saqlash
+      </AsyncButton>,
+    )
+
+    const visibleContent = screen.getByText('Telegram ID saqlash')
+    expect(visibleContent.className).toContain('inline-flex')
+    expect(visibleContent.className).toContain('items-center')
+  })
 })
 
 describe('ExportDownloadButton request contract', () => {

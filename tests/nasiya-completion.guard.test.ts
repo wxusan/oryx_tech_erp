@@ -36,10 +36,10 @@ describe('nasiya completion: status transition, log, and Telegram message', () =
   })
 })
 
-describe('nasiyalar list surfaces the Yakunlangan tab and excludes completed nasiyas from active reminders', () => {
-  it('nasiyalar-client has a Yakunlangan filter tab wired to COMPLETED', () => {
+describe('nasiyalar list surfaces the To‘liq yopilgan tab and excludes completed nasiyas from active reminders', () => {
+  it('nasiyalar-client has a To‘liq yopilgan filter tab wired to COMPLETED', () => {
     const client = read('src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx')
-    expect(client).toContain("{ label: 'Yakunlangan', value: 'COMPLETED' }")
+    expect(client).toContain("{ label: 'To‘liq yopilgan', value: 'COMPLETED' }")
   })
 
   it('cron reminder queries require native remaining debt, so a fully-paid nasiya never matches', () => {

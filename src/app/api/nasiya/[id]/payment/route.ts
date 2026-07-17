@@ -762,7 +762,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 newValue: {
                   finalNasiyaAmount: Number(nasiya.finalNasiyaAmount),
                 },
-                note: 'Nasiya yakunlandi',
+                note: 'Nasiya to‘liq yopildi',
               },
             })
           }

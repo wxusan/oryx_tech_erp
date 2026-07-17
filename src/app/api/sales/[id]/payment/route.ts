@@ -189,12 +189,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           })
           if (!contractPayment.accepted) {
             if (contractPayment.reason === 'ALREADY_SETTLED') {
-              throw { status: 409, message: "Bu sotuv bo'yicha qarz yopilgan" }
+              throw { status: 409, message: 'Bu qarz allaqachon to‘liq yopilgan.' }
             }
             if (contractPayment.reason === 'OVERPAYMENT') {
-              throw { status: 409, message: "To'lov qolgan shartnoma qarzidan oshib ketdi" }
+              throw { status: 409, message: 'To‘lov summasi qolgan qarzdan oshib ketdi.' }
             }
-            throw { status: 400, message: "To'lov summasi noto'g'ri" }
+            throw { status: 400, message: 'Kiritilgan summa noto‘g‘ri.' }
           }
 
           const oldRemaining = Number(sale.remainingAmount)

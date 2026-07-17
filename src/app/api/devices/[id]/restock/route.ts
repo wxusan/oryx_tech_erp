@@ -123,7 +123,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // Rows are already committed, so cron is the backstop if this misses.
     after(() => processPendingNotifications().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
 
-    return ok(result, "Qurilma omborga qaytarildi va sotuvga tayyor")
+    return ok(result, 'Qurilma qayta omborga qo‘shildi va sotuvga tayyor')
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }

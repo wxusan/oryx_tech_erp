@@ -322,7 +322,7 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
                           ? 'bg-zinc-900 text-white'
                           : 'bg-zinc-100 text-zinc-500',
                       ].join(' ')}>
-                        {log.actorType === 'SUPER_ADMIN' ? 'Bosh admin' : "Do'kon"}
+                        {actorLabel(log.actorType)}
                       </span>
                     </div>
                   </TableCell>

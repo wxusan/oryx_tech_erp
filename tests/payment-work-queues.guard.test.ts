@@ -41,8 +41,8 @@ describe('Nasiya cohort tabs', () => {
     expect(route).toContain("const tabParam = searchParams.get('tab')")
     expect(page).toContain("['ACTIVE', 'OVERDUE', 'DUE_TODAY', 'UPCOMING']")
     expect(lists).toContain("display_status IN ('ACTIVE', 'OVERDUE')")
-    expect(client).toContain("{ label: \"Bugun to'lanadi\", value: 'DUE_TODAY' }")
-    expect(client).toContain("{ label: \"Muddati o'tgan\", value: 'OVERDUE' }")
+    expect(client).toContain("{ label: 'Bugun to‘lanishi kerak', value: 'DUE_TODAY' }")
+    expect(client).toContain("{ label: 'Muddati o‘tgan', value: 'OVERDUE' }")
     expect(client).toContain("params.set('tab', filter)")
   })
 

@@ -1,85 +1,44 @@
 import { displayImei } from '@/lib/device-display'
 import { formatMoneyByCurrency, type CurrencyContext } from '@/lib/currency'
-
-const actionLabels: Record<string, string> = {
-  CREATE: "Qo'shildi",
-  CREATE_NASIYA: 'Nasiya yaratildi',
-  IMPORT_NASIYA: 'Eski nasiya import qilindi',
-  NASIYA_COMPLETED: 'Nasiya yakunlandi',
-  NASIYA_DEFER: 'Muddat uzaytirildi',
-  OLIB_SOTDIM_CREATE: 'Olib-sotdim amalga oshirildi',
-  SUPPLIER_PAYABLE_PAID: "Yetkazib beruvchiga to'lov qilindi",
-  PAYMENT: "To'lov qabul qilindi",
-  SELL: 'Sotuv qilindi',
-  RETURN: 'Qaytarildi',
-  RESTOCK: 'Omborga qaytarildi',
-  UPDATE: "Ma'lumot yangilandi",
-  DELETE: "O'chirildi",
-  IMPORT: 'Import qilindi',
-  RESET_PASSWORD: 'Parol tiklandi',
-  CHANGE_PASSWORD: 'Parol yangilandi',
-  UPDATE_TELEGRAM_ID: 'Telegram ID yangilandi',
-  UPDATE_REMINDER: 'Eslatma sozlamasi yangilandi',
-  PAY_SUBSCRIPTION: "Obuna to'lovi qabul qilindi",
-  PROVISION_LOGIN_CREDENTIALS: 'Kirish maʼlumotlari sozlandi',
-  SEED_DEMO: "Demo ma'lumotlar qo'shildi",
-}
-
-const targetLabels: Record<string, string> = {
-  Database: "Ma'lumotlar bazasi",
-  Device: 'Qurilma',
-  Customer: 'Mijoz',
-  Nasiya: 'Nasiya',
-  NasiyaSchedule: "Nasiya to'lovi",
-  Sale: 'Sotuv',
-  Shop: "Do'kon",
-  ShopAdmin: "Do'kon admini",
-  SuperAdmin: 'Bosh admin',
-  CurrencyRate: 'Valyuta kursi',
-  SupplierPayable: "Yetkazib beruvchi qarzi",
-}
-
-const paymentMethodLabels: Record<string, string> = {
-  CASH: 'Naqd',
-  TRANSFER: "Pul o'tkazma",
-  CARD: 'Karta',
-  OTHER: 'Boshqa',
-}
+import {
+  actorTypeLabel,
+  deviceStatusLabel,
+  logActionLabel,
+  logTargetLabel,
+  nasiyaStatusLabel,
+  paymentMethodLabel,
+  scheduleStatusLabel,
+  shopStatusLabel,
+} from '@/lib/presentation-labels'
 
 const statusLabels: Record<string, string> = {
-  ACTIVE: 'Faol',
-  SUSPENDED: "To'xtatilgan",
-  DELETED: "O'chirilgan",
-  IN_STOCK: 'Omborda',
-  SOLD_CASH: 'Naqd sotilgan',
-  SOLD_DEBT: 'Qarzga sotilgan',
-  SOLD_NASIYA: 'Nasiyaga sotilgan',
-  RETURNED: 'Qaytarilgan (eski holat)',
-  COMPLETED: 'Yakunlangan',
-  OVERDUE: "Muddati o'tgan",
-  CANCELLED: 'Bekor qilingan',
-  PENDING: 'Kutilmoqda',
-  PAID: "To'langan",
-  PARTIAL: 'Qisman toʻlangan',
-  DEFERRED: 'Kechiktirilgan',
+  ACTIVE: nasiyaStatusLabel('ACTIVE'),
+  SUSPENDED: shopStatusLabel('SUSPENDED'),
+  DELETED: deviceStatusLabel('DELETED'),
+  IN_STOCK: deviceStatusLabel('IN_STOCK'),
+  SOLD_CASH: deviceStatusLabel('SOLD_CASH'),
+  SOLD_DEBT: deviceStatusLabel('SOLD_DEBT'),
+  SOLD_NASIYA: deviceStatusLabel('SOLD_NASIYA'),
+  RETURNED: deviceStatusLabel('RETURNED'),
+  COMPLETED: nasiyaStatusLabel('COMPLETED'),
+  OVERDUE: scheduleStatusLabel('OVERDUE'),
+  CANCELLED: scheduleStatusLabel('CANCELLED'),
+  PENDING: scheduleStatusLabel('PENDING'),
+  PAID: scheduleStatusLabel('PAID'),
+  PARTIAL: scheduleStatusLabel('PARTIAL'),
+  DEFERRED: scheduleStatusLabel('DEFERRED'),
 }
 
 export function actorLabel(actorType: string) {
-  if (actorType === 'SUPER_ADMIN') return 'Bosh admin'
-  if (actorType === 'SHOP_ADMIN') return "Do'kon admini"
-  return actorType
+  return actorTypeLabel(actorType)
 }
 
 export function targetTypeLabel(targetType: string) {
-  return targetLabels[targetType] ?? 'Yozuv'
+  return logTargetLabel(targetType)
 }
 
 export function actionLabel(action: string, targetType: string) {
-  if (action === 'CREATE' && targetType === 'Shop') return "Do'kon yaratildi"
-  if (action === 'CREATE' && targetType === 'ShopAdmin') return "Do'kon admini qo'shildi"
-  if (action === 'CREATE' && targetType === 'Device') return "Qurilma qo'shildi"
-  if (action === 'CREATE' && targetType === 'Customer') return "Mijoz qo'shildi"
-  return actionLabels[action] ?? 'Boshqa amal'
+  return logActionLabel(action, targetType)
 }
 
 export function formatLogValue(value: unknown, currency?: CurrencyContext) {
@@ -102,12 +61,12 @@ export function formatLogValue(value: unknown, currency?: CurrencyContext) {
     moneyPart(data.purchasePrice, currency),
     moneyPart(data.downPayment, currency),
     typeof data.months === 'number' ? `${data.months} oy` : undefined,
-    typeof data.paymentMethod === 'string' ? (paymentMethodLabels[data.paymentMethod] ?? "Noma'lum to'lov usuli") : undefined,
-    typeof data.status === 'string' ? (statusLabels[data.status] ?? "Noma'lum holat") : undefined,
-    typeof data.reminderEnabled === 'boolean' ? `Eslatma: ${data.reminderEnabled ? 'yoqilgan' : "o'chirilgan"}` : undefined,
-    typeof data.telegramId === 'string' ? `Telegram ID: ${data.telegramId || "o'chirilgan"}` : undefined,
-    data.passwordChanged === true ? 'Parol yangilandi' : undefined,
-    data.passwordReset === true ? 'Parol tiklandi' : undefined,
+    typeof data.paymentMethod === 'string' ? paymentMethodLabel(data.paymentMethod) : undefined,
+    typeof data.status === 'string' ? (statusLabels[data.status] ?? 'Holat noma’lum') : undefined,
+    typeof data.reminderEnabled === 'boolean' ? `Eslatma: ${data.reminderEnabled ? 'yoqilgan' : 'o‘chirilgan'}` : undefined,
+    typeof data.telegramId === 'string' ? `Telegram ID: ${data.telegramId || 'o‘chirilgan'}` : undefined,
+    data.passwordChanged === true ? 'Parol o‘zgartirildi' : undefined,
+    data.passwordReset === true ? 'Parol qayta o‘rnatildi' : undefined,
   ]
 
   return parts.filter(Boolean).join(' - ')
@@ -135,6 +94,6 @@ function imeiPart(value: unknown) {
 
 function moneyPart(value: unknown, currency?: CurrencyContext) {
   if (typeof value !== 'number') return undefined
-  if (!currency) return `${value.toLocaleString('ru-RU')} so'm`
+  if (!currency) return `${value.toLocaleString('ru-RU')} so‘m`
   return formatMoneyByCurrency(value, currency.currency, currency.usdUzsRate)
 }

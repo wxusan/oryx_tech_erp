@@ -36,7 +36,7 @@ interface Shop {
 const tabs: { key: FilterTab; label: string }[] = [
   { key: 'barchasi', label: 'Barchasi' },
   { key: 'ACTIVE', label: 'Faol' },
-  { key: 'SUSPENDED', label: "To'xtatilgan" },
+  { key: 'SUSPENDED', label: 'Vaqtincha to‘xtatilgan' },
   { key: 'DELETED', label: "O'chirilgan" },
 ]
 
@@ -170,7 +170,7 @@ export default function ShopsPage() {
               <TableHead className="text-xs text-zinc-500 font-medium">Egalik qiluvchi</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">Tel</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">Do&apos;kon raqami</TableHead>
-              <TableHead className="text-xs text-zinc-500 font-medium">Status</TableHead>
+              <TableHead className="text-xs text-zinc-500 font-medium">Holat</TableHead>
               <TableHead className="text-xs text-zinc-500 font-medium">Keyingi to&apos;lov sanasi</TableHead>
             </TableRow>
           </TableHeader>

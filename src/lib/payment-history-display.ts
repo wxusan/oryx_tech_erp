@@ -1,4 +1,5 @@
 import { formatMoneyDto, type FxQuoteDto, type MoneyDto } from '@/lib/currency'
+import { exchangeRateSourceLabel } from '@/lib/presentation-labels'
 
 export interface NasiyaPaymentDisplayRecord {
   id: string
@@ -39,7 +40,7 @@ export function paymentAmountDisplay(payment: NasiyaPaymentDisplayRecord): Histo
   const rateDetail = rate
     ? [
         `Kurs: 1 USD = ${rate} so'm`,
-        quote?.source ?? null,
+        exchangeRateSourceLabel(quote?.source),
         quoteDate ? new Intl.DateTimeFormat('uz-UZ', { dateStyle: 'medium' }).format(new Date(quoteDate)) : null,
       ].filter(Boolean).join(' · ')
     : null

@@ -32,8 +32,9 @@ describe('ShopPackageEditor', () => {
     for (const feature of SHOP_FEATURE_CATALOG) {
       expect(screen.getByText(feature.label)).toBeTruthy()
     }
-    expect(screen.getByText('Xodimlar profili doimo bepul')).toBeTruthy()
-    expect(screen.getAllByText(/STAFF_ACCESS.*0 USD.*jami narx/).length).toBeGreaterThan(0)
+    expect(screen.getByText('Xodimlar uchun kirish doimo bepul')).toBeTruthy()
+    expect(screen.getByText('Xodimlar uchun kirish narxi 0. Uni yoqish yoki o‘chirish paketning oylik jami narxini hech qachon o‘zgartirmaydi.')).toBeTruthy()
+    expect(screen.queryByText(/STAFF_ACCESS/)).toBeNull()
     expect(screen.getAllByText('$100.00')).toHaveLength(2)
   })
 
@@ -44,12 +45,12 @@ describe('ShopPackageEditor', () => {
     const total = screen.getByRole('region', { name: 'Oylik paket jami' })
     expect(within(total).getAllByText('$100.00')).toHaveLength(2)
 
-    await user.click(screen.getByRole('radio', { name: /Egasi va xodimlar/ }))
+    await user.click(screen.getByRole('radio', { name: /Do‘kon egasi va xodimlar/ }))
 
-    expect((screen.getByRole('checkbox', { name: /Xodimlar profili/ }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('checkbox', { name: /Xodimlar uchun kirish/ }) as HTMLInputElement).checked).toBe(true)
     expect(within(total).getAllByText('$100.00')).toHaveLength(2)
 
-    await user.click(screen.getByRole('checkbox', { name: /Xodimlar profili/ }))
+    await user.click(screen.getByRole('checkbox', { name: /Xodimlar uchun kirish/ }))
     expect((screen.getByRole('radio', { name: /Faqat do‘kon egasi/ }) as HTMLInputElement).checked).toBe(true)
     expect(within(total).getAllByText('$100.00')).toHaveLength(2)
   })
@@ -60,14 +61,14 @@ describe('ShopPackageEditor', () => {
 
     await user.click(screen.getByRole('checkbox', { name: /Olib-sotdim/ }))
 
-    expect((screen.getByRole('checkbox', { name: /Qurilmalar va ombor/ }) as HTMLInputElement).checked).toBe(true)
-    expect((screen.getByRole('checkbox', { name: /Naqd savdo va Qarz/ }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('checkbox', { name: /Ombor boshqaruvi/ }) as HTMLInputElement).checked).toBe(true)
+    expect((screen.getByRole('checkbox', { name: /Naqd sotuvlar/ }) as HTMLInputElement).checked).toBe(true)
     expect((screen.getByRole('checkbox', { name: /Olib-sotdim/ }) as HTMLInputElement).checked).toBe(true)
     expect(screen.getByRole('status').textContent).toContain("bog'liq modullar ham yoqildi")
 
-    await user.click(screen.getByRole('checkbox', { name: /Qurilmalar va ombor/ }))
+    await user.click(screen.getByRole('checkbox', { name: /Ombor boshqaruvi/ }))
 
-    expect((screen.getByRole('checkbox', { name: /Naqd savdo va Qarz/ }) as HTMLInputElement).checked).toBe(false)
+    expect((screen.getByRole('checkbox', { name: /Naqd sotuvlar/ }) as HTMLInputElement).checked).toBe(false)
     expect((screen.getByRole('checkbox', { name: /Olib-sotdim/ }) as HTMLInputElement).checked).toBe(false)
     expect(screen.getByRole('status').textContent).toContain("bog'liq modullar ham o'chirildi")
   })

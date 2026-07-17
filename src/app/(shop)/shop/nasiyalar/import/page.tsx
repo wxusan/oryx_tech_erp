@@ -177,12 +177,12 @@ function AuthorizedImportNasiyaPage() {
       </Link>
 
       <div>
-        <h1 className="text-2xl font-bold text-zinc-900">Eski nasiya kiritish</h1>
+        <h1 className="text-2xl font-bold text-zinc-900">Avvalgi nasiya kiritish</h1>
         <p className="mt-1 text-sm text-zinc-500">Oryx'dan oldingi mavjud nasiyani import qilish</p>
       </div>
 
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-        Bu eski nasiya sifatida import qilinadi. Importgacha to'langan pul joriy oy daromadiga qo'shilmaydi.
+        Bu avvalgi nasiya sifatida import qilinadi. Importgacha to‘langan pul joriy oy daromadiga qo‘shilmaydi.
         <span className="font-semibold"> Bu yangi sotuv emas.</span>
       </div>
 
@@ -215,7 +215,7 @@ function AuthorizedImportNasiyaPage() {
         <Field label="Asosiy IMEI">
           <Input value={form.imei} onChange={(e) => set('imei')(e.target.value)} inputMode="numeric" maxLength={15} className="h-10 rounded-lg border-zinc-200 font-mono" />
         </Field>
-        <Field label="Ikkinchi IMEI">
+        <Field label="Qo‘shimcha IMEI">
           <Input value={form.secondaryImei} onChange={(e) => set('secondaryImei')(e.target.value)} inputMode="numeric" maxLength={15} className="h-10 rounded-lg border-zinc-200 font-mono" />
         </Field>
         <StorageInput
@@ -228,7 +228,7 @@ function AuthorizedImportNasiyaPage() {
         <Field label="Holati" required>
           <Select value={form.conditionCode} onValueChange={(value) => value && set('conditionCode')(value)}>
             <SelectTrigger className="h-10"><SelectValue placeholder="Tanlang" /></SelectTrigger>
-            <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">B/U</SelectItem></SelectContent>
+            <SelectContent><SelectItem value="NEW">Yangi</SelectItem><SelectItem value="USED">Ishlatilgan</SelectItem></SelectContent>
           </Select>
         </Field>
         <Field label="Rang">
@@ -240,7 +240,7 @@ function AuthorizedImportNasiyaPage() {
       </Section>
 
       <Section title="Moliyaviy ma'lumot">
-        <Field label={`Eski nasiya umumiy summasi (${currencyLabel(currency.currency)})`} required>
+        <Field label={`Avvalgi nasiya umumiy summasi (${currencyLabel(currency.currency)})`} required>
           <MoneyInput currency={currency.currency} value={form.originalTotalAmount} onChange={set('originalTotalAmount')} className="h-10 rounded-lg border-zinc-200" />
         </Field>
         <Field label={`Importgacha to'langan (${currencyLabel(currency.currency)})`}>

@@ -1,3 +1,9 @@
+import {
+  DEVICE_STATUS_LABELS,
+  deviceStatusLabel as approvedDeviceStatusLabel,
+  logActionLabel,
+} from '@/lib/presentation-labels'
+
 export function isImportPlaceholderImei(imei?: string | null): boolean {
   return typeof imei === 'string' && imei.trim().startsWith('IMPORT-')
 }
@@ -41,29 +47,14 @@ export function deviceMatchesSearch(
   )
 }
 
-/** Item 3 — extracted from the device detail page (was an inline object literal). */
-export const DEVICE_STATUS_LABELS: Record<string, string> = {
-  IN_STOCK: 'Omborda',
-  SOLD_CASH: 'Naqd sotildi',
-  SOLD_DEBT: 'Qarzga sotilgan',
-  SOLD_NASIYA: 'Nasiyada',
-  RETURNED: 'Qaytarilgan (eski holat)',
-  DELETED: "O'chirilgan",
-}
+export { DEVICE_STATUS_LABELS }
 
-/** Uzbek label for a device status, falling back to the raw status if unknown rather than showing nothing. */
+/** Uzbek label for a device status without exposing unknown internal values. */
 export function deviceStatusLabel(status: string): string {
-  return DEVICE_STATUS_LABELS[status] ?? status
+  return approvedDeviceStatusLabel(status)
 }
 
 /** Item 3 — extracted from the device detail page (was an inline function). Uzbek label for a device history log action. */
 export function deviceActionLabel(action: string): string {
-  if (action === 'CREATE') return "Qurilma qo'shildi"
-  if (action === 'SELL') return 'Naqd sotildi'
-  if (action === 'CREATE_NASIYA') return 'Nasiyaga berildi'
-  if (action === 'RETURN') return 'Qaytarildi'
-  if (action === 'RESTOCK') return 'Omborga qaytarildi'
-  if (action === 'UPDATE') return "Ma'lumot o'zgartirildi"
-  if (action === 'DELETE') return "O'chirildi"
-  return action
+  return logActionLabel(action, 'Device')
 }

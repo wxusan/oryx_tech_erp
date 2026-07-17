@@ -149,14 +149,14 @@ export const createShopSchema = z.object({
     context.addIssue({
       code: 'custom',
       path: ['admins'],
-      message: "Faqat do'kon egasi rejimida aynan bitta kirish profili bo'lishi kerak",
+      message: 'Faqat do‘kon egasi rejimida aynan bitta kirish profili bo‘lishi kerak',
     })
   }
   if (accessMode === 'OWNER_AND_STAFF' && value.admins.length < 2) {
     context.addIssue({
       code: 'custom',
       path: ['admins'],
-      message: "Egasi va xodimlar rejimida kamida ikkita kirish profili bo'lishi kerak",
+      message: 'Do‘kon egasi va xodimlar rejimida kamida ikkita kirish profili bo‘lishi kerak',
     })
   }
   if (value.package) {
@@ -166,7 +166,7 @@ export const createShopSchema = z.object({
       context.addIssue({
         code: 'custom',
         path: ['package', 'features'],
-        message: "Xodimlar profili tanlangan kirish rejimiga mos bo'lishi kerak",
+        message: 'Xodimlar uchun kirish tanlangan kirish rejimiga mos bo‘lishi kerak',
       })
     }
   }
@@ -204,14 +204,14 @@ export const addDeviceSchema = z.object({
     .string({ error: "IMEI kiritilishi shart" })
     .trim()
     .refine(isValidImei, "IMEI 15 ta raqamdan iborat bo'lishi kerak"),
-  secondaryImei: z.string().trim().refine((value) => !value || isValidImei(value), "Ikkinchi IMEI 15 ta raqamdan iborat bo'lishi kerak").optional(),
+  secondaryImei: z.string().trim().refine((value) => !value || isValidImei(value), 'Qo‘shimcha IMEI 15 ta raqamdan iborat bo‘lishi kerak').optional(),
   supplierName: z.string().max(100, "Ta'minotchi nomi 100 ta belgidan oshmasligi kerak").optional(),
   supplierPhone: phoneSchema.optional(),
   note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
   imageUrls: z.array(deviceImageKeySchema).optional(),
   inputCurrency: currencyCodeSchema.optional(),
 }).refine((data) => !data.secondaryImei || data.secondaryImei.replace(/[\s-]/g, '') !== data.imei.replace(/[\s-]/g, ''), {
-  message: "Asosiy va ikkinchi IMEI bir xil bo'lishi mumkin emas",
+  message: 'Asosiy va qo‘shimcha IMEI bir xil bo‘lishi mumkin emas',
   path: ['secondaryImei'],
 })
 
@@ -424,7 +424,7 @@ export const importNasiyaSchema = z
     passportPhotoUrl: privateFileKeySchema.optional(),
     deviceModel: z.string({ error: "Qurilma nomi kiritilishi shart" }).min(1, "Qurilma nomi kiritilishi shart").max(120),
     imei: z.string().trim().refine((value) => !value || isValidImei(value), "IMEI 15 ta raqamdan iborat bo'lishi kerak").optional(),
-    secondaryImei: z.string().trim().refine((value) => !value || isValidImei(value), "Ikkinchi IMEI 15 ta raqamdan iborat bo'lishi kerak").optional(),
+    secondaryImei: z.string().trim().refine((value) => !value || isValidImei(value), 'Qo‘shimcha IMEI 15 ta raqamdan iborat bo‘lishi kerak').optional(),
     storage: z.string().trim().max(50, "Xotira 50 ta belgidan oshmasligi kerak").optional(),
     storageAmount: z.number().positive("Xotira hajmi 0 dan katta bo'lishi kerak").optional(),
     storageUnit: z.enum(['GB', 'TB']).optional(),
@@ -432,8 +432,8 @@ export const importNasiyaSchema = z
     color: z.string().trim().max(50, "Rang 50 ta belgidan oshmasligi kerak").optional(),
     batteryHealth: z.number().int().min(0).max(100).optional(),
     originalTotalAmount: z
-      .number({ error: "Eski nasiya umumiy summasi kiritilishi shart" })
-      .positive("Eski nasiya summasi musbat son bo'lishi kerak"),
+      .number({ error: 'Avvalgi nasiya umumiy summasi kiritilishi shart' })
+      .positive('Avvalgi nasiya summasi musbat son bo‘lishi kerak'),
     alreadyPaidBeforeImport: z
       .number({ error: "Importgacha to'langan summa kiritilishi shart" })
       .min(0, "Importgacha to'langan summa manfiy bo'lmasligi kerak")
@@ -451,7 +451,7 @@ export const importNasiyaSchema = z
     inputCurrency: currencyCodeSchema.optional(),
   })
   .refine((data) => data.remainingDebt <= data.originalTotalAmount, {
-    message: "Qolgan qarz eski nasiya umumiy summasidan oshmasligi kerak",
+    message: 'Qolgan qarz avvalgi nasiya umumiy summasidan oshmasligi kerak',
     path: ['remainingDebt'],
   })
   .refine((data) => {
@@ -459,11 +459,11 @@ export const importNasiyaSchema = z
     return Math.round(data.originalTotalAmount * units) ===
       Math.round((data.alreadyPaidBeforeImport + data.remainingDebt) * units)
   }, {
-    message: "Eski nasiya jami to'langan summa va qolgan qarz yig'indisiga teng bo'lishi kerak",
+    message: 'Avvalgi nasiya jami to‘langan summa va qolgan qarz yig‘indisiga teng bo‘lishi kerak',
     path: ['remainingDebt'],
   })
-  .refine((data) => !data.secondaryImei || Boolean(data.imei), { message: 'Ikkinchi IMEI uchun asosiy IMEI ham kiritilishi kerak', path: ['secondaryImei'] })
-  .refine((data) => !data.secondaryImei || data.secondaryImei.replace(/[\s-]/g, '') !== data.imei?.replace(/[\s-]/g, ''), { message: "Asosiy va ikkinchi IMEI bir xil bo'lishi mumkin emas", path: ['secondaryImei'] })
+  .refine((data) => !data.secondaryImei || Boolean(data.imei), { message: 'Qo‘shimcha IMEI uchun asosiy IMEI ham kiritilishi kerak', path: ['secondaryImei'] })
+  .refine((data) => !data.secondaryImei || data.secondaryImei.replace(/[\s-]/g, '') !== data.imei?.replace(/[\s-]/g, ''), { message: 'Asosiy va qo‘shimcha IMEI bir xil bo‘lishi mumkin emas', path: ['secondaryImei'] })
   .refine((data) => (data.storageAmount == null) === (data.storageUnit == null), { message: 'Xotira hajmi va birligi birga kiritilishi kerak', path: ['storageUnit'] })
 
 export type ImportNasiyaInput = z.infer<typeof importNasiyaSchema>
@@ -555,7 +555,7 @@ export const createOlibSotdimSchema = z
     batteryHealth: z.number().int().min(0).max(100).optional(),
     conditionCode: z.enum(['NEW', 'USED'], { error: "Qurilma holati tanlanishi shart" }),
     imei: z.string({ error: "IMEI kiritilishi shart" }).trim().refine(isValidImei, "IMEI 15 ta raqamdan iborat bo'lishi kerak"),
-    secondaryImei: z.string().trim().refine((value) => !value || isValidImei(value), "Ikkinchi IMEI 15 ta raqamdan iborat bo'lishi kerak").optional(),
+    secondaryImei: z.string().trim().refine((value) => !value || isValidImei(value), 'Qo‘shimcha IMEI 15 ta raqamdan iborat bo‘lishi kerak').optional(),
     deviceNote: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
     imageUrls: z.array(deviceImageKeySchema).optional(),
 
@@ -613,7 +613,7 @@ export const createOlibSotdimSchema = z
     path: ['paymentMethod'],
   })
   .refine((data) => !data.secondaryImei || data.secondaryImei.replace(/[\s-]/g, '') !== data.imei.replace(/[\s-]/g, ''), {
-    message: "Asosiy va ikkinchi IMEI bir xil bo'lishi mumkin emas",
+    message: 'Asosiy va qo‘shimcha IMEI bir xil bo‘lishi mumkin emas',
     path: ['secondaryImei'],
   })
   .refine((data) => !data.supplierPaidNow || data.supplierPaymentMethod !== undefined, {
