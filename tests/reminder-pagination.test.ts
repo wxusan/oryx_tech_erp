@@ -63,4 +63,23 @@ describe('reminder generation pagination', () => {
     expect([...firstRun, ...resumedRun]).toEqual(rows.map((row) => row.id))
     expect(new Set([...firstRun, ...resumedRun]).size).toBe(250)
   })
+
+  it('primes and flushes once per bounded page around row processing', async () => {
+    const calls: string[] = []
+    await processReminderPages({
+      initialCursor: null,
+      fetchPage: fetchFrom(rows.slice(0, 3)),
+      beforePage: async (page) => { calls.push(`prime:${page.length}`) },
+      processRow: async (row) => { calls.push(row.id) },
+      afterPage: async () => { calls.push('flush') },
+      checkpoint: async () => { calls.push('checkpoint') },
+      hasTime: () => true,
+      pageSize: 2,
+    })
+
+    expect(calls).toEqual([
+      'prime:2', 'row-000', 'row-001', 'flush', 'checkpoint',
+      'prime:1', 'row-002', 'flush', 'checkpoint',
+    ])
+  })
 })

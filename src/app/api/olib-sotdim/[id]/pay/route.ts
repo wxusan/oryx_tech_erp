@@ -13,7 +13,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-auth'
 import { markSupplierPayablePaidSchema } from '@/lib/validations'
 import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
-import { processPendingNotifications } from '@/lib/notification-service'
+import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { supplierPayablePaidMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { rateLimitKey } from '@/lib/rate-limit'
@@ -22,6 +22,7 @@ import { invalidateShopSaleMutation } from '@/lib/server/cache-tags'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
+import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -80,8 +81,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       const u = await tx.supplierPayable.findFirstOrThrow({ where: { id, shopId } })
 
       const shop = await tx.shop.findUnique({ where: { id: shopId }, select: { name: true } })
-      const shopAdmins = await tx.shopAdmin.findMany({
-        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
+      const recipients = await resolveTelegramRecipients(tx, {
+        shopId,
+        audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF,
       })
       const message = supplierPayablePaidMessage({
         shopName: shop?.name ?? '',
@@ -94,20 +96,22 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         adminName: session.user.name,
         currency,
       })
-      for (const admin of shopAdmins) {
-        await tx.notification.create({
-          data: {
-            shopId,
-            type: 'SUPPLIER_PAYABLE_PAID',
-            message,
-            telegramId: admin.telegramId!,
-            recipientShopAdminId: admin.id,
-            scheduledAt: new Date(),
-            relatedId: id,
-            relatedType: 'SupplierPayable',
-          },
-        })
-      }
+      const scheduledAt = new Date()
+      const notificationRows = [
+        ...telegramNotificationRows(recipients, {
+          type: 'SUPPLIER_PAYABLE_PAID',
+          message,
+          scheduledAt,
+          relatedId: id,
+          relatedType: 'SupplierPayable',
+        }),
+        ...telegramUnavailableMarkerRows(recipients, {
+          type: 'SUPPLIER_PAYABLE_PAID',
+          dedupeScope: id,
+          cancelledAt: scheduledAt,
+        }),
+      ]
+      if (notificationRows.length > 0) await tx.notification.createMany({ data: notificationRows })
 
       await tx.log.create({
         data: {
@@ -132,7 +136,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     invalidateShopSaleMutation(shopId)
 
     after(() =>
-      processPendingNotifications().catch((e) =>
+      flushQueuedTelegramWork().catch((e) =>
         logger.warn('notification flush failed', { event: 'notification.flush_failed', route: '/api/olib-sotdim/[id]/pay', error: e }),
       ),
     )

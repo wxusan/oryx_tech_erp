@@ -13,6 +13,10 @@ import { shopAdminPublicSelect } from '@/lib/api-selects'
 import { z, ZodError } from 'zod'
 import { logger } from '@/lib/logger'
 import { phoneSchema } from '@/lib/validations'
+import {
+  purgeTelegramIdentityInTransaction,
+  TELEGRAM_PURGE_REASON,
+} from '@/lib/server/telegram-lifecycle'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -114,6 +118,15 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         where: { id },
         data: updateData,
       })
+      if (updateData.status !== undefined && updateData.status !== 'ACTIVE') {
+        // Do not rely on the pre-transaction `statusChanged` snapshot: another
+        // writer may have reactivated the shop while this request was waiting.
+        await purgeTelegramIdentityInTransaction(
+          tx,
+          { type: 'SHOP', shopId: id },
+          { reason: TELEGRAM_PURGE_REASON.SHOP_DISABLED },
+        )
+      }
       if (statusChanged) {
         await tx.shopAdmin.updateMany({
           where: { shopId: id, deletedAt: null },
@@ -194,6 +207,11 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
         where: { shopId: id, deletedAt: null },
         data: { sessionVersion: { increment: 1 } },
       })
+      await purgeTelegramIdentityInTransaction(
+        tx,
+        { type: 'SHOP', shopId: id },
+        { reason: TELEGRAM_PURGE_REASON.SHOP_DELETED },
+      )
       await tx.authSession.updateMany({
         where: { actorType: 'SHOP_ADMIN', shopId: id, revokedAt: null },
         data: { revokedAt: new Date() },

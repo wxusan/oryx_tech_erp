@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { prisma } from '@/lib/prisma'
 import { tashkentTodayInputValue } from '@/lib/timezone'
+import { reconcileLinkedTelegramIdentity } from '@/lib/server/telegram-lifecycle'
 
 export const telegramIdSchema = z
   .string()
@@ -25,6 +26,8 @@ export function nextTelegramVerifiedAt<T extends Date | string | null>(
 }
 
 export async function findTelegramOwner(telegramId: string) {
+  await reconcileLinkedTelegramIdentity(telegramId)
+
   const [superAdmin, shopAdmin] = await Promise.all([
     prisma.superAdmin.findFirst({
       where: { telegramId, deletedAt: null },
@@ -35,13 +38,13 @@ export async function findTelegramOwner(telegramId: string) {
         telegramId,
         deletedAt: null,
         isActive: true,
-        telegramNotificationsEnabled: true,
         shop: { deletedAt: null, status: 'ACTIVE', telegramNotificationsEnabled: true },
       },
       select: {
         id: true,
         name: true,
         login: true,
+        telegramNotificationsEnabled: true,
         shop: {
           select: {
             id: true,
@@ -68,7 +71,10 @@ export async function findTelegramOwner(telegramId: string) {
     const enabled = new Set(shopAdmin.shop.packageVersions[0]?.features
       .filter((feature) => feature.enabled)
       .map((feature) => feature.featureCode) ?? [])
-    const memberAllowed = shopAdmin.id === shopAdmin.shop.ownerAdminId || enabled.has('STAFF_ACCESS')
+    const isOwner = shopAdmin.id === shopAdmin.shop.ownerAdminId
+    const memberAllowed = isOwner || (
+      shopAdmin.telegramNotificationsEnabled && enabled.has('STAFF_ACCESS')
+    )
     if (!enabled.has('TELEGRAM') || !memberAllowed) return null
     return { type: 'SHOP_ADMIN' as const, user: shopAdmin }
   }
@@ -80,10 +86,7 @@ export async function isTelegramIdTaken(
   telegramId: string,
   current?: { type: 'SUPER_ADMIN' | 'SHOP_ADMIN'; id: string },
 ) {
-  // Reserve an ID for every non-deleted actor, including an inactive shop
-  // admin. This mirrors the database's live-identity constraint and prevents
-  // an inactive account from becoming ambiguous when it is reactivated.
-  const [superAdmin, shopAdmin] = await Promise.all([
+  const lookup = () => Promise.all([
     prisma.superAdmin.findFirst({
       where: {
         telegramId,
@@ -98,9 +101,16 @@ export async function isTelegramIdTaken(
         deletedAt: null,
         ...(current?.type === 'SHOP_ADMIN' ? { id: { not: current.id } } : {}),
       },
-      select: { id: true },
+      select: { id: true, shopId: true },
     }),
-  ])
+  ] as const)
+  let [superAdmin, shopAdmin] = await lookup()
+  // Free IDs stay on the two-query parallel fast path. Reconciliation is only
+  // needed when a historic ShopAdmin row is actually reserving the value.
+  if (shopAdmin) {
+    await reconcileLinkedTelegramIdentity(telegramId)
+    ;[superAdmin, shopAdmin] = await lookup()
+  }
   return Boolean(superAdmin || shopAdmin)
 }
 

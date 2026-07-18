@@ -11,7 +11,7 @@ import { prisma } from '@/lib/prisma'
 import { requireShopAnyPermission, requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { addDeviceSchema } from '@/lib/validations'
 import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
-import { processPendingNotifications } from '@/lib/notification-service'
+import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { deviceAddedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
@@ -25,6 +25,7 @@ import { formatDeviceStorage, deviceConditionLabel, normalizeImei } from '@/lib/
 import { displayImei } from '@/lib/device-display'
 import { principalHasPermission } from '@/lib/server/shop-access'
 import { computeSaleContractMargin } from '@/lib/nasiya-contract'
+import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED', 'DELETED'] as const
 
@@ -370,7 +371,7 @@ export async function POST(req: NextRequest) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
     const [shop, currency] = await Promise.all([
-      prisma.shop.findUnique({ where: { id: resolvedShopId }, select: { name: true, ownerAdminId: true } }),
+      prisma.shop.findUnique({ where: { id: resolvedShopId }, select: { name: true } }),
       getShopCurrencyContext(resolvedShopId),
     ])
     const notificationMessage = deviceAddedMessage({
@@ -442,32 +443,30 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      const notificationAdmins = await tx.shopAdmin.findMany({
-        // The device-added template includes the purchase cost. Do not send
-        // that owner-financial data to staff Telegram identities.
-        where: {
-          shopId: resolvedShopId,
-          id: shop?.ownerAdminId ?? '__no-shop-owner__',
-          isActive: true,
-          telegramId: { not: null },
-          telegramVerifiedAt: { not: null },
-          deletedAt: null,
-        },
-        select: { id: true, telegramId: true },
+      // The device-added template includes purchase cost, so the shared
+      // resolver deliberately targets only the owner.
+      const recipients = await resolveTelegramRecipients(tx, {
+        shopId: resolvedShopId,
+        audience: TELEGRAM_AUDIENCES.OWNER_ONLY,
       })
-      if (notificationAdmins.length) {
+      const scheduledAt = new Date()
+      const notificationRows = [
+        ...telegramNotificationRows(recipients, {
+          type: 'DEVICE_CREATED',
+          message: notificationMessage,
+          scheduledAt,
+          relatedId: createdDevice.id,
+          relatedType: 'Device',
+        }),
+        ...telegramUnavailableMarkerRows(recipients, {
+          type: 'DEVICE_CREATED',
+          dedupeScope: createdDevice.id,
+          cancelledAt: scheduledAt,
+        }),
+      ]
+      if (notificationRows.length) {
         await tx.notification.createMany({
-          data: notificationAdmins.flatMap((admin) => admin.telegramId ? [{
-            shopId: resolvedShopId,
-            type: 'DEVICE_CREATED',
-            message: notificationMessage,
-            telegramId: admin.telegramId,
-            recipientShopAdminId: admin.id,
-            status: 'PENDING' as const,
-            scheduledAt: new Date(),
-            relatedId: createdDevice.id,
-            relatedType: 'Device',
-          }] : []),
+          data: notificationRows,
         })
       }
 
@@ -480,7 +479,7 @@ export async function POST(req: NextRequest) {
     // add-device request never waits on Telegram HTTP calls.
     after(async () => {
       try {
-        await processPendingNotifications()
+        await flushQueuedTelegramWork()
       } catch (e) {
         logger.warn('device create notification failed', {
           event: 'notification.flush_failed',

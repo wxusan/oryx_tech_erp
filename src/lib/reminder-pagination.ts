@@ -17,6 +17,8 @@ export async function processReminderPages<T extends { id: string }>(input: {
   fetchPage: (cursor: string | null, take: number) => Promise<T[]>
   processRow: (row: T) => Promise<void>
   checkpoint: (cursor: string) => Promise<void>
+  beforePage?: (page: T[]) => Promise<void>
+  afterPage?: () => Promise<void>
   hasTime: () => boolean
   pageSize?: number
 }): Promise<ReminderPageResult> {
@@ -28,12 +30,15 @@ export async function processReminderPages<T extends { id: string }>(input: {
     const page = await input.fetchPage(cursor, pageSize)
     if (page.length === 0) return { complete: true, processed, cursor }
 
+    await input.beforePage?.(page)
+
     for (const row of page) {
       await input.processRow(row)
       processed++
     }
 
     cursor = page[page.length - 1]!.id
+    await input.afterPage?.()
     await input.checkpoint(cursor)
     if (page.length < pageSize) return { complete: true, processed, cursor }
   }

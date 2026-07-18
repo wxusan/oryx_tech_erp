@@ -99,9 +99,9 @@ describe('supplier payable reminders: cron + jitter + idempotency', () => {
   })
 
   it('uses the shared jitter helper and dedupe keys (no separate jitter logic)', () => {
-    expect(cron).toContain("dedupeKey = `SUPPLIER_PAYABLE_REMINDER:")
-    expect(cron).toContain("dedupeKey = `SUPPLIER_PAYABLE_OVERDUE:")
-    expect(cron).toContain("dedupeKey = `SUPPLIER_PAYABLE_EARLY_REMINDER:")
+    expect(cron).toContain("dedupeKey: (recipient) => `SUPPLIER_PAYABLE_REMINDER:")
+    expect(cron).toContain("dedupeKey: (recipient) => `SUPPLIER_PAYABLE_OVERDUE:")
+    expect(cron).toContain("dedupeKey: (recipient) => `SUPPLIER_PAYABLE_EARLY_REMINDER:")
   })
 
   it('early reminders catch up only when the original trigger day belongs to the watermark window', () => {
@@ -110,10 +110,9 @@ describe('supplier payable reminders: cron + jitter + idempotency', () => {
     expect(block).toContain('isWithin(triggerDay, windowStart, windowEnd)')
   })
 
-  it('upsert-by-dedupeKey guarantees no duplicates across repeated cron runs', () => {
-    const count = [cron, overdueTransition]
-      .reduce((total, source) => total + source.split('.notification.upsert({').length - 1, 0)
-    expect(count).toBeGreaterThanOrEqual(9) // one per planned reminder type, all upsert not create
+  it('unique dedupe keys plus insert-only skipDuplicates prevent replay duplicates', () => {
+    expect(cron).toContain('prisma.notification.createMany({ data: rows, skipDuplicates: true })')
+    expect(overdueTransition).toContain('tx.notification.createMany({ data: gapMarkers, skipDuplicates: true })')
   })
 })
 
@@ -143,7 +142,9 @@ describe('Telegram: photo pipeline covers SupplierPayable, never touches passpor
 
   it('unverified telegram IDs are still excluded (unchanged admin filter reused by the new route)', () => {
     const route = read('src/app/api/olib-sotdim/route.ts')
-    expect(route).toContain('telegramVerifiedAt: { not: null }')
+    const recipients = read('src/lib/server/telegram-recipients.ts')
+    expect(route).toContain('resolveTelegramRecipients(tx,')
+    expect(recipients).toContain('!admin.telegramId || !admin.telegramVerifiedAt')
   })
 })
 

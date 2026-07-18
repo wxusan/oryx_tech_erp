@@ -14,6 +14,11 @@ import {
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import { logger } from '@/lib/logger'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
+import {
+  createTelegramDisableTransitionInTransaction,
+  purgeTelegramIdentityInTransaction,
+  TELEGRAM_PURGE_REASON,
+} from '@/lib/server/telegram-lifecycle'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -239,6 +244,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
         select: packageVersionSelect,
       })
 
+      if (!nextEnabledFeatures.has('TELEGRAM')) {
+        await createTelegramDisableTransitionInTransaction(tx, {
+          packageVersionId: createdVersion.id,
+          shopId: id,
+          effectiveOn: createdVersion.effectiveOn,
+        })
+      }
+
       if (parsed.data.effectiveOn === today) {
         await tx.shop.update({ where: { id }, data: { authorizationVersion: { increment: 1 } } })
         if (entitlementsChanged) {
@@ -268,6 +281,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
             where: { actorType: 'SHOP_ADMIN', actorId: { in: staffIds }, revokedAt: null },
             data: { revokedAt: new Date() },
           })
+          await purgeTelegramIdentityInTransaction(
+            tx,
+            { type: 'SHOP_STAFF', shopId: id, ownerAdminId: existingShop.ownerAdminId! },
+            { reason: TELEGRAM_PURGE_REASON.ACCOUNT_INACTIVE },
+          )
         }
       }
 

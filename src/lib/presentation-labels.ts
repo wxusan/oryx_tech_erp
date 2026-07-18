@@ -384,10 +384,24 @@ export const NOTIFICATION_CANCELLATION_LABELS = {
   reminders_not_entitled: 'Eslatmalar funksiyasidan foydalanish huquqi mavjud emas',
   invalid_reminder_reference: 'Eslatma tegishli yozuv bilan bog‘lanmagan',
   debt_resolved_or_changed: 'Qarz yopilgan yoki qarz ma’lumotlari o‘zgargan',
+  unlinked_or_unverified: 'Telegram hisobi ulanmagan yoki tasdiqlanmagan',
+  personal_disabled: 'Xodim uchun Telegram xabarlari o‘chirilgan',
+  shop_disabled: 'Do‘kon uchun Telegram xabarlari o‘chirilgan',
+  package_not_entitled: 'Do‘kon paketida Telegram yoki xodimlar imkoniyati mavjud emas',
+  recipient_limit_reached: 'Faol xodimlar soni Telegram qabul qiluvchilarining xavfsiz chegarasidan oshgan',
 } as const
 
 export function notificationCancellationLabel(value?: string | null) {
   return labelFrom(NOTIFICATION_CANCELLATION_LABELS, value, 'Bekor qilish sababi noma’lum')
+}
+
+export const TELEGRAM_AUDIENCE_LABELS = {
+  OWNER_ONLY: 'Faqat do‘kon egasi',
+  OWNER_AND_ACTIVE_STAFF: 'Do‘kon egasi va faol xodimlar',
+} as const
+
+export function telegramAudienceLabel(value?: string | null) {
+  return labelFrom(TELEGRAM_AUDIENCE_LABELS, value, 'Qabul qiluvchilar noma’lum')
 }
 
 export const OPERATIONS_EVENT_LABELS: Readonly<Record<string, string>> = {
@@ -414,6 +428,7 @@ export const OPERATIONS_EVENT_LABELS: Readonly<Record<string, string>> = {
   'notification.flush_failed': 'Xabarnomalar navbatini qayta ishlashda xatolik',
   'notification.no_recipients': 'Qabul qiluvchilar topilmadi',
   'notification.queue_failed': 'Xabarnomani navbatga qo‘shishda xatolik',
+  'notification.recipient_unavailable': 'Telegram qabul qiluvchisi mavjud emas',
   'notification.queued': 'Xabarnoma yuborish navbatiga qo‘shildi',
   'notification.run': 'Xabarnomalarni yuborish jarayoni ishga tushdi',
   'notification.run_failed': 'Xabarnomalarni yuborish jarayonida xatolik',

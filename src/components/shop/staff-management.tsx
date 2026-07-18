@@ -277,7 +277,9 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
           phone: form.phone,
           login: form.login.trim(),
           password: form.password,
-          telegramId: form.telegramId.trim() || undefined,
+          telegramId: isOwner && enabledFeatures.has('TELEGRAM') && form.telegramNotificationsEnabled
+            ? form.telegramId.trim() || undefined
+            : undefined,
           telegramNotificationsEnabled: isOwner && enabledFeatures.has('TELEGRAM')
             ? form.telegramNotificationsEnabled
             : false,
@@ -399,7 +401,23 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
             <Field controlId="staff-phone" label="Telefon" required error={submitted && !isValidPhone(form.phone) ? "Telefon raqami noto'g'ri" : undefined}><PhoneInput disabled={Boolean(editing) && !canEditProfile} value={form.phone} onChange={(phone) => setForm((current) => ({ ...current, phone }))} /></Field>
             <Field controlId="staff-login" label="Login" required={!editing} help={editing && isOwner ? "Faqat do'kon egasi loginni o'zgartira oladi. Saqlangandan keyin xodim qayta kiradi." : undefined} error={submitted && ((!editing || (isOwner && form.login.trim() !== editing?.login)) && (form.login.trim().length < 3 || !loginPattern.test(form.login.trim()))) ? "Login 3-64 ta lotin harfi, raqam yoki _ belgisidan iborat bo'lishi kerak" : undefined}><Input autoComplete="off" disabled={Boolean(editing) && !isOwner} value={form.login} onChange={(event) => setForm((current) => ({ ...current, login: event.target.value }))} /></Field>
             <Field controlId="staff-password" label={editing ? 'Yangi parol (ixtiyoriy)' : 'Parol'} required={!editing} error={submitted && ((!editing && form.password.length < 10) || (Boolean(editing) && Boolean(form.password) && form.password.length < 10)) ? "Parol kamida 10 ta belgidan iborat bo'lishi kerak" : undefined}><Input autoComplete="new-password" disabled={Boolean(editing) && !canResetPassword} type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="Kamida 10 ta belgi" /></Field>
-            {!editing && <Field label="Telegram ID"><Input inputMode="numeric" value={form.telegramId} onChange={(event) => setForm((current) => ({ ...current, telegramId: event.target.value.replace(/\D/g, '') }))} /></Field>}
+            {!editing && isOwner && <Field
+              controlId="staff-telegram-id"
+              label="Telegram ID"
+              help={!enabledFeatures.has('TELEGRAM')
+                ? 'Do\'kon paketida Telegram yoqilmagan. ID biriktirib bo\'lmaydi.'
+                : !form.telegramNotificationsEnabled
+                  ? 'ID kiritishdan oldin xodim uchun Telegram xabarlarini yoqing.'
+                  : 'Raqamli Telegram ID kiriting; xodim botga /start yuborib tasdiqlaydi.'}
+            >
+              <Input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                disabled={!enabledFeatures.has('TELEGRAM') || !form.telegramNotificationsEnabled}
+                value={form.telegramId}
+                onChange={(event) => setForm((current) => ({ ...current, telegramId: event.target.value.replace(/\D/g, '') }))}
+              />
+            </Field>}
           </div>
 
           {((!editing && isOwner) || (editing && canManagePermissions)) && (
@@ -446,7 +464,11 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
 
           {((!editing && isOwner) || (editing && canManageNotifications)) && <label htmlFor="staff-telegram-enabled" className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 p-3 text-sm">
             <span><span className="block font-medium">Telegram xabarlari</span><span className="text-xs text-zinc-500">{enabledFeatures.has('TELEGRAM') ? 'Egasi xodim uchun alohida boshqaradi' : 'Paketda yoqilmagan'}</span></span>
-            <input id="staff-telegram-enabled" type="checkbox" disabled={!enabledFeatures.has('TELEGRAM')} checked={form.telegramNotificationsEnabled} onChange={(event) => setForm((current) => ({ ...current, telegramNotificationsEnabled: event.target.checked }))} />
+            <input id="staff-telegram-enabled" type="checkbox" disabled={!enabledFeatures.has('TELEGRAM')} checked={form.telegramNotificationsEnabled} onChange={(event) => setForm((current) => ({
+              ...current,
+              telegramNotificationsEnabled: event.target.checked,
+              ...(!event.target.checked ? { telegramId: '' } : {}),
+            }))} />
           </label>}
           {(!editing || canManageStatus) && <label htmlFor="staff-account-active" className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 p-3 text-sm">
             <span className="font-medium">Xodim faol</span>

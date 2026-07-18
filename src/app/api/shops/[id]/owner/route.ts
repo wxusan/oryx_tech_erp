@@ -12,6 +12,10 @@ import {
 } from '@/lib/server/request-limits'
 import { logger } from '@/lib/logger'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
+import {
+  purgeTelegramIdentityInTransaction,
+  TELEGRAM_PURGE_REASON,
+} from '@/lib/server/telegram-lifecycle'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -55,7 +59,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           isActive: true,
           deletedAt: null,
         },
-        select: { id: true, name: true, login: true },
+        select: { id: true, name: true, login: true, telegramId: true },
       })
       if (!nextOwner) throw Object.assign(new Error('OWNER_NOT_FOUND'), { code: 'OWNER_NOT_FOUND' })
 
@@ -84,6 +88,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
         data: {
           isActive: true,
           legacyFullAccess: false,
+          telegramNotificationsEnabled: nextOwner.telegramId ? true : undefined,
           sessionVersion: { increment: 1 },
         },
       })
@@ -96,6 +101,13 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
             sessionVersion: { increment: 1 },
           },
         })
+        if (!staffEnabled) {
+          await purgeTelegramIdentityInTransaction(
+            tx,
+            { type: 'SHOP_ADMIN', shopId: id, shopAdminId: shop.ownerAdminId },
+            { reason: TELEGRAM_PURGE_REASON.ACCOUNT_INACTIVE },
+          )
+        }
       }
 
       if (affectedIds.length) {

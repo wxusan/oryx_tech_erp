@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/reminders",
       "schedule": "35 6 * * *"
+    },
+    {
+      "path": "/api/cron/telegram-disable-transitions",
+      "schedule": "0 19 * * *"
     }
   ]
 }

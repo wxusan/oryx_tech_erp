@@ -20,7 +20,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireShopAnyPermission, requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { createOlibSotdimSchema } from '@/lib/validations'
 import { ok, created, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
-import { processPendingNotifications } from '@/lib/notification-service'
+import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { olibSotdimCreatedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { rateLimitKey } from '@/lib/rate-limit'
@@ -39,6 +39,7 @@ import {
   buildSaleComponentPlan,
   splitUzsReportingAmount,
 } from '@/lib/payment-profit-allocation'
+import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 
 // ---------------------------------------------------------------------------
 // GET /api/olib-sotdim
@@ -444,19 +445,11 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      const shop = await tx.shop.findUnique({ where: { id: shopId }, select: { name: true, ownerAdminId: true } })
-      const shopAdmins = await tx.shopAdmin.findMany({
-        // Olib-sotdim messages include purchase cost and margin, so a staff
-        // Telegram identity must not receive them even when general Telegram
-        // notifications are enabled for that worker.
-        where: {
-          shopId,
-          id: shop?.ownerAdminId ?? '__no-shop-owner__',
-          deletedAt: null,
-          isActive: true,
-          telegramId: { not: '' },
-          telegramVerifiedAt: { not: null },
-        },
+      const shop = await tx.shop.findUnique({ where: { id: shopId }, select: { name: true } })
+      // Purchase cost and margin remain owner-only.
+      const recipients = await resolveTelegramRecipients(tx, {
+        shopId,
+        audience: TELEGRAM_AUDIENCES.OWNER_ONLY,
       })
       const message = olibSotdimCreatedMessage({
         shopName: shop?.name ?? '',
@@ -474,20 +467,22 @@ export async function POST(req: NextRequest) {
         adminName: session.user.name,
         currency,
       })
-      for (const admin of shopAdmins) {
-        await tx.notification.create({
-          data: {
-            shopId,
-            type: 'OLIB_SOTDIM_CREATED',
-            message,
-            telegramId: admin.telegramId!,
-            recipientShopAdminId: admin.id,
-            scheduledAt: new Date(),
-            relatedId: sale.id,
-            relatedType: 'Sale',
-          },
-        })
-      }
+      const scheduledAt = new Date()
+      const notificationRows = [
+        ...telegramNotificationRows(recipients, {
+          type: 'OLIB_SOTDIM_CREATED',
+          message,
+          scheduledAt,
+          relatedId: sale.id,
+          relatedType: 'Sale',
+        }),
+        ...telegramUnavailableMarkerRows(recipients, {
+          type: 'OLIB_SOTDIM_CREATED',
+          dedupeScope: sale.id,
+          cancelledAt: scheduledAt,
+        }),
+      ]
+      if (notificationRows.length > 0) await tx.notification.createMany({ data: notificationRows })
 
       await tx.log.create({
         data: {
@@ -519,7 +514,7 @@ export async function POST(req: NextRequest) {
     invalidateShopSaleMutation(shopId)
 
     after(() =>
-      processPendingNotifications().catch((e) =>
+      flushQueuedTelegramWork().catch((e) =>
         logger.warn('notification flush failed', { event: 'notification.flush_failed', route: '/api/olib-sotdim', error: e }),
       ),
     )

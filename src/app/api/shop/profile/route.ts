@@ -20,6 +20,10 @@ import { invalidateShopProfileMutation } from '@/lib/server/cache-tags'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { logger } from '@/lib/logger'
 import { phoneSchema } from '@/lib/validations'
+import {
+  purgeTelegramIdentityInTransaction,
+  TELEGRAM_PURGE_REASON,
+} from '@/lib/server/telegram-lifecycle'
 
 function shopProfileSelect() {
   return {
@@ -137,6 +141,16 @@ export async function PATCH(req: NextRequest) {
 
     const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       await tx.shop.update({ where: { id: shopId }, data: updateData })
+      // The outer `existing` row is only an early response/audit snapshot. A
+      // concurrent enable may commit before this transaction acquires the Shop
+      // row lock, so every committed disable must purge unconditionally.
+      if (parsed.data.telegramNotificationsEnabled === false) {
+        await purgeTelegramIdentityInTransaction(
+          tx,
+          { type: 'SHOP', shopId },
+          { reason: TELEGRAM_PURGE_REASON.SHOP_DISABLED },
+        )
+      }
       await tx.log.create({
         data: {
           shopId,

@@ -14,7 +14,7 @@ import { requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-
 import { addNasiyaPaymentSchema } from '@/lib/validations'
 import { allocateNasiyaPayment } from '@/lib/nasiya-payment-allocation'
 import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
-import { processPendingNotifications } from '@/lib/notification-service'
+import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { nasiyaPaymentMessage, nasiyaCompletedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
@@ -37,6 +37,7 @@ import {
   hasNasiyaPaymentFxQuoteColumns,
   nasiyaPaymentFxSourceForPersistence,
 } from '@/lib/server/nasiya-payment-schema'
+import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -650,17 +651,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           timings.allocationLedgerReconciliation = (timings.allocationLedgerReconciliation ?? 0)
             + (performance.now() - allocationLedgerStartedAt)
 
-          // Notify all active shop admins with a verified telegramId.
           const notificationAuditStartedAt = performance.now()
-          const shopAdmins = await tx.shopAdmin.findMany({
-              where: {
-                shopId,
-                deletedAt: null,
-                isActive: true,
-                telegramId: { not: '' },
-                telegramVerifiedAt: { not: null },
-              },
-            })
+          const recipients = await resolveTelegramRecipients(tx, {
+            shopId,
+            audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF,
+          })
           const paymentMessage = nasiyaPaymentMessage({
               shopName: nasiya.shop.name,
               customerName: nasiya.customer.name,
@@ -700,28 +695,32 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           const scheduledAt = new Date()
           // `if (completedMessage)`, each administrator receives one
           // completion row in addition to the ordinary payment row.
-          const notificationRows: Prisma.NotificationCreateManyInput[] = shopAdmins.flatMap((admin) => [
-            {
-              shopId,
-              type: 'PAYMENT_RECEIVED' as const,
+          const notificationRows = [
+            ...telegramNotificationRows(recipients, {
+              type: 'PAYMENT_RECEIVED',
               message: paymentMessage,
-              telegramId: admin.telegramId!,
-              recipientShopAdminId: admin.id,
               scheduledAt,
               relatedId: allocations.length === 1 ? allocations[0].scheduleId : nasiyaId,
-              relatedType: allocations.length === 1 ? ('NasiyaSchedule' as const) : ('Nasiya' as const),
-            },
-            ...(completedMessage ? [{
-                  shopId,
-                  type: 'NASIYA_COMPLETED' as const,
-                  message: completedMessage,
-                  telegramId: admin.telegramId!,
-                  recipientShopAdminId: admin.id,
-                  scheduledAt,
-                  relatedId: nasiyaId,
-                  relatedType: 'Nasiya' as const,
-                }] : []),
-          ])
+              relatedType: allocations.length === 1 ? 'NasiyaSchedule' : 'Nasiya',
+            }),
+            ...(completedMessage ? telegramNotificationRows(recipients, {
+              type: 'NASIYA_COMPLETED',
+              message: completedMessage,
+              scheduledAt,
+              relatedId: nasiyaId,
+              relatedType: 'Nasiya',
+            }) : []),
+            ...telegramUnavailableMarkerRows(recipients, {
+              type: 'PAYMENT_RECEIVED',
+              dedupeScope: payment.id,
+              cancelledAt: scheduledAt,
+            }),
+            ...(completedMessage ? telegramUnavailableMarkerRows(recipients, {
+              type: 'NASIYA_COMPLETED',
+              dedupeScope: payment.id,
+              cancelledAt: scheduledAt,
+            }) : []),
+          ]
           if (notificationRows.length > 0) {
             await tx.notification.createMany({ data: notificationRows })
           }
@@ -819,7 +818,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // Flush freshly-queued notifications after the response (non-blocking).
     // The rows are already committed, so cron is the backstop if this misses.
     after(() =>
-      processPendingNotifications().catch((e) =>
+      flushQueuedTelegramWork().catch((e) =>
         logger.warn('notification flush failed', {
           event: 'notification.flush_failed',
           error: e,
