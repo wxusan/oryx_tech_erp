@@ -32,6 +32,10 @@ import {
 } from '@/lib/server/request-limits'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { logger } from '@/lib/logger'
+import {
+  processDueTelegramDisableTransitions,
+  telegramPreassignmentAllowed,
+} from '@/lib/server/telegram-lifecycle'
 
 const STAFF_ADMIN_PERMISSIONS = [
   'STAFF_VIEW',
@@ -99,6 +103,7 @@ export async function POST(request: NextRequest) {
         parsed.data.logsViewEnabled,
       ),
     )
+    const telegramId = normalizeTelegramId(parsed.data.telegramId)
     if (
       principal.memberKind === 'SHOP_STAFF' &&
       (permissionCodes.length > 0 || parsed.data.telegramNotificationsEnabled)
@@ -110,8 +115,18 @@ export async function POST(request: NextRequest) {
     if (parsed.data.telegramNotificationsEnabled && !principal.enabledFeatures.has('TELEGRAM')) {
       return badRequest("Telegram moduli yoqilmagani uchun xodim bildirishnomalarini yoqib bo'lmaydi")
     }
-
-    const telegramId = normalizeTelegramId(parsed.data.telegramId)
+    if (telegramId && !parsed.data.telegramNotificationsEnabled) {
+      return badRequest("Telegram ID biriktirishdan oldin xodim uchun Telegram bildirishnomalarini yoqing")
+    }
+    if (parsed.data.telegramNotificationsEnabled || telegramId) {
+      await processDueTelegramDisableTransitions({ shopId, limit: 100 })
+    }
+    if (
+      (parsed.data.telegramNotificationsEnabled || telegramId) &&
+      !(await telegramPreassignmentAllowed(prisma, shopId))
+    ) {
+      return badRequest("Telegram funksiyasi do'kon uchun yoqilmagan")
+    }
     if (telegramId && await isTelegramIdTaken(telegramId)) {
       return conflict(`Bu Telegram ID allaqachon tizimda bor: ${telegramId}`)
     }
@@ -139,8 +154,17 @@ export async function POST(request: NextRequest) {
       if (parsed.data.telegramNotificationsEnabled && !livePrincipal.enabledFeatures.has('TELEGRAM')) {
         throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
       }
+      if (telegramId && !parsed.data.telegramNotificationsEnabled) {
+        throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
+      }
+      if (
+        (parsed.data.telegramNotificationsEnabled || telegramId) &&
+        !(await telegramPreassignmentAllowed(tx, shopId))
+      ) {
+        throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
+      }
       if (telegramId) {
-        await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`telegram:${telegramId}`}))`)
+        await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${telegramId}, 0))`)
         const [superAdminOwner, shopAdminOwner] = await Promise.all([
           tx.superAdmin.findFirst({ where: { telegramId, deletedAt: null }, select: { id: true } }),
           tx.shopAdmin.findFirst({ where: { telegramId, deletedAt: null }, select: { id: true } }),

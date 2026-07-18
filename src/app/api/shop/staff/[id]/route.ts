@@ -28,6 +28,12 @@ import {
 } from '@/lib/server/request-limits'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { logger } from '@/lib/logger'
+import {
+  processDueTelegramDisableTransitions,
+  purgeTelegramIdentityInTransaction,
+  TELEGRAM_PURGE_REASON,
+  telegramPreassignmentAllowed,
+} from '@/lib/server/telegram-lifecycle'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -114,6 +120,15 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (parsed.data.telegramNotificationsEnabled === true && !principal.enabledFeatures.has('TELEGRAM')) {
       return badRequest("Telegram moduli yoqilmagani uchun bildirishnomalarni yoqib bo'lmaydi")
     }
+    if (parsed.data.telegramNotificationsEnabled === true) {
+      await processDueTelegramDisableTransitions({ shopId, limit: 100 })
+    }
+    if (
+      parsed.data.telegramNotificationsEnabled === true &&
+      !(await telegramPreassignmentAllowed(prisma, shopId))
+    ) {
+      return badRequest("Telegram funksiyasi do'kon uchun yoqilmagan")
+    }
     const passwordHash = parsed.data.password ? await bcrypt.hash(parsed.data.password, 12) : undefined
 
     const row = await runSerializable(() => prisma.$transaction(async (tx) => {
@@ -180,6 +195,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       if (parsed.data.telegramNotificationsEnabled === true && !activeFeatures.has('TELEGRAM')) {
         throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
       }
+      if (
+        parsed.data.telegramNotificationsEnabled === true &&
+        !(await telegramPreassignmentAllowed(tx, shopId))
+      ) {
+        throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
+      }
       const permissionSnapshotChanged = parsed.data.permissionCodes !== undefined || parsed.data.logsViewEnabled !== undefined
       const existingPermissionCodes = withNasiyaArchivePermissionBundle(target.legacyFullAccess
         ? legacyStaffPermissionCodes(activeFeatures)
@@ -219,6 +240,19 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           sessionVersion: sessionAffectingChange ? { increment: 1 } : undefined,
         },
       })
+
+      if (parsed.data.telegramNotificationsEnabled === false || parsed.data.isActive === false) {
+        await purgeTelegramIdentityInTransaction(
+          tx,
+          { type: 'SHOP_ADMIN', shopId, shopAdminId: id },
+          {
+            reason: parsed.data.telegramNotificationsEnabled === false
+              ? TELEGRAM_PURGE_REASON.STAFF_DISABLED
+              : TELEGRAM_PURGE_REASON.ACCOUNT_INACTIVE,
+            disablePersonalNotifications: parsed.data.telegramNotificationsEnabled === false,
+          },
+        )
+      }
 
       if (permissionSnapshotChanged) {
         await tx.shopMemberPermission.deleteMany({ where: { shopAdminId: id, shopId } })
@@ -332,6 +366,11 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
           permissionVersion: { increment: 1 },
         },
       })
+      await purgeTelegramIdentityInTransaction(
+        tx,
+        { type: 'SHOP_ADMIN', shopId, shopAdminId: id },
+        { reason: TELEGRAM_PURGE_REASON.ACCOUNT_DELETED },
+      )
       await tx.authSession.updateMany({
         where: { actorType: 'SHOP_ADMIN', actorId: id, revokedAt: null },
         data: { revokedAt: new Date() },

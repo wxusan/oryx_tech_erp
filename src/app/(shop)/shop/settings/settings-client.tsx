@@ -102,7 +102,7 @@ export function ShopSettingsClient() {
             onShopChange={updateShop}
           />
         )}
-        {settings.profile.telegramAllowed && (
+        {(settings.profile.telegramAllowed || Boolean(settings.profile.telegramId)) && (
           <SettingsTelegramSection profile={settings.profile} onProfileChange={updateProfile} />
         )}
         <SettingsPasswordSection />

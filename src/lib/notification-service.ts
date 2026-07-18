@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { prisma } from '@/lib/prisma'
 import type { Prisma } from '@/generated/prisma/client'
 import { sendTelegramMediaGroup, sendTelegramMessage, sendTelegramPhoto, type TelegramSendResult } from '@/lib/telegram'
@@ -6,6 +7,18 @@ import { resolveNotificationImageKeys, resolveNotificationImageUrls } from '@/li
 import { logger } from '@/lib/logger'
 import { recordOpsEvent } from '@/lib/server/ops-events'
 import { tashkentTodayInputValue } from '@/lib/timezone'
+import {
+  processDueTelegramDisableTransitions,
+} from '@/lib/server/telegram-lifecycle'
+import {
+  resolveTelegramRecipients,
+  safeTelegramNotificationType,
+  telegramNotificationRows,
+  telegramUnavailableMarkerRows,
+  TELEGRAM_AUDIENCES,
+  TELEGRAM_RECIPIENT_UNAVAILABLE_REASONS,
+  type TelegramRecipientUnavailableReason,
+} from '@/lib/server/telegram-recipients'
 
 const MAX_NOTIFICATION_ATTEMPTS = 5
 const NOTIFICATION_BATCH_SIZE = 100
@@ -43,11 +56,12 @@ interface QueueNotificationOptions { processImmediately?: boolean }
 export async function queueNotification(params: QueueNotificationParams, options: QueueNotificationOptions = {}): Promise<boolean> {
   try {
     const scheduledAt = params.scheduledAt ?? new Date()
+    const notificationType = safeTelegramNotificationType(params.type)
     const notification = await prisma.notification.create({
       data: {
         shopId: params.shopId,
         recipientShopAdminId: params.recipientShopAdminId,
-        type: params.type,
+        type: notificationType,
         message: params.message,
         telegramId: params.telegramId,
         status: 'PENDING',
@@ -56,14 +70,14 @@ export async function queueNotification(params: QueueNotificationParams, options
         relatedType: params.relatedType ?? null,
       },
     })
-    logger.info('notification queued', { event: 'notification.queued', shopId: params.shopId, entityType: 'Notification', entityId: notification.id, status: params.type })
+    logger.info('notification queued', { event: 'notification.queued', shopId: params.shopId, entityType: 'Notification', entityId: notification.id, status: notificationType })
     if (options.processImmediately !== false && scheduledAt <= new Date()) {
       const delivery = await processPendingNotifications()
       return delivery.ok
     }
     return true
   } catch (error) {
-    await recordOpsEvent({ level: 'ERROR', event: 'notification.queue_failed', message: 'Failed to queue notification', shopId: params.shopId, status: params.type, metadata: { error: error instanceof Error ? error.message : String(error) } })
+    await recordOpsEvent({ level: 'ERROR', event: 'notification.queue_failed', message: 'Failed to queue notification', shopId: params.shopId, status: safeTelegramNotificationType(params.type), metadata: { error: error instanceof Error ? error.message : String(error) } })
     return false
   }
 }
@@ -112,19 +126,34 @@ function hasPositiveDebt(...amounts: Array<unknown>): boolean {
   return amounts.some((amount) => Number(amount) > 0)
 }
 
-function telegramEligibilitySelect() {
+function telegramEligibilitySelect(now: Date) {
   return {
     id: true,
     telegramId: true,
+    telegramVerifiedAt: true,
+    telegramNotificationsEnabled: true,
+    isActive: true,
+    deletedAt: true,
     shop: {
       select: {
         ownerAdminId: true,
+        status: true,
+        deletedAt: true,
         telegramNotificationsEnabled: true,
         packageVersions: {
-          where: { effectiveOn: { lte: new Date(`${tashkentTodayInputValue()}T00:00:00.000Z`) } },
+          where: { effectiveOn: { lte: new Date(`${tashkentTodayInputValue(now)}T00:00:00.000Z`) } },
           orderBy: [{ effectiveOn: 'desc' as const }, { createdAt: 'desc' as const }],
           take: 1,
           select: { features: { select: { featureCode: true, enabled: true } } },
+        },
+        telegramDisableTransitions: {
+          where: {
+            processedAt: null,
+            effectiveOn: { lte: new Date(`${tashkentTodayInputValue(now)}T00:00:00.000Z`) },
+          },
+          orderBy: [{ effectiveOn: 'asc' as const }, { id: 'asc' as const }],
+          take: 1,
+          select: { id: true },
         },
       },
     },
@@ -137,10 +166,21 @@ function enabledFeaturesForAdmin(admin: TelegramEligibleAdmin) {
   return new Set(admin.shop.packageVersions[0]?.features.filter((feature) => feature.enabled).map((feature) => feature.featureCode) ?? [])
 }
 
-function telegramAdminIsEligible(admin: TelegramEligibleAdmin) {
-  const enabled = enabledFeaturesForAdmin(admin)
-  if (!admin.shop.telegramNotificationsEnabled || !enabled.has('TELEGRAM')) return false
-  return admin.id === admin.shop.ownerAdminId || enabled.has('STAFF_ACCESS')
+type PreDeliveryCancellation = {
+  reason: string
+  recipientWarning?: {
+    reason: TelegramRecipientUnavailableReason
+  }
+}
+
+function recipientCancellation(
+  reason: string,
+  warningReason?: TelegramRecipientUnavailableReason,
+): PreDeliveryCancellation {
+  return {
+    reason,
+    ...(warningReason ? { recipientWarning: { reason: warningReason } } : {}),
+  }
 }
 
 /**
@@ -150,31 +190,91 @@ function telegramAdminIsEligible(admin: TelegramEligibleAdmin) {
  * only the reminder types whose related entity describes current debt are
  * cancelled when that debt is no longer active.
  */
-async function preDeliveryCancellationReason(notification: PendingNotification): Promise<string | null> {
-  if (!notification.recipientShopAdminId) return 'legacy_recipient_unbound'
+async function preDeliveryCancellationReason(
+  notification: PendingNotification,
+  now: Date,
+): Promise<PreDeliveryCancellation | null> {
+  if (!notification.recipientShopAdminId) {
+    return recipientCancellation(
+      'legacy_recipient_unbound',
+      TELEGRAM_RECIPIENT_UNAVAILABLE_REASONS.UNLINKED_OR_UNVERIFIED,
+    )
+  }
   const recipient = await prisma.shopAdmin.findFirst({
     where: {
       shopId: notification.shopId,
       id: notification.recipientShopAdminId,
-      telegramId: notification.telegramId,
-      telegramVerifiedAt: { not: null },
-      telegramNotificationsEnabled: true,
-      isActive: true,
-      deletedAt: null,
-      shop: { status: 'ACTIVE', deletedAt: null },
     },
-    select: telegramEligibilitySelect(),
+    select: telegramEligibilitySelect(now),
   })
-  if (!recipient) return 'recipient_revoked_or_unverified'
-  if (!telegramAdminIsEligible(recipient)) return 'recipient_not_entitled_or_notifications_disabled'
+  if (!recipient) {
+    return recipientCancellation(
+      'recipient_revoked_or_unverified',
+      TELEGRAM_RECIPIENT_UNAVAILABLE_REASONS.UNLINKED_OR_UNVERIFIED,
+    )
+  }
+
+  if (
+    recipient.shop.status !== 'ACTIVE'
+    || recipient.shop.deletedAt
+    || !recipient.shop.telegramNotificationsEnabled
+  ) {
+    return recipientCancellation(
+      'recipient_not_entitled_or_notifications_disabled',
+      TELEGRAM_RECIPIENT_UNAVAILABLE_REASONS.SHOP_DISABLED,
+    )
+  }
+
+  const enabledFeatures = enabledFeaturesForAdmin(recipient)
+  if (recipient.shop.telegramDisableTransitions.length > 0 || !enabledFeatures.has('TELEGRAM')) {
+    return recipientCancellation(
+      recipient.shop.telegramDisableTransitions.length > 0
+        ? 'telegram_disable_transition_pending'
+        : 'recipient_not_entitled_or_notifications_disabled',
+      TELEGRAM_RECIPIENT_UNAVAILABLE_REASONS.PACKAGE_NOT_ENTITLED,
+    )
+  }
+
+  const isOwner = recipient.id === recipient.shop.ownerAdminId
+  if (!isOwner && !enabledFeatures.has('STAFF_ACCESS')) {
+    return recipientCancellation(
+      'recipient_not_entitled_or_notifications_disabled',
+      TELEGRAM_RECIPIENT_UNAVAILABLE_REASONS.PACKAGE_NOT_ENTITLED,
+    )
+  }
+  if (!isOwner && !recipient.telegramNotificationsEnabled) {
+    return recipientCancellation(
+      'recipient_not_entitled_or_notifications_disabled',
+      TELEGRAM_RECIPIENT_UNAVAILABLE_REASONS.PERSONAL_DISABLED,
+    )
+  }
+
+  if (
+    !recipient.isActive
+    || recipient.deletedAt
+    || !recipient.telegramId
+    || !recipient.telegramVerifiedAt
+    || recipient.telegramId !== notification.telegramId
+  ) {
+    return recipientCancellation(
+      'recipient_revoked_or_unverified',
+      TELEGRAM_RECIPIENT_UNAVAILABLE_REASONS.UNLINKED_OR_UNVERIFIED,
+    )
+  }
+
   if (
     (NASIYA_REMINDER_TYPES.has(notification.type) || SALE_REMINDER_TYPES.has(notification.type) || SUPPLIER_REMINDER_TYPES.has(notification.type)) &&
-    !enabledFeaturesForAdmin(recipient).has('REMINDERS')
-  ) return 'reminders_not_entitled'
+    !enabledFeatures.has('REMINDERS')
+  ) {
+    return recipientCancellation(
+      'reminders_not_entitled',
+      TELEGRAM_RECIPIENT_UNAVAILABLE_REASONS.PACKAGE_NOT_ENTITLED,
+    )
+  }
 
   if (NASIYA_REMINDER_TYPES.has(notification.type)) {
     if (notification.relatedType !== 'NasiyaSchedule' || !notification.relatedId) {
-      return 'invalid_reminder_reference'
+      return recipientCancellation('invalid_reminder_reference')
     }
     const [schedule, newerDeferral] = await Promise.all([
       prisma.nasiyaSchedule.findFirst({
@@ -230,12 +330,12 @@ async function preDeliveryCancellationReason(notification: PendingNotification):
       && nasiyaDebt
       && schedule.payments.length === 0
       && !newerDeferral
-    return active ? null : 'debt_resolved_or_changed'
+    return active ? null : recipientCancellation('debt_resolved_or_changed')
   }
 
   if (SALE_REMINDER_TYPES.has(notification.type)) {
     if (notification.relatedType !== 'Sale' || !notification.relatedId) {
-      return 'invalid_reminder_reference'
+      return recipientCancellation('invalid_reminder_reference')
     }
     const sale = await prisma.sale.findFirst({
       where: { id: notification.relatedId, shopId: notification.shopId },
@@ -260,12 +360,12 @@ async function preDeliveryCancellationReason(notification: PendingNotification):
       && !sale.deletedAt
       && hasPositiveDebt(sale.contractRemainingAmount, sale.remainingAmount)
       && sale.payments.length === 0
-    return active ? null : 'debt_resolved_or_changed'
+    return active ? null : recipientCancellation('debt_resolved_or_changed')
   }
 
   if (SUPPLIER_REMINDER_TYPES.has(notification.type)) {
     if (notification.relatedType !== 'SupplierPayable' || !notification.relatedId) {
-      return 'invalid_reminder_reference'
+      return recipientCancellation('invalid_reminder_reference')
     }
     const payable = await prisma.supplierPayable.findFirst({
       where: { id: notification.relatedId, shopId: notification.shopId },
@@ -276,7 +376,7 @@ async function preDeliveryCancellationReason(notification: PendingNotification):
       && payable.reminderEnabled
       && !payable.paidAt
       && !payable.deletedAt
-    return active ? null : 'debt_resolved_or_changed'
+    return active ? null : recipientCancellation('debt_resolved_or_changed')
   }
 
   return null
@@ -419,6 +519,7 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
   })
   try {
     const now = new Date()
+    await processDueTelegramDisableTransitions({ limit: 100, now })
     const staleBefore = new Date(now.getTime() - STALE_PROCESSING_MS)
     for (let batch = 0; batch < NOTIFICATION_MAX_BATCHES_PER_RUN; batch++) {
       if (Date.now() - startedAt >= NOTIFICATION_RUN_BUDGET_MS) break
@@ -437,16 +538,19 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
         if (claim.count !== 1) return
         counters.attempted++
         try {
-          const cancellationReason = await preDeliveryCancellationReason(notification)
-          if (cancellationReason) {
+          const cancellation = await preDeliveryCancellationReason(notification, now)
+          if (cancellation) {
             counters.cancelled++
+            const cancellationData = {
+              status: 'CANCELLED' as const,
+              nextAttemptAt: null,
+              lastError: `Cancelled before delivery: ${cancellation.reason}`,
+              cancelledAt: now,
+              recipientUnavailableReason: cancellation.recipientWarning?.reason ?? null,
+            }
             await prisma.notification.update({
               where: { id: notification.id },
-              data: {
-                status: 'CANCELLED',
-                nextAttemptAt: null,
-                lastError: `Cancelled before delivery: ${cancellationReason}`,
-              },
+              data: cancellationData,
             })
             await recordOpsEvent({
               level: 'WARN',
@@ -456,7 +560,7 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
               entityType: 'Notification',
               entityId: notification.id,
               status: notification.type,
-              metadata: { attempts: notification.attemptCount + 1, reason: cancellationReason },
+              metadata: { attempts: notification.attemptCount + 1, reason: cancellation.reason },
             })
             return
           }
@@ -483,6 +587,7 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
               status: cancelled ? 'CANCELLED' : 'FAILED',
               nextAttemptAt: cancelled ? null : new Date(Date.now() + nextAttemptDelayMs(attemptCount, result.error?.retryAfterSeconds)),
               lastError: result.error?.description ?? 'Telegram media delivery failed',
+              ...(cancelled ? { cancelledAt: new Date() } : {}),
             },
           })
           if (cancelled) await recordOpsEvent({ level: 'ERROR', event: 'notification.cancelled', message: permanentFailure ? 'Notification cancelled after permanent Telegram failure' : 'Notification cancelled after max attempts', shopId: notification.shopId, entityType: 'Notification', entityId: notification.id, status: notification.type, errorCode: result.error?.errorCode, metadata: { attempts: attemptCount, permanentFailure, imagesRequested: result.imagesRequested, imagesSent: result.imagesSent, imagesFailed: result.imagesFailed } })
@@ -491,7 +596,7 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
           const exhausted = attemptCount >= MAX_NOTIFICATION_ATTEMPTS
           if (exhausted) counters.cancelled++
           else counters.failed++
-          await prisma.notification.update({ where: { id: notification.id }, data: { status: exhausted ? 'CANCELLED' : 'FAILED', nextAttemptAt: exhausted ? null : new Date(Date.now() + nextAttemptDelayMs(attemptCount)), lastError: error instanceof Error ? error.message : 'Unknown notification error' } })
+          await prisma.notification.update({ where: { id: notification.id }, data: { status: exhausted ? 'CANCELLED' : 'FAILED', nextAttemptAt: exhausted ? null : new Date(Date.now() + nextAttemptDelayMs(attemptCount)), lastError: error instanceof Error ? error.message : 'Unknown notification error', ...(exhausted ? { cancelledAt: new Date() } : {}) } })
           await recordOpsEvent({ level: 'ERROR', event: exhausted ? 'notification.cancelled' : 'notification.process_error', message: 'Error while processing a notification', shopId: notification.shopId, entityType: 'Notification', entityId: notification.id, status: notification.type, metadata: { attempts: attemptCount, error: error instanceof Error ? error.message : String(error) } })
         }
       }))
@@ -530,40 +635,45 @@ export async function processPendingNotifications(): Promise<NotificationRunSumm
   return summary
 }
 
+/** Shared post-commit task: warning aggregation and delivery drain share one
+ * `after()` callback without adding either operation to route response time. */
+export async function flushQueuedTelegramWork(): Promise<NotificationRunSummary> {
+  return processPendingNotifications()
+}
+
 export async function notifyShopAdmins(shopId: string, message: string, type: string, relatedId?: string, relatedType?: string): Promise<void> {
   try {
-    const admins = await prisma.shopAdmin.findMany({
-      where: {
-        shopId,
-        isActive: true,
-        telegramId: { not: null },
-        telegramVerifiedAt: { not: null },
-        telegramNotificationsEnabled: true,
-        deletedAt: null,
-      },
-      select: telegramEligibilitySelect(),
-    })
-    const targets = admins.filter(telegramAdminIsEligible).filter((admin): admin is typeof admin & { telegramId: string } => admin.telegramId !== null)
-    if (!targets.length) {
-      logger.info('no verified telegram admins for shop', { event: 'notification.no_recipients', shopId, status: type })
-      return
-    }
-    const queued = await Promise.all(targets.map((admin) => queueNotification({
+    const notificationType = safeTelegramNotificationType(type)
+    const resolution = await resolveTelegramRecipients(prisma, {
       shopId,
-      recipientShopAdminId: admin.id,
-      type,
-      message,
-      telegramId: admin.telegramId,
-      relatedId,
-      relatedType,
-    }, { processImmediately: false })))
-    const delivery = await processPendingNotifications()
-    const broadcastOk = queued.every(Boolean) && delivery.ok
-    logger.info('queued notification for shop admins', { event: 'notification.broadcast', shopId, status: broadcastOk ? 'ok' : 'partial', notificationType: type, attempt: targets.length, queued: queued.filter(Boolean).length, delivery })
+      audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF,
+    })
+    const scheduledAt = new Date()
+    const rows = [
+      ...telegramNotificationRows(resolution, {
+        type: notificationType,
+        message,
+        scheduledAt,
+        relatedId,
+        relatedType,
+      }),
+      ...telegramUnavailableMarkerRows(resolution, {
+        type: notificationType,
+        dedupeScope: relatedId ?? randomUUID(),
+        cancelledAt: scheduledAt,
+      }),
+    ]
+    if (rows.length > 0) await prisma.notification.createMany({ data: rows })
+    if (!rows.length) {
+      logger.info('no verified telegram admins for shop', { event: 'notification.no_recipients', shopId, status: notificationType })
+    }
+    const delivery = await flushQueuedTelegramWork()
+    const broadcastOk = delivery.ok
+    logger.info('queued notification for shop admins', { event: 'notification.broadcast', shopId, status: broadcastOk ? 'ok' : 'partial', notificationType, attempt: resolution.recipients.length, queued: rows.length, delivery })
     if (!broadcastOk) {
-      await recordOpsEvent({ level: 'WARN', event: 'notification.broadcast_partial', message: 'Notification broadcast was not fully delivered', shopId, status: type, metadata: { targets: targets.length, queued: queued.filter(Boolean).length, delivery } })
+      await recordOpsEvent({ level: 'WARN', event: 'notification.broadcast_partial', message: 'Notification broadcast was not fully delivered', shopId, status: notificationType, metadata: { targets: resolution.recipients.length, queued: rows.length, delivery } })
     }
   } catch (error) {
-    await recordOpsEvent({ level: 'ERROR', event: 'notification.broadcast_failed', message: 'notifyShopAdmins failed', shopId, status: type, metadata: { error: error instanceof Error ? error.message : String(error) } })
+    await recordOpsEvent({ level: 'ERROR', event: 'notification.broadcast_failed', message: 'notifyShopAdmins failed', shopId, status: safeTelegramNotificationType(type), metadata: { error: error instanceof Error ? error.message : String(error) } })
   }
 }

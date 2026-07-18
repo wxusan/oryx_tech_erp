@@ -18,8 +18,8 @@ describe('bounded background and storage work', () => {
   })
 
   it('broadcasts persist first and start only one queue drain', () => {
-    expect(notifications).toContain('{ processImmediately: false }')
-    expect(notifications).toContain('await processPendingNotifications()')
+    expect(notifications).toContain('export async function flushQueuedTelegramWork()')
+    expect(notifications).toContain('return processPendingNotifications()')
   })
 
   it('coalesces cold checks and reuses successful bucket validation for ten minutes', () => {

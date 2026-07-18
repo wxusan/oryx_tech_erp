@@ -230,6 +230,7 @@ model Shop {
   logs              Log[]
   supplierPayables  SupplierPayable[]
   packageVersions   ShopPackageVersion[]
+  telegramDisableTransitions TelegramDisableTransition[]
   memberPermissions ShopMemberPermission[]
   nasiyaPaymentAllocations NasiyaPaymentAllocation[]
   returnProfitReversals    ReturnProfitReversal[]
@@ -395,10 +396,35 @@ model ShopPackageVersion {
   features  ShopPackageFeature[]
   payments  ShopPayment[]
   sessions  AuthSession[]
+  telegramDisableTransition TelegramDisableTransition?
 
   @@unique([id, shopId])
   @@unique([shopId, effectiveOn])
   @@index([shopId, effectiveOn(sort: Desc), createdAt(sort: Desc)])
+}
+
+// Every package snapshot that disables Telegram gets one durable transition.
+// Future-dated transitions are processed at Tashkent midnight; processed rows
+// remain as proof that an older verified identity was purged exactly once.
+model TelegramDisableTransition {
+  id               String   @id @default(cuid())
+  packageVersionId String   @unique
+  shopId           String
+  effectiveOn      DateTime @db.Date
+  processedAt      DateTime?
+  outcome          String?
+  lastError        String?
+  attemptCount     Int      @default(0)
+  lastAttemptAt    DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  shop           Shop               @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  packageVersion ShopPackageVersion @relation(fields: [packageVersionId, shopId], references: [id, shopId], onDelete: Cascade)
+
+  @@index([processedAt, effectiveOn, id])
+  @@index([shopId, processedAt, effectiveOn])
+  @@unique([packageVersionId, shopId])
 }
 
 model ShopPackageFeature {
@@ -1266,6 +1292,11 @@ model Notification {
   lastAttemptAt      DateTime?
   nextAttemptAt      DateTime?
   lastError          String?
+  // Safe lifecycle marker consumed by the bounded Tizim projection. The
+  // notification type supplies event context; no message or Telegram ID is
+  // copied into operational warning metadata.
+  recipientUnavailableReason String?
+  cancelledAt         DateTime?
   relatedId          String?
   relatedType        String?
   // Ordered, tenant-validated device-image keys captured on the first send
@@ -1287,6 +1318,7 @@ model Notification {
   @@index([scheduledAt])
   @@index([nextAttemptAt])
   @@index([status, scheduledAt, nextAttemptAt])
+  @@index([status, cancelledAt(sort: Desc), id(sort: Desc)])
 }
 
 // Durable progress for the daily reminder generator. `completedThrough` is an
@@ -1361,12 +1393,17 @@ model OpsEvent {
   errorCode  String?
   requestId  String?
   metadata   Json?
+  dedupeKey  String?    @unique
+  occurrenceCount Int   @default(1)
+  lastOccurredAt DateTime @default(now())
   createdAt  DateTime   @default(now())
 
   @@index([level])
   @@index([event])
   @@index([createdAt])
   @@index([event, createdAt])
+  @@index([level, lastOccurredAt(sort: Desc)])
+  @@index([event, lastOccurredAt(sort: Desc)])
 }
 
 // ---------------------------------------------------------------------------

@@ -10,9 +10,16 @@
 
 import { NextRequest } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { Prisma } from '@/generated/prisma/client'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { ok, serverError } from '@/lib/api-helpers'
 import { logger } from '@/lib/logger'
+import {
+  TELEGRAM_AUDIENCES,
+  TELEGRAM_RECIPIENT_UNAVAILABLE_REASONS,
+  safeTelegramNotificationType,
+  telegramAudienceForNotificationType,
+} from '@/lib/server/telegram-recipients'
 
 export const dynamic = 'force-dynamic'
 
@@ -37,7 +44,7 @@ export async function GET(req: NextRequest) {
       alertState?.alertWindowStartsAt.getTime() ?? since.getTime(),
     ))
 
-    const [events, levelGroups, notifGroups, recentFailedNotifications, lastCron, lastCronFailure, oldestActionableNotification] =
+    const [events, levelGroups, notifGroups, recentFailedNotifications, lastCron, lastCronFailure, oldestActionableNotification, recipientWarningRows, recipientCancellationRows] =
       await Promise.all([
         prisma.opsEvent.findMany({
           where: {
@@ -120,7 +127,114 @@ export async function GET(req: NextRequest) {
             lastAttemptAt: true,
           },
         }),
+        prisma.$queryRaw<Array<{
+          shopId: string | null
+          shopName: string | null
+          status: string | null
+          metadata: Prisma.JsonValue
+          occurrenceCount: number
+          lastOccurredAt: Date
+        }>>(Prisma.sql`
+          SELECT
+            event."shopId",
+            shop."name" AS "shopName",
+            event."status",
+            event."metadata",
+            event."occurrenceCount",
+            event."lastOccurredAt"
+          FROM "OpsEvent" event
+          LEFT JOIN "Shop" shop ON shop."id" = event."shopId"
+          WHERE event."event" = 'notification.recipient_unavailable'
+            AND event."lastOccurredAt" >= ${activeSince}
+          ORDER BY event."lastOccurredAt" DESC
+          LIMIT 20
+        `),
+        prisma.notification.findMany({
+          where: {
+            status: 'CANCELLED',
+            cancelledAt: { gte: activeSince },
+            recipientUnavailableReason: { not: null },
+          },
+          orderBy: [{ cancelledAt: 'desc' }, { id: 'desc' }],
+          take: 101,
+          select: {
+            shopId: true,
+            type: true,
+            recipientUnavailableReason: true,
+            cancelledAt: true,
+            shop: { select: { name: true } },
+          },
+        }),
       ])
+
+    const safeAudiences = new Set<string>(Object.values(TELEGRAM_AUDIENCES))
+    const safeReasons = new Set<string>(Object.values(TELEGRAM_RECIPIENT_UNAVAILABLE_REASONS))
+    type RecipientWarningProjection = {
+      id: string
+      shopId: string
+      shopName: string
+      notificationType: string
+      audience: string
+      reason: string
+      occurrences: number
+      lastOccurredAt: Date
+    }
+    const warningsByKey = new Map<string, RecipientWarningProjection>()
+    const addRecipientWarning = (warning: Omit<RecipientWarningProjection, 'id'>) => {
+      const key = [warning.shopId, warning.notificationType, warning.audience, warning.reason].join(':')
+      const existing = warningsByKey.get(key)
+      if (existing) {
+        existing.occurrences += warning.occurrences
+        if (warning.lastOccurredAt > existing.lastOccurredAt) {
+          existing.lastOccurredAt = warning.lastOccurredAt
+        }
+        return
+      }
+      warningsByKey.set(key, { id: key, ...warning })
+    }
+
+    for (const row of recipientWarningRows) {
+      const metadata = row.metadata && typeof row.metadata === 'object' && !Array.isArray(row.metadata)
+        ? row.metadata as Record<string, unknown>
+        : {}
+      const audience = typeof metadata.audience === 'string' && safeAudiences.has(metadata.audience)
+        ? metadata.audience
+        : null
+      const reason = typeof metadata.reason === 'string' && safeReasons.has(metadata.reason)
+        ? metadata.reason
+        : null
+      if (!row.shopId || !audience || !reason) continue
+      addRecipientWarning({
+        shopId: row.shopId,
+        shopName: row.shopName ?? 'Noma’lum do‘kon',
+        notificationType: safeTelegramNotificationType(row.status),
+        audience,
+        reason,
+        occurrences: row.occurrenceCount,
+        lastOccurredAt: row.lastOccurredAt,
+      })
+    }
+
+    // Only the newest bounded sample is inspected. These rows intentionally
+    // exclude message, Telegram ID, recipient ID, customer, and related IDs.
+    for (const row of recipientCancellationRows.slice(0, 100)) {
+      const reason = row.recipientUnavailableReason
+      if (!reason || !safeReasons.has(reason) || !row.cancelledAt) continue
+      const notificationType = safeTelegramNotificationType(row.type)
+      addRecipientWarning({
+        shopId: row.shopId,
+        shopName: row.shop.name,
+        notificationType,
+        audience: telegramAudienceForNotificationType(notificationType),
+        reason,
+        occurrences: 1,
+        lastOccurredAt: row.cancelledAt,
+      })
+    }
+
+    const recipientWarnings = [...warningsByKey.values()]
+      .sort((left, right) => right.lastOccurredAt.getTime() - left.lastOccurredAt.getTime())
+      .slice(0, 20)
 
     const levelCounts = { INFO: 0, WARN: 0, ERROR: 0 } as Record<string, number>
     for (const group of levelGroups) levelCounts[group.level] = group._count._all
@@ -152,6 +266,9 @@ export async function GET(req: NextRequest) {
       oldestActionableAgeSeconds > 15 * 60
         ? `Eng eski yuborilishi kerak bo'lgan bildirishnoma ${Math.floor(oldestActionableAgeSeconds / 60)} daqiqadan beri navbatda`
         : null,
+      recipientWarnings.length > 0
+        ? `Telegram qabul qiluvchisi mavjud bo‘lmagan xabarnomalar bor: ${recipientWarnings.length} ta jamlangan ogohlantirish`
+        : null,
     ].filter((item): item is string => item !== null)
 
     return ok({
@@ -170,6 +287,7 @@ export async function GET(req: NextRequest) {
       },
       events,
       recentFailedNotifications,
+      recipientWarnings,
       lastCron,
       lastCronFailure,
       generatedAt: new Date().toISOString(),

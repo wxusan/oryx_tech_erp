@@ -19,9 +19,9 @@ describe('cron reminders use contract-currency remaining amounts', () => {
   })
 
   it('dedupe keys preserve original trigger days and every query is bounded', () => {
-    expect(cron).toContain('REMINDER:${triggerDay.dayKey}:${admin.telegramId}:${schedule.id}')
-    expect(cron).toContain('OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}')
-    expect(cron).toContain('EARLY_REMINDER:${triggerKey}:${admin.telegramId}:${schedule.id}')
+    expect(cron).toContain('REMINDER:${triggerDay.dayKey}:${recipient.id}:${schedule.id}')
+    expect(cron).toContain('OVERDUE:${dayKey}:${recipient.id}:${schedule.id}')
+    expect(cron).toContain('EARLY_REMINDER:${triggerKey}:${recipient.id}:${schedule.id}')
     expect(cron).toContain('scheduledReminderSendAt(dedupeKey,')
     expect(cron.split('findMany({').length - 1).toBe(9)
     expect(cron.split('orderBy: { id: \'asc\' }').length - 1).toBe(9)

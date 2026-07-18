@@ -13,7 +13,7 @@ import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { createNasiyaSchema } from '@/lib/validations'
 import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, forbidden, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
-import { processPendingNotifications } from '@/lib/notification-service'
+import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { nasiyaCreatedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { rateLimitKey } from '@/lib/rate-limit'
@@ -33,6 +33,7 @@ import {
   hasNasiyaPaymentFxQuoteColumns,
   nasiyaPaymentFxSourceForPersistence,
 } from '@/lib/server/nasiya-payment-schema'
+import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -329,8 +330,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         })
       }
 
-      const shopAdmins = await tx.shopAdmin.findMany({
-        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
+      const recipients = await resolveTelegramRecipients(tx, {
+        shopId,
+        audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF,
       })
       const nasiyaMessage = nasiyaCreatedMessage({
         shopName: device.shop.name,
@@ -349,20 +351,22 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         adminName: session.user.name,
         currency,
       })
-      for (const admin of shopAdmins) {
-        await tx.notification.create({
-          data: {
-            shopId,
-            type: 'NASIYA',
-            message: nasiyaMessage,
-            telegramId: admin.telegramId!,
-            recipientShopAdminId: admin.id,
-            scheduledAt: new Date(),
-            relatedId: nasiya.id,
-            relatedType: 'Nasiya',
-          },
-        })
-      }
+      const scheduledAt = new Date()
+      const notificationRows = [
+        ...telegramNotificationRows(recipients, {
+          type: 'NASIYA',
+          message: nasiyaMessage,
+          scheduledAt,
+          relatedId: nasiya.id,
+          relatedType: 'Nasiya',
+        }),
+        ...telegramUnavailableMarkerRows(recipients, {
+          type: 'NASIYA',
+          dedupeScope: nasiya.id,
+          cancelledAt: scheduledAt,
+        }),
+      ]
+      if (notificationRows.length > 0) await tx.notification.createMany({ data: notificationRows })
 
       await tx.log.create({
         data: {
@@ -399,7 +403,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     // Flush freshly-queued notifications after the response (non-blocking).
     // The rows are already committed, so cron is the backstop if this misses.
-    after(() => processPendingNotifications().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
+    after(() => flushQueuedTelegramWork().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
 
     return created(result, "Nasiya muvaffaqiyatli yaratildi")
   } catch (err: unknown) {

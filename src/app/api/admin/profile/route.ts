@@ -5,8 +5,9 @@ import { Prisma } from '@/generated/prisma/client'
 import { badRequest, conflict, notFound, ok, payloadTooLarge, serverError } from '@/lib/api-helpers'
 import { requireSuperAdmin } from '@/lib/api-auth'
 import { prisma } from '@/lib/prisma'
-import { isTelegramIdTaken, nextTelegramVerifiedAt, normalizeTelegramId } from '@/lib/telegram-id'
+import { nextTelegramVerifiedAt, normalizeTelegramId } from '@/lib/telegram-id'
 import { logger } from '@/lib/logger'
+import { reconcileLinkedTelegramIdentity } from '@/lib/server/telegram-lifecycle'
 import { currentPasswordSchema, passwordSchema } from '@/lib/validations'
 import {
   isInvalidRequestBody,
@@ -122,6 +123,7 @@ export async function PATCH(req: NextRequest) {
       }
 
       const telegramId = normalizeTelegramId(parsed.data.telegramId)
+      if (telegramId) await reconcileLinkedTelegramIdentity(telegramId)
       const admin = await prisma.superAdmin.findFirst({
         where: {
           id: guarded.session.user.id,
@@ -137,34 +139,66 @@ export async function PATCH(req: NextRequest) {
       })
 
       if (!admin) return notFound('Bosh administrator topilmadi')
-      if (telegramId && (await isTelegramIdTaken(telegramId, { type: 'SUPER_ADMIN', id: admin.id }))) {
-        return conflict(`Bu Telegram ID allaqachon tizimda bor: ${telegramId}`)
-      }
 
       const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+        await tx.$queryRaw(Prisma.sql`
+          SELECT "id" FROM "SuperAdmin" WHERE "id" = ${admin.id} FOR UPDATE
+        `)
+        const lockedAdmin = await tx.superAdmin.findFirst({
+          where: { id: admin.id, deletedAt: null },
+          select: {
+            id: true,
+            name: true,
+            login: true,
+            telegramId: true,
+            telegramVerifiedAt: true,
+          },
+        })
+        if (!lockedAdmin) throw Object.assign(new Error('ADMIN_NOT_FOUND'), { code: 'ADMIN_NOT_FOUND' })
+        if (telegramId) {
+          await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${telegramId}, 0))`)
+          const [otherSuperAdmin, shopAdmin] = await Promise.all([
+            tx.superAdmin.findFirst({
+              where: { telegramId, deletedAt: null, id: { not: lockedAdmin.id } },
+              select: { id: true },
+            }),
+            tx.shopAdmin.findFirst({ where: { telegramId, deletedAt: null }, select: { id: true } }),
+          ])
+          if (otherSuperAdmin || shopAdmin) {
+            throw Object.assign(new Error('TELEGRAM_TAKEN'), { code: 'TELEGRAM_TAKEN' })
+          }
+        }
         await tx.superAdmin.update({
-          where: { id: admin.id },
+          where: { id: lockedAdmin.id },
           data: {
             telegramId,
-            telegramVerifiedAt: nextTelegramVerifiedAt(admin.telegramId, admin.telegramVerifiedAt, telegramId),
+            telegramVerifiedAt: nextTelegramVerifiedAt(
+              lockedAdmin.telegramId,
+              lockedAdmin.telegramVerifiedAt,
+              telegramId,
+            ),
           },
         })
 
         await tx.log.create({
           data: {
             shopId: null,
-            actorId: admin.id,
+            actorId: lockedAdmin.id,
             actorType: 'SUPER_ADMIN',
             action: 'UPDATE_TELEGRAM_ID',
             targetType: 'SuperAdmin',
-            targetId: admin.id,
-            oldValue: { telegramId: admin.telegramId, login: admin.login, name: admin.name },
+            targetId: lockedAdmin.id,
+            oldValue: {
+              telegramId: lockedAdmin.telegramId,
+              login: lockedAdmin.login,
+              name: lockedAdmin.name,
+            },
             newValue: { telegramId },
           },
         })
 
         return tx.superAdmin.findUniqueOrThrow({
-          where: { id: admin.id },
+          where: { id: lockedAdmin.id },
           select: profileSelect(),
         })
       })
@@ -270,6 +304,9 @@ export async function PATCH(req: NextRequest) {
   } catch (err) {
     if (isRequestBodyTooLarge(err)) return payloadTooLarge()
     if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'TELEGRAM_TAKEN') {
+      return conflict('Bu Telegram hisobi boshqa foydalanuvchiga biriktirilgan.')
+    }
     logger.error('[PATCH /api/admin/profile]', { event: 'api.route_error', error: err })
     return serverError()
   }

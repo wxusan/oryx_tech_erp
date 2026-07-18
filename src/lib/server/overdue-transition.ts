@@ -1,5 +1,6 @@
 import 'server-only'
 
+import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { addMoneyDto, createMoneyDto, moneyDtoEquals, type CurrencyCode } from '@/lib/currency'
 
@@ -30,6 +31,13 @@ export function hasValidNasiyaScheduleNativeLedger(input: {
 }
 
 /** Shared by the reminders cron and database integration tests. */
+export interface NasiyaOverdueTransitionResult {
+  /** The schedule was still overdue/payable, so its daily notification policy applies. */
+  notificationEligible: boolean
+  /** At least one persisted overdue status changed and requires cache invalidation. */
+  stateChanged: boolean
+}
+
 export function transitionNasiyaToOverdue(input: {
   scheduleId: string
   nasiyaId: string
@@ -43,6 +51,7 @@ export function transitionNasiyaToOverdue(input: {
     recipientShopAdminId: string
     scheduledAt: Date
   }>
+  gapMarkers?: Prisma.NotificationCreateManyInput[]
 }) {
   return prisma.$transaction(async (tx) => {
     // Put the due-date and unpaid-status predicates on the write itself. If a
@@ -95,7 +104,9 @@ export function transitionNasiyaToOverdue(input: {
         },
         select: { id: true },
       })
-      if (!alreadyOverdue) return false
+      if (!alreadyOverdue) {
+        return { notificationEligible: false, stateChanged: false } satisfies NasiyaOverdueTransitionResult
+      }
     }
 
     for (const notification of input.notifications ?? []) {
@@ -110,6 +121,13 @@ export function transitionNasiyaToOverdue(input: {
           relatedType: 'NasiyaSchedule',
         },
       })
+    }
+    const gapMarkers = input.gapMarkers ?? []
+    if (gapMarkers.some((marker) => !marker.dedupeKey)) {
+      throw new Error('TELEGRAM_GAP_MARKER_DEDUPE_REQUIRED')
+    }
+    if (gapMarkers.length > 0) {
+      await tx.notification.createMany({ data: gapMarkers, skipDuplicates: true })
     }
     const nasiyaUpdate = await tx.nasiya.updateMany({
       where: { id: input.nasiyaId, shopId: input.shopId, status: { not: 'CANCELLED' }, resolutionState: 'ACTIVE', deletedAt: null },
@@ -129,6 +147,9 @@ export function transitionNasiyaToOverdue(input: {
         },
       })
     }
-    return changed
+    return {
+      notificationEligible: true,
+      stateChanged: changed,
+    } satisfies NasiyaOverdueTransitionResult
   })
 }

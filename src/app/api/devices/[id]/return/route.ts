@@ -5,7 +5,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireShopAnyPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, forbidden, serverError } from '@/lib/api-helpers'
 import { invalidateShopReturnMutation } from '@/lib/server/cache-tags'
-import { processPendingNotifications } from '@/lib/notification-service'
+import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { logger } from '@/lib/logger'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { deviceReturnedMessage } from '@/lib/telegram-templates'
@@ -18,6 +18,7 @@ import {
   type ReturnReceiptSource,
 } from '@/lib/return-accounting'
 import { presentDeviceSpecs } from '@/lib/device-specs'
+import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -281,12 +282,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         },
       })
 
-      const shopAdmins = await tx.shopAdmin.findMany({
-        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
-        select: { id: true, telegramId: true },
+      const recipients = await resolveTelegramRecipients(tx, {
+        shopId,
+        audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF,
       })
-      if (shopAdmins.length > 0) {
-        const message = deviceReturnedMessage({
+      const notificationRows = [
+        ...telegramNotificationRows(recipients, {
+          type: 'RETURN',
+          message: deviceReturnedMessage({
           shopName: device.shop.name,
           device: presentDeviceSpecs(device),
           refundAmount: refundAmountUzs,
@@ -294,20 +297,18 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           note: parsed.data.note,
           adminName: session.user.name,
           currency: displayCurrency,
-        })
-        await tx.notification.createMany({
-          data: shopAdmins.map((admin) => ({
-            shopId,
-            type: 'RETURN',
-            message,
-            telegramId: admin.telegramId!,
-            recipientShopAdminId: admin.id,
-            scheduledAt: now,
-            relatedId: returnRecord.id,
-            relatedType: 'DeviceReturn',
-          })),
-        })
-      }
+          }),
+          scheduledAt: now,
+          relatedId: returnRecord.id,
+          relatedType: 'DeviceReturn',
+        }),
+        ...telegramUnavailableMarkerRows(recipients, {
+          type: 'RETURN',
+          dedupeScope: returnRecord.id,
+          cancelledAt: now,
+        }),
+      ]
+      if (notificationRows.length > 0) await tx.notification.createMany({ data: notificationRows })
 
       return {
         device: await tx.device.findFirst({ where: { id: deviceId, shopId } }),
@@ -329,7 +330,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     invalidateShopReturnMutation(shopId)
     if (!result.duplicate) {
-      after(() => processPendingNotifications().catch((error) => logger.warn('notification flush failed', {
+      after(() => flushQueuedTelegramWork().catch((error) => logger.warn('notification flush failed', {
         event: 'notification.flush_failed',
         error,
       })))

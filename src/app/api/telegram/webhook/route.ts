@@ -18,11 +18,10 @@
 
 import { type NextRequest } from 'next/server'
 import { getBot } from '@/lib/telegram'
-import { prisma } from '@/lib/prisma'
 import { logger } from '@/lib/logger'
 import { recordOpsEvent } from '@/lib/server/ops-events'
 import { initializeRequestAuditContext } from '@/lib/server/request-context'
-import { findTelegramOwner } from '@/lib/telegram-id'
+import { verifyTelegramOwnerForStart } from '@/lib/server/telegram-lifecycle'
 import {
   startShopAdminMessage,
   startSuperAdminMessage,
@@ -50,35 +49,20 @@ function webhookBot() {
       return
     }
 
-    const owner = await findTelegramOwner(telegramId)
+    let owner: Awaited<ReturnType<typeof verifyTelegramOwnerForStart>>
+    try {
+      owner = await verifyTelegramOwnerForStart(telegramId)
+    } catch (error) {
+      logger.warn('telegram /start verification failed', {
+        event: 'telegram.verify_stamp_failed',
+        error,
+      })
+      owner = null
+    }
     if (!owner) {
       await ctx.reply(startUnknownMessage(telegramId), { parse_mode: 'HTML' })
       logger.info('telegram /start from unlinked id', { event: 'telegram.start_unlinked' })
       return
-    }
-
-    // Mark the manually-entered ID as verified on first /start (idempotent —
-    // only writes when telegramVerifiedAt is still null). Never blocks the
-    // welcome reply if the stamp fails.
-    try {
-      if (owner.type === 'SUPER_ADMIN') {
-        await prisma.superAdmin.updateMany({
-          where: { id: owner.user.id, telegramId, telegramVerifiedAt: null },
-          data: { telegramVerifiedAt: new Date() },
-        })
-      } else {
-        await prisma.shopAdmin.updateMany({
-          where: { id: owner.user.id, telegramId, telegramVerifiedAt: null },
-          data: { telegramVerifiedAt: new Date() },
-        })
-      }
-    } catch (error) {
-      logger.warn('telegram /start verify stamp failed', {
-        event: 'telegram.verify_stamp_failed',
-        actorId: owner.user.id,
-        actorType: owner.type,
-        error,
-      })
     }
 
     const welcome =

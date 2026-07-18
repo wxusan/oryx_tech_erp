@@ -5,7 +5,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { badRequest, conflict, forbidden, notFound, ok, payloadTooLarge, serverError } from '@/lib/api-helpers'
 import { requireApiSession } from '@/lib/api-auth'
-import { isTelegramIdTaken, nextTelegramVerifiedAt, normalizeTelegramId } from '@/lib/telegram-id'
+import { normalizeTelegramId } from '@/lib/telegram-id'
 import { logger } from '@/lib/logger'
 import { currentPasswordSchema, passwordSchema, phoneSchema } from '@/lib/validations'
 import {
@@ -13,6 +13,12 @@ import {
   isRequestBodyTooLarge,
   readLimitedJsonBody,
 } from '@/lib/server/request-limits'
+import {
+  processDueTelegramDisableTransitions,
+  linkShopAdminTelegramIdentityInTransaction,
+  reconcileLinkedTelegramIdentity,
+  unlinkShopAdminTelegramIdentityInTransaction,
+} from '@/lib/server/telegram-lifecycle'
 
 const changePasswordSchema = z.object({
   currentPassword: currentPasswordSchema,
@@ -143,6 +149,8 @@ export async function PATCH(req: NextRequest) {
       }
 
       const telegramId = normalizeTelegramId(parsed.data.telegramId)
+      if (telegramId) await reconcileLinkedTelegramIdentity(telegramId)
+      await processDueTelegramDisableTransitions({ shopId: session.user.shopId, limit: 10 })
       const admin = await prisma.shopAdmin.findFirst({
         where: {
           id: session.user.id,
@@ -163,21 +171,17 @@ export async function PATCH(req: NextRequest) {
       })
 
       if (!admin) return notFound("Admin topilmadi")
-      if (isStaff && (!telegramFeatureEnabled || !admin.telegramNotificationsEnabled || !admin.shop.telegramNotificationsEnabled)) {
-        return forbidden("Telegram bildirishnomalari do'kon egasi tomonidan siz uchun yoqilmagan")
-      }
-      if (telegramId && (await isTelegramIdTaken(telegramId, { type: 'SHOP_ADMIN', id: admin.id }))) {
-        return conflict(`Bu Telegram ID allaqachon tizimda bor: ${telegramId}`)
-      }
-
       const updated = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-        await tx.shopAdmin.update({
-          where: { id: admin.id },
-          data: {
+        const locked = telegramId
+          ? await linkShopAdminTelegramIdentityInTransaction(tx, {
+            shopId: admin.shopId,
+            shopAdminId: admin.id,
             telegramId,
-            telegramVerifiedAt: nextTelegramVerifiedAt(admin.telegramId, admin.telegramVerifiedAt, telegramId),
-          },
-        })
+          })
+          : await unlinkShopAdminTelegramIdentityInTransaction(tx, {
+            shopId: admin.shopId,
+            shopAdminId: admin.id,
+          })
 
         await tx.log.create({
           data: {
@@ -187,7 +191,11 @@ export async function PATCH(req: NextRequest) {
             action: 'UPDATE_TELEGRAM_ID',
             targetType: 'ShopAdmin',
             targetId: admin.id,
-            oldValue: { telegramId: admin.telegramId, login: admin.login, name: admin.name },
+            oldValue: {
+              telegramId: locked.actor.telegramId,
+              login: locked.actor.login,
+              name: locked.actor.name,
+            },
             newValue: { telegramId },
           },
         })
@@ -319,6 +327,12 @@ export async function PATCH(req: NextRequest) {
   } catch (err) {
     if (isRequestBodyTooLarge(err)) return payloadTooLarge()
     if (isInvalidRequestBody(err)) return badRequest("So'rov ma'lumoti noto'g'ri")
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'TELEGRAM_DISABLED') {
+      return forbidden("Telegram funksiyasi do'kon yoki xodim uchun yoqilmagan")
+    }
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'TELEGRAM_TAKEN') {
+      return conflict('Bu Telegram hisobi boshqa foydalanuvchiga biriktirilgan.')
+    }
     logger.error('[PATCH /api/shop-admin/profile]', { event: 'api.route_error', error: err })
     return serverError()
   }

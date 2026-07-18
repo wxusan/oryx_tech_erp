@@ -1,11 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
+vi.mock('server-only', () => ({}))
+
 const mocks = vi.hoisted(() => ({
   findMany: vi.fn(),
   updateMany: vi.fn(),
   update: vi.fn(),
   create: vi.fn(),
   count: vi.fn(),
+  transaction: vi.fn(),
+  opsEventUpsert: vi.fn(),
   shopAdminFindMany: vi.fn(),
   shopAdminFindFirst: vi.fn(),
   nasiyaScheduleFindFirst: vi.fn(),
@@ -29,11 +33,13 @@ vi.mock('@/lib/prisma', () => ({
       create: mocks.create,
       count: mocks.count,
     },
+    opsEvent: { upsert: mocks.opsEventUpsert },
     shopAdmin: { findMany: mocks.shopAdminFindMany, findFirst: mocks.shopAdminFindFirst },
     nasiyaSchedule: { findFirst: mocks.nasiyaScheduleFindFirst },
     nasiyaDeferral: { findFirst: mocks.nasiyaDeferralFindFirst },
     sale: { findFirst: mocks.saleFindFirst },
     supplierPayable: { findFirst: mocks.supplierPayableFindFirst },
+    $transaction: mocks.transaction,
   },
 }))
 
@@ -53,6 +59,16 @@ vi.mock('@/lib/logger', () => ({
 }))
 
 vi.mock('@/lib/server/ops-events', () => ({ recordOpsEvent: mocks.recordOpsEvent }))
+vi.mock('@/lib/server/telegram-lifecycle', () => ({
+  processDueTelegramDisableTransitions: vi.fn().mockResolvedValue({
+    selected: 0,
+    processed: 0,
+    failed: 0,
+    identitiesCleared: 0,
+    notificationsCancelled: 0,
+    mayHaveMore: false,
+  }),
+}))
 
 import { processPendingNotifications } from '@/lib/notification-service'
 import { TELEGRAM_CAPTION_LIMIT } from '@/lib/telegram-delivery'
@@ -72,6 +88,8 @@ type TestNotification = {
   lastAttemptAt: Date | null
   nextAttemptAt: Date | null
   lastError: string | null
+  cancelledAt: Date | null
+  recipientUnavailableReason: string | null
   relatedId: string | null
   relatedType: string | null
   mediaKeys: string[]
@@ -100,6 +118,8 @@ function makeNotification(imageCount: number, message = 'Qurilma sotildi'): Test
     lastAttemptAt: null,
     nextAttemptAt: null,
     lastError: null,
+    cancelledAt: null,
+    recipientUnavailableReason: null,
     relatedId: 'device-1',
     relatedType: 'Device',
     mediaKeys: Array.from({ length: imageCount }, (_, index) => `shop-1/device-${index}.jpg`),
@@ -127,6 +147,11 @@ beforeEach(() => {
   mocks.count.mockResolvedValue(0)
   mocks.updateMany.mockResolvedValue({ count: 1 })
   mocks.update.mockImplementation(async ({ data }: { data: Record<string, unknown> }) => applyUpdate(data))
+  mocks.opsEventUpsert.mockResolvedValue(undefined)
+  mocks.transaction.mockImplementation(async (callback: (tx: unknown) => Promise<unknown>) => callback({
+    notification: { update: mocks.update },
+    opsEvent: { upsert: mocks.opsEventUpsert },
+  }))
   mocks.resolveImageKeys.mockImplementation(async () => notification.mediaKeys)
   mocks.resolveImageUrls.mockImplementation(async (_shopId: string, keys: string[], positions: number[]) => (
     positions.map((position) => ({ position, key: keys[position], imageUrl: `https://signed.example/${position}` }))
@@ -137,9 +162,16 @@ beforeEach(() => {
   mocks.shopAdminFindFirst.mockResolvedValue({
     id: 'admin-1',
     telegramId: '123456789',
+    telegramVerifiedAt: new Date('2026-07-12T00:00:00.000Z'),
+    telegramNotificationsEnabled: false,
+    isActive: true,
+    deletedAt: null,
     shop: {
       ownerAdminId: 'admin-1',
+      status: 'ACTIVE',
+      deletedAt: null,
       telegramNotificationsEnabled: true,
+      telegramDisableTransitions: [],
       packageVersions: [{ features: [
         { featureCode: 'TELEGRAM', enabled: true },
         { featureCode: 'REMINDERS', enabled: true },
@@ -315,15 +347,26 @@ describe('Telegram notification delivery', () => {
     expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(notification.status).toBe('CANCELLED')
     expect(notification.lastError).toContain('recipient_revoked_or_unverified')
+    expect(notification).toMatchObject({
+      recipientUnavailableReason: 'unlinked_or_unverified',
+      cancelledAt: expect.any(Date),
+    })
   })
 
   it('cancels queued staff delivery when STAFF_ACCESS is no longer entitled', async () => {
     mocks.shopAdminFindFirst.mockResolvedValueOnce({
       id: 'staff-1',
       telegramId: '123456789',
+      telegramVerifiedAt: new Date('2026-07-12T00:00:00.000Z'),
+      telegramNotificationsEnabled: true,
+      isActive: true,
+      deletedAt: null,
       shop: {
         ownerAdminId: 'owner-1',
+        status: 'ACTIVE',
+        deletedAt: null,
         telegramNotificationsEnabled: true,
+        telegramDisableTransitions: [],
         packageVersions: [{ features: [
           { featureCode: 'TELEGRAM', enabled: true },
           { featureCode: 'STAFF_ACCESS', enabled: false },
@@ -337,9 +380,114 @@ describe('Telegram notification delivery', () => {
     expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(notification.lastError).toContain('recipient_not_entitled_or_notifications_disabled')
     expect(mocks.shopAdminFindFirst.mock.calls[0]?.[0]).toMatchObject({
-      where: { telegramNotificationsEnabled: true },
-      select: { shop: { select: { telegramNotificationsEnabled: true } } },
+      where: { id: 'admin-1', shopId: 'shop-1' },
+      select: {
+        telegramVerifiedAt: true,
+        telegramNotificationsEnabled: true,
+        shop: {
+          select: {
+            telegramNotificationsEnabled: true,
+            telegramDisableTransitions: { take: 1 },
+          },
+        },
+      },
     })
+    expect(notification.recipientUnavailableReason).toBe('package_not_entitled')
+  })
+
+  it('atomically cancels and reports a stale queued identity after the account was freshly re-linked', async () => {
+    notification.message = 'Customer Lola paid 5,000,000; telegram 123456789'
+    mocks.shopAdminFindFirst.mockResolvedValueOnce({
+      id: 'admin-1',
+      telegramId: '987654321',
+      telegramVerifiedAt: new Date('2026-07-12T07:59:00.000Z'),
+      telegramNotificationsEnabled: true,
+      isActive: true,
+      deletedAt: null,
+      shop: {
+        ownerAdminId: 'admin-1',
+        status: 'ACTIVE',
+        deletedAt: null,
+        telegramNotificationsEnabled: true,
+        telegramDisableTransitions: [],
+        packageVersions: [{ features: [{ featureCode: 'TELEGRAM', enabled: true }] }],
+      },
+    })
+
+    const result = await processPendingNotifications()
+
+    expect(result).toMatchObject({ sent: 0, cancelled: 1 })
+    const persisted = JSON.stringify(mocks.update.mock.calls.find((call) => (
+      call[0]?.data?.recipientUnavailableReason === 'unlinked_or_unverified'
+    ))?.[0])
+    expect(persisted).not.toContain(notification.message)
+    expect(persisted).not.toContain('123456789')
+    expect(persisted).not.toContain('987654321')
+  })
+
+  it('records a concurrent staff disable as personal-disabled even after its Telegram ID was cleared', async () => {
+    mocks.shopAdminFindFirst.mockResolvedValueOnce({
+      id: 'staff-1',
+      telegramId: null,
+      telegramVerifiedAt: null,
+      telegramNotificationsEnabled: false,
+      isActive: true,
+      deletedAt: null,
+      shop: {
+        ownerAdminId: 'owner-1',
+        status: 'ACTIVE',
+        deletedAt: null,
+        telegramNotificationsEnabled: true,
+        telegramDisableTransitions: [],
+        packageVersions: [{ features: [
+          { featureCode: 'TELEGRAM', enabled: true },
+          { featureCode: 'STAFF_ACCESS', enabled: true },
+        ] }],
+      },
+    })
+
+    await processPendingNotifications()
+
+    expect(notification).toMatchObject({
+      status: 'CANCELLED',
+      recipientUnavailableReason: 'personal_disabled',
+      cancelledAt: expect.any(Date),
+    })
+  })
+
+  it('folds a due package-disable transition into the authoritative recipient query', async () => {
+    mocks.shopAdminFindFirst.mockResolvedValueOnce({
+      id: 'admin-1',
+      telegramId: '123456789',
+      telegramVerifiedAt: new Date('2026-07-12T00:00:00.000Z'),
+      telegramNotificationsEnabled: true,
+      isActive: true,
+      deletedAt: null,
+      shop: {
+        ownerAdminId: 'admin-1',
+        status: 'ACTIVE',
+        deletedAt: null,
+        telegramNotificationsEnabled: true,
+        telegramDisableTransitions: [{ id: 'transition-1' }],
+        packageVersions: [{ features: [{ featureCode: 'TELEGRAM', enabled: true }] }],
+      },
+    })
+
+    await processPendingNotifications()
+
+    expect(notification.lastError).toContain('telegram_disable_transition_pending')
+    expect(notification.recipientUnavailableReason).toBe('package_not_entitled')
+    expect(mocks.shopAdminFindFirst).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not warn or inspect a stale snapshot when another worker wins the atomic claim', async () => {
+    mocks.updateMany.mockResolvedValueOnce({ count: 0 })
+
+    const result = await processPendingNotifications()
+
+    expect(result).toMatchObject({ attempted: 0, sent: 0, cancelled: 0 })
+    expect(mocks.shopAdminFindFirst).not.toHaveBeenCalled()
+    expect(mocks.sendMessage).not.toHaveBeenCalled()
   })
 
   it('cancels a queued sale reminder after its debt has been resolved', async () => {
@@ -364,6 +512,7 @@ describe('Telegram notification delivery', () => {
     expect(result).toMatchObject({ ok: false, sent: 0, cancelled: 1 })
     expect(mocks.sendMessage).not.toHaveBeenCalled()
     expect(notification.lastError).toContain('debt_resolved_or_changed')
+    expect(notification.recipientUnavailableReason).toBeNull()
   })
 
   it('cancels an otherwise-active reminder when a newer partial payment made its message stale', async () => {
