@@ -46,6 +46,7 @@ const routes: Array<{ path: string; load: () => Promise<RouteModule> }> = [
   { path: 'src/app/api/admin/reports/due-shops/route.ts', load: () => import('@/app/api/admin/reports/due-shops/route') },
   { path: 'src/app/api/auth/activity/route.ts', load: () => import('@/app/api/auth/activity/route') },
   { path: 'src/app/api/auth/validate-session/route.ts', load: () => import('@/app/api/auth/validate-session/route') },
+  { path: 'src/app/api/customers/[id]/analytics/route.ts', load: () => import('@/app/api/customers/[id]/analytics/route') },
   { path: 'src/app/api/customers/[id]/passport/image/route.ts', load: () => import('@/app/api/customers/[id]/passport/image/route') },
   { path: 'src/app/api/customers/[id]/passport/reveal/route.ts', load: () => import('@/app/api/customers/[id]/passport/reveal/route') },
   { path: 'src/app/api/customers/[id]/profile/route.ts', load: () => import('@/app/api/customers/[id]/profile/route') },

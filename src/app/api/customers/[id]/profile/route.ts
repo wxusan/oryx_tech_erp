@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server'
 import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
-import { forbidden, notFound, ok, serverError } from '@/lib/api-helpers'
+import { badRequest, forbidden, notFound, ok, serverError } from '@/lib/api-helpers'
 import { logger } from '@/lib/logger'
 import {
   CUSTOMER_PROFILE_SECTIONS,
@@ -18,6 +18,10 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(guarded.session, req.nextUrl.searchParams.get('shopId'))
     if (!resolved.ok) return resolved.response
     const { id } = await ctx.params
+    const view = req.nextUrl.searchParams.get('view')
+    if (view && view !== 'overview' && view !== 'history') {
+      return badRequest("Ko'rinish noto'g'ri")
+    }
     const requestedSection = req.nextUrl.searchParams.get('section')
     const section = CUSTOMER_PROFILE_SECTIONS.includes(requestedSection as CustomerProfileSection)
       ? requestedSection as CustomerProfileSection
@@ -26,25 +30,42 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       guarded.session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
     // Resolution events include immutable write-off/archive monetary context;
     // they are an owner-only audit surface, not an operational staff queue.
-    if (!includeOwnerFinancials && section === 'resolutions') {
+    if (view !== 'overview' && !includeOwnerFinancials && section === 'resolutions') {
       return forbidden("Hisobdan chiqarish va arxiv tarixi faqat do'kon egasiga ochiq")
     }
     const requestedPage = Number(req.nextUrl.searchParams.get('page') ?? 1)
     const page = Number.isFinite(requestedPage) ? Math.max(1, Math.trunc(requestedPage)) : 1
 
-    const overview = await getCustomerProfileOverview({
+    const overviewInput = {
       shopId: resolved.shopId,
       customerId: id,
       visibility: { includeOwnerFinancials },
-    })
-    if (!overview) return notFound('Mijoz topilmadi')
-    const history = await getCustomerProfileHistory({
+    }
+    const historyInput = {
       shopId: resolved.shopId,
       customerId: id,
       section,
       page,
       take: 20,
-    })
+    }
+
+    if (view === 'overview') {
+      const overview = await getCustomerProfileOverview(overviewInput)
+      if (!overview) return notFound('Mijoz topilmadi')
+      return ok({ overview }, 'Mijoz profili')
+    }
+
+    if (view === 'history') {
+      const history = await getCustomerProfileHistory(historyInput)
+      if (!history.found) return notFound('Mijoz topilmadi')
+      return ok({ section, history }, 'Mijoz tarixi')
+    }
+
+    const [overview, history] = await Promise.all([
+      getCustomerProfileOverview(overviewInput),
+      getCustomerProfileHistory(historyInput),
+    ])
+    if (!overview || !history.found) return notFound('Mijoz topilmadi')
 
     return ok({ overview, section, history }, 'Mijoz profili')
   } catch (error) {

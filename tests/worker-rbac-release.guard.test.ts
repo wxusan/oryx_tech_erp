@@ -163,12 +163,16 @@ describe('worker server boundary release guard', () => {
 
   it('keeps customer-profile financial aggregates and resolution history owner-only at both API and UI boundaries', () => {
     const profileApi = source('src/app/api/customers/[id]/profile/route.ts')
+    const analyticsApi = source('src/app/api/customers/[id]/analytics/route.ts')
     const profileData = source('src/lib/server/customer-profile.ts')
-    const profileClient = source('src/app/(shop)/shop/mijozlar/[id]/customer-profile-client.tsx')
+    const analyticsData = source('src/lib/server/customer-profile-analytics.ts')
+    const profileHistory = source('src/app/(shop)/shop/mijozlar/[id]/customer-profile-history.tsx')
     expect(profileApi).toContain('const includeOwnerFinancials =')
     expect(profileApi).toContain("!includeOwnerFinancials && section === 'resolutions'")
     expect(profileData).toContain('redactShopStaffCustomerProfileMetrics(metrics)')
-    expect(profileClient).toContain(".filter((candidate) => canSeeOwnerFinancials || candidate !== 'resolutions')")
+    expect(analyticsApi).toContain('includeOwnerFinancials')
+    expect(analyticsData).toContain('redactShopStaffCustomerProfileAnalytics')
+    expect(profileHistory).toContain(".filter((candidate) => canSeeOwnerFinancials || candidate !== 'resolutions')")
   })
 
   it('returns Nasiya resolution data only to owners or an exact resolution capability', () => {

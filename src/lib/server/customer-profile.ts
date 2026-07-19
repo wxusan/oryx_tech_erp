@@ -5,6 +5,7 @@ import { prisma } from '@/lib/prisma'
 import { computeCustomerTrustRatingFromFactors, isValidTrustTier, type CustomerTrustFactors } from '@/lib/nasiya-customer-trust'
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
 import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
+import { timeRequestPhase } from '@/lib/server/request-context'
 import { tashkentDayRange } from '@/lib/timezone'
 import {
   redactShopStaffCustomerProfileMetrics,
@@ -60,7 +61,7 @@ export async function getCustomerProfileOverview(input: {
   now?: Date
   visibility: CustomerProfileVisibility
 }) {
-  const customer = await prisma.customer.findFirst({
+  const customer = await timeRequestPhase('database', () => prisma.customer.findFirst({
     where: { id: input.customerId, shopId: input.shopId, deletedAt: null },
     select: {
       id: true,
@@ -73,11 +74,11 @@ export async function getCustomerProfileOverview(input: {
       passportPhotoUrl: true,
       createdAt: true,
     },
-  })
+  }))
   if (!customer) return null
 
   const day = tashkentDayRange(input.now ?? new Date())
-  const [metricRows, trustMap] = await Promise.all([
+  const [metricRows, trustMap] = await timeRequestPhase('database', () => Promise.all([
     prisma.$queryRaw<MetricRow[]>(Prisma.sql`
       WITH sale_base AS (
         SELECT s.*, d."purchasePrice" AS purchase_price
@@ -217,7 +218,7 @@ export async function getCustomerProfileOverview(input: {
         (SELECT count(*) FROM refunds)::integer AS return_count
     `),
     getCustomerTrustFactorsForList({ shopId: input.shopId, customerIds: [input.customerId], now: input.now }),
-  ])
+  ]))
 
   const row = metricRows[0]
   const fallbackFactors: CustomerTrustFactors = {
@@ -272,11 +273,12 @@ export async function getCustomerProfileOverview(input: {
 }
 
 interface HistoryRow {
-  id: string
-  occurred_at: Date
-  kind: string
+  customer_marker: string
+  id: string | null
+  occurred_at: Date | null
+  kind: string | null
   reference_id: string | null
-  title: string
+  title: string | null
   subtitle: string | null
   currency: 'UZS' | 'USD' | null
   amount: unknown
@@ -388,16 +390,32 @@ export async function getCustomerProfileHistory(input: {
   const page = Math.max(Math.trunc(input.page), 1)
   const offset = (page - 1) * take
   const base = historySql(input.section, input)
-  const [rows, countRows] = await Promise.all([
-    prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
-      SELECT * FROM (${base}) bounded_history
+  const rows = await timeRequestPhase('database', () => prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
+    SELECT customer_scope.customer_marker, bounded_history.*
+    FROM (
+      SELECT c."id" AS customer_marker
+      FROM "Customer" c
+      WHERE c."id" = ${input.customerId}
+        AND c."shopId" = ${input.shopId}
+        AND c."deletedAt" IS NULL
+    ) customer_scope
+    LEFT JOIN LATERAL (
+      SELECT * FROM (${base}) history_rows
       ORDER BY occurred_at DESC, id DESC
-      LIMIT ${take} OFFSET ${offset}`),
-    prisma.$queryRaw<Array<{ count: number }>>(Prisma.sql`
-      SELECT count(*)::integer AS count FROM (${base}) bounded_history`),
-  ])
+      LIMIT ${take + 1} OFFSET ${offset}
+    ) bounded_history ON TRUE
+  `))
+  const boundedRows = rows.filter((row): row is HistoryRow & {
+    id: string
+    occurred_at: Date
+    kind: string
+    title: string
+  } => row.id !== null && row.occurred_at !== null && row.kind !== null && row.title !== null)
+  const hasNext = boundedRows.length > take
+  const pageRows = boundedRows.slice(0, take)
   return {
-    items: rows.map((row) => ({
+    found: rows.length > 0,
+    items: pageRows.map((row) => ({
       id: row.id,
       occurredAt: row.occurred_at.toISOString(),
       kind: row.kind,
@@ -408,8 +426,16 @@ export async function getCustomerProfileHistory(input: {
       amount: row.amount == null ? null : Number(row.amount),
       status: row.status,
     })),
-    total: Number(countRows[0]?.count ?? 0),
+    // Compatibility lower bound for older consumers. It is intentionally not
+    // an exact count; take+1 is the only pagination work on the critical path.
+    total: offset + pageRows.length + (hasNext ? 1 : 0),
+    totalIsExact: false,
+    hasNext,
     page,
     take,
   }
 }
+
+export type CustomerProfileOverview = NonNullable<Awaited<ReturnType<typeof getCustomerProfileOverview>>>
+export type CustomerProfileHistory = Awaited<ReturnType<typeof getCustomerProfileHistory>>
+export type CustomerProfileHistoryItem = CustomerProfileHistory['items'][number]

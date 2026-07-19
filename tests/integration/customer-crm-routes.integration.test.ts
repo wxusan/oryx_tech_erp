@@ -69,7 +69,7 @@ async function seed() {
     },
     expires: '2099-01-01T00:00:00.000Z',
   }
-  return { superAdmin, shop, owner }
+  return { superAdmin, shop, owner, packageVersion }
 }
 
 describe('customer CRM protected routes', () => {
@@ -210,5 +210,113 @@ describe('customer CRM protected routes', () => {
     expect(collision.status).toBe(409)
     expect(await prisma.device.findUnique({ where: { id: collisionDevice.id }, select: { status: true } })).toEqual({ status: 'IN_STOCK' })
     expect(await prisma.customer.count({ where: { shopId: actor.shop.id } })).toBe(1)
+  })
+
+  it('splits profile surfaces, validates analytics ranges, and omits owner series for staff', async () => {
+    const actor = await seed()
+    const customer = await prisma.customer.create({
+      data: { shopId: actor.shop.id, name: 'Dashboard customer', phone: '+998909999991', normalizedPhone: '998909999991' },
+    })
+    const { NextRequest } = await import('next/server')
+    const profileRoute = await import('@/app/api/customers/[id]/profile/route')
+    const analyticsRoute = await import('@/app/api/customers/[id]/analytics/route')
+    const context = { params: Promise.resolve({ id: customer.id }) }
+
+    const overviewResponse = await profileRoute.GET(
+      new NextRequest(`http://localhost/api/customers/${customer.id}/profile?view=overview`),
+      context,
+    )
+    const overviewPayload = await overviewResponse.json()
+    expect(overviewResponse.status).toBe(200)
+    expect(overviewPayload.data.overview.customer.id).toBe(customer.id)
+    expect(overviewPayload.data).not.toHaveProperty('history')
+
+    const historyResponse = await profileRoute.GET(
+      new NextRequest(`http://localhost/api/customers/${customer.id}/profile?view=history&section=devices&page=1`),
+      context,
+    )
+    const historyPayload = await historyResponse.json()
+    expect(historyResponse.status).toBe(200)
+    expect(historyPayload.data).not.toHaveProperty('overview')
+    expect(historyPayload.data.history).toMatchObject({ items: [], hasNext: false, totalIsExact: false })
+
+    const invalidRange = await analyticsRoute.GET(
+      new NextRequest(`http://localhost/api/customers/${customer.id}/analytics?months=18`),
+      context,
+    )
+    expect(invalidRange.status).toBe(400)
+
+    const ownerAnalytics = await analyticsRoute.GET(
+      new NextRequest(`http://localhost/api/customers/${customer.id}/analytics?months=24`),
+      context,
+    )
+    const ownerPayload = await ownerAnalytics.json()
+    expect(ownerAnalytics.status).toBe(200)
+    expect(ownerPayload.data).toMatchObject({ months: 24, visibility: 'OWNER_FINANCIAL' })
+    expect(ownerPayload.data.activity).toHaveLength(24)
+    expect(ownerPayload.data.activity[0]).toHaveProperty('payments')
+
+    const staff = await prisma.shopAdmin.create({
+      data: {
+        shopId: actor.shop.id, name: 'CRM staff', phone: '+998909999992', login: 'crm-route-staff',
+        passwordHash: 'test-only', legacyFullAccess: false,
+      },
+    })
+    await prisma.shopMemberPermission.create({
+      data: {
+        shopId: actor.shop.id,
+        shopAdminId: staff.id,
+        permissionCode: 'CUSTOMER_VIEW',
+        grantedById: actor.owner.id,
+      },
+    })
+    const staffSession = await prisma.authSession.create({
+      data: {
+        id: 'crm-staff-session', actorId: staff.id, actorType: 'SHOP_ADMIN', shopId: actor.shop.id,
+        packageVersionId: actor.packageVersion.id, sessionVersion: staff.sessionVersion,
+        policy: 'IDLE_10_MINUTES', expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+      },
+    })
+    authState.session = {
+      user: {
+        id: staff.id, name: staff.name, role: 'SHOP_ADMIN', shopId: actor.shop.id,
+        sessionVersion: staff.sessionVersion, sessionId: staffSession.id,
+        sessionPolicy: staffSession.policy, packageVersionId: actor.packageVersion.id,
+      },
+      expires: '2099-01-01T00:00:00.000Z',
+    }
+
+    const staffAnalytics = await analyticsRoute.GET(
+      new NextRequest(`http://localhost/api/customers/${customer.id}/analytics?months=12`),
+      context,
+    )
+    const staffPayload = await staffAnalytics.json()
+    expect(staffAnalytics.status).toBe(200)
+    expect(staffPayload.data.visibility).toBe('OPERATIONAL')
+    for (const restricted of ['payments', 'refunds', 'writeOffs', 'legacyUsdPaymentCount']) {
+      expect(JSON.stringify(staffPayload)).not.toContain(restricted)
+    }
+
+    const resolutionHistory = await profileRoute.GET(
+      new NextRequest(`http://localhost/api/customers/${customer.id}/profile?view=history&section=resolutions`),
+      context,
+    )
+    expect(resolutionHistory.status).toBe(403)
+
+    const otherRoot = await prisma.superAdmin.create({ data: { name: 'Analytics other', login: 'analytics-other', passwordHash: 'test-only' } })
+    const otherShop = await prisma.shop.create({
+      data: {
+        name: 'Analytics other shop', ownerName: 'Other', ownerPhone: '+998909999993', shopNumber: 'analytics-other',
+        address: 'Other', subscriptionDue: new Date('2099-01-01T00:00:00.000Z'), createdById: otherRoot.id,
+      },
+    })
+    const foreignCustomer = await prisma.customer.create({
+      data: { shopId: otherShop.id, name: 'Foreign dashboard', phone: '+998909999994', normalizedPhone: '998909999994' },
+    })
+    const foreignResponse = await analyticsRoute.GET(
+      new NextRequest(`http://localhost/api/customers/${foreignCustomer.id}/analytics?months=12`),
+      { params: Promise.resolve({ id: foreignCustomer.id }) },
+    )
+    expect(foreignResponse.status).toBe(404)
   })
 })

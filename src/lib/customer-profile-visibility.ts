@@ -1,3 +1,5 @@
+import type { CustomerProfileAnalytics } from '@/lib/customer-profile-analytics'
+
 export interface CustomerProfileNativeMoney {
   UZS: number
   USD: number
@@ -28,5 +30,22 @@ export function redactShopStaffCustomerProfileMetrics(metrics: CustomerProfileMe
     contractValue: metrics.contractValue,
     dueToday: metrics.dueToday,
     overdue: metrics.overdue,
+  }
+}
+
+/** Owner cash-flow series and caveats never cross the staff API boundary. */
+export function redactShopStaffCustomerProfileAnalytics(
+  analytics: CustomerProfileAnalytics,
+): CustomerProfileAnalytics {
+  return {
+    asOf: analytics.asOf,
+    timezone: analytics.timezone,
+    months: analytics.months,
+    visibility: 'OPERATIONAL',
+    obligations: analytics.obligations,
+    activity: analytics.activity.map(({ month, contracts }) => ({ month, contracts })),
+    discipline: analytics.discipline,
+    counts: analytics.counts,
+    caveats: {},
   }
 }

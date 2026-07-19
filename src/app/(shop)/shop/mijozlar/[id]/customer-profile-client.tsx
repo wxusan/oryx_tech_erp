@@ -1,282 +1,173 @@
 'use client'
 
-import Link from 'next/link'
+import { useCallback, useEffect, useState } from 'react'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
-import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
-import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
-import { queryKeys } from '@/lib/query-keys'
-import { buttonVariants } from '@/components/ui/button'
-import { TrustBadge, type TrustBadgeData } from '@/components/shop/trust-badge'
 import { CustomerPassportPanel } from '@/components/shop/customer-passport-panel'
-import { IntentPrefetchLink } from '@/components/intent-prefetch-link'
-import { formatUzPhoneDisplay } from '@/lib/phone'
-import { uzDate } from '@/lib/dates'
-import { cn } from '@/lib/utils'
-import { historyStatusLabel, paymentMethodLabel } from '@/lib/labels'
-import { formatMoneyByCurrency } from '@/lib/currency'
-import type { CustomerProfileSection } from '@/lib/server/customer-profile'
-import { useShopAccess } from '@/components/shop/shop-access-context'
-import { useShopCurrency } from '@/lib/use-shop-currency'
+import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
+import { QueryActivity } from '@/components/query-activity'
+import { markQueryIntent } from '@/lib/client-performance'
+import type { CustomerProfileAnalytics, CustomerProfileAnalyticsMonths } from '@/lib/customer-profile-analytics'
+import { replaceListUrlState } from '@/lib/list-url-state'
+import { queryKeys } from '@/lib/query-keys'
+import type {
+  CustomerProfileHistory,
+  CustomerProfileOverview,
+  CustomerProfileSection,
+} from '@/lib/server/customer-profile'
+import { CustomerProfileCounts } from './customer-profile-counts'
+import { CustomerProfileDashboard } from './customer-profile-dashboard'
+import { CustomerProfileHeader } from './customer-profile-header'
+import { CustomerProfileHistorySection } from './customer-profile-history'
+import { CustomerProfileMetrics } from './customer-profile-metrics'
 
-const SECTION_LABELS: Record<CustomerProfileSection, string> = {
-  devices: 'Qurilmalar',
-  sales: 'Sotuvlar',
-  nasiya: 'Nasiyalar',
-  payments: "To'lovlar",
-  returns: 'Qaytarishlar',
-  resolutions: 'Arxiv / hisobdan chiqarish',
-}
-
-interface ProfileResponse {
+interface ApiEnvelope<T> {
   success: boolean
-  data?: {
-    overview: {
-      customer: {
-        id: string
-        name: string
-        phone: string
-        additionalPhones: string[]
-        note: string | null
-        createdAt: string
-        passportMasked: string | null
-        hasPassportPhoto: boolean
-      }
-      trust: TrustBadgeData & { reasons: string[]; factors: { onTimeRatio: number | null; lateInstallmentCount: number; maxDaysLate: number } }
-      metrics: {
-        contractValue: NativeMoney
-        dueToday: NativeMoney
-        overdue: NativeMoney
-        cashCollected?: NativeMoney
-        refunds?: NativeMoney
-        writeOffs?: NativeMoney
-        accountingAccrualGrossProfitUzs?: number
-        nasiyaInterestUzs?: number
-        legacyUsdPaymentCount?: number
-      }
-      counts: Record<string, number>
-    }
-    section: CustomerProfileSection
-    history: { items: HistoryItem[]; total: number; page: number; take: number }
-  }
+  data?: T
   error?: string
 }
 
-interface NativeMoney { UZS: number; USD: number }
-interface HistoryItem {
-  id: string
-  occurredAt: string
-  kind: string
-  referenceId: string | null
-  title: string
-  subtitle: string | null
-  currency: 'UZS' | 'USD' | null
-  amount: number | null
-  status: string | null
-}
-
-function nativeMoney(value: NativeMoney) {
-  const parts: string[] = []
-  if (value.UZS !== 0) parts.push(`${Math.round(value.UZS).toLocaleString('ru-RU')} UZS`)
-  if (value.USD !== 0) parts.push(`$${value.USD.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`)
-  return parts.length ? parts.join(' · ') : '0'
-}
-
-function historyAmount(item: HistoryItem) {
-  if (item.amount == null || !item.currency) return 'Aniq summa mavjud emas'
-  return nativeMoney({ UZS: item.currency === 'UZS' ? item.amount : 0, USD: item.currency === 'USD' ? item.amount : 0 })
-}
-
-function historyHref(item: HistoryItem) {
-  if (!item.referenceId) return null
-  if (item.kind === 'nasiya' || item.kind === 'nasiya-payment' || item.kind === 'resolution') {
-    return `/shop/nasiyalar/${item.referenceId}`
-  }
-  if (item.kind === 'device' || item.kind === 'sale' || item.kind === 'sale-payment' || item.kind === 'return') {
-    return `/shop/qurilmalar/${item.referenceId}`
-  }
-  return null
-}
+const PROFILE_STALE_TIME_MS = 120_000
 
 export function CustomerProfileClient({
   customerId,
+  initialOverview,
+  initialAnalytics,
+  initialHistory,
   initialSection,
   initialPage,
 }: {
   customerId: string
+  initialOverview: CustomerProfileOverview
+  initialAnalytics: CustomerProfileAnalytics
+  initialHistory: CustomerProfileHistory
   initialSection: CustomerProfileSection
   initialPage: number
 }) {
-  const { memberKind } = useShopAccess()
-  const { currency } = useShopCurrency()
-  const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const scope = useAuthenticatedQueryScope()
-  const section = initialSection
-  const page = initialPage
-  const query = useQuery({
-    queryKey: queryKeys.list(scope, 'customers', { surface: 'profile', customerId, section, page, take: 20 }),
-    queryFn: async ({ signal }) => {
-      const params = new URLSearchParams({ section, page: String(page) })
-      const response = await fetch(`/api/customers/${customerId}/profile?${params}`, { signal, cache: 'no-store' })
-      const json = await response.json() as ProfileResponse
-      if (!response.ok || !json.success || !json.data) throw new Error(json.error || "Mijoz profilini yuklab bo'lmadi")
-      return json.data
-    },
+  const [section, setSection] = useState<CustomerProfileSection>(initialSection)
+  const [page, setPage] = useState(initialPage)
+  const [months, setMonths] = useState<CustomerProfileAnalyticsMonths>(initialAnalytics.months)
+
+  const fetchOverview = useCallback(async (signal?: AbortSignal) => {
+    const response = await fetch(`/api/customers/${customerId}/profile?view=overview`, { signal, cache: 'no-store' })
+    const json = await response.json() as ApiEnvelope<{ overview: CustomerProfileOverview }>
+    if (!response.ok || !json.success || !json.data) throw new Error(json.error || "Mijoz profilini yuklab bo'lmadi")
+    return json.data.overview
+  }, [customerId])
+
+  const fetchAnalytics = useCallback(async (range: CustomerProfileAnalyticsMonths, signal?: AbortSignal) => {
+    const response = await fetch(`/api/customers/${customerId}/analytics?months=${range}`, { signal, cache: 'no-store' })
+    const json = await response.json() as ApiEnvelope<CustomerProfileAnalytics>
+    if (!response.ok || !json.success || !json.data) throw new Error(json.error || "Mijoz tahlilini yuklab bo'lmadi")
+    return json.data
+  }, [customerId])
+
+  const fetchHistory = useCallback(async (
+    nextSection: CustomerProfileSection,
+    nextPage: number,
+    signal?: AbortSignal,
+  ) => {
+    const params = new URLSearchParams({ view: 'history', section: nextSection, page: String(nextPage) })
+    const response = await fetch(`/api/customers/${customerId}/profile?${params}`, { signal, cache: 'no-store' })
+    const json = await response.json() as ApiEnvelope<{ section: CustomerProfileSection; history: CustomerProfileHistory }>
+    if (!response.ok || !json.success || !json.data) throw new Error(json.error || "Mijoz tarixini yuklab bo'lmadi")
+    return json.data.history
+  }, [customerId])
+
+  const overviewQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'customers', { surface: 'profile-overview', customerId }),
+    queryFn: ({ signal }) => fetchOverview(signal),
+    initialData: initialOverview,
+    staleTime: PROFILE_STALE_TIME_MS,
+  })
+  const analyticsQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'customers', { surface: 'profile-analytics', customerId, months }),
+    queryFn: ({ signal }) => fetchAnalytics(months, signal),
+    initialData: months === initialAnalytics.months ? initialAnalytics : undefined,
     placeholderData: keepPreviousData,
+    staleTime: PROFILE_STALE_TIME_MS,
+  })
+  const historyQuery = useQuery({
+    queryKey: queryKeys.list(scope, 'customers', { surface: 'profile-history', customerId, section, page, take: 20 }),
+    queryFn: ({ signal }) => fetchHistory(section, page, signal),
+    initialData: section === initialSection && page === initialPage ? initialHistory : undefined,
+    placeholderData: keepPreviousData,
+    staleTime: PROFILE_STALE_TIME_MS,
   })
 
-  function href(nextSection: CustomerProfileSection, nextPage = 1) {
-    return `/shop/mijozlar/${customerId}?section=${nextSection}&page=${nextPage}`
+  useEffect(() => {
+    replaceListUrlState({ section, page })
+  }, [page, section])
+
+  const overview = overviewQuery.data ?? initialOverview
+  const analytics = analyticsQuery.data ?? initialAnalytics
+  const history = historyQuery.data ?? initialHistory
+  const canSeeOwnerFinancials = analytics.visibility === 'OWNER_FINANCIAL'
+  const overviewError = overviewQuery.error instanceof Error ? overviewQuery.error.message : null
+  const analyticsError = analyticsQuery.error instanceof Error ? analyticsQuery.error.message : null
+  const historyError = historyQuery.error instanceof Error ? historyQuery.error.message : null
+
+  function selectMonths(nextMonths: CustomerProfileAnalyticsMonths) {
+    if (nextMonths === months) return
+    markQueryIntent('customer-profile-analytics')
+    setMonths(nextMonths)
   }
 
-  if (query.isPending && !query.data) {
-    return <div className="p-6" role="status">Mijoz profili yuklanmoqda…</div>
-  }
-  if (query.isError || !query.data) {
-    return <div className="p-6"><p role="alert" className="rounded border border-red-200 bg-red-50 p-4 text-sm text-red-700">{query.error instanceof Error ? query.error.message : 'Xatolik'}</p></div>
+  function selectSection(nextSection: CustomerProfileSection) {
+    if (nextSection === section) return
+    markQueryIntent('customer-profile-history')
+    setSection(nextSection)
+    setPage(1)
   }
 
-  const { overview, history } = query.data
-  const customer = overview.customer
-  const metricCards = [
-    ['Shartnomalar qiymati', nativeMoney(overview.metrics.contractValue)],
-    ["Bugun to'lanadi", nativeMoney(overview.metrics.dueToday)],
-    ["Muddati o'tgan", nativeMoney(overview.metrics.overdue)],
-    ...(overview.metrics.cashCollected && overview.metrics.refunds && overview.metrics.writeOffs && overview.metrics.accountingAccrualGrossProfitUzs != null && overview.metrics.nasiyaInterestUzs != null
-      ? [
-          ["Jami tushgan pul", nativeMoney(overview.metrics.cashCollected)],
-          ['Qaytarilgan pul', nativeMoney(overview.metrics.refunds)],
-          ['Hisobdan chiqarilgan qarz', nativeMoney(overview.metrics.writeOffs)],
-          ['Hisob siyosati bo‘yicha yalpi foyda', formatMoneyByCurrency(overview.metrics.accountingAccrualGrossProfitUzs, currency.currency, currency.usdUzsRate)],
-          ['Nasiya foizi', formatMoneyByCurrency(overview.metrics.nasiyaInterestUzs, currency.currency, currency.usdUzsRate)],
-        ]
-      : []),
-  ] as const
-  const totalPages = Math.max(1, Math.ceil(history.total / history.take))
+  function selectPage(nextPage: number) {
+    if (nextPage === page) return
+    markQueryIntent('customer-profile-history')
+    setPage(Math.max(1, nextPage))
+  }
 
   return (
-    <main className="space-y-5 p-4 sm:p-6">
-      <Link href="/shop/mijozlar" className="inline-flex items-center gap-1.5 text-sm text-zinc-500 hover:text-zinc-900">
-        <ArrowLeft className="size-4" aria-hidden="true" /> Mijozlarga qaytish
-      </Link>
+    <main className="space-y-5 p-4 sm:p-6 lg:p-8">
+      <CustomerProfileHeader overview={overview} />
 
-      <header className="rounded-lg border border-zinc-200 bg-white p-4 sm:p-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-xl font-bold text-zinc-900">{customer.name}</h1>
-            <p className="mt-1 font-mono text-sm text-zinc-600">{formatUzPhoneDisplay(customer.phone)}</p>
-            {customer.additionalPhones.map((phone) => <p key={phone} className="font-mono text-xs text-zinc-500">{formatUzPhoneDisplay(phone)}</p>)}
-            <p className="mt-2 text-xs text-zinc-400">Mijoz: {uzDate(customer.createdAt)} dan beri</p>
-          </div>
-          <TrustBadge trust={overview.trust} />
-        </div>
-        {overview.trust.reasons.length > 0 && (
-          <ul className="mt-3 list-disc space-y-1 pl-5 text-xs text-zinc-600">
-            {overview.trust.reasons.map((reason) => <li key={reason}>{reason}</li>)}
-          </ul>
-        )}
-        {customer.note && <p className="mt-3 whitespace-pre-wrap text-sm text-zinc-600">{customer.note}</p>}
-      </header>
+      <QueryActivity
+        isFetching={overviewQuery.isFetching}
+        error={overviewError}
+        onRetry={() => { markQueryIntent('customer-profile-overview'); void overviewQuery.refetch() }}
+        label="Asosiy ko‘rsatkichlar yangilanmoqda"
+        metricId="customer-profile-overview"
+      >
+        <CustomerProfileMetrics overview={overview} analytics={analytics} />
+      </QueryActivity>
 
-      <CustomerPassportPanel customerId={customer.id} passportMasked={customer.passportMasked} hasPassportPhoto={customer.hasPassportPhoto} />
+      <CustomerProfileDashboard
+        analytics={analytics}
+        selectedMonths={months}
+        isFetching={analyticsQuery.isFetching}
+        error={analyticsError}
+        onMonthsChange={selectMonths}
+        onRetry={() => { markQueryIntent('customer-profile-analytics'); void analyticsQuery.refetch() }}
+      />
 
-      <section aria-label="Mijoz moliyaviy ko'rsatkichlari" className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {metricCards.map(([label, value]) => (
-          <div key={label} className="rounded-lg border border-zinc-200 bg-white p-4">
-            <p className="text-xs text-zinc-500">{label}</p>
-            <p className="mt-1 text-base font-semibold text-zinc-900">{value}</p>
-          </div>
-        ))}
-      </section>
-      {overview.metrics.legacyUsdPaymentCount != null && overview.metrics.legacyUsdPaymentCount > 0 && (
-        <p className="rounded border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
-          {overview.metrics.legacyUsdPaymentCount} ta eski USD to‘lovida shartnoma-valyuta miqdori saqlanmagan; jami ichiga taxminiy konvertatsiya qo‘shilmadi.
-        </p>
-      )}
+      <CustomerProfileCounts counts={analytics.counts} />
 
-      <section aria-labelledby="customer-history-title" className="rounded-lg border border-zinc-200 bg-white">
-        <div className="border-b border-zinc-200 p-4">
-          <h2 id="customer-history-title" className="text-sm font-semibold text-zinc-900">Mijoz tarixi</h2>
-          <nav aria-label="Mijoz tarixi bo'limlari" className="mt-3 flex gap-2 overflow-x-auto pb-1">
-            {(Object.keys(SECTION_LABELS) as CustomerProfileSection[])
-              .filter((candidate) => canSeeOwnerFinancials || candidate !== 'resolutions')
-              .map((candidate) => (
-              <Link
-                key={candidate}
-                href={href(candidate)}
-                aria-current={candidate === section ? 'page' : undefined}
-                className={cn('shrink-0 rounded-md px-3 py-1.5 text-xs font-medium', candidate === section ? 'bg-zinc-900 text-white' : 'bg-zinc-100 text-zinc-700 hover:bg-zinc-200')}
-              >
-                {SECTION_LABELS[candidate]}
-              </Link>
-              ))}
-          </nav>
-        </div>
+      <CustomerPassportPanel
+        customerId={overview.customer.id}
+        passportMasked={overview.customer.passportMasked}
+        hasPassportPhoto={overview.customer.hasPassportPhoto}
+      />
 
-        {history.items.length === 0 ? (
-          <p className="p-8 text-center text-sm text-zinc-500">Bu bo‘limda ma’lumot yo‘q</p>
-        ) : (
-          <ul className="divide-y divide-zinc-100">
-            {history.items.map((item) => {
-              const itemHref = historyHref(item)
-              const content = (
-                <>
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-zinc-900">
-                      {item.kind === 'resolution' ? historyStatusLabel(item.title) : item.title}
-                    </p>
-                    <p className="mt-0.5 text-xs text-zinc-500">
-                      {item.subtitle
-                        ? item.kind.endsWith('payment') ? paymentMethodLabel(item.subtitle) : item.subtitle
-                        : historyStatusLabel(item.status)} · {uzDate(item.occurredAt)}
-                    </p>
-                  </div>
-                  <div className="shrink-0 text-left sm:text-right">
-                    <p className="text-sm font-semibold text-zinc-800">{historyAmount(item)}</p>
-                    {item.status && <p className="mt-0.5 text-[11px] text-zinc-500">{historyStatusLabel(item.status)}</p>}
-                  </div>
-                </>
-              )
-
-              return (
-                <li key={item.id}>
-                  {itemHref ? (
-                    <IntentPrefetchLink
-                      href={itemHref}
-                      className="flex flex-col gap-2 p-4 transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-zinc-900 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      {content}
-                    </IntentPrefetchLink>
-                  ) : (
-                    <div className="flex flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between">{content}</div>
-                  )}
-                </li>
-              )
-            })}
-          </ul>
-        )}
-
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between border-t border-zinc-200 p-4">
-            <Link
-              href={href(section, Math.max(1, page - 1))}
-              aria-disabled={page <= 1}
-              tabIndex={page <= 1 ? -1 : undefined}
-              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), page <= 1 && 'pointer-events-none opacity-50')}
-            >
-              <ChevronLeft className="mr-1 size-4" aria-hidden="true" /> Oldingi
-            </Link>
-            <span className="text-xs text-zinc-500">{page} / {totalPages}</span>
-            <Link
-              href={href(section, Math.min(totalPages, page + 1))}
-              aria-disabled={page >= totalPages}
-              tabIndex={page >= totalPages ? -1 : undefined}
-              className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), page >= totalPages && 'pointer-events-none opacity-50')}
-            >
-              Keyingi <ChevronRight className="ml-1 size-4" aria-hidden="true" />
-            </Link>
-          </div>
-        )}
-      </section>
+      <CustomerProfileHistorySection
+        history={history}
+        section={section}
+        page={page}
+        canSeeOwnerFinancials={canSeeOwnerFinancials}
+        isFetching={historyQuery.isFetching}
+        error={historyError}
+        onSectionChange={selectSection}
+        onPageChange={selectPage}
+        onRetry={() => { markQueryIntent('customer-profile-history'); void historyQuery.refetch() }}
+      />
     </main>
   )
 }
