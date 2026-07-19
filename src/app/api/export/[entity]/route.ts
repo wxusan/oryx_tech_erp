@@ -143,6 +143,8 @@ function exportResponse(entity: string, format: ExportFormat, data: ExportData) 
 function reportExportData(report: ShopRangeReport): ExportData {
   const row = (month: ShopRangeReport['months'][number], label: string): ExportCell[] => [
     label,
+    month.contracts.uzs,
+    month.contracts.usd,
     month.cashCollected.uzs,
     month.cashCollected.usd,
     month.cashCollected.complete,
@@ -168,6 +170,8 @@ function reportExportData(report: ShopRangeReport): ExportData {
   return {
     headers: [
       'month',
+      'contractsUzs',
+      'contractsUsd',
       'cashCollectedUzs',
       'cashCollectedUsd',
       'cashCollectedComplete',

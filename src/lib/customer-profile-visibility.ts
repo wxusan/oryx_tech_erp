@@ -7,7 +7,7 @@ export interface CustomerProfileNativeMoney {
 
 export interface CustomerProfileMetrics {
   contractValue: CustomerProfileNativeMoney
-  dueToday: CustomerProfileNativeMoney
+  dueThisMonth: CustomerProfileNativeMoney
   overdue: CustomerProfileNativeMoney
   cashCollected: CustomerProfileNativeMoney
   refunds: CustomerProfileNativeMoney
@@ -17,7 +17,7 @@ export interface CustomerProfileMetrics {
   legacyUsdPaymentCount: number
 }
 
-export type CustomerProfileOperationalMetrics = Pick<CustomerProfileMetrics, 'contractValue' | 'dueToday' | 'overdue'>
+export type CustomerProfileOperationalMetrics = Pick<CustomerProfileMetrics, 'contractValue' | 'dueThisMonth' | 'overdue'>
 export type CustomerProfileOwnerFinancialMetrics = Omit<CustomerProfileMetrics, keyof CustomerProfileOperationalMetrics>
 export type CustomerProfileVisibleMetrics = CustomerProfileOperationalMetrics & Partial<CustomerProfileOwnerFinancialMetrics>
 
@@ -28,7 +28,7 @@ export type CustomerProfileVisibleMetrics = CustomerProfileOperationalMetrics & 
 export function redactShopStaffCustomerProfileMetrics(metrics: CustomerProfileMetrics): CustomerProfileOperationalMetrics {
   return {
     contractValue: metrics.contractValue,
-    dueToday: metrics.dueToday,
+    dueThisMonth: metrics.dueThisMonth,
     overdue: metrics.overdue,
   }
 }

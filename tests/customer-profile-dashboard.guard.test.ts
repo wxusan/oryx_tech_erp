@@ -30,14 +30,29 @@ describe('customer-profile analytics architecture', () => {
   it('lazy-loads accessible, non-animated charts with a stable skeleton', () => {
     const loader = source('src/app/(shop)/shop/mijozlar/[id]/customer-profile-charts-loader.tsx')
     const charts = source('src/app/(shop)/shop/mijozlar/[id]/customer-profile-charts.tsx')
+    const activityChart = source('src/components/shop/monthly-activity-chart.tsx')
     expect(loader).toContain("dynamic(() => import('./customer-profile-charts')")
     expect(loader).toContain('ssr: false')
     expect(loader).toContain('h-[430px]')
-    expect(charts).toContain('<BarChart accessibilityLayer')
-    expect(charts).toContain('aria-labelledby="customer-activity-chart-title"')
+    expect(charts).toContain('<MonthlyActivityChart')
+    expect(activityChart).toContain('<BarChart accessibilityLayer')
+    expect(activityChart).toContain('aria-labelledby={titleId}')
     expect(charts).toContain('aria-labelledby="customer-debt-chart-title"')
-    expect(charts).toContain('isAnimationActive={false}')
-    expect(charts).toContain('Aniq oylik qiymatlar')
+    expect(activityChart).toContain('isAnimationActive={false}')
+    expect(activityChart).toContain('Aniq oylik qiymatlar')
+  })
+
+  it('uses a real Tashkent calendar-month metric without changing the daily work queues', () => {
+    const profile = source('src/lib/server/customer-profile.ts')
+    const metrics = source('src/app/(shop)/shop/mijozlar/[id]/customer-profile-metrics.tsx')
+    const dueBanner = source('src/components/shop/due-overdue-banner.tsx')
+    expect(profile).toContain('const month = tashkentMonthRange(asOf)')
+    expect(profile).toContain('due_at >= ${month.start} AND due_at < ${month.end}')
+    expect(profile).toContain('dueThisMonth: money(')
+    expect(metrics).toContain('Bu oy to‘lashi kutilmoqda')
+    expect(metrics).toContain('oy boshidan kechikkanlari ham kiradi')
+    expect(dueBanner).toContain('summary.dueToday')
+    expect(dueBanner).toContain("Bugun to'lanadi:")
   })
 
   it('keeps analytics tenant-scoped, range-bounded, and redacted on the server', () => {

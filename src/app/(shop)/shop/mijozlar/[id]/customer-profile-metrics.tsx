@@ -62,10 +62,10 @@ export function CustomerProfileMetrics({
       : []),
     { label: 'Joriy qarz', value: nativeMoneyLabel(debt), hint: 'Hozir ochiq majburiyatlar', icon: CircleDollarSign, tone: totalDueBuckets(analytics.obligations.UZS) + totalDueBuckets(analytics.obligations.USD) > 0 ? 'warning' : 'default' },
     { label: 'Muddati o‘tgan', value: nativeMoneyLabel(overview.metrics.overdue), hint: 'Bugundan oldingi ochiq qarz', icon: AlertTriangle, tone: overview.metrics.overdue.UZS || overview.metrics.overdue.USD ? 'danger' : 'default' },
-    ...(!owner ? [{ label: 'Bugun to‘lanadi', value: nativeMoneyLabel(overview.metrics.dueToday), hint: 'Toshkent kuni bo‘yicha', icon: CalendarClock }] : []),
+    ...(!owner ? [{ label: 'Bu oy to‘lashi kutilmoqda', value: nativeMoneyLabel(overview.metrics.dueThisMonth), hint: 'Shu oy muddati kelgan ochiq qoldiq; oy boshidan kechikkanlari ham kiradi', icon: CalendarClock }] : []),
   ]
   const secondary: MetricCard[] = owner ? [
-    { label: 'Bugun to‘lanadi', value: nativeMoneyLabel(overview.metrics.dueToday), hint: 'Toshkent kuni bo‘yicha', icon: CalendarClock },
+    { label: 'Bu oy to‘lashi kutilmoqda', value: nativeMoneyLabel(overview.metrics.dueThisMonth), hint: 'Shu oy muddati kelgan ochiq qoldiq; oy boshidan kechikkanlari ham kiradi', icon: CalendarClock },
     ...(overview.metrics.refunds ? [{ label: 'Qaytarilgan pul', value: nativeMoneyLabel(overview.metrics.refunds), hint: 'Qaytarish dalolatnomalari', icon: RotateCcw }] : []),
     ...(overview.metrics.writeOffs ? [{ label: 'Hisobdan chiqarilgan', value: nativeMoneyLabel(overview.metrics.writeOffs), hint: 'Qayta ochishlar ayirilgan', icon: ReceiptText }] : []),
     ...(overview.metrics.accountingAccrualGrossProfitUzs != null ? [{
