@@ -244,7 +244,7 @@ describe('customer CRM database privacy and set-based metrics', () => {
     expect(overview?.metrics.contractValue).toEqual({ UZS: 2500, USD: 430 })
     expect(overview?.metrics.cashCollected).toEqual({ UZS: 1200, USD: 160 })
     expect(overview?.metrics.legacyUsdPaymentCount).toBe(0)
-    expect(overview?.metrics.dueToday).toEqual({ UZS: 400, USD: 0 })
+    expect(overview?.metrics.dueThisMonth).toEqual({ UZS: 400, USD: 280 })
     expect(overview?.metrics.overdue).toEqual({ UZS: 0, USD: 280 })
     expect(overview?.metrics.refunds).toEqual({ UZS: 200, USD: 0 })
     expect(overview?.metrics.writeOffs).toEqual({ UZS: 500, USD: 0 })
@@ -272,7 +272,8 @@ describe('customer CRM database privacy and set-based metrics', () => {
       refunds: { UZS: 200, USD: 0 },
       writeOffs: { UZS: 500, USD: 0 },
     })
-    expect(analytics?.obligations.UZS.today).toBe(overview?.metrics.dueToday.UZS)
+    expect(analytics?.obligations.UZS.today).toBe(overview?.metrics.dueThisMonth.UZS)
+    expect(analytics?.obligations.USD.overdue).toBe(overview?.metrics.dueThisMonth.USD)
     expect(analytics?.obligations.USD.overdue).toBe(overview?.metrics.overdue.USD)
 
     const staffAnalytics = await getCustomerProfileAnalytics({

@@ -11,6 +11,7 @@ import type { ShopRangeReport } from '@/lib/server/shop-report-range'
 import type { ReportRangePreset } from '@/lib/report-range'
 import { formatMoneyByCurrency, formatPartitionedMoney, type CurrencyContext } from '@/lib/currency'
 import HisobotChartsLoader from './hisobot-charts-loader'
+import HisobotActivityChartLoader from './hisobot-activity-chart-loader'
 import HisobotFilters from './hisobot-filters'
 import ShopRangeReportPanel from './shop-range-report-panel'
 import { queryKeys } from '@/lib/query-keys'
@@ -233,7 +234,7 @@ export default function HisobotClient({
 
       {adminId && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-          Admin filtri tushum, marja va Nasiya foizini to'lovni yozgan xodimga, qaytarish reversini esa qaytarishni yozgan xodimga bog'laydi.
+          Admin filtri shartnomani yaratgan, to'lovni yozgan va qaytarishni yozgan xodim harakatlarini alohida bog'laydi; marja va Nasiya foizi to'lovni yozgan xodimga tegishli.
           Ombordagi tannarx, faol nasiyalar, kutilayotgan foyda va kechikkan qarzdorlik do'kon bo'yicha ko'rsatiladi.
         </div>
       )}
@@ -392,6 +393,8 @@ export default function HisobotClient({
           </CardContent>
         </Card>
       </div>
+
+      <HisobotActivityChartLoader months={rangeReport.months} currencyContext={currency} />
 
       {currencyTotalsComplete ? (
         <HisobotChartsLoader cashFlowData={cashFlowData} businessData={businessData} chartConfig={chartConfig} currency={currency} />

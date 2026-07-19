@@ -6,7 +6,7 @@ import { computeCustomerTrustRatingFromFactors, isValidTrustTier, type CustomerT
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
 import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
 import { timeRequestPhase } from '@/lib/server/request-context'
-import { tashkentDayRange } from '@/lib/timezone'
+import { tashkentDayRange, tashkentMonthRange } from '@/lib/timezone'
 import {
   redactShopStaffCustomerProfileMetrics,
   type CustomerProfileMetrics,
@@ -21,8 +21,8 @@ interface MetricRow {
   contract_usd: unknown
   collected_uzs: unknown
   collected_usd: unknown
-  due_today_uzs: unknown
-  due_today_usd: unknown
+  due_this_month_uzs: unknown
+  due_this_month_usd: unknown
   overdue_uzs: unknown
   overdue_usd: unknown
   refunds_uzs: unknown
@@ -77,7 +77,9 @@ export async function getCustomerProfileOverview(input: {
   }))
   if (!customer) return null
 
-  const day = tashkentDayRange(input.now ?? new Date())
+  const asOf = input.now ?? new Date()
+  const day = tashkentDayRange(asOf)
+  const month = tashkentMonthRange(asOf)
   const [metricRows, trustMap] = await timeRequestPhase('database', () => Promise.all([
     prisma.$queryRaw<MetricRow[]>(Prisma.sql`
       WITH sale_base AS (
@@ -190,8 +192,8 @@ export async function getCustomerProfileOverview(input: {
             END) FROM nasiya_base WHERE "contractCurrency" = 'USD'), 0))::numeric AS contract_usd,
         coalesce((SELECT sum(amount) FROM payments WHERE currency = 'UZS'), 0)::numeric AS collected_uzs,
         coalesce((SELECT sum(amount) FROM payments WHERE currency = 'USD'), 0)::numeric AS collected_usd,
-        coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'UZS' AND due_at >= ${day.start} AND due_at < ${day.end}), 0)::numeric AS due_today_uzs,
-        coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'USD' AND due_at >= ${day.start} AND due_at < ${day.end}), 0)::numeric AS due_today_usd,
+        coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'UZS' AND due_at >= ${month.start} AND due_at < ${month.end}), 0)::numeric AS due_this_month_uzs,
+        coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'USD' AND due_at >= ${month.start} AND due_at < ${month.end}), 0)::numeric AS due_this_month_usd,
         coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'UZS' AND due_at < ${day.start}), 0)::numeric AS overdue_uzs,
         coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'USD' AND due_at < ${day.start}), 0)::numeric AS overdue_usd,
         coalesce((SELECT sum(amount) FROM refunds WHERE currency = 'UZS'), 0)::numeric AS refunds_uzs,
@@ -234,7 +236,7 @@ export async function getCustomerProfileOverview(input: {
   const metrics: CustomerProfileMetrics = {
     contractValue: money(row?.contract_uzs, row?.contract_usd),
     cashCollected: money(row?.collected_uzs, row?.collected_usd),
-    dueToday: money(row?.due_today_uzs, row?.due_today_usd),
+    dueThisMonth: money(row?.due_this_month_uzs, row?.due_this_month_usd),
     overdue: money(row?.overdue_uzs, row?.overdue_usd),
     refunds: money(row?.refunds_uzs, row?.refunds_usd),
     writeOffs: money(row?.writeoffs_uzs, row?.writeoffs_usd),

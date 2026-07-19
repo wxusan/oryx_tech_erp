@@ -4,6 +4,7 @@
 
 - The dashboard supports 6, 12, and 24 complete Tashkent calendar-month ranges.
 - UZS and USD remain separate native-currency series and totals. The UI never creates a mixed-currency grand total or an inferred conversion.
+- `Bu oy to‘lashi kutilmoqda` is the currently unpaid amount whose effective due date falls inside the current Tashkent calendar month. It includes still-open earlier dates from the same month, so it can overlap with the overdue card.
 - Current obligations are split into overdue, today, next 7 days, days 8–30, and later. Deferred Nasiya schedules use their effective delayed due date.
 - Cancelled, returned, deleted, imported-as-new-activity, and non-active resolution records are excluded where the accounting contract requires it.
 - Payment discipline uses completed schedule payments, the existing one-day tolerance, on-time/late counts, on-time ratio, maximum days late, and the current overdue-schedule count.
@@ -15,7 +16,7 @@
 - Analytics are returned by one tenant-scoped, set-based PostgreSQL statement with at most 24 zero-filled rows.
 - Overview, analytics ranges, and history pages use separate React Query cache keys. Existing data stays mounted during refresh and requests use abort signals.
 - History uses `take + 1` pagination, so tab changes no longer run an exact total-count query.
-- Recharts is isolated behind a client-only dynamic import with a fixed-height skeleton; chart animation is disabled and exact values remain available as text.
+- The monthly activity visualization is shared with the shop report. Recharts is isolated behind a client-only dynamic import with a fixed-height skeleton; chart animation is disabled and exact values remain available as text.
 
 ## Local performance evidence
 
@@ -35,10 +36,10 @@ Initial data readiness saves 15.3 ms at p50 (56.1%), 20.3 ms at p75 (60.9%), and
 
 ## Verification coverage
 
-- 2,028 unit, component, security, architectural, and guard tests pass.
+- 2,034 unit, component, security, architectural, and guard tests pass.
 - 118 disposable-PostgreSQL integration tests pass.
 - ESLint passes with one pre-existing warning outside this change; TypeScript and the optimized Next.js production build pass.
-- Owner and limited-staff browser sessions were checked independently. Staff JSON contained only `month` and `contracts` activity keys and no financial caveat keys.
+- Owner and limited-staff browser sessions were checked independently. Staff JSON contained only `month` and `contracts` activity keys and no financial caveat keys; the current-month obligation card remained visible to customer-view staff.
 - Browser checks passed at 320, 375, 768, and 1,440 CSS pixels with no horizontal overflow, error overlay, page error, or console error. The 320-pixel reflow also covers the layout condition produced by 200% zoom on a 640-pixel CSS canvas.
 
 ## Remaining measurement limits

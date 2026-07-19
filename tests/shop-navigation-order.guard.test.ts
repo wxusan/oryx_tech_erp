@@ -20,6 +20,7 @@ describe('shop navigation order and placement', () => {
       '/shop/logs',
       '/shop/xodimlar',
       '/shop/settings',
+      '/shop/hisobot',
     ]
 
     const positions = sidebarHrefs.map((href) => shell.indexOf(`href: '${href}'`))
@@ -27,16 +28,19 @@ describe('shop navigation order and placement', () => {
     expect(positions).toEqual([...positions].sort((a, b) => a - b))
   })
 
-  it('keeps Olib-sotdim, Import, and Eksport out of the sidebar while moving reports to the header', () => {
+  it('keeps Olib-sotdim, Import, and Eksport out of the sidebar while placing reports last', () => {
     expect(shell).not.toContain("href: '/shop/olib-sotdim'")
     expect(shell).not.toContain("href: '/shop/import'")
     expect(shell).not.toContain("href: '/shop/eksport'")
-    expect(shell).toContain("href: '/shop/hisobot'")
-    expect(shell).toContain('sidebar: false, header: true')
+    expect(shell.indexOf("href: '/shop/hisobot'")).toBeGreaterThan(shell.indexOf("href: '/shop/settings'"))
+    expect(shell).toContain("permission: 'REPORT_VIEW'")
   })
 
-  it('derives sidebar and header links from the same permission-filtered set', () => {
-    expect(shell).toContain('const visibleSidebarLinks = permittedNavLinks.filter((link) => link.sidebar)')
-    expect(shell).toContain('const visibleHeaderLinks = permittedNavLinks.filter((link) => link.header)')
+  it('keeps header shortcuts removed while preserving the permission-filtered sidebar', () => {
+    expect(shell).toContain('const visibleSidebarLinks = permittedNavLinks')
+    expect(shell).not.toContain('visibleHeaderLinks')
+    expect(shell).not.toContain('Tezkor navigatsiya')
+    expect(shell.match(/href: '\/shop\/yangi-operatsiya'/g)).toHaveLength(1)
+    expect(shell.match(/href: '\/shop\/hisobot'/g)).toHaveLength(1)
   })
 })

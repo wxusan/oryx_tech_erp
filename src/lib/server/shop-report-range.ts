@@ -8,6 +8,8 @@ import { tashkentMonthRange } from '@/lib/timezone'
 
 interface MonthlyReportRow {
   month_key: string
+  contracts_uzs: unknown
+  contracts_usd: unknown
   cash_uzs: unknown
   cash_usd: unknown
   cash_incomplete_count: number
@@ -35,6 +37,7 @@ interface MonthlyReportRow {
 
 export interface ShopMonthlyReportPoint {
   monthKey: string
+  contracts: { uzs: number; usd: number }
   cashCollected: { uzs: number; usd: number; complete: boolean }
   accrualRevenue: { uzs: number; usd: number }
   nasiyaInterest: { uzs: number; usd: number }
@@ -96,6 +99,12 @@ export async function getShopRangeReport(input: {
   range: ReportRange
   adminId: string | null
 }): Promise<ShopRangeReport> {
+  const saleContractActor = input.adminId
+    ? Prisma.sql`AND s."createdBy" = ${input.adminId}`
+    : Prisma.empty
+  const nasiyaContractActor = input.adminId
+    ? Prisma.sql`AND n."createdBy" = ${input.adminId}`
+    : Prisma.empty
   const salePaymentActor = input.adminId
     ? Prisma.sql`AND p."createdBy" = ${input.adminId}`
     : Prisma.empty
@@ -116,6 +125,41 @@ export async function getShopRangeReport(input: {
         ordinal::integer AS ordinal
       FROM unnest(ARRAY[${Prisma.join(input.range.monthKeys.map((monthKey) => Prisma.sql`${monthKey}`))}]::text[])
         WITH ORDINALITY AS selected_months(month_key, ordinal)
+    ), contract_facts AS (
+      SELECT
+        to_char(s."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
+        s."contractCurrency" AS currency,
+        s."contractSalePrice"::numeric AS native_amount
+      FROM "Sale" s
+      WHERE s."shopId" = ${input.shopId}
+        AND s."deletedAt" IS NULL
+        AND s."createdAt" >= ${input.range.start}
+        AND s."createdAt" < ${input.range.end}
+        ${saleContractActor}
+
+      UNION ALL
+
+      SELECT
+        to_char(n."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
+        n."contractCurrency" AS currency,
+        CASE
+          WHEN n."resolutionState" = 'ARCHIVED' THEN n."contractDownPayment" + n."contractPaidAmount"
+          ELSE n."contractDownPayment" + n."contractFinalAmount"
+        END::numeric AS native_amount
+      FROM "Nasiya" n
+      WHERE n."shopId" = ${input.shopId}
+        AND n."deletedAt" IS NULL
+        AND n."isImported" = false
+        AND n."createdAt" >= ${input.range.start}
+        AND n."createdAt" < ${input.range.end}
+        ${nasiyaContractActor}
+    ), contract_months AS (
+      SELECT
+        month_key,
+        coalesce(sum(native_amount) FILTER (WHERE currency = 'UZS'), 0)::numeric AS contracts_uzs,
+        coalesce(sum(native_amount) FILTER (WHERE currency = 'USD'), 0)::numeric AS contracts_usd
+      FROM contract_facts
+      GROUP BY month_key
     ), sale_payment_facts AS (
       SELECT
         to_char(p."paidAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
@@ -364,6 +408,8 @@ export async function getShopRangeReport(input: {
     )
     SELECT
       m.month_key,
+      coalesce(c.contracts_uzs, 0)::numeric AS contracts_uzs,
+      coalesce(c.contracts_usd, 0)::numeric AS contracts_usd,
       coalesce(p.cash_uzs, 0)::numeric AS cash_uzs,
       coalesce(p.cash_usd, 0)::numeric AS cash_usd,
       coalesce(p.cash_incomplete_count, 0)::integer AS cash_incomplete_count,
@@ -388,6 +434,7 @@ export async function getShopRangeReport(input: {
       coalesce(w.write_off_count, 0)::integer AS write_off_count,
       coalesce(w.reopen_count, 0)::integer AS reopen_count
     FROM months m
+    LEFT JOIN contract_months c ON c.month_key = m.month_key
     LEFT JOIN payment_months p ON p.month_key = m.month_key
     LEFT JOIN recognition_months a ON a.month_key = m.month_key
     LEFT JOIN obligation_months o ON o.month_key = m.month_key
@@ -399,6 +446,7 @@ export async function getShopRangeReport(input: {
 
   const months = rows.map((row): ShopMonthlyReportPoint => ({
     monthKey: row.month_key,
+    contracts: { uzs: number(row.contracts_uzs), usd: number(row.contracts_usd) },
     cashCollected: {
       uzs: number(row.cash_uzs),
       usd: number(row.cash_usd),
@@ -423,6 +471,10 @@ export async function getShopRangeReport(input: {
   }))
 
   const totals = months.reduce<Omit<ShopMonthlyReportPoint, 'monthKey'>>((sum, month) => ({
+    contracts: {
+      uzs: sum.contracts.uzs + month.contracts.uzs,
+      usd: sum.contracts.usd + month.contracts.usd,
+    },
     cashCollected: {
       uzs: sum.cashCollected.uzs + month.cashCollected.uzs,
       usd: sum.cashCollected.usd + month.cashCollected.usd,
@@ -463,6 +515,7 @@ export async function getShopRangeReport(input: {
     writeOffCount: sum.writeOffCount + month.writeOffCount,
     reopenCount: sum.reopenCount + month.reopenCount,
   }), {
+    contracts: { uzs: 0, usd: 0 },
     cashCollected: { uzs: 0, usd: 0, complete: true },
     accrualRevenue: { uzs: 0, usd: 0 },
     nasiyaInterest: { uzs: 0, usd: 0 },

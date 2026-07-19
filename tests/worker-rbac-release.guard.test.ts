@@ -122,7 +122,7 @@ describe('worker server boundary release guard', () => {
   it('redacts customer lifetime cash-flow and profit aggregates while retaining the worker debt queue', () => {
     expect(redactShopStaffCustomerProfileMetrics({
       contractValue: { UZS: 1_000_000, USD: 0 },
-      dueToday: { UZS: 250_000, USD: 0 },
+      dueThisMonth: { UZS: 250_000, USD: 0 },
       overdue: { UZS: 100_000, USD: 0 },
       cashCollected: { UZS: 750_000, USD: 0 },
       refunds: { UZS: 10_000, USD: 0 },
@@ -132,7 +132,7 @@ describe('worker server boundary release guard', () => {
       legacyUsdPaymentCount: 1,
     })).toEqual({
       contractValue: { UZS: 1_000_000, USD: 0 },
-      dueToday: { UZS: 250_000, USD: 0 },
+      dueThisMonth: { UZS: 250_000, USD: 0 },
       overdue: { UZS: 100_000, USD: 0 },
     })
   })
