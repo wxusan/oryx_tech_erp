@@ -43,9 +43,9 @@ describe('schema: additive payment/creation currency fields exist', () => {
 
 describe('creation routes persist payment-time currency context (informational)', () => {
   it('nasiya creation stores creationCurrency/creationExchangeRate from the already-computed conversion', () => {
-    const route = read('src/app/api/devices/[id]/nasiya/route.ts')
-    expect(route).toContain('creationCurrency: totalInput.inputCurrency')
-    expect(route).toContain('creationExchangeRate: totalInput.exchangeRateUsed')
+    const core = read('src/lib/server/nasiya-contract-core.ts')
+    expect(core).toContain('creationCurrency: prepared.totalInput.inputCurrency')
+    expect(core).toContain('creationExchangeRate: prepared.totalInput.exchangeRateUsed')
   })
 
   it('sale creation stores creationCurrency/creationExchangeRate from the already-computed conversion', () => {

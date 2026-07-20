@@ -112,8 +112,8 @@ describe('olib-sotdim route stores contract currency for both the Sale and the S
   const route = read('src/app/api/olib-sotdim/route.ts')
 
   it('fixes the pre-existing gap: olib-sotdim Sale rows now get creationCurrency/creationExchangeRate too', () => {
-    expect(route).toContain('creationCurrency: saleInput.inputCurrency')
-    expect(route).toContain('creationExchangeRate: saleInput.exchangeRateUsed')
+    expect(route).toContain('creationCurrency: contractCurrency')
+    expect(route).toContain('creationExchangeRate: saleInput!.exchangeRateUsed')
   })
 
   it('stores contractCurrency/contractSalePrice/contractAmountPaid/contractRemainingAmount on Sale', () => {
@@ -123,10 +123,10 @@ describe('olib-sotdim route stores contract currency for both the Sale and the S
   })
 
   it('stores contractCurrency/contractAmount/contractExchangeRateAtCreation on SupplierPayable', () => {
-    const idx = route.indexOf('tx.supplierPayable.create')
-    const block = route.slice(idx, idx + 700)
-    expect(block).toContain('contractCurrency,')
-    expect(block).toContain('contractExchangeRateAtCreation: purchaseInput.exchangeRateUsed')
-    expect(block).toContain('contractAmount: contractPurchasePrice')
+    const ledger = read('src/lib/server/supplier-payable-payments.ts')
+    expect(route).toContain('createSupplierPayableCore({')
+    expect(ledger).toContain('contractCurrency: input.purchaseInput.inputCurrency')
+    expect(ledger).toContain('contractExchangeRateAtCreation: input.purchaseInput.exchangeRateUsed')
+    expect(ledger).toContain('contractAmount: input.contractAmount')
   })
 })

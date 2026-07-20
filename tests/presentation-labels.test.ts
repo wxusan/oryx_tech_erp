@@ -162,7 +162,7 @@ describe('approved status and source wording', () => {
 
 describe('notification and operations wording', () => {
   it('maps every current and historical notification type', () => {
-    expect(Object.keys(NOTIFICATION_TYPE_LABELS)).toHaveLength(24)
+    expect(Object.keys(NOTIFICATION_TYPE_LABELS)).toHaveLength(26)
     for (const [type, label] of Object.entries(NOTIFICATION_TYPE_LABELS)) {
       expect(notificationTypeLabel(type)).toBe(label)
       expect(label.trim()).not.toBe('')

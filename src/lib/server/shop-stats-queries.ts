@@ -364,6 +364,150 @@ export async function getShopObligationAggregate(input: {
   }
 }
 
+interface DebtStatsRow {
+  supplier_open_all_uzs: unknown
+  supplier_open_all_usd: unknown
+  supplier_open_all_count: number
+  supplier_due_uzs: unknown
+  supplier_due_usd: unknown
+  supplier_due_count: number
+  supplier_overdue_uzs: unknown
+  supplier_overdue_usd: unknown
+  supplier_overdue_count: number
+  customer_open_all_uzs: unknown
+  customer_open_all_usd: unknown
+  customer_open_all_count: number
+  customer_due_uzs: unknown
+  customer_due_usd: unknown
+  customer_due_count: number
+  customer_overdue_uzs: unknown
+  customer_overdue_usd: unknown
+  customer_overdue_count: number
+  supplier_paid_uzs: unknown
+  supplier_paid_usd: unknown
+  supplier_payment_count: number
+}
+
+export interface ShopDebtStatsAggregate {
+  supplierPayablesOpenAllTimeUzs: number
+  supplierPayablesOpenAllTimeUsd: number
+  supplierPayablesOpenAllTimeCount: number
+  supplierPayablesDueSelectedMonthUzs: number
+  supplierPayablesDueSelectedMonthUsd: number
+  supplierPayablesDueSelectedMonthCount: number
+  supplierPayablesOverdueWithinSelectedMonthUzs: number
+  supplierPayablesOverdueWithinSelectedMonthUsd: number
+  supplierPayablesOverdueWithinSelectedMonthCount: number
+  customerPayLaterOpenAllTimeUzs: number
+  customerPayLaterOpenAllTimeUsd: number
+  customerPayLaterOpenAllTimeCount: number
+  customerPayLaterDueSelectedMonthUzs: number
+  customerPayLaterDueSelectedMonthUsd: number
+  customerPayLaterDueSelectedMonthCount: number
+  customerPayLaterOverdueWithinSelectedMonthUzs: number
+  customerPayLaterOverdueWithinSelectedMonthUsd: number
+  customerPayLaterOverdueWithinSelectedMonthCount: number
+  supplierPaymentsMadeSelectedMonthUzs: number
+  supplierPaymentsMadeSelectedMonthUsd: number
+  supplierPaymentsMadeSelectedMonthCount: number
+}
+
+/**
+ * Current open debt balances, with both all-due-date totals and selected-month
+ * due-date slices. This is one set-based snapshot, not a historical month-end
+ * reconstruction. Supplier cash-out remains separate from revenue/profit.
+ */
+export async function getShopDebtStatsAggregate(input: {
+  shopId: string
+  monthStart: Date
+  monthEnd: Date
+  todayStart: Date
+  adminId: string | null
+}): Promise<ShopDebtStatsAggregate> {
+  const paymentActor = input.adminId
+    ? Prisma.sql`AND p."createdBy" = ${input.adminId}`
+    : Prisma.empty
+  const [row] = await prisma.$queryRaw<DebtStatsRow[]>(Prisma.sql`
+    WITH supplier_open AS (
+      SELECT
+        p."contractCurrency" AS currency,
+        p."contractRemainingAmount"::numeric AS outstanding,
+        p."dueDate" AS due_date
+      FROM "SupplierPayable" p
+      WHERE p."shopId" = ${input.shopId}
+        AND p."deletedAt" IS NULL
+        AND p."status" NOT IN ('PAID', 'CANCELLED')
+        AND p."contractRemainingAmount" > 0
+    ), customer_open AS (
+      SELECT
+        s."contractCurrency" AS currency,
+        s."contractRemainingAmount"::numeric AS outstanding,
+        s."dueDate" AS due_date
+      FROM "Sale" s
+      WHERE s."shopId" = ${input.shopId}
+        AND s."deletedAt" IS NULL
+        AND s."returnedAt" IS NULL
+        AND s."paidFully" = false
+        AND s."contractRemainingAmount" > 0
+    ), supplier_payments AS (
+      SELECT
+        p."paymentInputCurrency" AS currency,
+        p."paymentInputAmount"::numeric AS amount
+      FROM "SupplierPayablePayment" p
+      WHERE p."shopId" = ${input.shopId}
+        AND p."paidAt" >= ${input.monthStart}
+        AND p."paidAt" < ${input.monthEnd}
+        ${paymentActor}
+    )
+    SELECT
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'UZS') FROM supplier_open), 0)::numeric AS supplier_open_all_uzs,
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'USD') FROM supplier_open), 0)::numeric AS supplier_open_all_usd,
+      (SELECT count(*) FROM supplier_open)::integer AS supplier_open_all_count,
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'UZS' AND due_date >= ${input.monthStart} AND due_date < ${input.monthEnd}) FROM supplier_open), 0)::numeric AS supplier_due_uzs,
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'USD' AND due_date >= ${input.monthStart} AND due_date < ${input.monthEnd}) FROM supplier_open), 0)::numeric AS supplier_due_usd,
+      (SELECT count(*) FILTER (WHERE due_date >= ${input.monthStart} AND due_date < ${input.monthEnd}) FROM supplier_open)::integer AS supplier_due_count,
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'UZS' AND due_date >= ${input.monthStart} AND due_date < ${input.monthEnd} AND due_date < ${input.todayStart}) FROM supplier_open), 0)::numeric AS supplier_overdue_uzs,
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'USD' AND due_date >= ${input.monthStart} AND due_date < ${input.monthEnd} AND due_date < ${input.todayStart}) FROM supplier_open), 0)::numeric AS supplier_overdue_usd,
+      (SELECT count(*) FILTER (WHERE due_date >= ${input.monthStart} AND due_date < ${input.monthEnd} AND due_date < ${input.todayStart}) FROM supplier_open)::integer AS supplier_overdue_count,
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'UZS') FROM customer_open), 0)::numeric AS customer_open_all_uzs,
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'USD') FROM customer_open), 0)::numeric AS customer_open_all_usd,
+      (SELECT count(*) FROM customer_open)::integer AS customer_open_all_count,
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'UZS' AND due_date >= ${input.monthStart} AND due_date < ${input.monthEnd}) FROM customer_open), 0)::numeric AS customer_due_uzs,
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'USD' AND due_date >= ${input.monthStart} AND due_date < ${input.monthEnd}) FROM customer_open), 0)::numeric AS customer_due_usd,
+      (SELECT count(*) FILTER (WHERE due_date >= ${input.monthStart} AND due_date < ${input.monthEnd}) FROM customer_open)::integer AS customer_due_count,
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'UZS' AND due_date >= ${input.monthStart} AND due_date < ${input.monthEnd} AND due_date < ${input.todayStart}) FROM customer_open), 0)::numeric AS customer_overdue_uzs,
+      coalesce((SELECT sum(outstanding) FILTER (WHERE currency = 'USD' AND due_date >= ${input.monthStart} AND due_date < ${input.monthEnd} AND due_date < ${input.todayStart}) FROM customer_open), 0)::numeric AS customer_overdue_usd,
+      (SELECT count(*) FILTER (WHERE due_date >= ${input.monthStart} AND due_date < ${input.monthEnd} AND due_date < ${input.todayStart}) FROM customer_open)::integer AS customer_overdue_count,
+      coalesce((SELECT sum(amount) FILTER (WHERE currency = 'UZS') FROM supplier_payments), 0)::numeric AS supplier_paid_uzs,
+      coalesce((SELECT sum(amount) FILTER (WHERE currency = 'USD') FROM supplier_payments), 0)::numeric AS supplier_paid_usd,
+      (SELECT count(*) FROM supplier_payments)::integer AS supplier_payment_count
+  `)
+
+  return {
+    supplierPayablesOpenAllTimeUzs: Number(row?.supplier_open_all_uzs ?? 0),
+    supplierPayablesOpenAllTimeUsd: Number(row?.supplier_open_all_usd ?? 0),
+    supplierPayablesOpenAllTimeCount: Number(row?.supplier_open_all_count ?? 0),
+    supplierPayablesDueSelectedMonthUzs: Number(row?.supplier_due_uzs ?? 0),
+    supplierPayablesDueSelectedMonthUsd: Number(row?.supplier_due_usd ?? 0),
+    supplierPayablesDueSelectedMonthCount: Number(row?.supplier_due_count ?? 0),
+    supplierPayablesOverdueWithinSelectedMonthUzs: Number(row?.supplier_overdue_uzs ?? 0),
+    supplierPayablesOverdueWithinSelectedMonthUsd: Number(row?.supplier_overdue_usd ?? 0),
+    supplierPayablesOverdueWithinSelectedMonthCount: Number(row?.supplier_overdue_count ?? 0),
+    customerPayLaterOpenAllTimeUzs: Number(row?.customer_open_all_uzs ?? 0),
+    customerPayLaterOpenAllTimeUsd: Number(row?.customer_open_all_usd ?? 0),
+    customerPayLaterOpenAllTimeCount: Number(row?.customer_open_all_count ?? 0),
+    customerPayLaterDueSelectedMonthUzs: Number(row?.customer_due_uzs ?? 0),
+    customerPayLaterDueSelectedMonthUsd: Number(row?.customer_due_usd ?? 0),
+    customerPayLaterDueSelectedMonthCount: Number(row?.customer_due_count ?? 0),
+    customerPayLaterOverdueWithinSelectedMonthUzs: Number(row?.customer_overdue_uzs ?? 0),
+    customerPayLaterOverdueWithinSelectedMonthUsd: Number(row?.customer_overdue_usd ?? 0),
+    customerPayLaterOverdueWithinSelectedMonthCount: Number(row?.customer_overdue_count ?? 0),
+    supplierPaymentsMadeSelectedMonthUzs: Number(row?.supplier_paid_uzs ?? 0),
+    supplierPaymentsMadeSelectedMonthUsd: Number(row?.supplier_paid_usd ?? 0),
+    supplierPaymentsMadeSelectedMonthCount: Number(row?.supplier_payment_count ?? 0),
+  }
+}
+
 interface IdRow { id: string }
 
 export async function getUpcomingScheduleIds(shopId: string, take = 5): Promise<string[]> {

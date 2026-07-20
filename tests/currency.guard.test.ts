@@ -53,7 +53,7 @@ describe('currency source guards', () => {
       'src/app/api/sales/[id]/payment/route.ts',
       'src/app/api/nasiya/import/route.ts',
     ]) {
-      const src = read(file)
+      const src = read(file) + (file.endsWith('/nasiya/route.ts') ? read('src/lib/server/nasiya-contract-core.ts') : '')
       expect(src, file).toMatch(/moneyInputToUzs|createMoneyInputConverter/)
       expect(src, file).toContain('moneyInputMeta')
     }

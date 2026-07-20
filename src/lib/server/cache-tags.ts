@@ -12,6 +12,7 @@ export const shopCacheTag = {
   sales: (shopId: string) => `shop:${shopId}:sales`,
   nasiyaSchedules: (shopId: string) => `shop:${shopId}:nasiya-schedules`,
   returns: (shopId: string) => `shop:${shopId}:returns`,
+  debts: (shopId: string) => `shop:${shopId}:debts`,
 }
 
 export function invalidateShopCache(
@@ -37,6 +38,7 @@ export function invalidateShopDeviceMutation(shopId: string) {
       shopCacheTag.stats,
       shopCacheTag.reports,
       shopCacheTag.logs,
+      shopCacheTag.debts,
     ],
   )
 }
@@ -51,6 +53,7 @@ export function invalidateShopSaleMutation(shopId: string) {
       shopCacheTag.stats,
       shopCacheTag.reports,
       shopCacheTag.logs,
+      shopCacheTag.debts,
     ],
   )
 }
@@ -77,6 +80,20 @@ export function invalidateShopPaymentMutation(shopId: string) {
       shopCacheTag.sales,
       shopCacheTag.nasiyalar,
       shopCacheTag.nasiyaSchedules,
+      shopCacheTag.stats,
+      shopCacheTag.reports,
+      shopCacheTag.logs,
+      shopCacheTag.debts,
+    ],
+  )
+}
+
+export function invalidateShopSupplierPayableMutation(shopId: string) {
+  invalidateShopCache(
+    shopId,
+    [
+      shopCacheTag.debts,
+      shopCacheTag.devices,
       shopCacheTag.stats,
       shopCacheTag.reports,
       shopCacheTag.logs,

@@ -38,9 +38,9 @@ function staffWithOnly(permission: ActiveShopPermissionCode): ShopPrincipalAcces
 }
 
 describe('Staff Permissions V2 behavioral authorization kernel', () => {
-  it('has exactly 55 unique active capabilities with complete operational metadata', () => {
-    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(55)
-    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(55)
+  it('has exactly 58 unique active capabilities with complete operational metadata', () => {
+    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(58)
+    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(58)
 
     for (const code of ACTIVE_SHOP_PERMISSION_CODES) {
       const definition = permissionDefinition(code)
@@ -140,7 +140,11 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
   it('expands every retired alias only to its documented exact V2 targets', () => {
     for (const retired of RETIRED_SHOP_PERMISSION_CODES) {
       const expanded = expandShopPermissionCodes([retired])
-      expect([...expanded]).toEqual([retired, ...LEGACY_PERMISSION_EXPANSIONS[retired]])
+      const expected = [retired, ...LEGACY_PERMISSION_EXPANSIONS[retired]]
+      if (expected.includes('SUPPLIER_PAYMENT_RECORD') || expected.includes('SUPPLIER_PAYMENT_MARK_PAID')) {
+        expected.push('SUPPLIER_PAYABLE_VIEW')
+      }
+      expect([...expanded]).toEqual([...new Set(expected)])
       for (const replacement of LEGACY_PERMISSION_EXPANSIONS[retired]) {
         expect(ACTIVE_SHOP_PERMISSION_CODES).toContain(replacement)
       }

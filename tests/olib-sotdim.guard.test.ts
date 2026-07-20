@@ -18,8 +18,10 @@ describe('quick action: Olib-sotdim card on /shop/yangi-operatsiya', () => {
 describe('olib-sotdim device lifecycle: never IN_STOCK, never normal-sale-available', () => {
   const route = read('src/app/api/olib-sotdim/route.ts')
 
-  it('creates the device directly as SOLD_CASH or SOLD_DEBT, flagged isExternalSourced', () => {
-    expect(route).toContain("const deviceStatus = contractRemaining > 0 ? 'SOLD_DEBT' : 'SOLD_CASH'")
+  it('creates the device directly as SOLD_CASH, SOLD_DEBT, or SOLD_NASIYA, flagged isExternalSourced', () => {
+    expect(route).toContain("const deviceStatus = d.customerDealType === 'NASIYA'")
+    expect(route).toContain("? 'SOLD_NASIYA' as const")
+    expect(route).toContain("? 'SOLD_DEBT' as const : 'SOLD_CASH' as const")
     expect(route).toContain('status: deviceStatus')
     expect(route).toContain('isExternalSourced: true')
     expect(route).not.toContain("status: 'IN_STOCK'")
@@ -31,8 +33,10 @@ describe('olib-sotdim device lifecycle: never IN_STOCK, never normal-sale-availa
     expect(route).toContain('normalizedValue: { in: imeiValues }')
   })
 
-  it('creates a real Sale row so existing sold-device/profit UI and reports pick it up unchanged', () => {
+  it('creates an exact Sale or Nasiya outcome behind one Olib operation', () => {
     expect(route).toContain('tx.sale.create')
+    expect(route).toContain('createNasiyaContractCore({')
+    expect(route).toContain('tx.olibSotdimOperation.create')
     expect(route).toContain('deviceId: device.id')
   })
 })
@@ -44,7 +48,7 @@ describe('supplier debt is tracked separately from customer debt', () => {
   it('SupplierPayable is its own model, not folded into Sale', () => {
     const supplierPayableBlock = schema.slice(
       schema.indexOf('model SupplierPayable'),
-      schema.indexOf('model SupplierPayable') + 1900,
+      schema.indexOf('model SupplierPayablePayment'),
     )
     expect(supplierPayableBlock).toContain('amount')
     expect(supplierPayableBlock).toContain('SupplierPayableStatus')
@@ -54,31 +58,36 @@ describe('supplier debt is tracked separately from customer debt', () => {
   })
 
   it('the create route writes Sale.remainingAmount (customer owes us) and SupplierPayable.amount (we owe supplier) independently', () => {
-    expect(route).toContain('remainingAmount: remaining')
-    expect(route).toContain('tx.supplierPayable.create')
+    expect(route).toContain('contractRemainingAmount: contractRemaining')
+    expect(route).toContain('createSupplierPayableCore({')
   })
 })
 
 describe('supplier paid now vs pay later', () => {
   const route = read('src/app/api/olib-sotdim/route.ts')
+  const ledger = read('src/lib/server/supplier-payable-payments.ts')
 
   it('paid now creates a PAID payable with paidAt + paymentMethod, no reminders', () => {
-    expect(route).toContain("status: supplierPaidNow ? 'PAID' : 'PENDING'")
-    expect(route).toContain('reminderEnabled: supplierPaidNow ? false')
+    expect(route).toContain('supplierPaidNow:')
+    expect(route).toContain('supplierInitialRaw = d.supplierPaidNow ? d.purchasePrice')
+    expect(ledger).toContain("status: fullyPaid ? 'PAID' : 'PARTIAL'")
+    expect(ledger).toContain('reminderEnabled: fullyPaid ? false : input.reminderEnabled')
   })
 
   it('pay later requires a due date and defaults reminders on', () => {
-    expect(route).toContain('dueDate: supplierPaidNow ? (d.supplierPaidDate ?? new Date()) : d.supplierDueDate!')
+    expect(route).toContain('dueDate: d.supplierPaidNow ? (d.supplierPaidDate ?? new Date()) : d.supplierDueDate!')
   })
 })
 
 describe('mark supplier payable as paid stops reminders', () => {
   const payRoute = read('src/app/api/olib-sotdim/[id]/pay/route.ts')
+  const ledger = read('src/lib/server/supplier-payable-payments.ts')
   const cron = read('src/app/api/cron/reminders/route.ts')
 
   it('pay route flips status to PAID and rejects an already-paid payable', () => {
-    expect(payRoute).toContain("status: 'PAID'")
-    expect(payRoute).toContain('PAYABLE_NOT_OPEN_MESSAGE')
+    expect(payRoute).toContain('recordSupplierPayablePayment({')
+    expect(ledger).toContain("const nextStatus = isFullyPaid ? 'PAID' as const")
+    expect(ledger).toContain("Bu qarz yopilgan yoki bekor qilingan")
   })
 
   it('cron reminder queries only ever select PENDING/OVERDUE, so a PAID payable is naturally excluded', () => {
@@ -159,10 +168,11 @@ describe('money/currency: MoneyInput used, server converts and stores UZS', () =
   })
 
   it('submits inputCurrency and converts every amount through one operation-scoped rate', () => {
-    expect(form).toContain('inputCurrency: currency.currency')
-    expect(route).toContain('createMoneyInputConverter(d.inputCurrency)')
-    expect(route).toContain('purchaseInput = convertMoney(d.purchasePrice)')
-    expect(route).toContain('saleInput = convertMoney(d.salePrice)')
+    expect(form).toContain('purchaseInputCurrency,')
+    expect(form).toContain('customerInputCurrency,')
+    expect(route).toContain('createMoneyInputConverter(d.purchaseInputCurrency ?? d.inputCurrency)')
+    expect(route).toContain('purchaseInput = convertPurchase(d.purchasePrice)')
+    expect(route).toContain('saleInput = convertCustomer(d.salePrice!)')
   })
 })
 
@@ -175,10 +185,10 @@ describe('reports: no double-counted inventory cost', () => {
   })
 
   it('freezes the supplier cost and proportional paid margin on the Sale receipt exactly once', () => {
-    expect(route).toContain('costBasisAmount: contractPurchasePrice')
+    expect(route).toContain('contractCostBasisAmount: componentPlan.principal')
     expect(route).toContain("accountingReconstructionStatus: 'COMPLETE'")
-    expect(route).toContain('contractMarginAmount: initialComponents!.allocation.margin')
-    expect(route).toContain('marginAmountUzs: reportingComponents.margin')
+    expect(route).toContain('contractMarginPaidAmount: initialComponents?.paidAfter.margin ?? 0')
+    expect(route).toContain('marginAmountUzs: reporting.margin')
   })
 })
 
@@ -186,15 +196,15 @@ describe('search: olib-sotdim list is searchable by supplier/customer/device/IME
   const route = read('src/app/api/olib-sotdim/route.ts')
 
   it('the GET query is scoped to the resolved shopId', () => {
-    const whereBlock = route.slice(route.indexOf('const where: Prisma.SupplierPayableWhereInput'), route.indexOf('const [payables, total]'))
+    const whereBlock = route.slice(route.indexOf('const where: Prisma.SupplierPayableWhereInput'), route.indexOf('const [rows, total]'))
     expect(whereBlock).toContain('shopId,')
   })
 
   it('search matches supplier name/phone, customer name/phone, device model/IMEI', () => {
     expect(route).toContain('supplierName: { contains: search')
     expect(route).toContain('supplierPhone: { contains: search')
-    expect(route).toContain("sale: { customer: { name: { contains: search")
-    expect(route).toContain("sale: { customer: { phone: { contains: search")
+    expect(route).toContain("olibSotdimOperation: { customer: { name: { contains: search")
+    expect(route).toContain("olibSotdimOperation: { customer: { phone: { contains: search")
     expect(route).toContain("device: { model: { contains: search")
     expect(route).toContain("device: { imei: { contains: search")
   })
@@ -211,20 +221,23 @@ describe('search: olib-sotdim list is searchable by supplier/customer/device/IME
  */
 describe('mark supplier payable as paid is race-safe (atomic status-guarded update)', () => {
   const payRoute = read('src/app/api/olib-sotdim/[id]/pay/route.ts')
+  const ledger = read('src/lib/server/supplier-payable-payments.ts')
 
   it('flips PAID via updateMany with a status guard, not a plain update by id', () => {
-    expect(payRoute).toContain("const flipped = await tx.supplierPayable.updateMany({\n        where: { id, shopId, deletedAt: null, status: { in: ['PENDING', 'OVERDUE'] } },")
-    expect(payRoute).not.toContain('await tx.supplierPayable.update({\n        where: { id },')
+    expect(payRoute).toContain('recordSupplierPayablePayment({')
+    expect(ledger).toContain('const updated = await tx.supplierPayable.updateMany({')
+    expect(ledger).toContain('ledgerVersion: payable.ledgerVersion')
+    expect(ledger).toContain("status: { notIn: ['PAID', 'CANCELLED'] }")
   })
 
   it('rejects with 409 if the atomic flip did not affect exactly one row (already paid by a concurrent request)', () => {
-    expect(payRoute).toContain('if (flipped.count !== 1) {')
-    expect(payRoute).toContain('throw { status: 409, message: PAYABLE_NOT_OPEN_MESSAGE }')
-    expect(payRoute).toContain("if (e.status === 409) return conflict(e.message)")
+    expect(ledger).toContain('if (updated.count !== 1)')
+    expect(ledger).toContain("code: 'P2034'")
+    expect(payRoute).toContain('return conflict(error.message)')
   })
 
   it('allows only PENDING/OVERDUE and cannot transition CANCELLED to PAID', () => {
-    expect(payRoute).toContain("payable.status !== 'PENDING' && payable.status !== 'OVERDUE'")
-    expect(payRoute).not.toContain("status: { not: 'PAID' }")
+    expect(ledger).toContain("payable.status === 'PAID' || payable.status === 'CANCELLED'")
+    expect(ledger).toContain("status: { notIn: ['PAID', 'CANCELLED'] }")
   })
 })

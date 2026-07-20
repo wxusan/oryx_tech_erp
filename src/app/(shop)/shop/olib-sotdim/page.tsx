@@ -8,7 +8,7 @@ export default async function OlibSotdimPage({
 }: {
   searchParams?: Promise<{ q?: string | string[]; page?: string | string[] }>
 }) {
-  const guarded = await requireCurrentShopAnyPermission(['OLIB_VIEW', 'SUPPLIER_PAYMENT_MARK_PAID'])
+  const guarded = await requireCurrentShopAnyPermission(['OLIB_VIEW', 'SUPPLIER_PAYABLE_VIEW', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID'])
   if (!guarded.ok || !guarded.shopId) redirect('/shop/dashboard')
   const params = await searchParams
   return (

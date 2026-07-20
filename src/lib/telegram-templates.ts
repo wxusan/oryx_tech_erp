@@ -193,6 +193,8 @@ export function deviceAddedMessage(data: {
   purchasePrice: number
   purchaseCurrency: CurrencyCode
   supplierPhone?: string | null
+  supplierRemainingAmount?: number | null
+  supplierDueDate?: Date | string | null
   adminName?: string | null
   currency?: CurrencyContext | null
 }): string {
@@ -203,6 +205,10 @@ export function deviceAddedMessage(data: {
     block(
       `💵 Olingan narx: ${contractMoney(data.purchasePrice, data.purchaseCurrency, data.currency)}`,
       optionalLine('Yetkazib beruvchi', data.supplierPhone, '📞'),
+      typeof data.supplierRemainingAmount === 'number' && data.supplierRemainingAmount > 0
+        ? `📌 Yetkazib beruvchiga qarz: ${contractMoney(data.supplierRemainingAmount, data.purchaseCurrency, data.currency)}`
+        : null,
+      data.supplierRemainingAmount && data.supplierDueDate ? `📅 To‘lov muddati: ${formatUzDate(data.supplierDueDate)}` : null,
     ),
     optionalLine('Admin', data.adminName, '👨‍💼'),
   )
@@ -698,13 +704,16 @@ export function olibSotdimCreatedMessage(data: {
   salePrice: number
   profit: number
   contractCurrency: CurrencyCode
+  purchaseCurrency?: CurrencyCode
+  saleCurrency?: CurrencyCode
   supplierPaidNow: boolean
   customerName: string
   customerPhone?: string | null
   adminName?: string | null
   currency?: CurrencyContext | null
 }): string {
-  const money = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency)
+  const purchaseMoney = (amount: number) => contractMoney(amount, data.purchaseCurrency ?? data.contractCurrency, data.currency)
+  const saleMoney = (amount: number) => contractMoney(amount, data.saleCurrency ?? data.contractCurrency, data.currency)
   return compose(
     '<b>🔄 Olib-sotdim operatsiyasi</b>',
     optionalLine('Do‘kon', data.shopName, '🏪'),
@@ -716,12 +725,57 @@ export function olibSotdimCreatedMessage(data: {
     ),
     block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
     block(
-      `💵 Olingan narx: ${money(data.purchasePrice)}`,
-      `💰 Sotilish narxi: ${money(data.salePrice)}`,
+      `💵 Olingan narx: ${purchaseMoney(data.purchasePrice)}`,
+      `💰 Sotilish narxi: ${saleMoney(data.salePrice)}`,
       data.supplierPaidNow
-        ? `📊 Foyda: ${money(data.profit)}`
-        : `📊 Kutilayotgan foyda: ${money(data.profit)} (yetkazib beruvchiga hali to‘lanmagan)`,
+        ? `📊 Foyda: ${saleMoney(data.profit)}`
+        : `📊 Kutilayotgan foyda: ${saleMoney(data.profit)} (yetkazib beruvchiga hali to‘lanmagan)`,
       `💳 Yetkazib beruvchiga to‘lov: ${data.supplierPaidNow ? 'hozir to‘landi' : 'keyinroq to‘lanadi'}`,
+    ),
+    optionalLine('Admin', data.adminName, '👨‍💼'),
+  )
+}
+
+export function olibSotdimNasiyaCreatedMessage(data: {
+  shopName: string
+  device: DeviceSpecs
+  supplierName: string
+  supplierPhone?: string | null
+  supplierLocation?: string | null
+  purchasePrice: number
+  purchaseCurrency: CurrencyCode
+  supplierRemainingAmount: number
+  customerName: string
+  customerPhone?: string | null
+  totalAmount: number
+  downPayment: number
+  finalNasiyaAmount: number
+  months: number
+  monthlyPayment: number
+  nextPaymentDate?: Date | string | null
+  nasiyaCurrency: CurrencyCode
+  adminName?: string | null
+  currency?: CurrencyContext | null
+}): string {
+  return compose(
+    '<b>🔄 Olib-sotdim — Nasiya yaratildi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
+    formatDeviceSpecs(data.device),
+    block(
+      optionalLine('Kimdan olindi', data.supplierName, '🏬'),
+      optionalLine('Yetkazib beruvchi', data.supplierPhone, '📞'),
+      optionalLine('Manzil', data.supplierLocation, '📍'),
+      `💵 Olingan narx: ${contractMoney(data.purchasePrice, data.purchaseCurrency, data.currency)}`,
+      `📌 Yetkazib beruvchiga qolgan qarz: ${contractMoney(data.supplierRemainingAmount, data.purchaseCurrency, data.currency)}`,
+    ),
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
+    block(
+      `💰 Qurilma narxi: ${contractMoney(data.totalAmount, data.nasiyaCurrency, data.currency)}`,
+      `💳 Boshlang‘ich to‘lov: ${contractMoney(data.downPayment, data.nasiyaCurrency, data.currency)}`,
+      `📊 Nasiya jami: ${contractMoney(data.finalNasiyaAmount, data.nasiyaCurrency, data.currency)}`,
+      `📆 Muddat: ${escapeTelegramHtml(data.months)} oy`,
+      `🧾 Oylik to‘lov: ${contractMoney(data.monthlyPayment, data.nasiyaCurrency, data.currency)}`,
+      data.nextPaymentDate ? `📅 Birinchi muddat: ${formatUzDate(data.nextPaymentDate)}` : null,
     ),
     optionalLine('Admin', data.adminName, '👨‍💼'),
   )
@@ -816,6 +870,32 @@ export function supplierPayablePaidMessage(data: {
     supplierPayableIntro(data),
     block(
       `💰 To‘langan: ${contractMoney(data.amount, data.contractCurrency, data.currency)}`,
+      optionalLine('To‘lov usuli', formatPaymentMethod(data.paymentMethod), '💳'),
+    ),
+    optionalLine('Admin', data.adminName, '👨‍💼'),
+  )
+}
+
+export function supplierPayablePartialPaymentMessage(data: {
+  shopName: string
+  device: DeviceSpecs
+  supplierName: string
+  supplierPhone?: string | null
+  paidAmount: number
+  remainingAmount: number
+  contractCurrency: CurrencyCode
+  paymentMethod?: string | null
+  adminName?: string | null
+  currency?: CurrencyContext | null
+}): string {
+  return compose(
+    '<b>💸 Yetkazib beruvchiga qisman to‘lov qilindi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
+    formatDeviceSpecs(data.device, { battery: false }),
+    supplierPayableIntro(data),
+    block(
+      `💰 To‘langan: ${contractMoney(data.paidAmount, data.contractCurrency, data.currency)}`,
+      `📌 Qolgan qarz: ${contractMoney(data.remainingAmount, data.contractCurrency, data.currency)}`,
       optionalLine('To‘lov usuli', formatPaymentMethod(data.paymentMethod), '💳'),
     ),
     optionalLine('Admin', data.adminName, '👨‍💼'),

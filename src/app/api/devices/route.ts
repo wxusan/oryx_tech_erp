@@ -6,16 +6,18 @@
  * Shop admins can only see/add devices for their own shop.
  */
 
+import { createHash } from 'node:crypto'
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { Prisma } from '@/generated/prisma/client'
 import { requireShopAnyPermission, requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { addDeviceSchema } from '@/lib/validations'
-import { ok, created, badRequest, conflict, serverError } from '@/lib/api-helpers'
+import { ok, created, badRequest, conflict, forbidden, serverError } from '@/lib/api-helpers'
 import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { deviceAddedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
-import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
-import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
+import { invalidateShopDeviceMutation, invalidateShopSupplierPayableMutation } from '@/lib/server/cache-tags'
+import { createMoneyInputConverter, moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { buildShopDevicesWhere, getShopDeviceListItemsByIds, getShopDevicesList, type DeviceStatusFilter } from '@/lib/server/shop-lists'
 import { latestChangeCursorForShop } from '@/lib/server/change-events'
@@ -23,9 +25,12 @@ import { resolvePrivateUploadReference } from '@/lib/server/private-upload-refer
 import type { ZodError } from 'zod'
 import { formatDeviceStorage, deviceConditionLabel, normalizeImei } from '@/lib/device-specs'
 import { displayImei } from '@/lib/device-display'
-import { principalHasPermission } from '@/lib/server/shop-access'
+import { enabledFeatureSet, getActiveShopPackage, getLiveShopPrincipalForMutation, principalHasPermission } from '@/lib/server/shop-access'
 import { computeSaleContractMargin } from '@/lib/nasiya-contract'
 import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
+import { createSupplierPayableCore } from '@/lib/server/supplier-payable-payments'
+import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
+import { validatePaymentBreakdown } from '@/lib/payment-breakdown'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED', 'DELETED'] as const
 
@@ -315,6 +320,11 @@ export async function GET(req: NextRequest) {
     }, { includeOwnerFinancials })
     return ok({ items, total, skip, take }, "Qurilmalar ro'yxati")
   } catch (err) {
+    if (typeof err === 'object' && err !== null && 'status' in err) {
+      const typed = err as { status: number; message: string }
+      if (typed.status === 403) return forbidden(typed.message)
+      if (typed.status === 409) return conflict(typed.message)
+    }
     logger.error('[GET /api/devices]', { event: 'api.route_error', error: err })
     return serverError()
   }
@@ -326,7 +336,7 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   try {
-    const guarded = await requireShopPermission('DEVICE_CREATE')
+    const guarded = await requireShopAnyPermission(['DEVICE_CREATE', 'DEVICE_PURCHASE_ON_CREDIT'])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const includeOwnerFinancials =
@@ -339,6 +349,17 @@ export async function POST(req: NextRequest) {
     if (!parsed.success) {
       const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
       return badRequest(firstError)
+    }
+
+    const purchaseSettlement = parsed.data.purchaseSettlement
+    const requiredPermission = purchaseSettlement === 'PAY_LATER' ? 'DEVICE_PURCHASE_ON_CREDIT' : 'DEVICE_CREATE'
+    if (
+      session.user.role !== 'SUPER_ADMIN' &&
+      (!guarded.principal || !principalHasPermission(guarded.principal, requiredPermission))
+    ) return forbidden("Bu amal uchun ruxsat berilmagan")
+    const idempotencyKey = req.headers.get('idempotency-key')?.trim()
+    if (purchaseSettlement === 'PAY_LATER' && (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120)) {
+      return badRequest("Keyin to'lash operatsiyasi uchun Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
     }
 
     const {
@@ -365,24 +386,59 @@ export async function POST(req: NextRequest) {
       return badRequest("Qurilma rasmi boshqa do'konga tegishli yoki havola muddati tugagan")
     }
     let purchaseInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    let supplierInitialInput: Awaited<ReturnType<typeof moneyInputToUzs>> | null = null
+    const supplierInitialRaw = purchaseSettlement === 'PAY_LATER'
+      ? (parsed.data.supplierInitialPaymentAmount ?? 0)
+      : 0
     try {
-      purchaseInput = await moneyInputToUzs(purchasePrice, parsed.data.inputCurrency)
+      const convertMoney = await createMoneyInputConverter(parsed.data.inputCurrency)
+      purchaseInput = convertMoney(purchasePrice)
+      if (supplierInitialRaw > 0) supplierInitialInput = convertMoney(supplierInitialRaw)
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
+    if (parsed.data.supplierPaymentBreakdown) {
+      const breakdownError = validatePaymentBreakdown(
+        parsed.data.supplierPaymentBreakdown,
+        supplierInitialRaw,
+        purchaseInput.inputCurrency,
+      )
+      if (breakdownError) return badRequest(breakdownError)
+    }
+    const commandHash = createHash('sha256').update(JSON.stringify({
+      shopId: resolvedShopId,
+      actorId: session.user.id,
+      command: parsed.data,
+    })).digest('hex')
     const [shop, currency] = await Promise.all([
       prisma.shop.findUnique({ where: { id: resolvedShopId }, select: { name: true } }),
       getShopCurrencyContext(resolvedShopId),
     ])
-    const notificationMessage = deviceAddedMessage({
-      shopName: shop?.name ?? '',
-      device: { deviceModel: model, storage, color, batteryHealth, imei, secondaryImei, conditionLabel: conditionCode === 'NEW' ? 'Yangi' : 'Ishlatilgan' },
-      purchasePrice,
-      purchaseCurrency: purchaseInput.inputCurrency,
-      supplierPhone,
-      adminName: session.user.name,
-      currency,
-    })
+    if (purchaseSettlement === 'PAY_LATER' && idempotencyKey) {
+      const replay = await prisma.supplierPayable.findUnique({
+        where: { shopId_creationIdempotencyKey: { shopId: resolvedShopId, creationIdempotencyKey: idempotencyKey } },
+        select: { id: true, deviceId: true, status: true, createdBy: true, creationCommandHash: true, origin: true },
+      })
+      if (replay) {
+        if (replay.origin !== 'DEVICE_PURCHASE' || replay.createdBy !== session.user.id || replay.creationCommandHash !== commandHash) {
+          return conflict("Idempotency-Key boshqa yoki o'zgartirilgan qurilma xaridi uchun ishlatilgan")
+        }
+        const [item, changeCursor] = await Promise.all([
+          getShopDeviceListItemsByIds(resolvedShopId, [replay.deviceId], { includeOwnerFinancials }).then((items) => items[0]),
+          latestChangeCursorForShop(resolvedShopId),
+        ])
+        if (!item) return serverError('Qurilma topilmadi. Sahifani yangilang.')
+        return ok({
+          id: replay.deviceId,
+          item,
+          supplierPayableId: replay.id,
+          supplierPayableStatus: replay.status,
+          changeCursor,
+          affectedDomains: ['devices', 'debts', 'reports', 'logs'],
+          mutationId: `device.credit.replay:${replay.id}`,
+        }, "Qurilma xaridi allaqachon saqlangan")
+      }
+    }
 
     // Check active IMEI uniqueness within shop. Soft-deleted rows may be reused.
     const existing = await prisma.device.findFirst({
@@ -397,7 +453,30 @@ export async function POST(req: NextRequest) {
     })
     if (existing) return conflict("Bu IMEI raqami allaqachon mavjud")
 
-    const device = await prisma.$transaction(async (tx) => {
+    const run = () => prisma.$transaction(async (tx) => {
+      if (session.user.role === 'SHOP_ADMIN') {
+        const live = await getLiveShopPrincipalForMutation(tx, { shopId: resolvedShopId, actorId: session.user.id })
+        if (!live || !principalHasPermission(live, requiredPermission)) {
+          throw { status: 403, message: "Bu amal uchun ruxsat berilmagan" }
+        }
+      } else {
+        const activePackage = await getActiveShopPackage(resolvedShopId, new Date(), tx)
+        if (!enabledFeatureSet(activePackage).has('INVENTORY')) {
+          throw { status: 403, message: "Ombor moduli do'kon paketida yoqilmagan" }
+        }
+      }
+      if (purchaseSettlement === 'PAY_LATER' && idempotencyKey) {
+        const replay = await tx.supplierPayable.findUnique({
+          where: { shopId_creationIdempotencyKey: { shopId: resolvedShopId, creationIdempotencyKey: idempotencyKey } },
+          select: { id: true, deviceId: true, status: true, createdBy: true, creationCommandHash: true, origin: true },
+        })
+        if (replay) {
+          if (replay.origin !== 'DEVICE_PURCHASE' || replay.createdBy !== session.user.id || replay.creationCommandHash !== commandHash) {
+            throw { status: 409, message: "Idempotency-Key boshqa yoki o'zgartirilgan qurilma xaridi uchun ishlatilgan" }
+          }
+          return { deviceId: replay.deviceId, payable: replay, duplicate: true as const }
+        }
+      }
       let supplierId: string | undefined
       if (supplierName) {
         const supplier = await tx.supplier.create({
@@ -431,17 +510,82 @@ export async function POST(req: NextRequest) {
         },
       })
 
+      const payable = purchaseSettlement === 'PAY_LATER'
+        ? await createSupplierPayableCore({
+            tx,
+            shopId: resolvedShopId,
+            deviceId: createdDevice.id,
+            supplierId,
+            origin: 'DEVICE_PURCHASE',
+            supplierName: supplierName!,
+            supplierPhone: supplierPhone!,
+            purchaseInput,
+            contractAmount: purchasePrice,
+            dueDate: parsed.data.supplierDueDate!,
+            reminderEnabled: parsed.data.supplierReminderEnabled,
+            earlyReminderEnabled: parsed.data.earlyReminderEnabled,
+            earlyReminderDays: parsed.data.earlyReminderDays,
+            initialPayment: supplierInitialInput && parsed.data.supplierPaymentMethod ? {
+              rawAmount: supplierInitialRaw,
+              converted: supplierInitialInput,
+              paymentMethod: parsed.data.supplierPaymentMethod,
+              paymentBreakdown: parsed.data.supplierPaymentBreakdown,
+              paidAt: new Date(),
+              note: "Boshlang'ich to'lov",
+            } : undefined,
+            actorId: session.user.id,
+            commandHash,
+            idempotencyScope: idempotencyKey!,
+          })
+        : null
+
       await tx.log.create({
         data: {
           shopId: resolvedShopId,
           actorId: session.user.id,
           actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
-          action: 'CREATE',
+          action: payable ? 'CREATE_DEVICE_PAY_LATER' : 'CREATE',
           targetType: 'Device',
           targetId: createdDevice.id,
-          newValue: { model, imei, purchasePrice: purchaseInput.amountUzs, ...moneyInputMeta(purchaseInput) },
+          newValue: {
+            model,
+            imei,
+            purchasePrice: purchaseInput.amountUzs,
+            ...(payable ? {
+              supplierPayableId: payable.id,
+              supplierName: payable.supplierName,
+              supplierDueDate: payable.dueDate,
+              supplierRemainingAmount: Number(payable.contractRemainingAmount),
+              supplierStatus: payable.status,
+            } : {}),
+            ...moneyInputMeta(purchaseInput),
+          },
         },
       })
+      if (payable) {
+        await tx.log.create({
+          data: {
+            shopId: resolvedShopId,
+            actorId: session.user.id,
+            actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
+            action: 'CREATE_SUPPLIER_PAYABLE',
+            targetType: 'SupplierPayable',
+            targetId: payable.id,
+            newValue: {
+              origin: payable.origin,
+              deviceId: createdDevice.id,
+              supplierName: payable.supplierName,
+              supplierPhone: payable.supplierPhone,
+              dueDate: payable.dueDate,
+              contractCurrency: payable.contractCurrency,
+              contractAmount: Number(payable.contractAmount),
+              contractPaidAmount: Number(payable.contractPaidAmount),
+              contractRemainingAmount: Number(payable.contractRemainingAmount),
+              status: payable.status,
+            },
+          },
+        })
+      }
 
       // The device-added template includes purchase cost, so the shared
       // resolver deliberately targets only the owner.
@@ -450,6 +594,17 @@ export async function POST(req: NextRequest) {
         audience: TELEGRAM_AUDIENCES.OWNER_ONLY,
       })
       const scheduledAt = new Date()
+      const notificationMessage = deviceAddedMessage({
+        shopName: shop?.name ?? '',
+        device: { deviceModel: model, storage, color, batteryHealth, imei, secondaryImei, conditionLabel: conditionCode === 'NEW' ? 'Yangi' : 'Ishlatilgan' },
+        purchasePrice,
+        purchaseCurrency: purchaseInput.inputCurrency,
+        supplierPhone,
+        supplierRemainingAmount: payable ? Number(payable.contractRemainingAmount) : null,
+        supplierDueDate: payable?.dueDate,
+        adminName: session.user.name,
+        currency,
+      })
       const notificationRows = [
         ...telegramNotificationRows(recipients, {
           type: 'DEVICE_CREATED',
@@ -470,10 +625,20 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      return createdDevice
-    })
+      return { deviceId: createdDevice.id, payable, duplicate: false as const }
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+
+    let result: Awaited<ReturnType<typeof run>> | undefined
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try { result = await run(); break } catch (error) {
+        if (isRetryableTransactionError(error) && attempt < 2) continue
+        throw error
+      }
+    }
+    if (!result) return serverError()
 
     invalidateShopDeviceMutation(resolvedShopId)
+    if (result.payable) invalidateShopSupplierPayableMutation(resolvedShopId)
 
     // Deliver notifications after the response is sent (non-blocking) so the
     // add-device request never waits on Telegram HTTP calls.
@@ -490,20 +655,30 @@ export async function POST(req: NextRequest) {
     })
 
     const [item, changeCursor] = await Promise.all([
-      getShopDeviceListItemsByIds(resolvedShopId, [device.id], { includeOwnerFinancials }).then((items) => items[0]),
+      getShopDeviceListItemsByIds(resolvedShopId, [result.deviceId], { includeOwnerFinancials }).then((items) => items[0]),
       latestChangeCursorForShop(resolvedShopId),
     ])
     if (!item) throw new Error('CREATED_DEVICE_DTO_NOT_FOUND')
-    return created({
-      id: device.id,
+    const responseData = {
+      id: result.deviceId,
       item,
+      supplierPayableId: result.payable?.id ?? null,
+      supplierPayableStatus: result.payable?.status ?? null,
       changeCursor,
-      affectedDomains: ['devices', 'reports', 'logs'],
-      mutationId: `device.created:${device.id}:${changeCursor}`,
-    }, "Qurilma muvaffaqiyatli qo'shildi")
+      affectedDomains: result.payable ? ['devices', 'debts', 'reports', 'logs'] : ['devices', 'reports', 'logs'],
+      mutationId: `device.created:${result.deviceId}:${changeCursor}`,
+    }
+    return result.duplicate
+      ? ok(responseData, "Qurilma xaridi allaqachon saqlangan")
+      : created(responseData, "Qurilma muvaffaqiyatli qo'shildi")
   } catch (err) {
     // Handle the race where two concurrent adds both pass the IMEI pre-check
     // and one violates the active partial unique index (Prisma P2002).
+    if (typeof err === 'object' && err !== null && 'status' in err) {
+      const typed = err as { status: number; message: string }
+      if (typed.status === 403) return forbidden(typed.message)
+      if (typed.status === 409) return conflict(typed.message)
+    }
     if (err && typeof err === 'object' && 'code' in err && (err as { code?: string }).code === 'P2002') {
       return conflict('Bu IMEI allaqachon mavjud.')
     }

@@ -12,7 +12,7 @@ describe('initial payment historical metadata', () => {
     ['nasiya', 'src/app/api/devices/[id]/nasiya/route.ts'],
     ['olib-sotdim', 'src/app/api/olib-sotdim/route.ts'],
   ])('%s creation freezes original payment input context', (_name, path) => {
-    const text = source(path)
+    const text = source(path) + (_name === 'nasiya' ? source('src/lib/server/nasiya-contract-core.ts') : '')
     expect(text).toContain('paymentInputAmount:')
     expect(text).toContain('paymentInputCurrency:')
     expect(text).toContain('paymentExchangeRate:')

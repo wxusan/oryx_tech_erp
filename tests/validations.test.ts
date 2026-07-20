@@ -49,6 +49,26 @@ describe('validation hardening', () => {
     expect(parsed).toMatchObject({ storageAmount: 1, storageUnit: 'TB' })
   })
 
+  it('validates normal device Pay Later supplier terms independently from inventory status', () => {
+    const base = {
+      model: 'iPhone 15',
+      color: 'Qora',
+      purchasePrice: 10_000_000,
+      imei: '123456789012345',
+      storageAmount: 256,
+      storageUnit: 'GB' as const,
+      conditionCode: 'NEW' as const,
+      purchaseSettlement: 'PAY_LATER' as const,
+      supplierName: 'Ali aka',
+      supplierPhone: '+998901234567',
+      supplierDueDate: '2026-08-01',
+    }
+    expect(addDeviceSchema.safeParse(base).success).toBe(true)
+    expect(addDeviceSchema.safeParse({ ...base, supplierDueDate: undefined }).success).toBe(false)
+    expect(addDeviceSchema.safeParse({ ...base, supplierInitialPaymentAmount: 10_000_000, supplierPaymentMethod: 'CASH' }).success).toBe(false)
+    expect(addDeviceSchema.safeParse({ ...base, supplierInitialPaymentAmount: 2_000_000, supplierPaymentMethod: 'CARD' }).success).toBe(true)
+  })
+
   it('caps long text fields on core create flows', () => {
     expect(createShopSchema.safeParse({
       name: 'A'.repeat(121),
