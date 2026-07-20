@@ -43,19 +43,21 @@ describe('device lifecycle status model', () => {
 
     expect(saleRoute).toContain("const nextDeviceStatus = contractRemaining > 0 ? 'SOLD_DEBT' : 'SOLD_CASH'")
     expect(saleRoute).toContain('data: { status: nextDeviceStatus')
-    expect(olibSotdimRoute).toContain("const deviceStatus = contractRemaining > 0 ? 'SOLD_DEBT' : 'SOLD_CASH'")
+    expect(olibSotdimRoute).toContain("const deviceStatus = d.customerDealType === 'NASIYA'")
+    expect(olibSotdimRoute).toContain("? 'SOLD_NASIYA' as const")
+    expect(olibSotdimRoute).toContain("? 'SOLD_DEBT' as const : 'SOLD_CASH' as const")
     expect(paymentRoute).toContain("contractPayment.isFullyPaid && sale.device.status === 'SOLD_DEBT'")
     expect(paymentRoute).toContain("? 'SOLD_CASH'")
   })
 
   it('keeps nasiya separate and exposes debt status in devices list, filter, labels, and export', () => {
-    const nasiyaRoute = read('src/app/api/devices/[id]/nasiya/route.ts')
+    const nasiyaCore = read('src/lib/server/nasiya-contract-core.ts')
     const list = read('src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx')
     const labels = read('src/lib/labels.ts')
     const presentationLabels = read('src/lib/presentation-labels.ts')
     const exportRoute = read('src/app/api/export/[entity]/route.ts')
 
-    expect(nasiyaRoute).toContain("data: { status: 'SOLD_NASIYA'")
+    expect(nasiyaCore).toContain("data: { status: 'SOLD_NASIYA'")
     expect(list).toContain("{ label: 'Qarzga sotilgan', value: 'SOLD_DEBT' }")
     expect(list).toContain("SOLD_DEBT: 'Qarzga sotilgan'")
     expect(labels).toContain('DEVICE_STATUS_LABELS')

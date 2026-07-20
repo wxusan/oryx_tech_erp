@@ -586,7 +586,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
   }
 
   if (entity === 'olib') {
-    const where = { shopId, deletedAt: null }
+    const where = { shopId, deletedAt: null, origin: 'OLIB_SOTDIM' as const }
     const total = await assertExportSize(entity, prisma.supplierPayable.count({ where }))
     const payables = await fetchExportRows(total, (skip, take) =>
       prisma.supplierPayable.findMany({
@@ -617,6 +617,14 @@ async function exportData(entity: string, shopId: string, role: string): Promise
               customer: { select: { name: true, phone: true } },
             },
           },
+          olibSotdimOperation: {
+            select: {
+              dealType: true,
+              customer: { select: { name: true, phone: true } },
+              sale: { select: { contractCurrency: true, contractSalePrice: true } },
+              nasiya: { select: { contractCurrency: true, contractFinalAmount: true } },
+            },
+          },
         },
       }),
     )
@@ -643,28 +651,40 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'note',
         'createdAt',
       ],
-      rows: payables.map((item) => [
+      rows: payables.map((item) => {
+        const customer = item.olibSotdimOperation?.customer ?? item.sale?.customer
+        const outcome = item.olibSotdimOperation?.dealType === 'NASIYA'
+          ? item.olibSotdimOperation.nasiya && {
+              currency: item.olibSotdimOperation.nasiya.contractCurrency,
+              amount: item.olibSotdimOperation.nasiya.contractFinalAmount,
+            }
+          : (item.olibSotdimOperation?.sale ?? item.sale) && {
+              currency: (item.olibSotdimOperation?.sale ?? item.sale)!.contractCurrency,
+              amount: (item.olibSotdimOperation?.sale ?? item.sale)!.contractSalePrice,
+            }
+        return [
         item.supplierName,
         item.supplierPhone,
         item.supplierLocation,
         item.supplierNote,
         item.device.model,
         displayImei(item.device.imei),
-        item.sale.customer.name,
-        item.sale.customer.phone,
+        customer?.name ?? '',
+        customer?.phone ?? '',
         currencyLabel(item.contractCurrency),
         item.contractExchangeRateAtCreation?.toString() ?? '',
         item.contractAmount.toString(),
         item.amount.toString(),
-        currencyLabel(item.sale.contractCurrency),
-        item.sale.contractSalePrice.toString(),
+        outcome ? currencyLabel(outcome.currency) : '',
+        outcome?.amount.toString() ?? '',
         supplierPayableStatusLabel(item.status),
         item.dueDate,
         item.paidAt,
         paymentMethodLabel(item.paymentMethod),
         item.note,
         item.createdAt,
-      ]),
+        ]
+      }),
     }
   }
 

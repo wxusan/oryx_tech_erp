@@ -11,6 +11,7 @@ import {
   getShopMonthlyAccountingAggregate,
   getNasiyaWriteOffAggregate,
   getShopObligationAggregate,
+  getShopDebtStatsAggregate,
   getUpcomingScheduleIds,
 } from '@/lib/server/shop-stats-queries'
 
@@ -43,7 +44,7 @@ export async function getShopStats(session: Session, shopId: string, options: Sh
 
   return unstable_cache(
     () => getShopStatsFresh(role, shopId, monthKey, adminId),
-    ['shop-stats:v3-payment-basis', shopId, role, monthKey ?? 'current', adminId ?? 'all'],
+    ['shop-stats:v4-debt-ledger', shopId, role, monthKey ?? 'current', adminId ?? 'all'],
     {
       // Money/overdue figures are high-churn. Keep the TTL short and expire
       // these tags immediately after sale/payment/return mutations.
@@ -58,6 +59,7 @@ export async function getShopStats(session: Session, shopId: string, options: Sh
         shopCacheTag.returns(shopId),
         shopCacheTag.logs(shopId),
         shopCacheTag.customers(shopId),
+        shopCacheTag.debts(shopId),
       ],
     },
   )()
@@ -202,6 +204,27 @@ async function getShopOperationalStatsFresh(role: StatsRole, shopId: string): Pr
 
   return {
     ...computed,
+    supplierPayablesOpenAllTimeUzs: 0,
+    supplierPayablesOpenAllTimeUsd: 0,
+    supplierPayablesOpenAllTimeCount: 0,
+    supplierPayablesDueSelectedMonthUzs: 0,
+    supplierPayablesDueSelectedMonthUsd: 0,
+    supplierPayablesDueSelectedMonthCount: 0,
+    supplierPayablesOverdueWithinSelectedMonthUzs: 0,
+    supplierPayablesOverdueWithinSelectedMonthUsd: 0,
+    supplierPayablesOverdueWithinSelectedMonthCount: 0,
+    customerPayLaterOpenAllTimeUzs: 0,
+    customerPayLaterOpenAllTimeUsd: 0,
+    customerPayLaterOpenAllTimeCount: 0,
+    customerPayLaterDueSelectedMonthUzs: 0,
+    customerPayLaterDueSelectedMonthUsd: 0,
+    customerPayLaterDueSelectedMonthCount: 0,
+    customerPayLaterOverdueWithinSelectedMonthUzs: 0,
+    customerPayLaterOverdueWithinSelectedMonthUsd: 0,
+    customerPayLaterOverdueWithinSelectedMonthCount: 0,
+    supplierPaymentsMadeSelectedMonthUzs: 0,
+    supplierPaymentsMadeSelectedMonthUsd: 0,
+    supplierPaymentsMadeSelectedMonthCount: 0,
     writeOffsThisMonthNativeUzs: 0,
     writeOffsThisMonthNativeUsd: 0,
     writeOffsThisMonthFrozenUzs: 0,
@@ -209,7 +232,7 @@ async function getShopOperationalStatsFresh(role: StatsRole, shopId: string): Pr
     writeOffReopenCountThisMonth: 0,
     monthKey,
     filteredByAdmin: null,
-    nonAttributableFields: ['totalDevices', 'activeNasiyalar', 'inventoryPurchaseCost', 'expectedThisMonth', 'overdueMoney', 'upcomingPayments'] as const,
+    nonAttributableFields: ['totalDevices', 'activeNasiyalar', 'inventoryPurchaseCost', 'expectedThisMonth', 'overdueMoney', 'upcomingPayments', 'supplierPayablesOpenAllTime', 'supplierPayablesDueSelectedMonth', 'customerPayLaterOpenAllTime', 'customerPayLaterDueSelectedMonth'] as const,
   }
 }
 
@@ -256,6 +279,27 @@ export function redactFinancialShopStats(stats: ShopStatsResult): ShopStatsResul
     writeOffsThisMonthNativeUzs: 0,
     writeOffsThisMonthNativeUsd: 0,
     writeOffsThisMonthFrozenUzs: 0,
+    supplierPayablesOpenAllTimeUzs: 0,
+    supplierPayablesOpenAllTimeUsd: 0,
+    supplierPayablesOpenAllTimeCount: 0,
+    supplierPayablesDueSelectedMonthUzs: 0,
+    supplierPayablesDueSelectedMonthUsd: 0,
+    supplierPayablesDueSelectedMonthCount: 0,
+    supplierPayablesOverdueWithinSelectedMonthUzs: 0,
+    supplierPayablesOverdueWithinSelectedMonthUsd: 0,
+    supplierPayablesOverdueWithinSelectedMonthCount: 0,
+    customerPayLaterOpenAllTimeUzs: 0,
+    customerPayLaterOpenAllTimeUsd: 0,
+    customerPayLaterOpenAllTimeCount: 0,
+    customerPayLaterDueSelectedMonthUzs: 0,
+    customerPayLaterDueSelectedMonthUsd: 0,
+    customerPayLaterDueSelectedMonthCount: 0,
+    customerPayLaterOverdueWithinSelectedMonthUzs: 0,
+    customerPayLaterOverdueWithinSelectedMonthUsd: 0,
+    customerPayLaterOverdueWithinSelectedMonthCount: 0,
+    supplierPaymentsMadeSelectedMonthUzs: 0,
+    supplierPaymentsMadeSelectedMonthUsd: 0,
+    supplierPaymentsMadeSelectedMonthCount: 0,
     upcomingPayments: stats.upcomingPayments.map((payment) => ({
       ...payment,
       expectedAmount: 0,
@@ -291,6 +335,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     recentActivity,
     upcomingScheduleIds,
     writeOffAggregate,
+    debtStatsAggregate,
   ] = await Promise.all([
     prisma.device.count({
       // Imported devices exist only to carry pre-Oryx debt — they were never
@@ -398,6 +443,8 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     getUpcomingScheduleIds(shopId, 5),
 
     getNasiyaWriteOffAggregate({ shopId, monthStart, monthEnd, adminId }),
+
+    getShopDebtStatsAggregate({ shopId, monthStart, monthEnd, todayStart, adminId }),
   ])
 
   const upcomingRows = upcomingScheduleIds.length
@@ -469,6 +516,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
   // currently-outstanding schedules) that have no single admin to blame/credit.
   return {
     ...computed,
+    ...debtStatsAggregate,
     writeOffsThisMonthNativeUzs: writeOffAggregate.nativeUzs,
     writeOffsThisMonthNativeUsd: writeOffAggregate.nativeUsd,
     writeOffsThisMonthFrozenUzs: writeOffAggregate.frozenUzs,
@@ -476,6 +524,6 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     writeOffReopenCountThisMonth: writeOffAggregate.reopenCount,
     monthKey: tashkentMonthRangeFromKey(monthKey, now).monthKey,
     filteredByAdmin: adminId,
-    nonAttributableFields: ['totalDevices', 'activeNasiyalar', 'inventoryPurchaseCost', 'expectedThisMonth', 'overdueMoney', 'upcomingPayments'] as const,
+    nonAttributableFields: ['totalDevices', 'activeNasiyalar', 'inventoryPurchaseCost', 'expectedThisMonth', 'overdueMoney', 'upcomingPayments', 'supplierPayablesOpenAllTime', 'supplierPayablesDueSelectedMonth', 'customerPayLaterOpenAllTime', 'customerPayLaterDueSelectedMonth'] as const,
   }
 }

@@ -43,6 +43,7 @@ type PayableStatus = SupplierPayableStatus
 
 const statusLabels: Record<PayableStatus, string> = {
   PENDING: 'To‘lanmagan',
+  PARTIAL: 'Qisman to‘langan',
   PAID: 'To‘langan',
   CANCELLED: 'Bekor qilingan',
   OVERDUE: 'To‘lov muddati o‘tgan',
@@ -50,6 +51,7 @@ const statusLabels: Record<PayableStatus, string> = {
 
 const statusStyles: Record<PayableStatus, string> = {
   PENDING: 'bg-zinc-100 text-zinc-700',
+  PARTIAL: 'bg-amber-100 text-amber-800',
   PAID: 'bg-emerald-100 text-emerald-700',
   CANCELLED: 'bg-zinc-200 text-zinc-500',
   OVERDUE: 'bg-red-100 text-red-700',
@@ -58,6 +60,8 @@ const statusStyles: Record<PayableStatus, string> = {
 interface OlibSotdimRow {
   id: string
   amount: number
+  paidAmount: number
+  remainingAmount: number
   contractCurrency: 'UZS' | 'USD'
   status: PayableStatus
   dueDate: string
@@ -79,15 +83,18 @@ interface OlibSotdimRow {
     purchasePrice?: number
     purchaseCurrency?: 'UZS' | 'USD'
   }
-  sale: {
+  customer: { id: string; name: string; phone: string } | null
+  customerOutcome: {
+    type: 'SALE' | 'NASIYA'
     id: string
-    customer: { name: string; phone: string }
-    /** Owner-only: supplier payable + sale price would reveal margin. */
-    salePrice?: number
-    contractCurrency?: 'UZS' | 'USD'
-  }
+    total: number
+    remaining: number
+    contractCurrency: 'UZS' | 'USD'
+    months?: number
+    monthlyPayment?: number
+  } | null
   /** Owner-only margin, omitted for staff. */
-  profit?: number
+  profit?: number | null
 }
 
 export default function OlibSotdimClient({ initialSearch, initialPage }: { initialSearch: string; initialPage: number }) {
@@ -95,7 +102,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
   const scope = useAuthenticatedQueryScope()
   const { can, memberKind } = useShopAccess()
   const canCreate = can('OLIB_CREATE')
-  const canReceivePayment = can('SUPPLIER_PAYMENT_MARK_PAID')
+  const canReceivePayment = can('SUPPLIER_PAYMENT_RECORD') || can('SUPPLIER_PAYMENT_MARK_PAID')
   const canViewDevice = can('INVENTORY_VIEW')
   const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
   const [search, setSearch] = useState(initialSearch)
@@ -273,19 +280,19 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
             </div>
             <dl className="pointer-events-none relative z-10 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
               <div><dt className="text-zinc-400">Yetkazib beruvchi</dt><dd className="mt-0.5 text-zinc-800">{row.supplierName}</dd></div>
-              <div><dt className="text-zinc-400">Mijoz</dt><dd className="mt-0.5 text-zinc-800">{row.sale.customer.name}</dd></div>
+              <div><dt className="text-zinc-400">Mijoz</dt><dd className="mt-0.5 text-zinc-800">{row.customer?.name ?? '—'}</dd></div>
               {canSeeOwnerFinancials && row.device.purchasePrice != null && row.device.purchaseCurrency && (
                 <div><dt className="text-zinc-400">Olingan</dt><dd className="mt-0.5 font-medium text-zinc-900">{fmt(row.device.purchasePrice, row.device.purchaseCurrency)}</dd></div>
               )}
-              {canSeeOwnerFinancials && row.sale.salePrice != null && row.sale.contractCurrency && (
-                <div><dt className="text-zinc-400">Sotilgan</dt><dd className="mt-0.5 font-medium text-zinc-900">{fmt(row.sale.salePrice, row.sale.contractCurrency)}</dd></div>
+              {canSeeOwnerFinancials && row.customerOutcome && (
+                <div><dt className="text-zinc-400">{row.customerOutcome.type === 'NASIYA' ? 'Nasiya jami' : 'Sotilgan'}</dt><dd className="mt-0.5 font-medium text-zinc-900">{fmt(row.customerOutcome.total, row.customerOutcome.contractCurrency)}</dd></div>
               )}
               {canSeeOwnerFinancials && row.profit != null && (
                 <div><dt className="text-zinc-400">Farq</dt><dd className={`mt-0.5 font-medium ${row.profit < 0 ? 'text-red-600' : 'text-emerald-700'}`}>{fmt(row.profit, row.contractCurrency)}</dd></div>
               )}
               <div><dt className="text-zinc-400">Sana</dt><dd className="mt-0.5 text-zinc-700">{uzDate(row.createdAt)}</dd></div>
             </dl>
-            {canReceivePayment && (row.status === 'PENDING' || row.status === 'OVERDUE') && (
+            {canReceivePayment && (row.status === 'PENDING' || row.status === 'PARTIAL' || row.status === 'OVERDUE') && (
               <div className="relative z-10">
                 <Button variant="outline" className="h-10 w-full" onClick={() => openPay(row)}>
                   To&apos;landi deb belgilash
@@ -347,8 +354,8 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                     <div className="text-xs text-zinc-500">{formatUzPhoneDisplay(row.supplierPhone)}</div>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="text-zinc-900">{row.sale.customer.name}</div>
-                    <div className="text-xs text-zinc-500">{formatUzPhoneDisplay(row.sale.customer.phone)}</div>
+                    <div className="text-zinc-900">{row.customer?.name ?? '—'}</div>
+                    <div className="text-xs text-zinc-500">{row.customer ? formatUzPhoneDisplay(row.customer.phone) : '—'}</div>
                   </td>
                   {canSeeOwnerFinancials && (
                     <td className="px-4 py-3 text-zinc-900 font-medium">
@@ -359,8 +366,8 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                   )}
                   {canSeeOwnerFinancials && (
                     <td className="px-4 py-3 text-zinc-900 font-medium">
-                      {row.sale.salePrice != null && row.sale.contractCurrency
-                        ? fmt(row.sale.salePrice, row.sale.contractCurrency)
+                      {row.customerOutcome
+                        ? fmt(row.customerOutcome.total, row.customerOutcome.contractCurrency)
                         : '—'}
                     </td>
                   )}
@@ -378,7 +385,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                     </span>
                   </td>
                   <td className="relative z-10 px-4 py-3">
-                    {canReceivePayment && (row.status === 'PENDING' || row.status === 'OVERDUE') && (
+                    {canReceivePayment && (row.status === 'PENDING' || row.status === 'PARTIAL' || row.status === 'OVERDUE') && (
                       <Button
                         type="button"
                         variant="outline"
@@ -406,7 +413,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
           {payFor && (
             <div className="space-y-3">
               <div className="text-sm text-zinc-600">
-                {payFor.supplierName} · {fmt(payFor.amount, payFor.contractCurrency)}
+                {payFor.supplierName} · qolgan {fmt(payFor.remainingAmount, payFor.contractCurrency)}
               </div>
               {payError && <div className="text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{payError}</div>}
               <div>

@@ -1,6 +1,6 @@
 'use client'
 
-import { CalendarRange, CircleDollarSign, Download, RotateCcw, TrendingUp, WalletCards } from 'lucide-react'
+import { CalendarRange, CircleDollarSign, Download, HandCoins, RotateCcw, TrendingUp, UserRoundCheck, WalletCards } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { ExportDownloadButton } from '@/components/shop/export-download-button'
 import { formatMoneyByCurrency, formatPartitionedMoney, type CurrencyContext } from '@/lib/currency'
@@ -92,6 +92,27 @@ export default function ShopRangeReportPanel({
       icon: TrendingUp,
       color: totals.grossProfitUzs < 0 ? 'text-red-600' : 'text-emerald-600',
     },
+    {
+      label: 'Bizning qarzlarimiz',
+      value: partitionText(totals.supplierPayables, currency),
+      note: `${totals.supplierPayables.count} ta ochiq qarz; due date tanlangan oylar ichida bo'lgan joriy qoldiq`,
+      icon: HandCoins,
+      color: 'text-amber-700',
+    },
+    {
+      label: 'Bizga Pay Later qarzlar',
+      value: partitionText(totals.customerPayLater, currency),
+      note: `${totals.customerPayLater.count} ta ochiq Sotuv qoldig'i; Nasiya kiritilmagan`,
+      icon: UserRoundCheck,
+      color: 'text-blue-700',
+    },
+    {
+      label: "Yetkazib beruvchiga to'langan",
+      value: partitionText(totals.supplierPaymentsMade, currency),
+      note: `${totals.supplierPaymentsMade.count} ta to'lov; mavjud Sof tushum va foyda formulalaridan ayrilmagan`,
+      icon: HandCoins,
+      color: 'text-zinc-600',
+    },
   ]
 
   return (
@@ -137,7 +158,7 @@ export default function ShopRangeReportPanel({
           <CardDescription>Oyma-oy hisob</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
-          <table className="min-w-[1140px] w-full text-left text-xs">
+          <table className="min-w-[1460px] w-full text-left text-xs">
             <thead className="border-y border-zinc-200 bg-zinc-50 text-zinc-600">
               <tr>
                 <th scope="col" className="px-4 py-3 font-medium">Oy</th>
@@ -147,6 +168,9 @@ export default function ShopRangeReportPanel({
                 <th scope="col" className="px-4 py-3 font-medium">Kutilayotgan foyda</th>
                 <th scope="col" className="px-4 py-3 font-medium">Foiz: olingan / kutilayotgan</th>
                 <th scope="col" className="px-4 py-3 font-medium">Muddati keladigan qarz</th>
+                <th scope="col" className="px-4 py-3 font-medium">Bizning qarzlarimiz</th>
+                <th scope="col" className="px-4 py-3 font-medium">Bizga Pay Later qarzlar</th>
+                <th scope="col" className="px-4 py-3 font-medium">Yetkazib beruvchiga to&apos;langan</th>
                 <th scope="col" className="px-4 py-3 font-medium">Qaytarish</th>
               </tr>
             </thead>
@@ -164,6 +188,9 @@ export default function ShopRangeReportPanel({
                     {formatMoneyByCurrency(month.interestProfitUzs, currency.currency, currency.usdUzsRate)} / {partitionText(month.nasiyaInterestExpected, currency)}
                   </td>
                   <td className="px-4 py-3 text-zinc-700">{partitionText(month.expectedReceivables, currency)}</td>
+                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.supplierPayables, currency)} · {month.supplierPayables.count} ta</td>
+                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.customerPayLater, currency)} · {month.customerPayLater.count} ta</td>
+                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.supplierPaymentsMade, currency)} · {month.supplierPaymentsMade.count} ta</td>
                   <td className="px-4 py-3 text-zinc-700">{partitionText(month.refunds, currency)}</td>
                 </tr>
               ))}

@@ -100,6 +100,28 @@ const queries = {
     ORDER BY s."dueDate" ASC NULLS LAST, s."id" ASC
     LIMIT 26
   `,
+  supplier_payables_page: `
+    SELECT p."id", p."dueDate", p."contractRemainingAmount", p."contractCurrency",
+           d."id" AS device_id, d."model"
+    FROM "SupplierPayable" p
+    JOIN "Device" d ON d."id" = p."deviceId" AND d."shopId" = p."shopId" AND d."deletedAt" IS NULL
+    WHERE p."shopId" = $1 AND p."deletedAt" IS NULL
+      AND p."status" NOT IN ('PAID', 'CANCELLED')
+      AND p."contractRemainingAmount" > 0
+    ORDER BY p."dueDate" ASC, p."id" ASC
+    LIMIT 19
+  `,
+  incoming_pay_later_page: `
+    SELECT s."id", s."dueDate", s."contractRemainingAmount", s."contractCurrency",
+           d."id" AS device_id, d."model", c."id" AS customer_id
+    FROM "Sale" s
+    JOIN "Device" d ON d."id" = s."deviceId" AND d."shopId" = s."shopId" AND d."deletedAt" IS NULL
+    JOIN "Customer" c ON c."id" = s."customerId" AND c."shopId" = s."shopId" AND c."deletedAt" IS NULL
+    WHERE s."shopId" = $1 AND s."deletedAt" IS NULL AND s."returnedAt" IS NULL
+      AND s."paidFully" = false AND s."contractRemainingAmount" > 0
+    ORDER BY s."dueDate" ASC, s."id" ASC
+    LIMIT 19
+  `,
   customers_page_with_counts: `
     SELECT c."id", c."createdAt",
       (SELECT count(*) FROM "Sale" s WHERE s."customerId" = c."id" AND s."deletedAt" IS NULL) AS sale_count,
@@ -162,7 +184,22 @@ try {
   const shopId = shopResult.rows[0]?.id
   if (!shopId) fail('no active Shop fixture was found')
 
-  const report = { iterations, mode: 'READ ONLY', queries: {} }
+  const debtSchemaResult = await client.query(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'SupplierPayable'
+        AND column_name = 'contractRemainingAmount'
+    ) AS ready
+  `)
+  const skippedQueries = []
+  if (!debtSchemaResult.rows[0]?.ready) {
+    skippedQueries.push('supplier_payables_page', 'incoming_pay_later_page')
+    delete queries.supplier_payables_page
+    delete queries.incoming_pay_later_page
+  }
+  const report = { iterations, mode: 'READ ONLY', skippedQueries, queries: {} }
   for (const [name, sql] of Object.entries(queries)) {
     await client.query(sql, [shopId])
     const samples = []

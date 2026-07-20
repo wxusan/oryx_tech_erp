@@ -21,6 +21,7 @@ vi.mock('@/lib/server/cache-tags', () => ({
   invalidateShopPaymentMutation: vi.fn(),
   invalidateShopSaleMutation: vi.fn(),
   invalidateShopReturnMutation: vi.fn(),
+  invalidateShopSupplierPayableMutation: vi.fn(),
 }))
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
@@ -165,6 +166,16 @@ async function deviceListRequest() {
   const { NextRequest } = await import('next/server')
   const { GET } = await import('@/app/api/devices/route')
   return GET(new NextRequest('http://localhost/api/devices?paginated=1'))
+}
+
+async function createDeviceRequest(body: Record<string, unknown>, idempotencyKey: string) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/devices/route')
+  return POST(new NextRequest('http://localhost/api/devices', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
+    body: JSON.stringify(body),
+  }))
 }
 
 async function shopStatsRequest() {
@@ -1868,6 +1879,46 @@ describe('real-PostgreSQL route evidence', () => {
     expect((await prisma.device.findUniqueOrThrow({ where: { id: foreign.device.id } })).model).toBe('Route phone tenant_matrix_foreign')
     expect((await prisma.customer.findUniqueOrThrow({ where: { id: foreign.customer.id } })).note).toBeNull()
     expect((await prisma.nasiya.findUniqueOrThrow({ where: { id: foreign.nasiya.id } })).note).toBeNull()
+  })
+
+  it('creates an in-stock normal device with an append-only partial supplier debt split', async () => {
+    const actor = await seedActor('device_pay_later')
+    useShopAdmin(actor)
+    const response = await createDeviceRequest({
+      model: 'Normal Pay Later phone',
+      color: 'Qora',
+      storageAmount: 256,
+      storageUnit: 'GB',
+      conditionCode: 'NEW',
+      purchasePrice: 1_000_000,
+      inputCurrency: 'UZS',
+      imei: '867530920260722',
+      supplierName: 'Normal device supplier',
+      supplierPhone: '+998907771122',
+      purchaseSettlement: 'PAY_LATER',
+      supplierDueDate: '2026-09-20',
+      supplierInitialPaymentAmount: 300_000,
+      supplierPaymentMethod: 'CASH',
+      supplierPaymentBreakdown: [
+        { method: 'CASH', amount: 100_000 },
+        { method: 'CARD', amount: 200_000 },
+      ],
+    }, 'device-pay-later-split-proof')
+    expect(response.status).toBe(201)
+    const device = await prisma.device.findFirstOrThrow({ where: { shopId: actor.shop.id, imei: '867530920260722' } })
+    expect(device.status).toBe('IN_STOCK')
+    const payable = await prisma.supplierPayable.findFirstOrThrow({
+      where: { shopId: actor.shop.id, deviceId: device.id },
+      include: { payments: true },
+    })
+    expect(payable).toMatchObject({ origin: 'DEVICE_PURCHASE', status: 'PARTIAL', saleId: null })
+    expect(Number(payable.contractPaidAmount)).toBe(300_000)
+    expect(Number(payable.contractRemainingAmount)).toBe(700_000)
+    expect(payable.payments).toHaveLength(1)
+    expect(payable.payments[0].paymentBreakdown).toEqual([
+      { method: 'CASH', amount: 100000 },
+      { method: 'CARD', amount: 200000 },
+    ])
   })
 
   it('allows the supplier payable PENDING and OVERDUE transitions to PAID', async () => {

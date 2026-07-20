@@ -3,7 +3,7 @@
 import Link from 'next/link'
 import { useEffect } from 'react'
 import { usePathname } from 'next/navigation'
-import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, ScrollText, Settings, UserCog, WalletCards, ShoppingBag } from 'lucide-react'
+import { LayoutDashboard, Smartphone, CreditCard, Plus, BarChart3, Users, ScrollText, Settings, UserCog, WalletCards, ShoppingBag, HandCoins } from 'lucide-react'
 import { SessionControls } from '@/components/auth/session-controls'
 import { Badge } from '@/components/ui/badge'
 import { DueOverdueBanner, type DueOverdueSummary } from '@/components/shop/due-overdue-banner'
@@ -20,11 +20,12 @@ import { markNavigationIntent, markNavigationSettled } from '@/lib/client-perfor
 
 const navLinks = [
   { href: '/shop/dashboard', label: 'Boshqaruv', icon: LayoutDashboard, prefetch: true, permission: null, anyPermissions: ['DASHBOARD_OPERATIONAL_VIEW', 'DASHBOARD_FINANCIAL_VIEW'], ownerOnly: false },
-  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus, prefetch: true, permission: null, anyPermissions: ['DEVICE_CREATE', 'SALE_CREATE', 'NASIYA_CREATE', 'OLIB_CREATE', 'SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE'], ownerOnly: false },
+  { href: '/shop/yangi-operatsiya', label: 'Yangi operatsiya', icon: Plus, prefetch: true, permission: null, anyPermissions: ['DEVICE_CREATE', 'DEVICE_PURCHASE_ON_CREDIT', 'SALE_CREATE', 'NASIYA_CREATE', 'OLIB_CREATE', 'SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE'], ownerOnly: false },
   { href: '/shop/qurilmalar', label: 'Qurilmalar', icon: Smartphone, prefetch: true, permission: null, anyPermissions: ['INVENTORY_VIEW', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_RETURN_REFUND'], ownerOnly: false },
   { href: '/shop/sotuvlar', label: 'Sotuvlar', icon: ShoppingBag, prefetch: true, permission: null, anyPermissions: ['SALE_VIEW', 'SALE_EDIT', 'SALE_REMINDER_MANAGE'], ownerOnly: false },
   { href: '/shop/nasiyalar', label: 'Nasiyalar', icon: CreditCard, prefetch: true, permission: null, anyPermissions: ['NASIYA_VIEW', 'NASIYA_EDIT', 'NASIYA_REMINDER_MANAGE', 'NASIYA_ARCHIVE', 'NASIYA_REOPEN'], ownerOnly: false },
   { href: '/shop/tolovlar', label: "To'lovlar", icon: WalletCards, prefetch: true, permission: null, anyPermissions: ['RECEIVABLES_VIEW', 'SALE_VIEW', 'SALE_PAYMENT_RECEIVE', 'NASIYA_VIEW', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER'], ownerOnly: false },
+  { href: '/shop/qarzlar', label: 'Qarzlarim', icon: HandCoins, prefetch: true, permission: null, anyPermissions: ['SUPPLIER_PAYABLE_VIEW', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID', 'RECEIVABLES_VIEW', 'SALE_VIEW', 'SALE_PAYMENT_RECEIVE'], ownerOnly: false },
   { href: '/shop/mijozlar', label: 'Mijozlar', icon: Users, prefetch: true, permission: null, anyPermissions: ['CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_PHOTO_VIEW', 'CUSTOMER_PASSPORT_REVEAL', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'], ownerOnly: false },
   { href: '/shop/logs', label: 'Loglar', icon: ScrollText, prefetch: true, permission: 'LOG_VIEW', anyPermissions: [], ownerOnly: false },
   { href: '/shop/xodimlar', label: 'Xodimlar', icon: UserCog, prefetch: true, permission: null, anyPermissions: ['STAFF_VIEW', 'STAFF_CREATE', 'STAFF_EDIT_PROFILE', 'STAFF_RESET_PASSWORD', 'STAFF_STATUS_MANAGE', 'STAFF_DELETE', 'STAFF_PERMISSION_MANAGE', 'STAFF_NOTIFICATION_MANAGE'], ownerOnly: false },

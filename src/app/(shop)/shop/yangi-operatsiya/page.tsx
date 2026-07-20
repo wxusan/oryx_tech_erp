@@ -10,8 +10,8 @@ const operations = [
     href: '/shop/qurilmalar/new?from=yangi-operatsiya',
     icon: Smartphone,
     title: "Yangi qurilma qo'shish",
-    description: "Yangi kelgan qurilmani omborga kiriting",
-    permissions: ['DEVICE_CREATE'],
+    description: "Yangi kelgan qurilmani omborga kiriting yoki keyin to‘lashga oling",
+    permissions: ['DEVICE_CREATE', 'DEVICE_PURCHASE_ON_CREDIT'],
   },
   {
     href: '/shop/sotuv/new',

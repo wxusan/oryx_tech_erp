@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest'
 import { RETIRED_SHOP_PERMISSION_CODES } from '@/lib/access-control'
 
 const routeMatrix = [
-  ['src/app/api/devices/route.ts', 'INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_VIEW', 'SALE_CREATE', 'SALE_EDIT', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND', 'NASIYA_CREATE'],
-  ['src/app/api/devices/[id]/route.ts', 'INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_VIEW', 'SALE_CREATE', 'SALE_EDIT', 'SALE_PAYMENT_RECEIVE', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND', 'NASIYA_CREATE'],
+  ['src/app/api/devices/route.ts', 'INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_PURCHASE_ON_CREDIT', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_VIEW', 'SALE_CREATE', 'SALE_EDIT', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND', 'NASIYA_CREATE'],
+  ['src/app/api/devices/[id]/route.ts', 'INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_VIEW', 'SALE_CREATE', 'SALE_EDIT', 'SALE_PAYMENT_RECEIVE', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND', 'NASIYA_CREATE', 'SUPPLIER_PAYABLE_VIEW'],
   ['src/app/api/devices/[id]/sell/route.ts', 'SALE_CREATE'],
   ['src/app/api/devices/[id]/nasiya/route.ts', 'NASIYA_CREATE'],
   ['src/app/api/devices/[id]/return/route.ts', 'SALE_RETURN_REFUND'],
@@ -21,8 +21,10 @@ const routeMatrix = [
   ['src/app/api/nasiya/[id]/reminder/route.ts', 'NASIYA_REMINDER_MANAGE'],
   ['src/app/api/nasiya/[id]/resolution/route.ts', 'NASIYA_ARCHIVE', 'NASIYA_REOPEN'],
   ['src/app/api/nasiya/import/route.ts', 'IMPORT_OLD_NASIYA'],
-  ['src/app/api/olib-sotdim/route.ts', 'OLIB_VIEW', 'OLIB_CREATE', 'SUPPLIER_PAYMENT_MARK_PAID'],
-  ['src/app/api/olib-sotdim/[id]/pay/route.ts', 'SUPPLIER_PAYMENT_MARK_PAID'],
+  ['src/app/api/olib-sotdim/route.ts', 'OLIB_VIEW', 'OLIB_CREATE', 'SUPPLIER_PAYABLE_VIEW', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID'],
+  ['src/app/api/olib-sotdim/[id]/pay/route.ts', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID'],
+  ['src/app/api/supplier-payables/[id]/payments/route.ts', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID'],
+  ['src/app/api/debts/query/route.ts', 'SUPPLIER_PAYABLE_VIEW', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID', 'RECEIVABLES_VIEW', 'SALE_VIEW', 'SALE_PAYMENT_RECEIVE'],
   ['src/app/api/sales/[id]/route.ts', 'SALE_EDIT', 'SALE_REMINDER_MANAGE'],
   ['src/app/api/sales/[id]/payment/route.ts', 'SALE_PAYMENT_RECEIVE'],
   ['src/app/api/uploads/device/route.ts', 'DEVICE_CREATE', 'DEVICE_EDIT', 'OLIB_CREATE'],
@@ -43,14 +45,13 @@ const featureMatrix = [
   ['src/app/api/nasiya/[id]/defer/route.ts', 'NASIYA_DEFER', 'NASIYA'],
   ['src/app/api/nasiya/import/route.ts', 'IMPORT_OLD_NASIYA', 'NASIYA'],
   ['src/app/api/import/customers/route.ts', 'IMPORT_CUSTOMERS', 'CUSTOMER_CRM'],
-  ['src/app/api/olib-sotdim/[id]/pay/route.ts', 'SUPPLIER_PAYMENT_MARK_PAID', 'OLIB_SOTDIM'],
   ['src/app/api/reports/shop/route.ts', 'REPORT_VIEW', 'REPORTS'],
 ] as const
 
 const uiMatrix = [
   ['src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx', 'DEVICE_CREATE', 'EXPORT_DEVICES'],
-  ['src/app/(shop)/shop/qurilmalar/[id]/page.tsx', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_CREATE', 'SALE_EDIT', 'SALE_PAYMENT_RECEIVE', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND'],
-  ['src/app/(shop)/shop/qurilmalar/new/page.tsx', 'DEVICE_CREATE'],
+  ['src/app/(shop)/shop/qurilmalar/[id]/page.tsx', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK', 'SALE_CREATE', 'SALE_EDIT', 'SALE_PAYMENT_RECEIVE', 'SALE_REMINDER_MANAGE', 'SALE_RETURN_REFUND', 'SUPPLIER_PAYABLE_VIEW', 'SUPPLIER_PAYMENT_RECORD'],
+  ['src/app/(shop)/shop/qurilmalar/new/page.tsx', 'DEVICE_CREATE', 'DEVICE_PURCHASE_ON_CREDIT'],
   ['src/app/(shop)/shop/sotuv/new/page.tsx', 'SALE_CREATE'],
   ['src/app/(shop)/shop/mijozlar/customers-client.tsx', 'CUSTOMER_VIEW', 'CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'],
   ['src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx', 'NASIYA_CREATE', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER', 'NASIYA_ARCHIVE', 'NASIYA_REOPEN'],

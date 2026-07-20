@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Boxes, CalendarClock, CircleDollarSign, Download, RotateCcw, TrendingUp, WalletCards } from 'lucide-react'
+import { AlertTriangle, Boxes, CalendarClock, CircleDollarSign, Download, HandCoins, RotateCcw, TrendingUp, UserRoundCheck, WalletCards } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ExportDownloadButton } from '@/components/shop/export-download-button'
@@ -149,6 +149,24 @@ export default function HisobotClient({
   const expectedInterestText = formatPartitionedMoney({
     amountUzs: stats.nasiyaInterestExpectedThisMonthUzs,
     amountUsd: stats.nasiyaInterestExpectedThisMonthUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+  const supplierDebtText = formatPartitionedMoney({
+    amountUzs: stats.supplierPayablesOpenAllTimeUzs,
+    amountUsd: stats.supplierPayablesOpenAllTimeUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+  const customerPayLaterText = formatPartitionedMoney({
+    amountUzs: stats.customerPayLaterOpenAllTimeUzs,
+    amountUsd: stats.customerPayLaterOpenAllTimeUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+  const supplierPaymentsText = formatPartitionedMoney({
+    amountUzs: stats.supplierPaymentsMadeSelectedMonthUzs,
+    amountUsd: stats.supplierPaymentsMadeSelectedMonthUsd,
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
@@ -364,6 +382,43 @@ export default function HisobotClient({
           <CardContent>
             <div className="text-2xl font-bold text-red-700">{overdueText}</div>
             <p className="mt-3 text-xs text-red-700/70">Bugun ko'rib chiqilishi kerak bo'lgan qarzdorlik · joriy kurs bo'yicha</p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg border-amber-200 bg-amber-50/40">
+          <CardHeader>
+            <CardDescription className="text-amber-900">Bizning qarzlarimiz</CardDescription>
+            <CardAction><HandCoins className="size-4 text-amber-700" /></CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-950">{supplierDebtText}</div>
+            <p className="mt-3 text-xs text-amber-900/70">
+              {stats.supplierPayablesOpenAllTimeCount} ta ochiq qarz · barcha muddatlardagi joriy qoldiq
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg border-blue-200 bg-blue-50/40">
+          <CardHeader>
+            <CardDescription className="text-blue-900">Bizga Pay Later qarzlar</CardDescription>
+            <CardAction><UserRoundCheck className="size-4 text-blue-700" /></CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-950">{customerPayLaterText}</div>
+            <p className="mt-3 text-xs text-blue-900/70">
+              {stats.customerPayLaterOpenAllTimeCount} ta oddiy Sotuv qoldig&apos;i · barcha muddatlar, Nasiya bu raqamga kirmaydi
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardDescription>Yetkazib beruvchiga to&apos;langan</CardDescription>
+            <CardAction><HandCoins className="size-4 text-zinc-500" /></CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-zinc-900">{supplierPaymentsText}</div>
+            <p className="mt-3 text-xs text-zinc-500">Tanlangan oyda yozilgan {stats.supplierPaymentsMadeSelectedMonthCount} ta to&apos;lov; Sof tushum va foydadan ayrilmaydi</p>
           </CardContent>
         </Card>
 

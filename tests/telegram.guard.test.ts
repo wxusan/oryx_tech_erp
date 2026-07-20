@@ -176,7 +176,8 @@ describe('canonical device identity in Telegram producers', () => {
 
   it('uses one shared mapper wherever an existing device is messaged', () => {
     for (const file of producers) {
-      expect(read(file), file).toContain('presentDeviceSpecs(')
+      const source = read(file) + (file.endsWith('/olib-sotdim/[id]/pay/route.ts') ? read('src/lib/server/supplier-payable-payments.ts') : '')
+      expect(source, file).toContain('presentDeviceSpecs(')
     }
   })
 

@@ -26,6 +26,14 @@ function allMigrationCatalogCodes() {
   return new Set(codes)
 }
 
+function allMigrationSource() {
+  const root = resolve(process.cwd(), 'prisma/migrations')
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => readFileSync(resolve(root, entry.name, 'migration.sql'), 'utf8'))
+    .join('\n')
+}
+
 describe('Staff Permissions V2 migration source guard', () => {
   it('keeps every historical SQL catalog permission classified as active or retired', () => {
     const definedAcrossMigrations = allMigrationCatalogCodes()
@@ -37,9 +45,14 @@ describe('Staff Permissions V2 migration source guard', () => {
   })
 
   it('contains every documented legacy mapping and no retired target', () => {
+    const migrations = allMigrationSource()
     for (const oldCode of RETIRED_SHOP_PERMISSION_CODES) {
       for (const newCode of LEGACY_PERMISSION_EXPANSIONS[oldCode]) {
-        expect(migration).toContain(`('${oldCode}', '${newCode}')`)
+        if (newCode === 'SUPPLIER_PAYMENT_RECORD') {
+          expect(migrations).toContain("WHEN 'SUPPLIER_PAYMENT_MARK_PAID' THEN 'SUPPLIER_PAYMENT_RECORD'")
+        } else {
+          expect(migrations).toContain(`('${oldCode}', '${newCode}')`)
+        }
         expect(RETIRED_SHOP_PERMISSION_CODES).not.toContain(newCode)
       }
     }
@@ -166,7 +179,7 @@ describe('Staff Permissions V2 live-boundary source guard', () => {
       expect(sync).not.toMatch(new RegExp(`['"]${retired}['"]`))
       expect(navigation).not.toMatch(new RegExp(`['"]${retired}['"]`))
     }
-    expect(sync).toContain("allow(['SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE', 'SUPPLIER_PAYMENT_MARK_PAID'], ['payments'])")
+    expect(sync).toContain("allow(['SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID'], ['payments'])")
     expect(sync).toContain("allow(['LOG_VIEW'], ['logs'])")
   })
 })

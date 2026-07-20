@@ -73,9 +73,9 @@ describe('supplier payable Telegram messages read the contract-currency amount, 
   })
 })
 
-describe('cron reminders and olib-sotdim pay route read contractAmount/contractCurrency, not the legacy amount', () => {
+describe('cron reminders and shared payment ledger read contract amounts/currency, not legacy snapshots', () => {
   const cron = read('src/app/api/cron/reminders/route.ts')
-  const payRoute = read('src/app/api/olib-sotdim/[id]/pay/route.ts')
+  const ledger = read('src/lib/server/supplier-payable-payments.ts')
 
   it('all 3 cron supplier payable reminder call sites use payable.contractAmount + payable.contractCurrency', () => {
     const occurrences = cron.split('amount: Number(payable.contractAmount)').length - 1
@@ -83,8 +83,8 @@ describe('cron reminders and olib-sotdim pay route read contractAmount/contractC
     expect(cron.split('contractCurrency: payable.contractCurrency').length - 1).toBe(3)
   })
 
-  it("the pay route's paid-confirmation message uses payable.contractAmount + payable.contractCurrency", () => {
-    expect(payRoute).toContain('amount: Number(payable.contractAmount)')
-    expect(payRoute).toContain('contractCurrency: payable.contractCurrency')
+  it("the payment service's confirmation uses the applied native amount and payable contract currency", () => {
+    expect(ledger).toContain('amount: appliedContractAmount')
+    expect(ledger).toContain('contractCurrency: payable.contractCurrency')
   })
 })

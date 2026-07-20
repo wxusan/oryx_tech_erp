@@ -7,12 +7,12 @@ function read(rel: string): string {
 }
 
 describe('nasiya creation stores the native contract-currency ledger', () => {
-  const route = read('src/app/api/devices/[id]/nasiya/route.ts')
+  const route = read('src/lib/server/nasiya-contract-core.ts')
 
   it('computes a parallel contractAmounts from the RAW (non-UZS-converted) input', () => {
-    expect(route).toContain('contractAmounts = calculateNasiyaAmounts({')
-    expect(route).toContain('totalAmount,')
-    expect(route).toContain('downPayment,')
+    expect(route).toContain('const contractAmounts = input.useMonthlyPaymentOverride')
+    expect(route).toContain('totalAmount: input.totalAmount,')
+    expect(route).toContain('downPayment: input.downPayment,')
     expect(route).toContain('currency: totalInput.inputCurrency,')
   })
 
@@ -22,8 +22,8 @@ describe('nasiya creation stores the native contract-currency ledger', () => {
   })
 
   it('stores contractCurrency + all 8 contract amount fields on Nasiya, alongside the untouched legacy fields', () => {
-    expect(route).toContain('contractCurrency: totalInput.inputCurrency')
-    expect(route).toContain('contractExchangeRateAtCreation: totalInput.exchangeRateUsed')
+    expect(route).toContain('contractCurrency: prepared.totalInput.inputCurrency')
+    expect(route).toContain('contractExchangeRateAtCreation: prepared.totalInput.exchangeRateUsed')
     for (const field of [
       'contractTotalAmount',
       'contractDownPayment',
@@ -37,20 +37,20 @@ describe('nasiya creation stores the native contract-currency ledger', () => {
       expect(route).toContain(field)
     }
     // Legacy fields still written exactly as before.
-    expect(route).toContain('totalAmount: amounts.totalAmount')
-    expect(route).toContain('creationCurrency: totalInput.inputCurrency')
+    expect(route).toContain('totalAmount: prepared.amounts.totalAmount')
+    expect(route).toContain('creationCurrency: prepared.totalInput.inputCurrency')
   })
 
   it('stores contractCurrency + contractExpectedAmount on every NasiyaSchedule row', () => {
     const block = route.slice(route.indexOf('tx.nasiyaSchedule.createMany'), route.indexOf('tx.nasiyaSchedule.createMany') + 500)
-    expect(block).toContain('contractCurrency: totalInput.inputCurrency')
-    expect(block).toContain('contractExpectedAmount: contractScheduleItems[index].expectedAmount')
+    expect(block).toContain('contractCurrency: prepared.totalInput.inputCurrency')
+    expect(block).toContain('contractExpectedAmount: prepared.contractScheduleItems[index].expectedAmount')
   })
 
   it('stores appliedAmountInContractCurrency on the initial down-payment NasiyaPayment', () => {
-    const paymentStart = route.lastIndexOf('tx.nasiyaPayment.create', route.indexOf('"Boshlang\'ich to\'lov"'))
-    const block = route.slice(paymentStart, route.indexOf('const shopAdmins', paymentStart))
-    expect(block).toContain('appliedAmountInContractCurrency: contractAmounts.downPayment')
+    const paymentStart = route.indexOf('tx.nasiyaPayment.create')
+    const block = route.slice(paymentStart, route.indexOf('tx.nasiyaPaymentAllocation.create', paymentStart))
+    expect(block).toContain('appliedAmountInContractCurrency: prepared.contractAmounts.downPayment')
   })
 })
 

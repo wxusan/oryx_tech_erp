@@ -15,12 +15,12 @@ describe('Telegram producer coverage', () => {
     'src/app/api/nasiya/[id]/payment/route.ts',
     'src/app/api/nasiya/import/route.ts',
     'src/app/api/olib-sotdim/route.ts',
-    'src/app/api/olib-sotdim/[id]/pay/route.ts',
+    'src/app/api/supplier-payables/[id]/payments/route.ts',
   ]
 
   it('routes every transactional producer through the shared resolver and row contract', () => {
     for (const path of transactionalProducers) {
-      const source = read(path)
+      const source = (path.includes('/supplier-payables/') ? read('src/lib/server/supplier-payable-payments.ts') : '') + read(path)
       expect(source, path).toContain('resolveTelegramRecipients')
       expect(source, path).toContain('telegramNotificationRows')
       expect(source, path).toContain('telegramUnavailableMarkerRows')
