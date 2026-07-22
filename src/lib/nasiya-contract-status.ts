@@ -47,7 +47,7 @@ export interface ContractNasiyaStatusInput {
 }
 
 export interface ContractScheduleStatusDerivation {
-  displayStatus: 'PAID' | 'PARTIAL' | 'OVERDUE' | 'PENDING' | 'DEFERRED' | 'CANCELLED'
+  displayStatus: 'PAID' | 'SETTLED' | 'PARTIAL' | 'OVERDUE' | 'PENDING' | 'DEFERRED' | 'CANCELLED'
   outstanding: number
   isOverdue: boolean
 }
@@ -102,7 +102,9 @@ export function deriveContractScheduleStatus(
   // Older rows/callers without it retain the explicit expected-minus-paid
   // compatibility path below; new ledger reads never recompute it in React.
   if (storedRemaining != null) {
-    if (storedRemaining <= 0) return { displayStatus: 'PAID', outstanding: 0, isOverdue: false }
+    if (storedRemaining <= 0) {
+      return { displayStatus: schedule.status === 'SETTLED' ? 'SETTLED' : 'PAID', outstanding: 0, isOverdue: false }
+    }
     const isOverdue = isBeforeTashkentToday(new Date(scheduleEffectiveDueTime(schedule)), now)
     return {
       displayStatus: isOverdue ? 'OVERDUE' : (paid ?? 0) > 0 ? 'PARTIAL' : schedule.status === 'DEFERRED' ? 'DEFERRED' : 'PENDING',
@@ -120,14 +122,18 @@ export function deriveContractScheduleStatus(
     const outstanding = Math.max(0, legacyExpected - legacyPaid)
     const isOverdue = outstanding > 0 && isBeforeTashkentToday(new Date(scheduleEffectiveDueTime(schedule)), now)
     return {
-      displayStatus: outstanding <= 0 ? 'PAID' : isOverdue ? 'OVERDUE' : legacyPaid > 0 ? 'PARTIAL' : 'PENDING',
+      displayStatus: outstanding <= 0
+        ? schedule.status === 'SETTLED' ? 'SETTLED' : 'PAID'
+        : isOverdue ? 'OVERDUE' : legacyPaid > 0 ? 'PARTIAL' : 'PENDING',
       outstanding,
       isOverdue,
     }
   }
 
   const outstanding = contractScheduleOutstanding(expected, paid, currency)
-  if (outstanding <= 0) return { displayStatus: 'PAID', outstanding: 0, isOverdue: false }
+  if (outstanding <= 0) {
+    return { displayStatus: schedule.status === 'SETTLED' ? 'SETTLED' : 'PAID', outstanding: 0, isOverdue: false }
+  }
 
   const isOverdue = isBeforeTashkentToday(new Date(scheduleEffectiveDueTime(schedule)), now)
   return {

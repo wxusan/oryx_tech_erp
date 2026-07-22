@@ -84,6 +84,7 @@ export const ALLOCATION_LEDGER_STATE_LABELS = {
 export const SCHEDULE_STATUS_LABELS = {
   PENDING: 'To‘lov kutilmoqda',
   PAID: 'To‘langan',
+  SETTLED: 'Kelishuv bilan yopilgan',
   PARTIAL: 'Qisman to‘langan',
   OVERDUE: 'Muddati o‘tgan',
   DEFERRED: 'Muddati uzaytirilgan',
@@ -150,6 +151,7 @@ export const LOG_TARGET_LABELS = {
   CurrencyRate: 'Valyuta kursi',
   SupplierPayable: 'Yetkazib beruvchiga qarz',
   SupplierPayablePayment: 'Yetkazib beruvchiga to‘lov',
+  NasiyaSettlement: 'Nasiya yopish kelishuvi',
   OlibSotdimOperation: 'Olib-sotdim operatsiyasi',
   ShopPackageVersion: 'Paket narxi',
 } as const
@@ -159,6 +161,8 @@ const DIRECT_ACTION_LABELS: Readonly<Record<string, string>> = {
   CREATE_NASIYA: 'Yangi nasiya yaratildi',
   IMPORT_NASIYA: 'Avvalgi nasiya import qilindi',
   NASIYA_COMPLETED: 'Nasiya to‘liq yopildi',
+  NASIYA_SETTLED_FULL_WITH_PROFIT: 'Nasiya foydasi bilan yopildi',
+  NASIYA_SETTLED_PROFIT_WAIVED: 'Nasiya kelgusi foydasi kechilib yopildi',
   NASIYA_DEFER: 'Nasiya to‘lovi muddati uzaytirildi',
   NASIYA_ARCHIVE: 'Nasiya arxivga olindi',
   NASIYA_REOPEN: 'Nasiya qayta ochildi',
@@ -526,6 +530,7 @@ export const SHOP_PERMISSION_LABELS: Readonly<Record<string, string>> = {
   NASIYA_CREATE: 'Nasiya yaratish',
   NASIYA_EDIT: 'Nasiya ma’lumotlarini tahrirlash',
   NASIYA_PAYMENT_RECEIVE: 'Nasiya to‘lovini qabul qilish',
+  NASIYA_PROFIT_WAIVE: 'Nasiya foydasidan kechish',
   NASIYA_DEFER: 'Nasiya to‘lovi muddatini uzaytirish',
   NASIYA_REMINDER_MANAGE: 'Nasiya eslatmalarini boshqarish',
   NASIYA_ARCHIVE: 'Nasiyani arxivga olish',
@@ -799,6 +804,8 @@ export function historyStatusLabel(value?: string | null) {
     ...NASIYA_RESOLUTION_EVENT_LABELS,
     DEBT: 'Qarz',
     RECORDED: 'Qayd etilgan',
+    FULL_WITH_PROFIT: 'Foydasi bilan yopish',
+    WAIVE_REMAINING_PROFIT: 'Foydani kechib yopish',
     LEGACY_AMOUNT_UNAVAILABLE: 'Avvalgi yozuvda aniq summa mavjud emas',
   }
   return value.split(':').map((part) => labels[part] ?? 'Holat noma’lum').join(' → ')

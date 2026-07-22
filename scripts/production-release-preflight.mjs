@@ -55,6 +55,7 @@ const RELEASE_MIGRATIONS = [
   '202607180001_telegram_disable_lifecycle',
   '202607200001_olib_nasiya_debt_ledger',
   '202607220001_custom_shop_staff_roles',
+  '202607220002_nasiya_early_settlement',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))
@@ -181,19 +182,20 @@ const countChecks = [
     blocking: true,
     sql: `
       SELECT COUNT(*)::integer AS count
-      FROM "Nasiya"
-      WHERE "contractTotalAmount" <= 0
-         OR "contractDownPayment" < 0
-         OR "contractBaseRemainingAmount" < 0
-         OR "contractInterestAmount" < 0
-         OR "contractFinalAmount" <= 0
-         OR "contractPaidAmount" < 0
-         OR "contractRemainingAmount" < 0
-         OR "contractBaseRemainingAmount" <> "contractTotalAmount" - "contractDownPayment"
-         OR "contractFinalAmount" <> "contractBaseRemainingAmount" + "contractInterestAmount"
-         OR "contractPaidAmount" + "contractRemainingAmount" <> "contractFinalAmount"
-         OR (status <> 'CANCELLED'::"NasiyaStatus"
-             AND (status = 'COMPLETED'::"NasiyaStatus") <> ("contractRemainingAmount" = 0))
+      FROM "Nasiya" n
+      WHERE n."contractTotalAmount" <= 0
+         OR n."contractDownPayment" < 0
+         OR n."contractBaseRemainingAmount" < 0
+         OR n."contractInterestAmount" < 0
+         OR n."contractFinalAmount" <= 0
+         OR n."contractPaidAmount" < 0
+         OR COALESCE((to_jsonb(n)->>'contractInterestWaivedAmount')::numeric, 0) < 0
+         OR n."contractRemainingAmount" < 0
+         OR n."contractBaseRemainingAmount" <> n."contractTotalAmount" - n."contractDownPayment"
+         OR n."contractFinalAmount" <> n."contractBaseRemainingAmount" + n."contractInterestAmount"
+         OR n."contractPaidAmount" + COALESCE((to_jsonb(n)->>'contractInterestWaivedAmount')::numeric, 0) + n."contractRemainingAmount" <> n."contractFinalAmount"
+         OR (n.status <> 'CANCELLED'::"NasiyaStatus"
+             AND (n.status = 'COMPLETED'::"NasiyaStatus") <> (n."contractRemainingAmount" = 0))
     `,
   },
   {
@@ -201,12 +203,14 @@ const countChecks = [
     blocking: true,
     sql: `
       SELECT COUNT(*)::integer AS count
-      FROM "NasiyaSchedule"
-      WHERE "contractExpectedAmount" <= 0
-         OR "contractPaidAmount" < 0
-         OR "contractPaidAmount" > "contractExpectedAmount"
-         OR "contractRemainingAmount" <> "contractExpectedAmount" - "contractPaidAmount"
-         OR (status = 'PAID'::"NasiyaScheduleStatus") <> ("contractRemainingAmount" = 0)
+      FROM "NasiyaSchedule" s
+      WHERE s."contractExpectedAmount" <= 0
+         OR s."contractPaidAmount" < 0
+         OR COALESCE((to_jsonb(s)->>'contractInterestWaivedAmount')::numeric, 0) < 0
+         OR s."contractPaidAmount" + COALESCE((to_jsonb(s)->>'contractInterestWaivedAmount')::numeric, 0) > s."contractExpectedAmount"
+         OR s."contractRemainingAmount" <> s."contractExpectedAmount" - s."contractPaidAmount" - COALESCE((to_jsonb(s)->>'contractInterestWaivedAmount')::numeric, 0)
+         OR ((s.status::text IN ('PAID', 'SETTLED')) <> (s."contractRemainingAmount" = 0))
+         OR ((s.status::text = 'SETTLED') <> (COALESCE((to_jsonb(s)->>'contractInterestWaivedAmount')::numeric, 0) > 0))
     `,
   },
   {
@@ -263,6 +267,10 @@ const countChecks = [
           )
           OR n."contractPaidAmount" <> (
             SELECT COALESCE(SUM(s."contractPaidAmount"), 0)
+            FROM "NasiyaSchedule" s WHERE s."nasiyaId" = n.id
+          )
+          OR COALESCE((to_jsonb(n)->>'contractInterestWaivedAmount')::numeric, 0) <> (
+            SELECT COALESCE(SUM(COALESCE((to_jsonb(s)->>'contractInterestWaivedAmount')::numeric, 0)), 0)
             FROM "NasiyaSchedule" s WHERE s."nasiyaId" = n.id
           )
           OR n."contractRemainingAmount" <> (
@@ -571,6 +579,99 @@ const nasiyaLedgerEnforcementChecks = [
   },
 ]
 
+const nasiyaSettlementChecks = [
+  {
+    name: 'nasiya_settlement_permission_definition_missing',
+    blocking: true,
+    sql: `
+      SELECT CASE WHEN COUNT(*) = 1 THEN 0 ELSE 1 END::integer AS count
+      FROM "PermissionDefinition"
+      WHERE "code" = 'NASIYA_PROFIT_WAIVE' AND "isActive" = TRUE AND "featureCode" = 'NASIYA'
+    `,
+  },
+  {
+    name: 'nasiya_settlement_triggers_missing',
+    blocking: true,
+    sql: `
+      SELECT (6 - COUNT(DISTINCT tgname))::integer AS count
+      FROM pg_trigger
+      WHERE NOT tgisinternal
+        AND tgenabled = 'O'
+        AND tgname = ANY(ARRAY[
+          'NasiyaSettlement_immutable',
+          'NasiyaSettlementAllocation_immutable',
+          'NasiyaSettlement_ledger_reconcile',
+          'NasiyaSettlementAllocation_ledger_reconcile',
+          'Nasiya_settlement_ledger_reconcile',
+          'NasiyaSchedule_settlement_ledger_reconcile'
+        ]::text[])
+    `,
+  },
+  {
+    name: 'nasiya_settlement_ledger_mismatches',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM (
+        SELECT st.id
+        FROM "NasiyaSettlement" st
+        JOIN "Nasiya" n ON n.id = st."nasiyaId" AND n."shopId" = st."shopId"
+        LEFT JOIN "NasiyaSettlementAllocation" a
+          ON a."nasiyaSettlementId" = st.id AND a."shopId" = st."shopId"
+        LEFT JOIN "NasiyaPayment" p
+          ON p.id = st."nasiyaPaymentId" AND p."nasiyaId" = st."nasiyaId" AND p."shopId" = st."shopId"
+        GROUP BY st.id, st.mode, st."contractRemainingBefore", st."contractCashReceivedAmount",
+          st."contractInterestWaivedAmount", st."contractRemainingAfter", st."cashReceivedAmountUzs",
+          st."interestWaivedAmountUzs",
+          st."nasiyaPaymentId", n."contractRemainingAmount", n."contractInterestWaivedAmount", n.status,
+          p.id, p."appliedAmountInContractCurrency", p.amount
+        HAVING COUNT(a.id) = 0
+          OR st."contractRemainingBefore" <> st."contractCashReceivedAmount" + st."contractInterestWaivedAmount" + st."contractRemainingAfter"
+          OR st."contractRemainingAfter" <> 0
+          OR (st.mode = 'FULL_WITH_PROFIT'::"NasiyaSettlementMode"
+            AND (st."contractInterestWaivedAmount" <> 0 OR st."contractCashReceivedAmount" <> st."contractRemainingBefore"))
+          OR (st.mode = 'WAIVE_REMAINING_PROFIT'::"NasiyaSettlementMode" AND st."contractInterestWaivedAmount" <= 0)
+          OR n.status <> 'COMPLETED'::"NasiyaStatus"
+          OR n."contractRemainingAmount" <> 0
+          OR n."contractInterestWaivedAmount" <> st."contractInterestWaivedAmount"
+          OR COALESCE(SUM(a."contractRemainingBefore"), 0) <> st."contractRemainingBefore"
+          OR COALESCE(SUM(a."contractCashAmount"), 0) <> st."contractCashReceivedAmount"
+          OR COALESCE(SUM(a."contractInterestWaivedAmount"), 0) <> st."contractInterestWaivedAmount"
+          OR COALESCE(SUM(a."contractRemainingAfter"), 0) <> st."contractRemainingAfter"
+          OR COALESCE(SUM(a."cashAmountUzs"), 0) <> st."cashReceivedAmountUzs"
+          OR COALESCE(SUM(a."interestWaivedAmountUzs"), 0) <> st."interestWaivedAmountUzs"
+          OR (st."contractCashReceivedAmount" = 0 AND st."nasiyaPaymentId" IS NOT NULL)
+          OR (st."contractCashReceivedAmount" > 0 AND (
+            p.id IS NULL
+            OR p."appliedAmountInContractCurrency" <> st."contractCashReceivedAmount"
+            OR p.amount <> st."cashReceivedAmountUzs"
+          ))
+      ) mismatches
+    `,
+  },
+  {
+    name: 'settled_nasiya_actionable_reminders',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "Notification" notification
+      JOIN "NasiyaSettlement" st ON st."shopId" = notification."shopId"
+      WHERE notification.type::text IN ('REMINDER', 'OVERDUE', 'EARLY_REMINDER')
+        AND notification.status::text IN ('PENDING', 'PROCESSING', 'FAILED')
+        AND (
+          (notification."relatedType" = 'Nasiya' AND notification."relatedId" = st."nasiyaId")
+          OR (
+            notification."relatedType" = 'NasiyaSchedule'
+            AND EXISTS (
+              SELECT 1 FROM "NasiyaSettlementAllocation" a
+              WHERE a."nasiyaSettlementId" = st.id AND a."nasiyaScheduleId" = notification."relatedId"
+            )
+          )
+        )
+    `,
+  },
+]
+
 const nasiyaPaymentRateSourceChecks = [
   {
     name: 'nasiya_payment_fx_snapshot_issues',
@@ -663,6 +764,9 @@ try {
       : []),
     ...(phase === 'post' && appliedMigrationSet.has('202607160002_nasiya_ledger_enforcement')
       ? nasiyaLedgerEnforcementChecks
+      : []),
+    ...(appliedMigrationSet.has('202607220002_nasiya_early_settlement')
+      ? nasiyaSettlementChecks
       : []),
   ]
   for (const check of applicableChecks) {

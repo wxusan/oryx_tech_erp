@@ -426,6 +426,20 @@ export const FORM_SURFACE_CONTRACT = [
     id: 'nasiya.payment', source: 'src/components/shop/nasiya-payment-modal.tsx', endpoint: 'POST /api/nasiya/[id]/payment', schemaSource: 'src/lib/validations.ts#addNasiyaPaymentSchema', fields: [always('nasiya.payment', 'nasiyaScheduleId', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Selected from the tenant-bound contract schedule.' }), always('nasiya.payment', 'amount', 'MONEY'), always('nasiya.payment', 'paymentMethod', 'STATUS_FILTER'), conditional('nasiya.payment', 'paymentBreakdown', 'split payment is enabled', 'MONEY'), always('nasiya.payment', 'date', 'DATE_FILTER'), optional('nasiya.payment', 'note')],
   },
   {
+    id: 'nasiya.settle', source: 'src/components/shop/nasiya-settlement-modal.tsx', endpoint: 'POST /api/nasiya/[id]/settlement', schemaSource: 'src/lib/validations.ts#settleNasiyaSchema', fields: [
+      always('nasiya.settle', 'mode', 'STATUS_FILTER'),
+      conditional('nasiya.settle', 'paymentMethod', 'cash is received', 'STATUS_FILTER'),
+      conditional('nasiya.settle', 'paymentBreakdown', 'cash is split across two methods', 'MONEY'),
+      always('nasiya.settle', 'date', 'DATE_FILTER'),
+      conditional('nasiya.settle', 'reason', 'mode is WAIVE_REMAINING_PROFIT'),
+      optional('nasiya.settle', 'inputCurrency', 'STATUS_FILTER'),
+      always('nasiya.settle', 'expectedContractCurrency', 'STATUS_FILTER'),
+      always('nasiya.settle', 'expectedRemainingMinorUnits', 'MONEY'),
+      always('nasiya.settle', 'expectedCashMinorUnits', 'MONEY'),
+      always('nasiya.settle', 'expectedWaivedMinorUnits', 'MONEY'),
+    ],
+  },
+  {
     id: 'nasiya.defer', source: 'src/components/shop/nasiya-defer-modal.tsx', endpoint: 'POST /api/nasiya/[id]/defer', schemaSource: 'src/lib/validations.ts#deferNasiyaScheduleSchema', fields: [always('nasiya.defer', 'nasiyaScheduleId', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Selected from the tenant-bound contract schedule.' }), always('nasiya.defer', 'newDueDate', 'DATE_FILTER'), optional('nasiya.defer', 'reason')],
   },
   {

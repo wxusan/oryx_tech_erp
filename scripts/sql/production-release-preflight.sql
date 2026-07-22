@@ -130,15 +130,16 @@ SELECT 'nasiya_nonnegative_or_reconciliation', COUNT(*)
 FROM "Nasiya"
 WHERE "totalAmount" < 0 OR "downPayment" < 0 OR "baseRemainingAmount" < 0
    OR "interestPercent" < 0 OR "interestAmount" < 0 OR "finalNasiyaAmount" < 0
-   OR "remainingAmount" < 0 OR "monthlyPayment" <= 0 OR months <= 0
+   OR "remainingAmount" < 0 OR "interestWaivedAmount" < 0 OR "monthlyPayment" <= 0 OR months <= 0
    OR "contractTotalAmount" <= 0 OR "contractDownPayment" < 0
    OR "contractBaseRemainingAmount" < 0 OR "contractInterestAmount" < 0
    OR "contractFinalAmount" <= 0 OR "contractMonthlyPayment" <= 0
-   OR "contractRemainingAmount" < 0 OR "contractPaidAmount" < 0
+   OR "contractRemainingAmount" < 0 OR "contractPaidAmount" < 0 OR "contractInterestWaivedAmount" < 0
    OR "contractDownPayment" > "contractTotalAmount"
    OR "contractBaseRemainingAmount" <> "contractTotalAmount" - "contractDownPayment"
    OR "contractFinalAmount" <> "contractBaseRemainingAmount" + "contractInterestAmount"
-   OR "contractPaidAmount" + "contractRemainingAmount" <> "contractFinalAmount"
+   OR "contractPaidAmount" + "contractInterestWaivedAmount" + "contractRemainingAmount" <> "contractFinalAmount"
+   OR "contractInterestWaivedAmount" > "contractInterestAmount"
    OR (status <> 'CANCELLED'::"NasiyaStatus" AND
        (status = 'COMPLETED'::"NasiyaStatus") <> ("contractRemainingAmount" = 0))
    OR ("contractCurrency" = 'UZS'::"CurrencyCode" AND
@@ -150,6 +151,7 @@ WHERE "totalAmount" < 0 OR "downPayment" < 0 OR "baseRemainingAmount" < 0
         OR trunc("contractMonthlyPayment") <> "contractMonthlyPayment"
         OR trunc("contractRemainingAmount") <> "contractRemainingAmount"
         OR trunc("contractPaidAmount") <> "contractPaidAmount"
+        OR trunc("contractInterestWaivedAmount") <> "contractInterestWaivedAmount"
         OR "contractExchangeRateAtCreation" IS NOT NULL))
    OR ("contractCurrency" = 'USD'::"CurrencyCode" AND
        "contractExchangeRateAtCreation" NOT BETWEEN 1000 AND 100000)
@@ -163,14 +165,17 @@ WHERE "isImported" = true
 UNION ALL
 SELECT 'nasiya_schedule_invalid', COUNT(*)
 FROM "NasiyaSchedule"
-WHERE "contractExpectedAmount" <= 0 OR "contractPaidAmount" < 0
-   OR "contractPaidAmount" > "contractExpectedAmount"
-   OR "contractRemainingAmount" <> "contractExpectedAmount" - "contractPaidAmount"
-   OR (status = 'PAID'::"NasiyaScheduleStatus") <> ("contractRemainingAmount" = 0)
+WHERE "contractExpectedAmount" <= 0 OR "contractPaidAmount" < 0 OR "contractInterestWaivedAmount" < 0
+   OR "contractPaidAmount" + "contractInterestWaivedAmount" > "contractExpectedAmount"
+   OR "contractRemainingAmount" <> "contractExpectedAmount" - "contractPaidAmount" - "contractInterestWaivedAmount"
+   OR "contractInterestPaidAmount" + "contractInterestWaivedAmount" > "contractInterestAmount"
+   OR (status IN ('PAID'::"NasiyaScheduleStatus", 'SETTLED'::"NasiyaScheduleStatus")) <> ("contractRemainingAmount" = 0)
+   OR (status = 'SETTLED'::"NasiyaScheduleStatus") <> ("contractInterestWaivedAmount" > 0)
    OR ("contractCurrency" = 'UZS'::"CurrencyCode" AND
        (trunc("contractExpectedAmount") <> "contractExpectedAmount"
         OR trunc("contractPaidAmount") <> "contractPaidAmount"
-        OR trunc("contractRemainingAmount") <> "contractRemainingAmount"))
+        OR trunc("contractRemainingAmount") <> "contractRemainingAmount"
+        OR trunc("contractInterestWaivedAmount") <> "contractInterestWaivedAmount"))
 UNION ALL
 SELECT 'nasiya_payment_invalid', COUNT(*)
 FROM "NasiyaPayment"
@@ -202,6 +207,71 @@ WHERE p.amount <= 0 OR p."contractAmount" <= 0
    OR (p."contractCurrency" = 'USD'::"CurrencyCode" AND
        p."contractExchangeRateAtCreation" NOT BETWEEN 1000 AND 100000)
 ORDER BY check_name;
+
+\echo '== nasiya settlement ledger integrity (must return zero rows) =='
+SELECT st.id, st."shopId", st."nasiyaId", st.mode
+FROM "NasiyaSettlement" st
+JOIN "Nasiya" n ON n.id = st."nasiyaId" AND n."shopId" = st."shopId"
+LEFT JOIN "NasiyaSettlementAllocation" a
+  ON a."nasiyaSettlementId" = st.id AND a."shopId" = st."shopId"
+LEFT JOIN "NasiyaPayment" p
+  ON p.id = st."nasiyaPaymentId" AND p."nasiyaId" = st."nasiyaId" AND p."shopId" = st."shopId"
+GROUP BY st.id, st."shopId", st."nasiyaId", st.mode, st."contractRemainingBefore",
+  st."contractCashReceivedAmount", st."contractInterestWaivedAmount", st."contractRemainingAfter",
+  st."cashReceivedAmountUzs", st."interestWaivedAmountUzs", st."nasiyaPaymentId", n."contractRemainingAmount",
+  n."contractInterestWaivedAmount", n.status, p.id, p."appliedAmountInContractCurrency", p.amount
+HAVING COUNT(a.id) = 0
+   OR st."contractRemainingBefore" <> st."contractCashReceivedAmount" + st."contractInterestWaivedAmount" + st."contractRemainingAfter"
+   OR st."contractRemainingAfter" <> 0
+   OR (st.mode = 'FULL_WITH_PROFIT'::"NasiyaSettlementMode" AND (st."contractInterestWaivedAmount" <> 0 OR st."contractCashReceivedAmount" <> st."contractRemainingBefore"))
+   OR (st.mode = 'WAIVE_REMAINING_PROFIT'::"NasiyaSettlementMode" AND st."contractInterestWaivedAmount" <= 0)
+   OR n.status <> 'COMPLETED'::"NasiyaStatus"
+   OR n."contractRemainingAmount" <> 0
+   OR n."contractInterestWaivedAmount" <> st."contractInterestWaivedAmount"
+   OR COALESCE(SUM(a."contractRemainingBefore"), 0) <> st."contractRemainingBefore"
+   OR COALESCE(SUM(a."contractCashAmount"), 0) <> st."contractCashReceivedAmount"
+   OR COALESCE(SUM(a."contractInterestWaivedAmount"), 0) <> st."contractInterestWaivedAmount"
+   OR COALESCE(SUM(a."contractRemainingAfter"), 0) <> st."contractRemainingAfter"
+   OR COALESCE(SUM(a."cashAmountUzs"), 0) <> st."cashReceivedAmountUzs"
+   OR COALESCE(SUM(a."interestWaivedAmountUzs"), 0) <> st."interestWaivedAmountUzs"
+   OR (st."contractCashReceivedAmount" = 0 AND st."nasiyaPaymentId" IS NOT NULL)
+   OR (st."contractCashReceivedAmount" > 0 AND (p.id IS NULL
+       OR p."appliedAmountInContractCurrency" <> st."contractCashReceivedAmount"
+       OR p.amount <> st."cashReceivedAmountUzs"));
+
+\echo '== nasiya settlement permission and triggers (both counts must be zero) =='
+SELECT 'permission_definition_missing' AS check_name,
+       CASE WHEN COUNT(*) = 1 THEN 0 ELSE 1 END::integer AS row_count
+FROM "PermissionDefinition"
+WHERE "code" = 'NASIYA_PROFIT_WAIVE' AND "isActive" = TRUE AND "featureCode" = 'NASIYA'
+UNION ALL
+SELECT 'required_triggers_missing',
+       (6 - COUNT(DISTINCT tgname))::integer
+FROM pg_trigger
+WHERE NOT tgisinternal
+  AND tgenabled = 'O'
+  AND tgname = ANY(ARRAY[
+    'NasiyaSettlement_immutable',
+    'NasiyaSettlementAllocation_immutable',
+    'NasiyaSettlement_ledger_reconcile',
+    'NasiyaSettlementAllocation_ledger_reconcile',
+    'Nasiya_settlement_ledger_reconcile',
+    'NasiyaSchedule_settlement_ledger_reconcile'
+  ]::text[]);
+
+\echo '== settled nasiya actionable reminders (must be zero) =='
+SELECT COUNT(*) AS row_count
+FROM "Notification" notification
+JOIN "NasiyaSettlement" st ON st."shopId" = notification."shopId"
+WHERE notification.type::text IN ('REMINDER', 'OVERDUE', 'EARLY_REMINDER')
+  AND notification.status::text IN ('PENDING', 'PROCESSING', 'FAILED')
+  AND (
+    (notification."relatedType" = 'Nasiya' AND notification."relatedId" = st."nasiyaId")
+    OR (notification."relatedType" = 'NasiyaSchedule' AND EXISTS (
+      SELECT 1 FROM "NasiyaSettlementAllocation" a
+      WHERE a."nasiyaSettlementId" = st.id AND a."nasiyaScheduleId" = notification."relatedId"
+    ))
+  );
 
 \echo '== notification delivery health (counts only) =='
 SELECT status,

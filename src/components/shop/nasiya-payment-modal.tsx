@@ -43,10 +43,11 @@ import { scheduleStatusLabel } from '@/lib/presentation-labels'
 
 type Schedule = NasiyaOperationSchedule
 
-type RowStatus = 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
+type RowStatus = 'PAID' | 'SETTLED' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
 
 const scheduleStatusLabels: Record<RowStatus, string> = {
   PAID: scheduleStatusLabel('PAID'),
+  SETTLED: scheduleStatusLabel('SETTLED'),
   PENDING: scheduleStatusLabel('PENDING'),
   PARTIAL: scheduleStatusLabel('PARTIAL'),
   OVERDUE: scheduleStatusLabel('OVERDUE'),
@@ -56,6 +57,7 @@ const scheduleStatusLabels: Record<RowStatus, string> = {
 
 function rowDisplayStatus(row: Schedule): RowStatus {
   if (row.status === 'CANCELLED') return 'CANCELLED'
+  if (row.status === 'SETTLED' || (row.waived?.minorUnits ?? 0) > 0) return 'SETTLED'
   if (row.remaining.minorUnits === 0) return 'PAID'
   if (row.status === 'OVERDUE') return 'OVERDUE'
   if (row.status === 'DEFERRED') return 'DEFERRED'

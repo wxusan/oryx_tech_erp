@@ -141,6 +141,35 @@ describe('multiple fully-completed, all-on-time nasiyas -> VERY_HIGH', () => {
   })
 })
 
+describe('profit-waived settlement is neutral, not a fully-paid trust reward', () => {
+  it('keeps prior paid history but excludes the settlement from completed-deal credit', () => {
+    const rating = computeCustomerTrustRating([{
+      status: 'COMPLETED',
+      contractCurrency: 'UZS',
+      settledWithWaiver: true,
+      schedules: [
+        paidOnTime(new Date('2026-05-01'), new Date('2026-05-01')),
+        {
+          status: 'SETTLED',
+          dueDate: new Date('2026-06-01'),
+          delayedUntil: null,
+          expectedAmount: 100_000,
+          paidAmount: 80_000,
+          interestWaivedAmount: 20_000,
+          paidAt: new Date('2026-05-15'),
+        },
+      ],
+    }], now)
+
+    expect(rating.factors.completedNasiyaCount).toBe(0)
+    expect(rating.factors.settledWithWaiverCount).toBe(1)
+    expect(rating.factors.paidInstallmentCount).toBe(1)
+    expect(rating.tier).not.toBe('HIGH')
+    expect(rating.tier).not.toBe('VERY_HIGH')
+    expect(rating.reasons).toContain('1 ta nasiya kelgusi foyda kechilib yopilgan')
+  })
+})
+
 describe('one completed nasiya with a couple of late payments -> a mid tier, not VERY_HIGH', () => {
   it('late history keeps it out of VERY_HIGH', () => {
     const nasiyas: CustomerNasiyaInput[] = [

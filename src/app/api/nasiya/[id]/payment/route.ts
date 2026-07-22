@@ -269,6 +269,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             contractCurrency: nasiya.contractCurrency,
             contractFinalAmount: nasiya.contractFinalAmount.toString(),
             contractPaidAmount: nasiya.contractPaidAmount.toString(),
+            contractInterestWaivedAmount: nasiya.contractInterestWaivedAmount.toString(),
             contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
             schedules: nasiya.schedules.map((schedule) => ({
               id: schedule.id,
@@ -280,6 +281,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               contractCurrency: schedule.contractCurrency,
               contractExpectedAmount: schedule.contractExpectedAmount.toString(),
               contractPaidAmount: schedule.contractPaidAmount.toString(),
+              contractInterestWaivedAmount: schedule.contractInterestWaivedAmount.toString(),
               contractRemainingAmount: schedule.contractRemainingAmount.toString(),
             })),
             allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE',
@@ -605,6 +607,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             contractCurrency,
             contractFinalAmount: nasiya.contractFinalAmount.toString(),
             contractPaidAmount: nasiya.contractPaidAmount.toString(),
+            contractInterestWaivedAmount: nasiya.contractInterestWaivedAmount.toString(),
             contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
             schedules: allSchedules.map((schedule) => ({
               id: schedule.id,
@@ -616,6 +619,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               contractCurrency: schedule.contractCurrency,
               contractExpectedAmount: schedule.contractExpectedAmount.toString(),
               contractPaidAmount: schedule.contractPaidAmount.toString(),
+              contractInterestWaivedAmount: schedule.contractInterestWaivedAmount.toString(),
               contractRemainingAmount: schedule.contractRemainingAmount.toString(),
             })),
             allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE',

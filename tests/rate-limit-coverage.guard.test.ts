@@ -23,6 +23,7 @@ describe('sensitive routes are wired to the distributed rate limit adapter', () 
   const protectedRoutes = [
     'src/app/api/sales/[id]/payment/route.ts',
     'src/app/api/nasiya/[id]/payment/route.ts',
+    'src/app/api/nasiya/[id]/settlement/route.ts',
     'src/app/api/olib-sotdim/[id]/pay/route.ts',
     'src/app/api/olib-sotdim/route.ts',
     'src/app/api/nasiya/import/route.ts',

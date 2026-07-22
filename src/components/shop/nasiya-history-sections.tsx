@@ -3,18 +3,21 @@ import { paymentMethodLabel } from '@/lib/labels'
 import { paymentAmountDisplay, type NasiyaPaymentDisplayRecord } from '@/lib/payment-history-display'
 import { uzDate, uzDateTime } from '@/lib/dates'
 import { logActionLabel, scheduleStatusLabel } from '@/lib/presentation-labels'
+import type { NasiyaSettlementMutationResult, NasiyaSettlementRecordDto } from '@/lib/nasiya-settlement'
 
 export interface NasiyaScheduleRow {
   id: string
   monthNumber: number
   dueDate: string
   delayedUntil: string | null
-  status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
+  status: 'PENDING' | 'PARTIAL' | 'PAID' | 'SETTLED' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
   expected: MoneyDto
   paid: MoneyDto
+  waived?: MoneyDto
   remaining: MoneyDto
   legacyExpected: MoneyDto
   legacyPaid: MoneyDto
+  legacyWaived?: MoneyDto
 }
 
 export interface NasiyaActionLog {
@@ -27,10 +30,11 @@ export interface NasiyaActionLog {
   newValue?: { oldDueDate?: string; newDueDate?: string; reminderEnabled?: boolean } | null
 }
 
-type RowStatus = 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
+type RowStatus = 'PAID' | 'SETTLED' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
 
 const schedulePresentation: Record<RowStatus, { label: string; className: string }> = {
   PAID: { label: scheduleStatusLabel('PAID'), className: 'bg-zinc-900 text-white' },
+  SETTLED: { label: scheduleStatusLabel('SETTLED'), className: 'bg-emerald-100 text-emerald-800' },
   PENDING: { label: scheduleStatusLabel('PENDING'), className: 'bg-zinc-100 text-zinc-600' },
   PARTIAL: { label: scheduleStatusLabel('PARTIAL'), className: 'bg-zinc-200 text-zinc-700' },
   OVERDUE: { label: scheduleStatusLabel('OVERDUE'), className: 'bg-red-100 text-red-700' },
@@ -45,6 +49,7 @@ function RowBadge({ status }: { status: RowStatus }) {
 
 function rowStatus(row: NasiyaScheduleRow): RowStatus {
   if (row.status === 'CANCELLED') return 'CANCELLED'
+  if (row.status === 'SETTLED' || (row.waived?.minorUnits ?? 0) > 0) return 'SETTLED'
   if (row.remaining.minorUnits === 0) return 'PAID'
   if (row.status === 'OVERDUE') return 'OVERDUE'
   if (row.status === 'DEFERRED') return 'DEFERRED'
@@ -73,6 +78,8 @@ export function NasiyaHistorySections({
   logsLoaded = true,
   logsLoading = false,
   onLoadLogs,
+  settlement,
+  paymentHistoryTruncated = false,
 }: {
   schedules: NasiyaScheduleRow[]
   payments: NasiyaPaymentDisplayRecord[]
@@ -84,6 +91,8 @@ export function NasiyaHistorySections({
   logsLoaded?: boolean
   logsLoading?: boolean
   onLoadLogs?: () => void
+  settlement?: (NasiyaSettlementRecordDto & { allocations?: NasiyaSettlementMutationResult['allocations'] }) | null
+  paymentHistoryTruncated?: boolean
 }) {
   const sortedSchedules = schedules.toSorted((a, b) => a.monthNumber - b.monthNumber)
 
@@ -92,14 +101,14 @@ export function NasiyaHistorySections({
       <section className="overflow-hidden rounded border border-zinc-200" aria-labelledby="nasiya-schedule-heading">
         <h2 id="nasiya-schedule-heading" className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-900">To&apos;lov jadvali</h2>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[640px] text-sm">
+          <table className="w-full min-w-[760px] text-sm">
             <caption className="sr-only">Nasiya bo&apos;yicha oylik to&apos;lov jadvali</caption>
-            <thead className="border-b border-zinc-200"><tr>{['#', 'Sana', 'Miqdor', "To'langan", 'Holat'].map((heading) => <th key={heading} className="bg-zinc-50 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">{heading}</th>)}</tr></thead>
+            <thead className="border-b border-zinc-200"><tr>{['#', 'Sana', 'Miqdor', "To'langan", 'Kechilgan foyda', 'Holat'].map((heading) => <th key={heading} className="bg-zinc-50 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">{heading}</th>)}</tr></thead>
             <tbody>{sortedSchedules.map((row) => {
               const status = rowStatus(row)
               return <tr key={row.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                 <td className="px-4 py-3 text-zinc-500">{row.monthNumber}</td><td className="px-4 py-3 text-zinc-700">{uzDate(row.dueDate)}</td>
-                <td className="px-4 py-3 font-medium text-zinc-900">{formatMoney(row.expected)}</td><td className="px-4 py-3 text-zinc-700">{formatMoney(row.paid)}</td>
+                <td className="px-4 py-3 font-medium text-zinc-900">{formatMoney(row.expected)}</td><td className="px-4 py-3 text-zinc-700">{formatMoney(row.paid)}</td><td className="px-4 py-3 text-zinc-700">{row.waived && row.waived.minorUnits > 0 ? formatMoney(row.waived) : '—'}</td>
                 <td className="px-4 py-3"><RowBadge status={status} /></td>
               </tr>
             })}</tbody>
@@ -107,8 +116,21 @@ export function NasiyaHistorySections({
         </div>
       </section>
 
+      {settlement && <section className="overflow-hidden rounded border border-emerald-200" aria-labelledby="nasiya-settlement-heading">
+        <h2 id="nasiya-settlement-heading" className="border-b border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-900">Nasiya yopish kelishuvi</h2>
+        <div className="grid gap-3 p-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
+          <div><div className="text-xs text-zinc-500">Yopish turi</div><div className="mt-1 font-medium text-zinc-900">{settlement.mode === 'FULL_WITH_PROFIT' ? 'Foydasi bilan yopish' : 'Foydani kechib yopish'}</div></div>
+          <div><div className="text-xs text-zinc-500">Olingan summa</div><div className="mt-1 font-medium text-zinc-900">{formatMoney(settlement.cashReceived)}</div></div>
+          <div><div className="text-xs text-zinc-500">Kechilgan foyda</div><div className="mt-1 font-medium text-zinc-900">{formatMoney(settlement.interestWaived)}</div></div>
+          <div><div className="text-xs text-zinc-500">Sana</div><div className="mt-1 font-medium text-zinc-900">{uzDateTime(settlement.settledAt)}</div></div>
+        </div>
+        {settlement.reason && <p className="border-t border-emerald-100 px-4 py-3 text-sm text-zinc-700"><span className="font-medium">Sabab:</span> {settlement.reason}</p>}
+        {historyLoaded && settlement.allocations && settlement.allocations.length > 0 && <div className="border-t border-emerald-100 px-4 py-3 text-xs text-zinc-500">{settlement.allocations.length} ta jadval qoldig‘i o‘zgarmas audit yozuvi bilan yopilgan.</div>}
+      </section>}
+
       <section className="overflow-hidden rounded border border-zinc-200" aria-labelledby="nasiya-payments-heading">
         <h2 id="nasiya-payments-heading" className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-900">To&apos;lov tarixi</h2>
+        {paymentHistoryTruncated && <p role="status" className="border-b border-amber-200 bg-amber-50 px-4 py-2 text-xs text-amber-900">Eng so‘nggi 500 ta to‘lov ko‘rsatilmoqda; undan eski yozuvlar o‘zgarmas ledgerda saqlanadi.</p>}
         {!historyLoaded && onLoadHistory ? <div className="px-4 py-5">
           <p className="text-sm text-zinc-500">To&apos;lovlar, mijoz bahosi va qo&apos;shimcha tarix birinchi ekranni sekinlashtirmasligi uchun alohida yuklanadi.</p>
           <button type="button" onClick={onLoadHistory} disabled={historyLoading} className="mt-3 rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">

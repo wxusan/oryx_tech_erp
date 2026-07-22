@@ -396,6 +396,12 @@ describe('isScheduleOverdue (canonical predicate)', () => {
     ).toBe(false)
   })
 
+  it('is false for a profit-waived SETTLED schedule even when legacy paid is below expected', () => {
+    expect(
+      isScheduleOverdue(sch({ status: 'SETTLED', paidAmount: 800_000, dueDate: new Date('2026-01-15') }), NOW),
+    ).toBe(false)
+  })
+
   it('honours an active defer (delayedUntil) — future defer is not overdue', () => {
     expect(
       isScheduleOverdue(
@@ -432,6 +438,9 @@ describe('scheduleDisplayStatus (detail row badge)', () => {
     expect(
       scheduleDisplayStatus(sch({ status: 'PAID', paidAmount: 1_000_000, dueDate: new Date('2026-01-15') }), NOW),
     ).toBe('PAID')
+  })
+  it('keeps a SETTLED row distinct from a cash-paid row', () => {
+    expect(scheduleDisplayStatus(sch({ status: 'SETTLED', paidAmount: 800_000 }), NOW)).toBe('SETTLED')
   })
   it('keeps a future PENDING row as PENDING', () => {
     expect(scheduleDisplayStatus(sch({ status: 'PENDING', dueDate: new Date('2026-09-15') }), NOW)).toBe('PENDING')
@@ -498,6 +507,15 @@ describe('deriveNasiyaOverdue (contract display status)', () => {
     // is settled — displayStatus must still read COMPLETED everywhere.
     const d = deriveNasiyaOverdue(
       { status: 'ACTIVE', schedules: [sch({ status: 'PAID', paidAmount: 1_000_000, dueDate: new Date('2026-01-15') })] },
+      NOW,
+    )
+    expect(d.displayStatus).toBe('COMPLETED')
+    expect(d.isOverdue).toBe(false)
+  })
+
+  it('a nasiya whose only schedule was settled with waived profit is effectively COMPLETED', () => {
+    const d = deriveNasiyaOverdue(
+      { status: 'ACTIVE', schedules: [sch({ status: 'SETTLED', paidAmount: 800_000, dueDate: new Date('2026-01-15') })] },
       NOW,
     )
     expect(d.displayStatus).toBe('COMPLETED')

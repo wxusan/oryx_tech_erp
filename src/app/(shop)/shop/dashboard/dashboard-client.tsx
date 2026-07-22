@@ -104,6 +104,12 @@ export default function DashboardClient({ initialStats, financialView }: { initi
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
+  const waivedProfitText = formatPartitionedMoney({
+    amountUzs: stats.waivedNasiyaProfitThisMonthUzs,
+    amountUsd: stats.waivedNasiyaProfitThisMonthUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
   const supplierDebtText = formatPartitionedMoney({
     amountUzs: stats.supplierPayablesOpenAllTimeUzs,
     amountUsd: stats.supplierPayablesOpenAllTimeUsd,
@@ -176,6 +182,10 @@ export default function DashboardClient({ initialStats, financialView }: { initi
                 <span>Shu oy kutilayotgan foyda</span>
                 <span className="font-semibold text-zinc-800">{expectedText}</span>
               </div>
+              {stats.waivedNasiyaProfitCountThisMonth > 0 && <div className="mt-2 flex items-center justify-between gap-3 border-t border-zinc-200 pt-2 text-xs text-amber-800">
+                <span>Kechilgan nasiya foydasi · {stats.waivedNasiyaProfitCountThisMonth} ta</span>
+                <span className="font-semibold">{waivedProfitText}</span>
+              </div>}
             </div>
             <KoLink href="/shop/hisobot" enabled={canViewReports} />
           </CardContent>

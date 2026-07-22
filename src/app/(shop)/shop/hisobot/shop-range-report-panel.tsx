@@ -72,6 +72,13 @@ export default function ShopRangeReportPanel({
       color: 'text-violet-600',
     },
     {
+      label: 'Kechilgan nasiya foydasi',
+      value: partitionText(totals.waivedNasiyaProfit, currency),
+      note: `${totals.waivedNasiyaProfit.count} ta “Foydani kechib yopish” kelishuvi · hodisa paytidagi UZS: ${formatMoneyByCurrency(totals.waivedNasiyaProfit.frozenUzs, 'UZS', currency.usdUzsRate)}`,
+      icon: HandCoins,
+      color: 'text-amber-700',
+    },
+    {
       label: "To'lanishi kerak bo'lgan summa",
       value: partitionText(totals.expectedReceivables, currency),
       note: "Tanlangan oylarda muddati kelgan va hali to'lanmagan summa; keyingi oylar kirmaydi",
@@ -158,7 +165,7 @@ export default function ShopRangeReportPanel({
           <CardDescription>Oyma-oy hisob</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
-          <table className="min-w-[1460px] w-full text-left text-xs">
+          <table className="min-w-[1580px] w-full text-left text-xs">
             <thead className="border-y border-zinc-200 bg-zinc-50 text-zinc-600">
               <tr>
                 <th scope="col" className="px-4 py-3 font-medium">Oy</th>
@@ -166,6 +173,7 @@ export default function ShopRangeReportPanel({
                 <th scope="col" className="px-4 py-3 font-medium">Tushum</th>
                 <th scope="col" className="px-4 py-3 font-medium">Haqiqiy foyda</th>
                 <th scope="col" className="px-4 py-3 font-medium">Kutilayotgan foyda</th>
+                <th scope="col" className="px-4 py-3 font-medium">Kechilgan nasiya foydasi</th>
                 <th scope="col" className="px-4 py-3 font-medium">Foiz: olingan / kutilayotgan</th>
                 <th scope="col" className="px-4 py-3 font-medium">Muddati keladigan qarz</th>
                 <th scope="col" className="px-4 py-3 font-medium">Bizning qarzlarimiz</th>
@@ -184,6 +192,7 @@ export default function ShopRangeReportPanel({
                     {formatMoneyByCurrency(month.grossProfitUzs, currency.currency, currency.usdUzsRate)}
                   </td>
                   <td className="px-4 py-3 text-zinc-700">{partitionText(month.expectedProfit, currency)}</td>
+                  <td className="px-4 py-3 text-amber-800">{partitionText(month.waivedNasiyaProfit, currency)} · {month.waivedNasiyaProfit.count} ta</td>
                   <td className="px-4 py-3 text-zinc-700">
                     {formatMoneyByCurrency(month.interestProfitUzs, currency.currency, currency.usdUzsRate)} / {partitionText(month.nasiyaInterestExpected, currency)}
                   </td>

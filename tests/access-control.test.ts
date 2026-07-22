@@ -123,8 +123,8 @@ describe('owner and staff authorization', () => {
   })
 
   it('enforces the complete typed permission matrix for staff', () => {
-    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(58)
-    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(58)
+    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(59)
+    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(59)
     for (const permission of SHOP_PERMISSION_CATALOG) {
       const granted = principal({ grantedPermissions: new Set([permission.code]) })
       expect(principalCan(granted, permission.code), permission.code).toBe(!permission.ownerOnly && !permission.retired)

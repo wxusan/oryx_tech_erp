@@ -9,6 +9,7 @@ interface CustomerTrustAggregateRow {
   customer_id: string
   total_nasiya_count: number
   completed_nasiya_count: number
+  settled_with_waiver_count: number
   active_nasiya_count: number
   cancelled_nasiya_count: number
   paid_installment_count: number
@@ -35,7 +36,12 @@ export async function getCustomerTrustFactorsForList(input: {
     SELECT
       c."id" AS customer_id,
       count(DISTINCT n."id")::integer AS total_nasiya_count,
-      count(DISTINCT n."id") FILTER (WHERE n."status" = 'COMPLETED')::integer AS completed_nasiya_count,
+      count(DISTINCT n."id") FILTER (
+        WHERE n."status" = 'COMPLETED' AND n."contractInterestWaivedAmount" = 0
+      )::integer AS completed_nasiya_count,
+      count(DISTINCT n."id") FILTER (
+        WHERE n."contractInterestWaivedAmount" > 0
+      )::integer AS settled_with_waiver_count,
       count(DISTINCT n."id") FILTER (
         WHERE n."status" IN ('ACTIVE', 'OVERDUE') AND n."resolutionState" = 'ACTIVE'
       )::integer AS active_nasiya_count,
@@ -71,10 +77,10 @@ export async function getCustomerTrustFactorsForList(input: {
           AND coalesce(s."delayedUntil", s."dueDate") < ${todayStart}
           AND (
             (n."contractCurrency" = 'USD'
-              AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01)
+              AND s."contractRemainingAmount" >= 0.01)
             OR
             (n."contractCurrency" = 'UZS'
-              AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1)
+              AND s."contractRemainingAmount" >= 1)
           )
       )::integer AS current_overdue_schedule_count
     FROM "Customer" c
@@ -98,6 +104,7 @@ export async function getCustomerTrustFactorsForList(input: {
     const factors: CustomerTrustFactors = {
       totalNasiyaCount: Number(row.total_nasiya_count ?? 0),
       completedNasiyaCount: Number(row.completed_nasiya_count ?? 0),
+      settledWithWaiverCount: Number(row.settled_with_waiver_count ?? 0),
       activeNasiyaCount: Number(row.active_nasiya_count ?? 0),
       cancelledNasiyaCount: Number(row.cancelled_nasiya_count ?? 0),
       paidInstallmentCount,

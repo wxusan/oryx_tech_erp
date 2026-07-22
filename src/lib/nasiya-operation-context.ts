@@ -10,12 +10,14 @@ export interface NasiyaOperationSchedule {
   monthNumber: number
   dueDate: string
   delayedUntil: string | null
-  status: 'PENDING' | 'PARTIAL' | 'PAID' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
+  status: 'PENDING' | 'PARTIAL' | 'PAID' | 'SETTLED' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
   expected: MoneyDto
   paid: MoneyDto
+  waived?: MoneyDto
   remaining: MoneyDto
   legacyExpected: MoneyDto
   legacyPaid: MoneyDto
+  legacyWaived?: MoneyDto
 }
 
 export interface NasiyaOperationContext {
@@ -24,6 +26,8 @@ export interface NasiyaOperationContext {
   device: { model: string }
   contractCurrency: CurrencyCode
   ledger: {
+    paid?: MoneyDto
+    waived?: MoneyDto
     remaining: MoneyDto
     status: 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
     health: 'HEALTHY' | 'REPAIRABLE_PARENT_CACHE' | 'QUARANTINED'

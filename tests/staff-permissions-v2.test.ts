@@ -38,9 +38,9 @@ function staffWithOnly(permission: ActiveShopPermissionCode): ShopPrincipalAcces
 }
 
 describe('Staff Permissions V2 behavioral authorization kernel', () => {
-  it('has exactly 58 unique active capabilities with complete operational metadata', () => {
-    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(58)
-    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(58)
+  it('has exactly 59 unique active capabilities with complete operational metadata', () => {
+    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(59)
+    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(59)
 
     for (const code of ACTIVE_SHOP_PERMISSION_CODES) {
       const definition = permissionDefinition(code)

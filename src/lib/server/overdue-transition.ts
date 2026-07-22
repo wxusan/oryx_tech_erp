@@ -14,6 +14,7 @@ import { addMoneyDto, createMoneyDto, moneyDtoEquals, type CurrencyCode } from '
 export function hasValidNasiyaScheduleNativeLedger(input: {
   contractExpectedAmount: number | string | { toString(): string }
   contractPaidAmount: number | string | { toString(): string }
+  contractInterestWaivedAmount?: number | string | { toString(): string }
   contractRemainingAmount: number | string | { toString(): string }
   contractCurrency: CurrencyCode
   status: string
@@ -21,10 +22,13 @@ export function hasValidNasiyaScheduleNativeLedger(input: {
   try {
     const expected = createMoneyDto(input.contractCurrency, input.contractExpectedAmount.toString())
     const paid = createMoneyDto(input.contractCurrency, input.contractPaidAmount.toString())
+    const waived = createMoneyDto(input.contractCurrency, input.contractInterestWaivedAmount?.toString() ?? '0')
     const remaining = createMoneyDto(input.contractCurrency, input.contractRemainingAmount.toString())
-    if (expected.minorUnits <= 0 || paid.minorUnits > expected.minorUnits) return false
-    if (!moneyDtoEquals(expected, addMoneyDto(paid, remaining))) return false
-    return input.status === 'CANCELLED' || (input.status === 'PAID') === (remaining.minorUnits === 0)
+    if (expected.minorUnits <= 0 || paid.minorUnits + waived.minorUnits > expected.minorUnits) return false
+    if (!moneyDtoEquals(expected, addMoneyDto(addMoneyDto(paid, waived), remaining))) return false
+    if (input.status === 'CANCELLED') return true
+    if (remaining.minorUnits > 0) return input.status !== 'PAID' && input.status !== 'SETTLED'
+    return waived.minorUnits > 0 ? input.status === 'SETTLED' : input.status === 'PAID'
   } catch {
     return false
   }

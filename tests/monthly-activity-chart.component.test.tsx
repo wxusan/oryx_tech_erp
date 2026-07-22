@@ -27,6 +27,7 @@ const activity = [{
   contracts: { UZS: 1_000, USD: 100 },
   payments: { UZS: 700, USD: 70 },
   refunds: { UZS: 200, USD: 20 },
+  waivedProfit: { UZS: 50, USD: 5 },
   writeOffs: { UZS: 100, USD: 10 },
 }]
 
@@ -46,6 +47,8 @@ describe('MonthlyActivityChart', () => {
     expect(screen.getByText(/Shartnoma 1[\s.]000 UZS/)).toBeTruthy()
     expect(screen.getByText(/To‘lov 700 UZS/)).toBeTruthy()
     expect(screen.getByText(/Qaytarish 200 UZS/)).toBeTruthy()
+    expect(screen.getByTestId('bar-waivedProfit')).toBeTruthy()
+    expect(screen.getByText(/Kechilgan foyda 50 UZS/)).toBeTruthy()
     expect(screen.queryByTestId('bar-writeOffs')).toBeNull()
 
     const toggle = screen.getByRole('button', { name: 'Hisobdan chiqarish' })
@@ -69,6 +72,8 @@ describe('MonthlyActivityChart', () => {
     expect(screen.getByText(/Shartnoma \$100.00/)).toBeTruthy()
     expect(screen.queryByText('To‘lovlar')).toBeNull()
     expect(screen.queryByText('Qaytarishlar (pastda)')).toBeNull()
+    expect(screen.queryByText('Kechilgan foyda (pastda)')).toBeNull()
+    expect(screen.queryByTestId('bar-waivedProfit')).toBeNull()
     expect(screen.queryByRole('button', { name: 'Hisobdan chiqarish' })).toBeNull()
   })
 })

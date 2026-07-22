@@ -16,7 +16,7 @@ const SECTION_LABELS: Record<CustomerProfileSection, string> = {
   nasiya: 'Nasiyalar',
   payments: "To'lovlar",
   returns: 'Qaytarishlar',
-  resolutions: 'Arxiv / hisobdan chiqarish',
+  resolutions: 'Yopish / arxiv',
 }
 
 function historyAmount(item: CustomerProfileHistoryItem) {
@@ -26,7 +26,7 @@ function historyAmount(item: CustomerProfileHistoryItem) {
 
 function historyHref(item: CustomerProfileHistoryItem) {
   if (!item.referenceId) return null
-  if (item.kind === 'nasiya' || item.kind === 'nasiya-payment' || item.kind === 'resolution') {
+  if (item.kind === 'nasiya' || item.kind === 'nasiya-payment' || item.kind === 'resolution' || item.kind === 'settlement') {
     return `/shop/nasiyalar/${item.referenceId}`
   }
   if (item.kind === 'device' || item.kind === 'sale' || item.kind === 'sale-payment' || item.kind === 'return') {
@@ -99,7 +99,7 @@ export function CustomerProfileHistorySection({
                 <>
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium text-zinc-950">
-                      {item.kind === 'resolution' ? historyStatusLabel(item.title) : item.title}
+                      {item.kind === 'resolution' || item.kind === 'settlement' ? historyStatusLabel(item.title) : item.title}
                     </p>
                     <p className="mt-0.5 text-xs text-zinc-500">
                       {item.subtitle

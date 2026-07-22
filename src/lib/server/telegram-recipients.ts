@@ -81,7 +81,8 @@ export function telegramAudienceForNotificationType(value: unknown): TelegramAud
     : TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF
 }
 
-type TelegramRecipientReader = Pick<Prisma.TransactionClient, 'shop'>
+type TelegramRecipientReader = Pick<Prisma.TransactionClient, 'shop'> &
+  Partial<Pick<Prisma.TransactionClient, '$queryRaw'>>
 
 function businessDate(now: Date) {
   return new Date(`${tashkentTodayInputValue(now)}T00:00:00.000Z`)
@@ -228,6 +229,12 @@ export async function resolveTelegramRecipients(
   reader: TelegramRecipientReader,
   input: { shopId: string; audience: TelegramAudience; now?: Date },
 ): Promise<TelegramRecipientResolution> {
+  if (typeof reader.$queryRaw === 'function') {
+    return resolveTelegramRecipientsTransactionSafe(
+      reader as Pick<Prisma.TransactionClient, '$queryRaw'>,
+      input,
+    )
+  }
   const now = input.now ?? new Date()
   if (input.audience === TELEGRAM_AUDIENCES.OWNER_ONLY) {
     const shop = await reader.shop.findUnique({
@@ -241,6 +248,128 @@ export async function resolveTelegramRecipients(
     select: telegramOwnerAndStaffRecipientShopSelect(now),
   })
   return resolveTelegramRecipientSnapshot(shop ?? undefined, input)
+}
+
+/**
+ * Interactive Prisma transactions own one PostgreSQL connection. The normal
+ * nested relation projection may fan out internally, so sensitive mutation
+ * paths use this equivalent set-based snapshot to keep recipient selection
+ * atomic without overlapping client.query() calls on that connection.
+ */
+export async function resolveTelegramRecipientsTransactionSafe(
+  reader: Pick<Prisma.TransactionClient, '$queryRaw'>,
+  input: { shopId: string; audience: TelegramAudience; now?: Date },
+): Promise<TelegramRecipientResolution> {
+  const now = input.now ?? new Date()
+  const includeStaff = input.audience === TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF
+  const rowLimit = includeStaff ? MAX_TELEGRAM_STAFF_RECIPIENTS + 3 : 1
+  const rows = await reader.$queryRaw<Array<{
+    id: string
+    status: string
+    deletedAt: Date | null
+    ownerAdminId: string | null
+    telegramNotificationsEnabled: boolean
+    packageVersionId: string | null
+    telegramFeatureEnabled: boolean
+    staffAccessFeatureEnabled: boolean
+    adminId: string | null
+    adminTelegramId: string | null
+    adminTelegramVerifiedAt: Date | null
+    adminTelegramNotificationsEnabled: boolean | null
+    adminIsActive: boolean | null
+    adminDeletedAt: Date | null
+  }>>(Prisma.sql`
+    WITH selected_shop AS (
+      SELECT
+        shop."id",
+        shop."status",
+        shop."deletedAt",
+        shop."ownerAdminId",
+        shop."telegramNotificationsEnabled"
+      FROM "Shop" shop
+      WHERE shop."id" = ${input.shopId}
+      LIMIT 1
+    ), active_package AS (
+      SELECT package."id"
+      FROM "ShopPackageVersion" package
+      JOIN selected_shop shop ON shop."id" = package."shopId"
+      WHERE package."effectiveOn" <= ${businessDate(now)}
+      ORDER BY package."effectiveOn" DESC, package."createdAt" DESC
+      LIMIT 1
+    )
+    SELECT
+      shop."id",
+      shop."status"::text AS "status",
+      shop."deletedAt",
+      shop."ownerAdminId",
+      shop."telegramNotificationsEnabled",
+      package."id" AS "packageVersionId",
+      EXISTS (
+        SELECT 1
+        FROM "ShopPackageFeature" feature
+        WHERE feature."packageVersionId" = package."id"
+          AND feature."featureCode" = 'TELEGRAM'
+          AND feature."enabled" = TRUE
+      ) AS "telegramFeatureEnabled",
+      EXISTS (
+        SELECT 1
+        FROM "ShopPackageFeature" feature
+        WHERE feature."packageVersionId" = package."id"
+          AND feature."featureCode" = 'STAFF_ACCESS'
+          AND feature."enabled" = TRUE
+      ) AS "staffAccessFeatureEnabled",
+      admin."id" AS "adminId",
+      admin."telegramId" AS "adminTelegramId",
+      admin."telegramVerifiedAt" AS "adminTelegramVerifiedAt",
+      admin."telegramNotificationsEnabled" AS "adminTelegramNotificationsEnabled",
+      admin."isActive" AS "adminIsActive",
+      admin."deletedAt" AS "adminDeletedAt"
+    FROM selected_shop shop
+    LEFT JOIN active_package package ON TRUE
+    LEFT JOIN "ShopAdmin" admin
+      ON admin."shopId" = shop."id"
+      AND (
+        admin."id" = shop."ownerAdminId"
+        OR (
+          ${includeStaff}
+          AND admin."id" IS DISTINCT FROM shop."ownerAdminId"
+          AND admin."isActive" = TRUE
+          AND admin."deletedAt" IS NULL
+        )
+      )
+    ORDER BY
+      CASE WHEN admin."id" = shop."ownerAdminId" THEN 0 ELSE 1 END,
+      admin."id" ASC
+    LIMIT ${rowLimit}
+  `)
+  const first = rows[0]
+  if (!first) return resolveTelegramRecipientSnapshot(undefined, input)
+  const toAdmin = (row: typeof first) => ({
+    id: row.adminId as string,
+    telegramId: row.adminTelegramId,
+    telegramVerifiedAt: row.adminTelegramVerifiedAt,
+    telegramNotificationsEnabled: row.adminTelegramNotificationsEnabled ?? false,
+    isActive: row.adminIsActive ?? false,
+    deletedAt: row.adminDeletedAt,
+  })
+  const ownerRow = rows.find((row) => row.adminId != null && row.adminId === first.ownerAdminId)
+  const features = [
+    ...(first.telegramFeatureEnabled ? [{ featureCode: 'TELEGRAM', enabled: true }] : []),
+    ...(first.staffAccessFeatureEnabled ? [{ featureCode: 'STAFF_ACCESS', enabled: true }] : []),
+  ]
+  const snapshot = {
+    id: first.id,
+    status: first.status,
+    deletedAt: first.deletedAt,
+    ownerAdminId: first.ownerAdminId,
+    telegramNotificationsEnabled: first.telegramNotificationsEnabled,
+    ownerAdmin: ownerRow ? toAdmin(ownerRow) : null,
+    packageVersions: first.packageVersionId ? [{ features }] : [],
+    ...(includeStaff
+      ? { admins: rows.filter((row) => row.adminId != null).map(toAdmin) }
+      : {}),
+  } as TelegramRecipientShop
+  return resolveTelegramRecipientSnapshot(snapshot, input)
 }
 
 async function resolveTelegramRecipientsMany(

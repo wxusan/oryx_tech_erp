@@ -38,6 +38,7 @@ export type NavigationMutationKind =
   | 'nasiya.updated'
   | 'nasiya.reminderUpdated'
   | 'nasiya.paymentRecorded'
+  | 'nasiya.settled'
   | 'nasiya.deferred'
   | 'nasiya.archived'
   | 'nasiya.writtenOff'
@@ -131,9 +132,10 @@ export function navigationImpactForMutation(mutation: NavigationMutation): Navig
         [...SHOP_INVENTORY_PATHS, '/shop/nasiyalar', deviceDetail, nasiyaDetail, '/shop/mijozlar', ...SHOP_FINANCIAL_PATHS],
       )
     case 'nasiya.paymentRecorded':
+    case 'nasiya.settled':
       return shopImpact(
-        ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
-        ['/shop/qurilmalar', '/shop/nasiyalar', deviceDetail, nasiyaDetail, '/shop/mijozlar', ...SHOP_FINANCIAL_PATHS],
+        ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue', 'debts'],
+        ['/shop/qurilmalar', '/shop/nasiyalar', deviceDetail, nasiyaDetail, '/shop/mijozlar', '/shop/qarzlar', ...SHOP_FINANCIAL_PATHS],
       )
     case 'nasiya.deferred':
     case 'nasiya.archived':

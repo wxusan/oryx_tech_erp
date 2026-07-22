@@ -20,6 +20,7 @@ import { uzDate } from '@/lib/dates'
 import { useShopCurrency } from '@/lib/use-shop-currency'
 import { NasiyaPaymentModal } from '@/components/shop/nasiya-payment-modal'
 import { NasiyaDeferModal } from '@/components/shop/nasiya-defer-modal'
+import { NasiyaSettlementModal } from '@/components/shop/nasiya-settlement-modal'
 import { TrustBadge } from '@/components/shop/trust-badge'
 import { ArrowLeft, Pencil } from 'lucide-react'
 import type { NasiyaPaymentDisplayRecord } from '@/lib/payment-history-display'
@@ -31,6 +32,11 @@ import {
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 import type { NasiyaLedgerDto } from '@/lib/nasiya-ledger'
+import type {
+  NasiyaSettlementMutationResult,
+  NasiyaSettlementQuote,
+  NasiyaSettlementRecordDto,
+} from '@/lib/nasiya-settlement'
 import type {
   NasiyaDeferMutationResult,
   NasiyaOperationContext,
@@ -90,6 +96,7 @@ interface Nasiya {
   resolutionUpdatedAt: string | null
   /** Omitted from the server DTO for staff because it contains owner-only archive amounts. */
   resolutionEvents?: ResolutionEvent[]
+  resolutionHistoryTruncated?: boolean
   displayStatus?: 'ACTIVE' | 'OVERDUE' | 'COMPLETED' | 'CANCELLED'
   reminderEnabled?: boolean
   note?: string | null
@@ -106,7 +113,12 @@ interface Nasiya {
   device: { model: string }
   customer: { id: string; name: string; phone: string; hasPassportPhoto?: boolean }
   schedules: NasiyaSchedule[]
+  settlementQuotes: { full: NasiyaSettlementQuote; waive: NasiyaSettlementQuote } | null
+  settlement: (NasiyaSettlementRecordDto & {
+    allocations?: NasiyaSettlementMutationResult['allocations']
+  }) | null
   payments?: NasiyaPayment[]
+  paymentHistoryTruncated?: boolean
   paymentScore?: {
     score: number
     label: string
@@ -175,6 +187,7 @@ function AuthorizedNasiyaDetailPage() {
   const canBrowseNasiyas = can('NASIYA_VIEW') || can('NASIYA_EDIT') || can('NASIYA_REMINDER_MANAGE') || can('NASIYA_ARCHIVE') || can('NASIYA_REOPEN')
   const canEditNasiya = can('NASIYA_EDIT')
   const canReceivePayment = can('NASIYA_PAYMENT_RECEIVE')
+  const canWaiveProfit = can('NASIYA_PROFIT_WAIVE')
   const canDeferNasiya = can('NASIYA_DEFER')
   const canManageReminder = can('NASIYA_REMINDER_MANAGE')
   const canArchiveNasiya = can('NASIYA_ARCHIVE')
@@ -204,6 +217,7 @@ function AuthorizedNasiyaDetailPage() {
 
   const [paymentModalOpen, setPaymentModalOpen] = useState(false)
   const [deferModalOpen, setDeferModalOpen] = useState(false)
+  const [settlementModalOpen, setSettlementModalOpen] = useState(false)
   const [resolutionAction, setResolutionAction] = useState<ResolutionAction | null>(null)
   const [resolutionReason, setResolutionReason] = useState('')
   const [resolutionError, setResolutionError] = useState('')
@@ -291,6 +305,63 @@ function AuthorizedNasiyaDetailPage() {
         schedules: patched.schedules.map((schedule) => schedule.id === result.nasiyaScheduleId
           ? { ...schedule, status: 'DEFERRED', delayedUntil: result.newDueDate! }
           : schedule),
+      }
+    })
+  }
+
+  function applySettlementResult(result: NasiyaSettlementMutationResult) {
+    setNasiya((current) => {
+      if (!current) return current
+      const allocationBySchedule = new Map(result.allocations.map((allocation) => [allocation.scheduleId, allocation]))
+      return {
+        ...current,
+        status: 'COMPLETED',
+        displayStatus: 'COMPLETED',
+        reminderEnabled: false,
+        settlementQuotes: null,
+        settlement: { ...result.settlement, allocations: result.allocations },
+        ledger: {
+          ...current.ledger,
+          paid: result.ledger.paid,
+          waived: result.ledger.waived,
+          fulfilled: result.ledger.fulfilled,
+          remaining: result.ledger.remaining,
+          parentPaid: result.ledger.paid,
+          parentWaived: result.ledger.waived,
+          parentRemaining: result.ledger.remaining,
+          status: 'COMPLETED',
+          isOverdue: false,
+          overdue: { currency: current.contractCurrency, minorUnits: 0 },
+          overdueCount: 0,
+          nextPaymentDate: null,
+          health: 'HEALTHY',
+          reasons: [],
+          parentInSync: true,
+          repair: null,
+          schedules: current.ledger.schedules.map((schedule) => {
+            const allocation = allocationBySchedule.get(schedule.id)
+            return allocation
+              ? {
+                  ...schedule,
+                  paid: addMoneyDto(schedule.paid, allocation.cash),
+                  waived: addMoneyDto(schedule.waived, allocation.interestWaived),
+                  remaining: allocation.remainingAfter,
+                }
+              : schedule
+          }),
+        },
+        schedules: current.schedules.map((schedule) => {
+          const allocation = allocationBySchedule.get(schedule.id)
+          return allocation
+            ? {
+                ...schedule,
+                paid: addMoneyDto(schedule.paid, allocation.cash),
+                waived: addMoneyDto(schedule.waived ?? { currency: current.contractCurrency, minorUnits: 0 }, allocation.interestWaived),
+                remaining: allocation.remainingAfter,
+                status: allocation.interestWaived.minorUnits > 0 ? 'SETTLED' : 'PAID',
+              }
+            : schedule
+        }),
       }
     })
   }
@@ -519,7 +590,7 @@ function AuthorizedNasiyaDetailPage() {
   // on a potentially stale parent cache or a legacy UZS snapshot.
   const { contractTerms, ledger } = nasiya
   const pct = ledger.financed.minorUnits > 0
-    ? Math.min(100, Math.round((ledger.paid.minorUnits / ledger.financed.minorUnits) * 100))
+    ? Math.min(100, Math.round((ledger.fulfilled.minorUnits / ledger.financed.minorUnits) * 100))
     : 0
   const contractMonthlyPayment = nasiya.schedules?.[0]?.expected ?? contractTerms.monthly
   const contractTotal = addMoneyDto(contractTerms.downPayment, contractTerms.financed)
@@ -597,7 +668,7 @@ function AuthorizedNasiyaDetailPage() {
             <p className="text-xs text-zinc-400 mt-1">{nasiya.customerTrust.reasons.join(' · ')}</p>
           )}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {(canEditNasiya || canManageReminder) && (
             <Button variant="outline" onClick={openEdit} className="h-9 px-3 text-sm border-zinc-200 text-zinc-700 hover:bg-zinc-50 rounded">
               <Pencil size={14} />
@@ -612,6 +683,11 @@ function AuthorizedNasiyaDetailPage() {
           {canReceivePayment && !ledgerQuarantined && isOperationallyActive && !isCompleted && (
             <Button onClick={() => setPaymentModalOpen(true)} className="h-9 px-4 text-sm bg-zinc-900 hover:bg-zinc-800 text-white rounded">
               To'lov qabul qilish
+            </Button>
+          )}
+          {canReceivePayment && nasiya.settlementQuotes && !ledgerQuarantined && isOperationallyActive && !isCompleted && (
+            <Button variant="outline" onClick={() => setSettlementModalOpen(true)} className="h-9 px-4 text-sm border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 rounded">
+              Nasiyani yopish
             </Button>
           )}
           {canResolveNasiya && (
@@ -645,7 +721,17 @@ function AuthorizedNasiyaDetailPage() {
 
       {isCompleted && (
         <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3">
-          <div className="text-sm font-semibold text-emerald-900">Bu nasiya to'liq yopilgan.</div>
+          <div className="text-sm font-semibold text-emerald-900">
+            {nasiya.settlement?.mode === 'WAIVE_REMAINING_PROFIT'
+              ? 'Bu nasiya kelgusi foyda kechilib yopilgan.'
+              : nasiya.settlement
+                ? 'Bu nasiya foydasi bilan yopilgan.'
+                : "Bu nasiya to'liq yopilgan."}
+          </div>
+          {nasiya.settlement && <div className="mt-1 text-xs text-emerald-800/80">
+            Olingan: {mfmt(nasiya.settlement.cashReceived)}
+            {nasiya.settlement.interestWaived.minorUnits > 0 ? ` · Kechilgan foyda: ${mfmt(nasiya.settlement.interestWaived)}` : ''}
+          </div>}
           <div className="text-xs text-emerald-800/80 mt-0.5">Qurilma sotilgan/nasiyadagi holatida qoladi — omborga qaytarilmaydi.</div>
         </div>
       )}
@@ -712,6 +798,9 @@ function AuthorizedNasiyaDetailPage() {
           { label: "Bo'lib to'lash jami (boshlang'ichsiz)", value: mfmt(ledger.financed) },
           { label: 'Jami shartnoma qiymati', value: mfmt(contractTotal) },
           { label: "To'langan", value: mfmt(ledger.paid) },
+          ...(ledger.waived.minorUnits > 0
+            ? [{ label: 'Kechilgan kelgusi foyda', value: mfmt(ledger.waived) }]
+            : []),
           {
             label: "Qarz qoldig'i",
             value: mfmt(ledger.remaining),
@@ -740,7 +829,9 @@ function AuthorizedNasiyaDetailPage() {
             </CardHeader>
             <CardContent>
               <div className="flex justify-between text-sm mb-2">
-                <span className="text-zinc-600 font-medium">{mfmt(ledger.paid)} to'landi</span>
+                <span className="text-zinc-600 font-medium">
+                  {mfmt(ledger.paid)} to'landi{ledger.waived.minorUnits > 0 ? ` · ${mfmt(ledger.waived)} kechildi` : ''}
+                </span>
                 <span className="font-bold text-zinc-900">{pct}%</span>
               </div>
               <Progress value={pct} className="h-2.5 rounded-full" />
@@ -824,6 +915,11 @@ function AuthorizedNasiyaDetailPage() {
             <CardDescription>Arxivlash va qayta ochish amallari</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
+            {nasiya.resolutionHistoryTruncated && (
+              <p role="status" className="rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                Eng so‘nggi 100 ta arxivlash amali ko‘rsatilmoqda; eski yozuvlar audit tarixida saqlanadi.
+              </p>
+            )}
             {resolutionEvents.map((event) => (
               <div key={event.id} className="rounded-lg border border-zinc-200 p-3 text-sm">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -877,6 +973,8 @@ function AuthorizedNasiyaDetailPage() {
         logsLoaded={!canViewLogs || logsLoaded}
         logsLoading={logsLoading}
         onLoadLogs={canViewLogs ? requestLogs : undefined}
+        settlement={nasiya.settlement}
+        paymentHistoryTruncated={nasiya.paymentHistoryTruncated}
       />
 
       {/* Payment modal — shared component, also used on the nasiyalar list */}
@@ -901,6 +999,21 @@ function AuthorizedNasiyaDetailPage() {
           deviceName={nasiya.device.model}
           initialContext={operationContext}
           onSuccess={applyDeferResult}
+        />
+      )}
+
+      {canReceivePayment && nasiya.settlementQuotes && !ledgerQuarantined && isOperationallyActive && !isCompleted && (
+        <NasiyaSettlementModal
+          nasiyaId={nasiya.id}
+          shopId={nasiya.shopId}
+          open={settlementModalOpen}
+          onOpenChange={setSettlementModalOpen}
+          initialQuotes={nasiya.settlementQuotes}
+          canWaiveProfit={canWaiveProfit}
+          customerName={nasiya.customer.name}
+          deviceName={nasiya.device.model}
+          onQuotesRefreshed={(quotes) => setNasiya((current) => current ? { ...current, settlementQuotes: quotes } : current)}
+          onSuccess={applySettlementResult}
         />
       )}
 
