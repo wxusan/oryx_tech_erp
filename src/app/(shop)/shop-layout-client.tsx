@@ -103,7 +103,7 @@ export function ShopLayoutClient({
       grantedPermissions={grantedPermissions}
       legacyFullAccess={legacyFullAccess}
     >
-      <div className="flex min-h-screen flex-col bg-zinc-50 md:h-screen md:flex-row md:overflow-hidden">
+      <div className="flex min-h-dvh flex-col bg-zinc-50 md:h-dvh md:min-h-0 md:flex-row md:overflow-hidden">
       <aside className="flex w-full flex-shrink-0 flex-col border-b border-zinc-200 bg-white/95 md:w-64 md:border-b-0 md:border-r">
         <div className="px-4 py-5 border-b border-zinc-200">
           <div className="flex items-center justify-between gap-2">
@@ -146,7 +146,7 @@ export function ShopLayoutClient({
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col md:overflow-hidden">
         <header className="sticky top-0 z-40 flex h-14 flex-shrink-0 items-center justify-between gap-2 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur sm:px-6">
           <div className="flex min-w-0 items-center gap-2 sm:gap-3">
             <span className="hidden text-sm font-medium text-zinc-900 sm:inline">Do&apos;kon portali</span>
@@ -168,7 +168,7 @@ export function ShopLayoutClient({
 
         {canSeeReceivables && <DueOverdueBanner initialData={initialDueSummary} />}
 
-        <main className="min-w-0 flex-1 overflow-auto bg-zinc-50">{children}</main>
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-zinc-50">{children}</main>
       </div>
       </div>
     </ShopAccessProvider>

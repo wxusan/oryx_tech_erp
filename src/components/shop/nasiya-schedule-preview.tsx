@@ -16,12 +16,11 @@ export function NasiyaSchedulePreview({
   return (
     <div className="overflow-hidden rounded border border-zinc-200">
       <div className="flex items-center justify-between border-b border-zinc-200 bg-zinc-50 px-4 py-3">
-        <span className="text-sm font-semibold text-zinc-900">To&apos;lov jadvali</span>
+        <span id="nasiya-schedule-preview-heading" className="text-sm font-semibold text-zinc-900">Nasiya to&apos;lov jadvali</span>
         <span className="text-xs text-zinc-500">{rows.length} oy</span>
       </div>
       <div>
-        <table className="w-full text-sm">
-          <caption className="sr-only">Nasiya to&apos;lov jadvali</caption>
+        <table aria-labelledby="nasiya-schedule-preview-heading" className="w-full text-sm">
           <thead className="border-b border-zinc-200 bg-zinc-50">
             <tr>
               {['#', 'Sana', 'Miqdor'].map((heading) => (

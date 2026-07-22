@@ -101,8 +101,7 @@ export function NasiyaHistorySections({
       <section className="overflow-hidden rounded border border-zinc-200" aria-labelledby="nasiya-schedule-heading">
         <h2 id="nasiya-schedule-heading" className="border-b border-zinc-200 bg-zinc-50 px-4 py-3 text-sm font-semibold text-zinc-900">To&apos;lov jadvali</h2>
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] text-sm">
-            <caption className="sr-only">Nasiya bo&apos;yicha oylik to&apos;lov jadvali</caption>
+          <table aria-labelledby="nasiya-schedule-heading" className="w-full min-w-[760px] text-sm">
             <thead className="border-b border-zinc-200"><tr>{['#', 'Sana', 'Miqdor', "To'langan", 'Kechilgan foyda', 'Holat'].map((heading) => <th key={heading} className="bg-zinc-50 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">{heading}</th>)}</tr></thead>
             <tbody>{sortedSchedules.map((row) => {
               const status = rowStatus(row)
@@ -136,8 +135,7 @@ export function NasiyaHistorySections({
           <button type="button" onClick={onLoadHistory} disabled={historyLoading} className="mt-3 rounded border border-zinc-300 px-3 py-2 text-sm font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-50">
             {historyLoading ? 'Tarix yuklanmoqda...' : 'Batafsil tarixni yuklash'}
           </button>
-        </div> : payments.length ? <div className="overflow-x-auto"><table className="w-full min-w-[560px] text-sm">
-          <caption className="sr-only">Nasiya bo&apos;yicha qabul qilingan to&apos;lovlar</caption>
+        </div> : payments.length ? <div className="overflow-x-auto"><table aria-labelledby="nasiya-payments-heading" className="w-full min-w-[560px] text-sm">
           <thead className="border-b border-zinc-200"><tr>{['Sana', 'Miqdor', 'Usul', 'Izoh'].map((heading) => <th key={heading} className="bg-zinc-50 px-4 py-2.5 text-left text-xs font-semibold uppercase tracking-wide text-zinc-500">{heading}</th>)}</tr></thead>
           <tbody>{payments.map((payment) => {
             const amount = paymentAmountDisplay(payment)
