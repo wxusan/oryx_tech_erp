@@ -84,6 +84,8 @@ const routes: Array<{ path: string; load: () => Promise<RouteModule> }> = [
   { path: 'src/app/api/shop-admin/profile/route.ts', load: () => import('@/app/api/shop-admin/profile/route') },
   { path: 'src/app/api/shop/profile/route.ts', load: () => import('@/app/api/shop/profile/route') },
   { path: 'src/app/api/shop/staff/[id]/route.ts', load: () => import('@/app/api/shop/staff/[id]/route') },
+  { path: 'src/app/api/shop/staff/roles/[roleId]/route.ts', load: () => import('@/app/api/shop/staff/roles/[roleId]/route') },
+  { path: 'src/app/api/shop/staff/roles/route.ts', load: () => import('@/app/api/shop/staff/roles/route') },
   { path: 'src/app/api/shop/staff/route.ts', load: () => import('@/app/api/shop/staff/route') },
   { path: 'src/app/api/shops/[id]/admins/route.ts', load: () => import('@/app/api/shops/[id]/admins/route') },
   { path: 'src/app/api/shops/[id]/owner/route.ts', load: () => import('@/app/api/shops/[id]/owner/route') },

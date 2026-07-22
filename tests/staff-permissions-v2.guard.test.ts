@@ -113,16 +113,22 @@ describe('Staff Permissions V2 live-boundary source guard', () => {
     expect(updateRoute).toContain("throw Object.assign(new Error('AUTHORIZATION_CHANGED')")
   })
 
-  it('keeps presets as package-filtered form helpers and never runtime roles', () => {
-    const staffUi = readFileSync(resolve(process.cwd(), 'src/components/shop/staff-management.tsx'), 'utf8')
-    expect(staffUi).toContain('const staffPermissionPresets:')
+  it('stores reusable shop roles while keeping effective authorization materialized', () => {
+    const presets = readFileSync(resolve(process.cwd(), 'src/lib/staff-role-presets.ts'), 'utf8')
+    const schema = readFileSync(resolve(process.cwd(), 'prisma/schema.prisma'), 'utf8')
+    const auth = readFileSync(resolve(process.cwd(), 'src/lib/api-auth.ts'), 'utf8')
+    const page = readFileSync(resolve(process.cwd(), 'src/app/(shop)/shop/xodimlar/page.tsx'), 'utf8')
+    expect(presets).toContain('SHOP_STAFF_ROLE_PRESETS')
     for (const label of ['Kassir', 'Omborchi', 'Nasiya undiruvchi', 'Nazoratchi', 'Hisobchi']) {
-      expect(staffUi).toContain(`label: '${label}'`)
+      expect(presets).toContain(`name: '${label}'`)
     }
-    expect(staffUi).toContain('permissionRequiredFeatures(permission.code).every')
-    expect(staffUi).toContain('window.confirm(`${sensitiveAdditions.length} ta muhim ruxsatni yoqishni tasdiqlaysizmi?`)')
-    const accessControl = readFileSync(resolve(process.cwd(), 'src/lib/access-control.ts'), 'utf8')
-    expect(accessControl).not.toContain('staffPermissionPresets')
+    expect(schema).toContain('model ShopStaffRole {')
+    expect(schema).toContain('model ShopStaffRolePermission {')
+    expect(schema).toContain('staffRoleId')
+    expect(auth).not.toContain('staffRole:')
+    expect(auth).not.toContain('ShopStaffRole')
+    expect(page).toContain('Promise.all([')
+    expect(page).toContain('getShopStaffRoles(')
   })
 
   it('prevents the signed-in owner credentials from autofilling the new-staff form', () => {

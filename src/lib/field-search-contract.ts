@@ -296,7 +296,8 @@ export const FORM_SURFACE_CONTRACT = [
       always('shop.staff.create', 'password', 'SECRET', { noSearchReason: 'Passwords are never searchable.' }),
       optional('shop.staff.create', 'telegramId', 'SECRET', { noSearchReason: 'Private delivery identity.' }),
       optional('shop.staff.create', 'telegramNotificationsEnabled', 'STATUS_FILTER'),
-      optional('shop.staff.create', 'permissionCodes', 'STATUS_FILTER'),
+      optional('shop.staff.create', 'permissionCodes', 'STATUS_FILTER'), optional('shop.staff.create', 'roleId', 'STATUS_FILTER'),
+      optional('shop.staff.create', 'logsViewEnabled', 'STATUS_FILTER'), optional('shop.staff.create', 'isActive', 'STATUS_FILTER'),
     ],
   },
   {
@@ -308,8 +309,30 @@ export const FORM_SURFACE_CONTRACT = [
       optional('shop.staff.update', 'name', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Bounded owner-only staff roster.' }),
       optional('shop.staff.update', 'phone', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Bounded owner-only staff roster.' }),
       optional('shop.staff.update', 'password', 'SECRET', { noSearchReason: 'Passwords are never searchable.' }),
-      optional('shop.staff.update', 'telegramNotificationsEnabled', 'STATUS_FILTER'), optional('shop.staff.update', 'permissionCodes', 'STATUS_FILTER'), optional('shop.staff.update', 'isActive', 'STATUS_FILTER'),
+      optional('shop.staff.update', 'login', 'SECRET', { noSearchReason: 'Authentication login is never public search.' }),
+      optional('shop.staff.update', 'telegramNotificationsEnabled', 'STATUS_FILTER'), optional('shop.staff.update', 'permissionCodes', 'STATUS_FILTER'), optional('shop.staff.update', 'roleId', 'STATUS_FILTER'), optional('shop.staff.update', 'logsViewEnabled', 'STATUS_FILTER'), optional('shop.staff.update', 'isActive', 'STATUS_FILTER'),
       always('shop.staff.update', 'note'),
+    ],
+  },
+  {
+    id: 'shop.staff-role.create',
+    source: 'src/components/shop/staff-role-management.tsx',
+    endpoint: 'POST /api/shop/staff/roles',
+    schemaSource: 'src/lib/shop-staff-role-contract.ts#createShopStaffRoleSchema',
+    fields: [
+      always('shop.staff-role.create', 'name', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Shop roles are capped at 35 and displayed as one bounded list.' }),
+      optional('shop.staff-role.create', 'description'), optional('shop.staff-role.create', 'permissionCodes', 'STATUS_FILTER'), optional('shop.staff-role.create', 'logsViewEnabled', 'STATUS_FILTER'),
+    ],
+  },
+  {
+    id: 'shop.staff-role.update',
+    source: 'src/components/shop/staff-role-management.tsx',
+    endpoint: 'PATCH /api/shop/staff/roles/[roleId]',
+    schemaSource: 'src/lib/shop-staff-role-contract.ts#updateShopStaffRoleSchema',
+    fields: [
+      optional('shop.staff-role.update', 'name', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Shop roles are capped at 35 and displayed as one bounded list.' }),
+      optional('shop.staff-role.update', 'description'), optional('shop.staff-role.update', 'permissionCodes', 'STATUS_FILTER'), optional('shop.staff-role.update', 'logsViewEnabled', 'STATUS_FILTER'),
+      always('shop.staff-role.update', 'note'),
     ],
   },
   {

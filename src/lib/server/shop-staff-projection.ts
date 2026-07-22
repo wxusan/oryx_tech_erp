@@ -12,6 +12,7 @@ import {
 } from '@/lib/shop-staff-contract'
 import { principalHasPermission, type ShopPrincipal } from '@/lib/server/shop-access'
 import { prisma } from '@/lib/prisma'
+import { SHOP_STAFF_ROLE_KIND } from '@/lib/staff-role-presets'
 
 export const shopStaffProjectionSelect = {
   id: true,
@@ -24,8 +25,18 @@ export const shopStaffProjectionSelect = {
   telegramNotificationsEnabled: true,
   legacyFullAccess: true,
   permissionVersion: true,
+  roleVersionApplied: true,
   createdAt: true,
   permissions: { select: { permissionCode: true } },
+  staffRole: {
+    select: {
+      id: true,
+      name: true,
+      kind: true,
+      isArchived: true,
+      version: true,
+    },
+  },
 } satisfies Prisma.ShopAdminSelect
 
 export type ShopStaffProjectionRow = Prisma.ShopAdminGetPayload<{
@@ -84,6 +95,18 @@ export function projectShopStaff(
     permissionCodes: revealPermissions
       ? visiblePermissions.filter((code) => code !== STAFF_LOGS_PERMISSION)
       : null,
+    staffRole: row.staffRole
+      ? {
+          id: row.staffRole.id,
+          name: row.staffRole.name,
+          kind: row.staffRole.kind === SHOP_STAFF_ROLE_KIND.BUILT_IN
+            ? SHOP_STAFF_ROLE_KIND.BUILT_IN
+            : SHOP_STAFF_ROLE_KIND.CUSTOM,
+          isArchived: row.staffRole.isArchived,
+          version: row.staffRole.version,
+        }
+      : null,
+    roleVersionApplied: revealPermissions ? row.roleVersionApplied : null,
   }
 }
 

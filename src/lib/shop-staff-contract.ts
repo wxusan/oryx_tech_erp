@@ -7,6 +7,7 @@ import {
   type ShopPermissionCode,
 } from '@/lib/access-control'
 import { passwordSchema, phoneSchema } from '@/lib/validations'
+import type { ShopStaffRoleKind } from '@/lib/staff-role-presets'
 
 /**
  * Log access is a deliberately separate owner decision. Keeping it out of
@@ -14,7 +15,7 @@ import { passwordSchema, phoneSchema } from '@/lib/validations'
  * while still storing the authoritative LOG_VIEW grant in the same typed
  * permission table.
  */
-export const STAFF_LOGS_PERMISSION: ShopPermissionCode = 'LOG_VIEW'
+export const STAFF_LOGS_PERMISSION = 'LOG_VIEW' as const satisfies ShopPermissionCode
 
 /**
  * Archive and restore are one staff-facing capability. They remain distinct
@@ -91,9 +92,17 @@ const memberFields = {
 
 export const createShopStaffSchema = z.object({
   ...memberFields,
+  roleId: z.string().min(1).max(100).nullable().optional(),
   isActive: z.boolean().default(true),
   login: loginSchema,
   password: passwordSchema,
+}).superRefine((value, context) => {
+  if (value.roleId && (value.permissionCodes.length > 0 || value.logsViewEnabled)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Lavozim yoki individual ruxsatlarni tanlang; ikkalasini birga emas",
+    })
+  }
 })
 
 export const updateShopStaffSchema = z.object({
@@ -105,13 +114,22 @@ export const updateShopStaffSchema = z.object({
   telegramNotificationsEnabled: z.boolean().optional(),
   logsViewEnabled: z.boolean().optional(),
   permissionCodes: permissionCodesSchema.optional(),
+  roleId: z.string().min(1).max(100).nullable().optional(),
   isActive: z.boolean().optional(),
   note: z.string().trim().min(5, "Sabab kamida 5 ta belgidan iborat bo'lishi kerak").max(1000),
+}).superRefine((value, context) => {
+  if (value.roleId && (value.permissionCodes !== undefined || value.logsViewEnabled !== undefined)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Lavozim yoki individual ruxsatlarni tanlang; ikkalasini birga emas",
+    })
+  }
 }).refine(
   (value) => value.name !== undefined || value.phone !== undefined ||
     value.login !== undefined || value.password !== undefined ||
     value.telegramNotificationsEnabled !== undefined || value.permissionCodes !== undefined ||
     value.logsViewEnabled !== undefined ||
+    value.roleId !== undefined ||
     value.isActive !== undefined,
   "Kamida bitta o'zgarish kiritilishi kerak",
 )
@@ -132,5 +150,13 @@ export interface ShopStaffDto {
   logsViewEnabled: boolean | null
   permissionVersion: number | null
   permissionCodes: ShopPermissionCode[] | null
+  staffRole: {
+    id: string
+    name: string
+    kind: ShopStaffRoleKind
+    isArchived: boolean
+    version: number
+  } | null
+  roleVersionApplied: number | null
   createdAt: string
 }

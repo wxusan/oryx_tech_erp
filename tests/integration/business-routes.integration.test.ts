@@ -2,6 +2,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
 import { getShopMonthlyAccountingAggregate } from '@/lib/server/shop-stats-queries'
+import { seedBuiltInStaffRoles } from '@/lib/server/shop-staff-roles'
 
 const authState = vi.hoisted(() => ({ session: null as unknown }))
 
@@ -207,6 +208,41 @@ async function updateStaffRequest(staffId: string, body: Record<string, unknown>
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   }), { params: Promise.resolve({ id: staffId }) })
+}
+
+async function createStaffRoleRequest(body: Record<string, unknown>) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/shop/staff/roles/route')
+  return POST(new NextRequest('http://localhost/api/shop/staff/roles', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }))
+}
+
+async function staffRoleListRequest() {
+  const { GET } = await import('@/app/api/shop/staff/roles/route')
+  return GET()
+}
+
+async function updateStaffRoleRequest(roleId: string, body: Record<string, unknown>) {
+  const { NextRequest } = await import('next/server')
+  const { PATCH } = await import('@/app/api/shop/staff/roles/[roleId]/route')
+  return PATCH(new NextRequest(`http://localhost/api/shop/staff/roles/${roleId}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }), { params: Promise.resolve({ roleId }) })
+}
+
+async function archiveStaffRoleRequest(roleId: string, body: Record<string, unknown>) {
+  const { NextRequest } = await import('next/server')
+  const { DELETE } = await import('@/app/api/shop/staff/roles/[roleId]/route')
+  return DELETE(new NextRequest(`http://localhost/api/shop/staff/roles/${roleId}`, {
+    method: 'DELETE',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }), { params: Promise.resolve({ roleId }) })
 }
 
 async function useSuperAdmin(actor: Awaited<ReturnType<typeof seedActor>>) {
@@ -675,6 +711,213 @@ describe('real-PostgreSQL route evidence', () => {
 
     useShopAdmin(target)
     expect((await deviceListRequest()).status).toBe(401)
+  })
+
+  it('seeds built-ins, creates Shogirt, and assigns its exact materialized grants', async () => {
+    const actor = await seedActor('staff_role_assign')
+    await prisma.$transaction((tx) => seedBuiltInStaffRoles(tx, actor.shop.id))
+    useShopAdmin(actor)
+
+    const roleResponse = await createStaffRoleRequest({
+      name: 'Shogirt',
+      description: 'Usta nazoratidagi yordamchi',
+      permissionCodes: ['INVENTORY_VIEW', 'DEVICE_CREATE'],
+      logsViewEnabled: false,
+    })
+    expect(roleResponse.status).toBe(201)
+    const rolePayload = await roleResponse.json() as { data: { id: string; version: number } }
+
+    const createResponse = await createStaffRequest({
+      name: 'Yangi shogirt',
+      phone: '+998901010111',
+      login: 'staff_shogirt_exact',
+      password: 'safe-password',
+      roleId: rolePayload.data.id,
+    })
+    expect(createResponse.status).toBe(201)
+
+    const member = await prisma.shopAdmin.findUniqueOrThrow({
+      where: { login: 'staff_shogirt_exact' },
+      include: { permissions: { orderBy: { permissionCode: 'asc' } }, staffRole: true },
+    })
+    expect(member.staffRole).toMatchObject({ id: rolePayload.data.id, name: 'Shogirt', kind: 'CUSTOM' })
+    expect(member.roleVersionApplied).toBe(1)
+    expect(member.permissions.map((permission) => permission.permissionCode)).toEqual(['DEVICE_CREATE', 'INVENTORY_VIEW'])
+
+    const listResponse = await staffRoleListRequest()
+    expect(listResponse.status).toBe(200)
+    const listPayload = await listResponse.json() as { data: Array<{ name: string; kind: string }> }
+    expect(listPayload.data).toHaveLength(6)
+    expect(listPayload.data).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'Kassir', kind: 'BUILT_IN' }),
+      expect.objectContaining({ name: 'Shogirt', kind: 'CUSTOM' }),
+    ]))
+
+    const builtIn = await prisma.shopStaffRole.findFirstOrThrow({
+      where: { shopId: actor.shop.id, kind: 'BUILT_IN' },
+    })
+    expect((await updateStaffRoleRequest(builtIn.id, {
+      version: builtIn.version,
+      name: 'O‘zgartirishga urinish',
+      note: 'Standart rol himoyasi',
+    })).status).toBe(409)
+  })
+
+  it('propagates role permission edits, revokes assigned sessions, and keeps name-only edits live', async () => {
+    const actor = await seedActor('staff_role_propagate')
+    useShopAdmin(actor)
+    const createRole = await createStaffRoleRequest({
+      name: 'Yordamchi',
+      permissionCodes: ['SALE_VIEW'],
+    })
+    const role = (await createRole.json() as { data: { id: string; version: number } }).data
+    const target = await seedStaff(actor, 'role_propagation_target', [])
+
+    expect((await updateStaffRequest(target.admin.id, {
+      roleId: role.id,
+      note: 'Yordamchi lavozimi biriktirildi',
+    })).status).toBe(200)
+    const assigned = await prisma.shopAdmin.findUniqueOrThrow({ where: { id: target.admin.id } })
+    const freshSession = await prisma.authSession.create({
+      data: {
+        id: 'role-propagation-fresh-session',
+        actorId: assigned.id,
+        actorType: 'SHOP_ADMIN',
+        shopId: actor.shop.id,
+        sessionVersion: assigned.sessionVersion,
+        packageVersionId: actor.packageVersion.id,
+        policy: 'IDLE_10_MINUTES',
+        expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+      },
+    })
+
+    const permissionUpdate = await updateStaffRoleRequest(role.id, {
+      version: 1,
+      permissionCodes: ['INVENTORY_VIEW', 'DEVICE_CREATE'],
+      logsViewEnabled: false,
+      note: 'Lavozim vakolatlari yangilandi',
+    })
+    expect(permissionUpdate.status).toBe(200)
+    const [afterPermissionUpdate, grants, revokedSession] = await Promise.all([
+      prisma.shopAdmin.findUniqueOrThrow({ where: { id: target.admin.id } }),
+      prisma.shopMemberPermission.findMany({
+        where: { shopAdminId: target.admin.id },
+        select: { permissionCode: true },
+        orderBy: { permissionCode: 'asc' },
+      }),
+      prisma.authSession.findUniqueOrThrow({ where: { id: freshSession.id } }),
+    ])
+    expect(grants.map((grant) => grant.permissionCode)).toEqual(['DEVICE_CREATE', 'INVENTORY_VIEW'])
+    expect(afterPermissionUpdate.permissionVersion).toBe(assigned.permissionVersion + 1)
+    expect(afterPermissionUpdate.sessionVersion).toBe(assigned.sessionVersion + 1)
+    expect(afterPermissionUpdate.roleVersionApplied).toBe(2)
+    expect(revokedSession.revokedAt).not.toBeNull()
+
+    const nameOnlySession = await prisma.authSession.create({
+      data: {
+        id: 'role-propagation-name-session',
+        actorId: afterPermissionUpdate.id,
+        actorType: 'SHOP_ADMIN',
+        shopId: actor.shop.id,
+        sessionVersion: afterPermissionUpdate.sessionVersion,
+        packageVersionId: actor.packageVersion.id,
+        policy: 'IDLE_10_MINUTES',
+        expiresAt: new Date('2099-01-01T00:00:00.000Z'),
+      },
+    })
+    const nameUpdate = await updateStaffRoleRequest(role.id, {
+      version: 2,
+      name: 'Katta yordamchi',
+      permissionCodes: ['INVENTORY_VIEW', 'DEVICE_CREATE'],
+      logsViewEnabled: false,
+      note: 'Lavozim nomi aniqlashtirildi',
+    })
+    expect(nameUpdate.status).toBe(200)
+    const [afterNameUpdate, liveNameSession] = await Promise.all([
+      prisma.shopAdmin.findUniqueOrThrow({ where: { id: target.admin.id } }),
+      prisma.authSession.findUniqueOrThrow({ where: { id: nameOnlySession.id } }),
+    ])
+    expect(afterNameUpdate.permissionVersion).toBe(afterPermissionUpdate.permissionVersion)
+    expect(afterNameUpdate.sessionVersion).toBe(afterPermissionUpdate.sessionVersion)
+    expect(afterNameUpdate.roleVersionApplied).toBe(3)
+    expect(liveNameSession.revokedAt).toBeNull()
+  })
+
+  it('enforces tenant isolation, owner-only role CRUD, and delegated assignment limits', async () => {
+    const actor = await seedActor('staff_role_owner')
+    useShopAdmin(actor)
+    const routineRoleResponse = await createStaffRoleRequest({ name: 'Sotuvchi', permissionCodes: ['SALE_VIEW'] })
+    const restrictedRoleResponse = await createStaffRoleRequest({ name: 'Qaytaruvchi', permissionCodes: ['SALE_RETURN_REFUND'] })
+    const routineRole = (await routineRoleResponse.json() as { data: { id: string } }).data
+    const restrictedRole = (await restrictedRoleResponse.json() as { data: { id: string } }).data
+    const manager = await seedStaff(actor, 'role_manager', ['STAFF_PERMISSION_MANAGE'])
+    const target = await seedStaff(actor, 'role_manager_target', [])
+    const sensitiveTarget = await seedStaff(actor, 'role_manager_sensitive_target', [])
+    expect((await updateStaffRequest(sensitiveTarget.admin.id, {
+      roleId: restrictedRole.id,
+      note: 'Egasi cheklangan lavozimni biriktirdi',
+    })).status).toBe(200)
+    useShopAdmin(manager)
+
+    expect((await createStaffRoleRequest({ name: 'Noqonuniy', permissionCodes: [] })).status).toBe(403)
+    expect((await updateStaffRequest(target.admin.id, {
+      roleId: routineRole.id,
+      note: 'Oddiy lavozim biriktirildi',
+    })).status).toBe(200)
+    expect((await updateStaffRequest(target.admin.id, {
+      roleId: restrictedRole.id,
+      note: 'Cheklangan lavozimga urinish',
+    })).status).toBe(403)
+    expect((await updateStaffRequest(sensitiveTarget.admin.id, {
+      roleId: routineRole.id,
+      note: 'Cheklangan lavozimni almashtirishga urinish',
+    })).status).toBe(403)
+
+    const otherActor = await seedActor('staff_role_other_tenant')
+    useShopAdmin(otherActor)
+    expect((await updateStaffRoleRequest(routineRole.id, {
+      version: 1,
+      name: 'Begona tenant',
+      note: 'Tenant chegarasi tekshiruvi',
+    })).status).toBe(404)
+    expect((await updateStaffRequest(target.admin.id, {
+      roleId: routineRole.id,
+      note: 'Begona xodimga urinish',
+    })).status).toBe(404)
+  })
+
+  it('archives custom roles without stripping assigned grants or allowing new assignment', async () => {
+    const actor = await seedActor('staff_role_archive')
+    useShopAdmin(actor)
+    const createdRole = await createStaffRoleRequest({ name: 'Vaqtinchalik', permissionCodes: ['CUSTOMER_VIEW'] })
+    const role = (await createdRole.json() as { data: { id: string; version: number } }).data
+    const target = await seedStaff(actor, 'role_archive_target', [])
+    expect((await updateStaffRequest(target.admin.id, {
+      roleId: role.id,
+      note: 'Vaqtinchalik lavozim berildi',
+    })).status).toBe(200)
+
+    expect((await archiveStaffRoleRequest(role.id, {
+      version: role.version,
+      note: 'Lavozim endi ishlatilmaydi',
+    })).status).toBe(200)
+    const [archived, member, grants] = await Promise.all([
+      prisma.shopStaffRole.findUniqueOrThrow({ where: { id: role.id } }),
+      prisma.shopAdmin.findUniqueOrThrow({ where: { id: target.admin.id } }),
+      prisma.shopMemberPermission.findMany({ where: { shopAdminId: target.admin.id } }),
+    ])
+    expect(archived.isArchived).toBe(true)
+    expect(member.staffRoleId).toBe(role.id)
+    expect(member.roleVersionApplied).toBe(archived.version)
+    expect(grants.map((grant) => grant.permissionCode)).toEqual(['CUSTOMER_VIEW'])
+
+    expect((await createStaffRequest({
+      name: 'Arxiv rolga urinish',
+      phone: '+998901010119',
+      login: 'staff_archived_role_attempt',
+      password: 'safe-password',
+      roleId: role.id,
+    })).status).toBe(400)
   })
 
   it('enforces live staff permissions on real routes while preserving allowed inventory access', async () => {

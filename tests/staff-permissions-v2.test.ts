@@ -112,6 +112,9 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
     expect(createShopStaffSchema.safeParse({ ...base, permissionCodes: ['CASH_SALE_CREATE'] }).success).toBe(false)
     expect(createShopStaffSchema.safeParse({ ...base, permissionCodes: [STAFF_LOGS_PERMISSION] }).success).toBe(false)
     expect(createShopStaffSchema.safeParse({ ...base, logsViewEnabled: true }).success).toBe(true)
+    expect(createShopStaffSchema.safeParse({ ...base, roleId: 'role-1' }).success).toBe(true)
+    expect(createShopStaffSchema.safeParse({ ...base, roleId: 'role-1', permissionCodes: ['SALE_CREATE'] }).success).toBe(false)
+    expect(updateShopStaffSchema.safeParse({ staffId: 'staff-1', note: 'Lavozim yangilandi', roleId: 'role-1', permissionCodes: [] }).success).toBe(false)
   })
 
   it('bundles archive and restore into the one staff-facing archive checkbox capability', () => {
@@ -193,6 +196,8 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
       telegramNotificationsEnabled: false,
       legacyFullAccess: false,
       permissionVersion: 1,
+      roleVersionApplied: null,
+      staffRole: null,
       createdAt: new Date('2026-07-15T00:00:00.000Z'),
       permissions: [
         { permissionCode: 'DEVICE_CREATE' },

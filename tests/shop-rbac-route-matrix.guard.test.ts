@@ -37,6 +37,8 @@ const routeMatrix = [
   ['src/app/api/shop/profile/route.ts', 'SHOP_PROFILE_EDIT', 'SHOP_CURRENCY_MANAGE', 'SHOP_TELEGRAM_MANAGE'],
   ['src/app/api/shop/staff/route.ts', 'STAFF_VIEW', 'STAFF_CREATE', 'STAFF_EDIT_PROFILE', 'STAFF_RESET_PASSWORD', 'STAFF_STATUS_MANAGE', 'STAFF_DELETE', 'STAFF_PERMISSION_MANAGE', 'STAFF_NOTIFICATION_MANAGE'],
   ['src/app/api/shop/staff/[id]/route.ts', 'STAFF_EDIT_PROFILE', 'STAFF_RESET_PASSWORD', 'STAFF_STATUS_MANAGE', 'STAFF_DELETE', 'STAFF_PERMISSION_MANAGE', 'STAFF_NOTIFICATION_MANAGE'],
+  ['src/app/api/shop/staff/roles/route.ts', 'STAFF_VIEW', 'STAFF_CREATE', 'STAFF_EDIT_PROFILE', 'STAFF_PERMISSION_MANAGE'],
+  ['src/app/api/shop/staff/roles/[roleId]/route.ts', 'STAFF_PERMISSION_MANAGE'],
 ] as const
 
 const featureMatrix = [
