@@ -24,6 +24,7 @@ import { tashkentTodayInputValue } from '@/lib/timezone'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { normalizePhone } from '@/lib/phone'
 import { createTelegramDisableTransitionInTransaction } from '@/lib/server/telegram-lifecycle'
+import { seedBuiltInStaffRoles } from '@/lib/server/shop-staff-roles'
 
 async function runSerializable<T>(operation: () => Promise<T>) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -208,6 +209,8 @@ export async function POST(req: NextRequest) {
           billingAnchorDay: Number(today.slice(-2)),
         },
       })
+
+      await seedBuiltInStaffRoles(tx, newShop.id)
 
       let ownerAdminId: string | null = null
       for (const [index, admin] of adminsWithPasswordHash.entries()) {
