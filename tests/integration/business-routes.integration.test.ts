@@ -1,7 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
-import { getCustomerProfileOverview } from '@/lib/server/customer-profile'
+import { getCustomerProfileHistory, getCustomerProfileOverview } from '@/lib/server/customer-profile'
 import { getShopMonthlyAccountingAggregate } from '@/lib/server/shop-stats-queries'
 import { seedBuiltInStaffRoles } from '@/lib/server/shop-staff-roles'
 import { getShopRangeReport } from '@/lib/server/shop-report-range'
@@ -480,6 +480,195 @@ async function seedSettlementNasiya(
   return { customer, device, ...result }
 }
 
+async function seedReturnableNasiya(
+  actor: Awaited<ReturnType<typeof seedActor>>,
+  suffix: string,
+) {
+  const customer = await prisma.customer.create({
+    data: {
+      shopId: actor.shop.id,
+      name: `Returnable Nasiya customer ${suffix}`,
+      phone: `+99892${suffix.padStart(7, '0').slice(-7)}`,
+      normalizedPhone: `99892${suffix.padStart(7, '0').slice(-7)}`,
+    },
+  })
+  const device = await prisma.device.create({
+    data: {
+      shopId: actor.shop.id,
+      model: `Returnable Nasiya phone ${suffix}`,
+      purchasePrice: 600,
+      purchaseInputAmount: 600,
+      purchaseAmountUzsSnapshot: 600,
+      imei: `ROUTE-NASIYA-RETURN-${suffix}`,
+      addedBy: actor.admin.id,
+      status: 'SOLD_NASIYA',
+    },
+  })
+
+  const result = await prisma.$transaction(async (tx) => {
+    const nasiya = await tx.nasiya.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        totalAmount: 1_000,
+        downPayment: 100,
+        baseRemainingAmount: 900,
+        interestPercent: 11.11,
+        interestAmount: 100,
+        finalNasiyaAmount: 1_000,
+        remainingAmount: 850,
+        months: 3,
+        monthlyPayment: 333,
+        startDate: new Date('2026-06-01T00:00:00.000Z'),
+        contractCurrency: 'UZS',
+        contractTotalAmount: 1_000,
+        contractDownPayment: 100,
+        contractBaseRemainingAmount: 900,
+        contractInterestAmount: 100,
+        contractFinalAmount: 1_000,
+        contractMonthlyPayment: 333,
+        contractRemainingAmount: 850,
+        contractPaidAmount: 150,
+        contractCostBasisAmount: 600,
+        contractMarginAmount: 400,
+        contractDownPaymentPrincipalAmount: 100,
+        contractDownPaymentMarginAmount: 0,
+        accountingReconstructionStatus: 'COMPLETE',
+        accountingReconstructedAt: new Date('2026-07-01T00:00:00.000Z'),
+        createdBy: actor.admin.id,
+      },
+    })
+    const paidSchedule = await tx.nasiyaSchedule.create({
+      data: {
+        nasiyaId: nasiya.id,
+        shopId: actor.shop.id,
+        monthNumber: 1,
+        dueDate: new Date('2026-07-10T00:00:00.000Z'),
+        expectedAmount: 150,
+        paidAmount: 150,
+        status: 'PAID',
+        paidAt: new Date('2026-07-15T08:00:00.000Z'),
+        paymentMethod: 'CASH',
+        contractCurrency: 'UZS',
+        contractExpectedAmount: 150,
+        contractPaidAmount: 150,
+        contractRemainingAmount: 0,
+        contractPrincipalAmount: 75,
+        contractMarginAmount: 60,
+        contractInterestAmount: 15,
+        contractPrincipalPaidAmount: 75,
+        contractMarginPaidAmount: 60,
+        contractInterestPaidAmount: 15,
+      },
+    })
+    const openSchedule = await tx.nasiyaSchedule.create({
+      data: {
+        nasiyaId: nasiya.id,
+        shopId: actor.shop.id,
+        monthNumber: 2,
+        dueDate: new Date('2026-08-30T00:00:00.000Z'),
+        expectedAmount: 350,
+        status: 'PENDING',
+        contractCurrency: 'UZS',
+        contractExpectedAmount: 350,
+        contractPaidAmount: 0,
+        contractRemainingAmount: 350,
+        contractPrincipalAmount: 175,
+        contractMarginAmount: 140,
+        contractInterestAmount: 35,
+      },
+    })
+    const finalSchedule = await tx.nasiyaSchedule.create({
+      data: {
+        nasiyaId: nasiya.id,
+        shopId: actor.shop.id,
+        monthNumber: 3,
+        dueDate: new Date('2026-09-30T00:00:00.000Z'),
+        expectedAmount: 500,
+        status: 'PENDING',
+        contractCurrency: 'UZS',
+        contractExpectedAmount: 500,
+        contractPaidAmount: 0,
+        contractRemainingAmount: 500,
+        contractPrincipalAmount: 250,
+        contractMarginAmount: 200,
+        contractInterestAmount: 50,
+      },
+    })
+    const downPayment = await tx.nasiyaPayment.create({
+      data: {
+        nasiyaId: nasiya.id,
+        shopId: actor.shop.id,
+        amount: 100,
+        paymentMethod: 'CASH',
+        paidAt: new Date('2026-07-01T08:00:00.000Z'),
+        note: 'Boshlang‘ich to‘lov',
+        idempotencyKey: `return-down-payment-${suffix}`,
+        paymentInputAmount: 100,
+        paymentInputCurrency: 'UZS',
+        appliedAmountInContractCurrency: 100,
+        createdBy: actor.admin.id,
+      },
+    })
+    const laterPayment = await tx.nasiyaPayment.create({
+      data: {
+        nasiyaId: nasiya.id,
+        nasiyaScheduleId: paidSchedule.id,
+        shopId: actor.shop.id,
+        amount: 150,
+        paymentMethod: 'CASH',
+        paidAt: new Date('2026-07-15T08:00:00.000Z'),
+        note: 'Birinchi oylik qisman to‘lov',
+        idempotencyKey: `return-later-payment-${suffix}`,
+        paymentInputAmount: 150,
+        paymentInputCurrency: 'UZS',
+        appliedAmountInContractCurrency: 150,
+        createdBy: actor.admin.id,
+      },
+    })
+    await tx.nasiyaPaymentAllocation.createMany({
+      data: [
+        {
+          shopId: actor.shop.id,
+          nasiyaId: nasiya.id,
+          nasiyaPaymentId: downPayment.id,
+          nasiyaScheduleId: null,
+          sequence: 1,
+          contractCurrency: 'UZS',
+          contractAmount: 100,
+          contractPrincipalAmount: 100,
+          contractMarginAmount: 0,
+          contractInterestAmount: 0,
+          amountUzs: 100,
+          principalAmountUzs: 100,
+          marginAmountUzs: 0,
+          interestAmountUzs: 0,
+        },
+        {
+          shopId: actor.shop.id,
+          nasiyaId: nasiya.id,
+          nasiyaPaymentId: laterPayment.id,
+          nasiyaScheduleId: paidSchedule.id,
+          sequence: 1,
+          contractCurrency: 'UZS',
+          contractAmount: 150,
+          contractPrincipalAmount: 75,
+          contractMarginAmount: 60,
+          contractInterestAmount: 15,
+          amountUzs: 150,
+          principalAmountUzs: 75,
+          marginAmountUzs: 60,
+          interestAmountUzs: 15,
+        },
+      ],
+    })
+    return { nasiya, paidSchedule, openSchedules: [openSchedule, finalSchedule], downPayment, laterPayment }
+  })
+
+  return { customer, device, ...result }
+}
+
 async function seedUsdSettlementNasiya(
   actor: Awaited<ReturnType<typeof seedActor>>,
   suffix: string,
@@ -805,6 +994,33 @@ async function returnDeviceRequest(input: {
     }),
   })
   return POST(request, { params: Promise.resolve({ id: input.deviceId }) })
+}
+
+async function returnNasiyaRequest(input: {
+  nasiyaId: string
+  key: string
+  refundAmount: number
+  expectedReceipts: number
+  expectedRemaining: number
+  refundMethod?: 'CASH' | 'TRANSFER' | 'CARD' | 'OTHER'
+  note?: string
+  inputCurrency?: 'UZS' | 'USD'
+}) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/nasiya/[id]/return/route')
+  const request = new NextRequest(`http://localhost/api/nasiya/${input.nasiyaId}/return`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': input.key },
+    body: JSON.stringify({
+      refundAmount: input.refundAmount,
+      refundMethod: input.refundMethod,
+      inputCurrency: input.inputCurrency ?? 'UZS',
+      expectedReceiptsMinorUnits: input.expectedReceipts,
+      expectedRemainingMinorUnits: input.expectedRemaining,
+      note: input.note ?? 'Mijozning holati sababli Nasiya qaytarildi',
+    }),
+  })
+  return POST(request, { params: Promise.resolve({ id: input.nasiyaId }) })
 }
 
 async function supplierPayablePaymentRequest(payableId: string, note: string) {
@@ -1405,52 +1621,500 @@ describe('real-PostgreSQL route evidence', () => {
     })).toEqual([{ telegramId: '800000001' }])
   })
 
-  it('rejects Nasiya cancellation without changing its contract or payments', async () => {
+  it('returns a Nasiya device, defaults the refund contract safely, and removes all future money from live stats', async () => {
     const actor = await seedActor('nasiya_return')
     useShopAdmin(actor)
-    const contract = await seedNasiya(actor, 'nasiya_return', 1_000)
-    await prisma.nasiyaPayment.create({
+    await Promise.all([
+      prisma.shop.update({
+        where: { id: actor.shop.id },
+        data: { telegramNotificationsEnabled: true },
+      }),
+      prisma.shopAdmin.update({
+        where: { id: actor.admin.id },
+        data: {
+          telegramId: '830000001',
+          telegramVerifiedAt: new Date('2026-07-01T00:00:00.000Z'),
+          telegramNotificationsEnabled: true,
+        },
+      }),
+    ])
+    const contract = await seedReturnableNasiya(actor, 'nasiya_return')
+    const payable = await prisma.supplierPayable.create({
       data: {
         shopId: actor.shop.id,
-        nasiyaId: contract.nasiya.id,
+        deviceId: contract.device.id,
+        origin: 'DEVICE_PURCHASE',
+        supplierName: 'Nasiya return supplier',
+        supplierPhone: '+998901414141',
         amount: 400,
-        appliedAmountInContractCurrency: 400,
-        paymentMethod: 'CARD',
+        contractAmount: 400,
+        remainingAmount: 400,
+        contractRemainingAmount: 400,
+        ledgerVersion: 2,
+        dueDate: new Date('2026-08-15T00:00:00.000Z'),
         createdBy: actor.admin.id,
       },
     })
-    await prisma.$transaction([
-      prisma.nasiya.update({
-        where: { id: contract.nasiya.id },
-        data: { contractPaidAmount: 400, contractRemainingAmount: 600, remainingAmount: 600 },
+    await prisma.notification.createMany({
+      data: [
+        {
+          shopId: actor.shop.id,
+          type: 'REMINDER',
+          message: 'Parent Nasiya reminder',
+          telegramId: '830000001',
+          recipientShopAdminId: actor.admin.id,
+          status: 'PENDING',
+          scheduledAt: new Date('2026-07-25T08:00:00.000Z'),
+          relatedId: contract.nasiya.id,
+          relatedType: 'Nasiya',
+        },
+        {
+          shopId: actor.shop.id,
+          type: 'OVERDUE',
+          message: 'Open schedule reminder',
+          telegramId: '830000001',
+          recipientShopAdminId: actor.admin.id,
+          status: 'FAILED',
+          scheduledAt: new Date('2026-07-25T08:00:00.000Z'),
+          relatedId: contract.openSchedules[0].id,
+          relatedType: 'NasiyaSchedule',
+        },
+      ],
+    })
+    const beforeAccounting = await getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-06-30T19:00:00.000Z'),
+      monthEnd: new Date('2026-07-31T19:00:00.000Z'),
+      adminId: null,
+    })
+    expect(beforeAccounting).toMatchObject({
+      actualProfitUzs: 75,
+      expectedProfitUzs: 0,
+    })
+    const beforeFutureAccounting = await getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-07-31T19:00:00.000Z'),
+      monthEnd: new Date('2026-08-31T19:00:00.000Z'),
+      adminId: null,
+    })
+    expect(beforeFutureAccounting).toMatchObject({
+      expectedProfitUzs: 175,
+      expectedInterestUzs: 35,
+    })
+
+    const response = await returnNasiyaRequest({
+      nasiyaId: contract.nasiya.id,
+      key: 'nasiya-immutable-return-key',
+      refundAmount: 100,
+      refundMethod: 'CASH',
+      expectedReceipts: 250,
+      expectedRemaining: 850,
+      note: 'Mijoz qolgan oylarni to‘lay olmasligini tushuntirdi',
+    })
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+
+    const [
+      nasiya,
+      schedules,
+      payments,
+      returned,
+      storedPayable,
+      reminders,
+      returnLogs,
+      afterAccounting,
+      afterFutureAccounting,
+      customerProfile,
+      customerNasiyaHistory,
+      customerReturnHistory,
+      rangeReport,
+    ] = await Promise.all([
+      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
+      prisma.nasiyaSchedule.findMany({ where: { nasiyaId: contract.nasiya.id }, orderBy: { monthNumber: 'asc' } }),
+      prisma.nasiyaPayment.findMany({ where: { nasiyaId: contract.nasiya.id }, orderBy: { paidAt: 'asc' } }),
+      prisma.deviceReturn.findFirstOrThrow({
+        where: { nasiyaId: contract.nasiya.id },
+        include: { refundAllocations: true, profitReversal: true },
       }),
-      prisma.nasiyaSchedule.update({
-        where: { id: contract.schedule.id },
-        data: { paidAmount: 400, contractPaidAmount: 400, contractRemainingAmount: 600, status: 'PARTIAL' },
+      prisma.supplierPayable.findUniqueOrThrow({ where: { id: payable.id } }),
+      prisma.notification.findMany({
+        where: {
+          shopId: actor.shop.id,
+          OR: [
+            { relatedType: 'Nasiya', relatedId: contract.nasiya.id },
+            { relatedType: 'NasiyaSchedule', relatedId: { in: contract.openSchedules.map(({ id }) => id) } },
+          ],
+        },
+      }),
+      prisma.log.findMany({ where: { targetType: 'Nasiya', targetId: contract.nasiya.id, action: 'RETURN' } }),
+      getShopMonthlyAccountingAggregate({
+        shopId: actor.shop.id,
+        monthStart: new Date('2026-06-30T19:00:00.000Z'),
+        monthEnd: new Date('2026-07-31T19:00:00.000Z'),
+        adminId: null,
+      }),
+      getShopMonthlyAccountingAggregate({
+        shopId: actor.shop.id,
+        monthStart: new Date('2026-07-31T19:00:00.000Z'),
+        monthEnd: new Date('2026-08-31T19:00:00.000Z'),
+        adminId: null,
+      }),
+      getCustomerProfileOverview({
+        shopId: actor.shop.id,
+        customerId: contract.customer.id,
+        now: new Date('2026-07-22T10:00:00.000Z'),
+        visibility: { includeOwnerFinancials: true },
+      }),
+      getCustomerProfileHistory({
+        shopId: actor.shop.id,
+        customerId: contract.customer.id,
+        section: 'nasiya',
+        page: 1,
+      }),
+      getCustomerProfileHistory({
+        shopId: actor.shop.id,
+        customerId: contract.customer.id,
+        section: 'returns',
+        page: 1,
+      }),
+      getShopRangeReport({
+        shopId: actor.shop.id,
+        range: resolveReportRange({
+          preset: 'custom',
+          startMonth: '2026-07',
+          endMonth: '2026-08',
+          defaultEndMonth: '2026-08',
+        }),
+        adminId: null,
+      }),
+    ])
+    expect(nasiya.status).toBe('CANCELLED')
+    expect(nasiya.returnedAt).not.toBeNull()
+    expect(nasiya.returnedBy).toBe(actor.admin.id)
+    expect(nasiya.reminderEnabled).toBe(false)
+    expect(nasiya.earlyReminderEnabled).toBe(false)
+    expect(Number(nasiya.contractPaidAmount)).toBe(150)
+    expect(Number(nasiya.contractRemainingAmount)).toBe(850)
+    expect((await prisma.device.findUniqueOrThrow({ where: { id: contract.device.id } })).status).toBe('IN_STOCK')
+    expect(schedules.map(({ status }) => status)).toEqual(['PAID', 'CANCELLED', 'CANCELLED'])
+    expect(schedules.map(({ contractRemainingAmount }) => Number(contractRemainingAmount))).toEqual([0, 350, 500])
+    expect(payments).toHaveLength(2)
+    expect(payments.map(({ amount }) => Number(amount))).toEqual([100, 150])
+    expect(returned).toMatchObject({
+      ledgerVersion: 2,
+      contractCurrency: 'UZS',
+      refundMethod: 'CASH',
+      note: 'Mijoz qolgan oylarni to‘lay olmasligini tushuntirdi',
+    })
+    expect(Number(returned.contractReceiptsAtReturn)).toBe(250)
+    expect(Number(returned.contractRefundAmount)).toBe(100)
+    expect(Number(returned.contractRetainedAmount)).toBe(150)
+    expect(Number(returned.contractCancelledDebt)).toBe(850)
+    expect(Number(returned.retainedValueAmountUzs)).toBe(150)
+    expect(returned.refundAllocations).toHaveLength(1)
+    expect(returned.profitReversal).toMatchObject({ nasiyaId: contract.nasiya.id })
+    expect(Number(returned.profitReversal?.recognizedMarginAmountUzs)).toBe(60)
+    expect(Number(returned.profitReversal?.recognizedInterestAmountUzs)).toBe(15)
+    expect(storedPayable).toMatchObject({ status: 'PENDING', reminderEnabled: true })
+    expect(Number(storedPayable.contractRemainingAmount)).toBe(400)
+    expect(reminders).toHaveLength(2)
+    expect(reminders.every(({ status }) => status === 'CANCELLED')).toBe(true)
+    expect(returnLogs).toHaveLength(1)
+    expect(afterAccounting).toMatchObject({
+      actualProfitUzs: 150,
+      expectedProfitUzs: 0,
+      expectedInterestUzs: 0,
+      nasiyaInterestReceivedUzs: 0,
+    })
+    expect(afterFutureAccounting).toMatchObject({
+      expectedProfitUzs: 0,
+      expectedInterestUzs: 0,
+    })
+    expect(customerProfile).toMatchObject({
+      counts: { activeNasiya: 0, completedNasiya: 0, returns: 1 },
+      metrics: {
+        cashCollected: { UZS: 250, USD: 0 },
+        dueThisMonth: { UZS: 0, USD: 0 },
+        overdue: { UZS: 0, USD: 0 },
+        refunds: { UZS: 100, USD: 0 },
+        accountingAccrualGrossProfitUzs: 150,
+        nasiyaInterestUzs: 0,
+      },
+      trust: { tier: 'NEW' },
+    })
+    expect(customerNasiyaHistory.items).toEqual([
+      expect.objectContaining({
+        kind: 'nasiya',
+        referenceId: contract.nasiya.id,
+        status: 'RETURNED',
+      }),
+    ])
+    expect(customerReturnHistory.items).toEqual([
+      expect.objectContaining({
+        kind: 'nasiya-return',
+        referenceId: contract.nasiya.id,
+        amount: 100,
+        retainedAmount: 150,
+        cancelledDebt: 850,
+      }),
+    ])
+    expect(rangeReport.months).toEqual([
+      expect.objectContaining({
+        monthKey: '2026-07',
+        cashCollected: { uzs: 250, usd: 0, complete: true },
+        refunds: { uzs: 100, usd: 0 },
+        grossProfitUzs: 150,
+        interestProfitUzs: 0,
+        expectedProfit: { uzs: 0, usd: 0 },
+        nasiyaInterestExpected: { uzs: 0, usd: 0 },
+        returnCount: 1,
+      }),
+      expect.objectContaining({
+        monthKey: '2026-08',
+        expectedProfit: { uzs: 0, usd: 0 },
+        nasiyaInterestExpected: { uzs: 0, usd: 0 },
+        supplierPayables: { uzs: 400, usd: 0, count: 1 },
       }),
     ])
 
-    const response = await returnDeviceRequest({
-      deviceId: contract.device.id,
+    const { NextRequest } = await import('next/server')
+    const { GET: exportEntity } = await import('@/app/api/export/[entity]/route')
+    const [returnsExport, nasiyaExport] = await Promise.all([
+      exportEntity(new NextRequest('http://localhost/api/export/returns?format=csv'), {
+        params: Promise.resolve({ entity: 'returns' }),
+      }),
+      exportEntity(new NextRequest('http://localhost/api/export/nasiya?format=csv'), {
+        params: Promise.resolve({ entity: 'nasiya' }),
+      }),
+    ])
+    expect(returnsExport.status).toBe(200)
+    expect(nasiyaExport.status).toBe(200)
+    const [returnsCsv, nasiyaCsv] = await Promise.all([returnsExport.text(), nasiyaExport.text()])
+    expect(returnsCsv).toContain('"returnId","saleId","nasiyaId"')
+    expect(returnsCsv).toContain('"contractRefundAmount","contractRetainedAmount","contractCancelledDebt"')
+    expect(returnsCsv).toContain('"note","operatorId","createdAt"')
+    expect(returnsCsv).toContain(contract.nasiya.id)
+    expect(returnsCsv).toContain(actor.admin.id)
+    expect(returnsCsv).toContain('Mijoz qolgan oylarni to‘lay olmasligini tushuntirdi')
+    expect(nasiyaCsv).toContain('Qaytarilgan')
+
+    const replay = await returnNasiyaRequest({
+      nasiyaId: contract.nasiya.id,
       key: 'nasiya-immutable-return-key',
-      refundAmount: 400,
+      refundAmount: 100,
+      refundMethod: 'CASH',
+      expectedReceipts: 250,
+      expectedRemaining: 850,
+      note: 'Mijoz qolgan oylarni to‘lay olmasligini tushuntirdi',
+    })
+    expect(replay.status).toBe(200)
+    expect((await replay.json()).data.duplicate).toBe(true)
+    expect(await prisma.deviceReturn.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(1)
+    expect(await prisma.notification.findMany({
+      where: { shopId: actor.shop.id, type: 'RETURN', relatedId: returned.id },
+      select: { telegramId: true },
+    })).toEqual([{ telegramId: '830000001' }])
+  })
+
+  it('keeps Nasiya return behind its exact staff capability and never reuses the Sale return grant', async () => {
+    const actor = await seedActor('nasiya_return_staff')
+    const deniedContract = await seedReturnableNasiya(actor, 'nasiya_return_staff_denied')
+    const saleReturner = await seedStaff(actor, 'nasiya_return_sale_only', ['SALE_RETURN_REFUND'])
+    useShopAdmin(saleReturner)
+
+    expect((await returnNasiyaRequest({
+      nasiyaId: deniedContract.nasiya.id,
+      key: 'nasiya-return-sale-only-denied',
+      refundAmount: 100,
+      refundMethod: 'CASH',
+      expectedReceipts: 250,
+      expectedRemaining: 850,
+    })).status).toBe(403)
+    expect(await prisma.deviceReturn.count({ where: { nasiyaId: deniedContract.nasiya.id } })).toBe(0)
+
+    const allowedContract = await seedReturnableNasiya(actor, 'nasiya_return_staff_allowed')
+    const nasiyaReturner = await seedStaff(actor, 'nasiya_return_exact', ['NASIYA_RETURN_REFUND'])
+    useShopAdmin(nasiyaReturner)
+    const detail = await nasiyaDetailRequest(allowedContract.nasiya.id)
+    expect(detail.status).toBe(200)
+    expect((await detail.json() as { data: { returnQuote: { defaultRefund: { minorUnits: number } } } }).data.returnQuote.defaultRefund.minorUnits).toBe(100)
+
+    const allowed = await returnNasiyaRequest({
+      nasiyaId: allowedContract.nasiya.id,
+      key: 'nasiya-return-exact-allowed',
+      refundAmount: 75,
+      refundMethod: 'CASH',
+      expectedReceipts: 250,
+      expectedRemaining: 850,
+    })
+    expect(allowed.status, JSON.stringify(await allowed.clone().json())).toBe(200)
+    const returned = await prisma.deviceReturn.findFirstOrThrow({
+      where: { nasiyaId: allowedContract.nasiya.id },
+    })
+    expect(returned.createdBy).toBe(nasiyaReturner.admin.id)
+    expect(Number(returned.contractRefundAmount)).toBe(75)
+    expect(Number(returned.contractRetainedAmount)).toBe(175)
+  })
+
+  it('accepts both a full receipt refund and an explicit zero refund', async () => {
+    const actor = await seedActor('nasiya_return_bounds')
+    useShopAdmin(actor)
+    const full = await seedReturnableNasiya(actor, 'nasiya_return_full')
+    const zero = await seedReturnableNasiya(actor, 'nasiya_return_zero')
+
+    const fullResponse = await returnNasiyaRequest({
+      nasiyaId: full.nasiya.id,
+      key: 'nasiya-return-full-receipts',
+      refundAmount: 250,
+      refundMethod: 'CASH',
+      expectedReceipts: 250,
+      expectedRemaining: 850,
+    })
+    const zeroResponse = await returnNasiyaRequest({
+      nasiyaId: zero.nasiya.id,
+      key: 'nasiya-return-zero-refund',
+      refundAmount: 0,
+      expectedReceipts: 250,
+      expectedRemaining: 850,
+    })
+    expect(fullResponse.status, JSON.stringify(await fullResponse.clone().json())).toBe(200)
+    expect(zeroResponse.status, JSON.stringify(await zeroResponse.clone().json())).toBe(200)
+
+    const [fullReturn, zeroReturn] = await Promise.all([
+      prisma.deviceReturn.findFirstOrThrow({
+        where: { nasiyaId: full.nasiya.id },
+        include: { refundAllocations: true },
+      }),
+      prisma.deviceReturn.findFirstOrThrow({
+        where: { nasiyaId: zero.nasiya.id },
+        include: { refundAllocations: true },
+      }),
+    ])
+    expect(Number(fullReturn.contractRefundAmount)).toBe(250)
+    expect(Number(fullReturn.contractRetainedAmount)).toBe(0)
+    expect(fullReturn.refundAllocations).toHaveLength(2)
+    expect(Number(zeroReturn.contractRefundAmount)).toBe(0)
+    expect(Number(zeroReturn.contractRetainedAmount)).toBe(250)
+    expect(zeroReturn.refundMethod).toBeNull()
+    expect(zeroReturn.refundAllocations).toHaveLength(0)
+  })
+
+  it('freezes a USD Nasiya refund at the current governed rate while preserving native contract values', async () => {
+    const actor = await seedActor('nasiya_return_usd')
+    useShopAdmin(actor)
+    await prisma.currencyRate.create({
+      data: {
+        baseCurrency: 'USD',
+        quoteCurrency: 'UZS',
+        rate: 13_000,
+        source: 'CBU',
+        effectiveDate: new Date('2026-07-22T00:00:00.000Z'),
+        fetchedAt: new Date(),
+      },
+    })
+    const contract = await seedUsdSettlementNasiya(actor, 'nasiya_return_usd')
+
+    const response = await returnNasiyaRequest({
+      nasiyaId: contract.nasiya.id,
+      key: 'nasiya-return-usd-current-fx',
+      refundAmount: 20,
       refundMethod: 'CARD',
+      inputCurrency: 'USD',
+      expectedReceipts: 6_000,
+      expectedRemaining: 6_000,
+    })
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+
+    const returned = await prisma.deviceReturn.findFirstOrThrow({
+      where: { nasiyaId: contract.nasiya.id },
+      include: { refundAllocations: true },
+    })
+    expect(returned.contractCurrency).toBe('USD')
+    expect(Number(returned.contractReceiptsAtReturn)).toBe(60)
+    expect(Number(returned.contractRefundAmount)).toBe(20)
+    expect(Number(returned.contractRetainedAmount)).toBe(40)
+    expect(Number(returned.contractCancelledDebt)).toBe(60)
+    expect(Number(returned.refundExchangeRateAtCreation)).toBe(13_000)
+    expect(Number(returned.refundAmount)).toBe(260_000)
+    expect(Number(returned.retainedValueAmountUzs)).toBe(460_000)
+    expect(returned.refundAllocations).toHaveLength(1)
+    expect(Number(returned.refundAllocations[0].contractAmount)).toBe(20)
+    expect(Number(returned.refundAllocations[0].amountUzs)).toBe(260_000)
+  })
+
+  it('returns an already early-settled Nasiya without rewriting its completed settlement history', async () => {
+    const actor = await seedActor('nasiya_return_settled')
+    useShopAdmin(actor)
+    const contract = await seedSettlementNasiya(actor, 'nasiya_return_settled')
+    const settled = await nasiyaSettlementRequest({
+      nasiyaId: contract.nasiya.id,
+      mode: 'WAIVE_REMAINING_PROFIT',
+      expectedRemaining: 600,
+      expectedCash: 500,
+      expectedWaived: 100,
+      key: 'nasiya-return-prior-settlement',
+      reason: 'Oldindan yopish kelishuvi',
+    })
+    expect(settled.status, JSON.stringify(await settled.clone().json())).toBe(200)
+
+    const response = await returnNasiyaRequest({
+      nasiyaId: contract.nasiya.id,
+      key: 'nasiya-return-after-settlement',
+      refundAmount: 0,
+      expectedReceipts: 1_100,
+      expectedRemaining: 0,
+    })
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+
+    const [nasiya, schedules, settlement, returned] = await Promise.all([
+      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
+      prisma.nasiyaSchedule.findMany({ where: { nasiyaId: contract.nasiya.id }, orderBy: { monthNumber: 'asc' } }),
+      prisma.nasiyaSettlement.findUniqueOrThrow({ where: { nasiyaId: contract.nasiya.id } }),
+      prisma.deviceReturn.findFirstOrThrow({ where: { nasiyaId: contract.nasiya.id } }),
+    ])
+    expect(nasiya.status).toBe('COMPLETED')
+    expect(nasiya.returnedAt).not.toBeNull()
+    expect(schedules.map(({ status }) => status)).toEqual(['PAID', 'SETTLED'])
+    expect(settlement.mode).toBe('WAIVE_REMAINING_PROFIT')
+    expect(Number(settlement.contractInterestWaivedAmount)).toBe(100)
+    expect(Number(returned.contractReceiptsAtReturn)).toBe(1_100)
+    expect(Number(returned.contractCancelledDebt)).toBe(0)
+    expect(Number(returned.contractRetainedAmount)).toBe(1_100)
+    expect((await prisma.device.findUniqueOrThrow({ where: { id: contract.device.id } })).status).toBe('IN_STOCK')
+  })
+
+  it('blocks legacy or imported Nasiya return when immutable payment evidence is unverifiable', async () => {
+    const actor = await seedActor('nasiya_return_legacy')
+    useShopAdmin(actor)
+    const contract = await seedNasiya(actor, 'nasiya_return_legacy', 1_000)
+    await prisma.nasiya.update({
+      where: { id: contract.nasiya.id },
+      data: {
+        isImported: true,
+        importSource: 'MANUAL',
+        importedAt: new Date('2026-07-01T00:00:00.000Z'),
+        importedById: actor.admin.id,
+        originalTotalAmount: 1_000,
+        alreadyPaidBeforeImport: 0,
+        remainingAtImport: 1_000,
+        accountingReconstructionStatus: 'UNRECONSTRUCTABLE',
+        accountingReconstructionReason: 'Historic payments cannot be verified',
+      },
+    })
+
+    const detail = await nasiyaDetailRequest(contract.nasiya.id)
+    expect(detail.status).toBe(200)
+    const quote = (await detail.json() as { data: { returnQuote: { eligible: boolean; receiptEvidenceVerified: boolean } } }).data.returnQuote
+    expect(quote).toMatchObject({ eligible: false, receiptEvidenceVerified: false })
+    const response = await returnNasiyaRequest({
+      nasiyaId: contract.nasiya.id,
+      key: 'nasiya-return-unverified-legacy',
+      refundAmount: 0,
+      expectedReceipts: 0,
+      expectedRemaining: 1_000,
     })
     expect(response.status).toBe(409)
-
-    const [nasiya, schedule, paymentCount, returned] = await Promise.all([
-      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
-      prisma.nasiyaSchedule.findUniqueOrThrow({ where: { id: contract.schedule.id } }),
-      prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } }),
-      prisma.deviceReturn.findFirst({ where: { nasiyaId: contract.nasiya.id } }),
-    ])
-    expect(nasiya.status).toBe('ACTIVE')
-    expect(nasiya.deletedAt).toBeNull()
-    expect(nasiya.returnedAt).toBeNull()
-    expect(Number(nasiya.contractRemainingAmount)).toBe(600)
-    expect(schedule.status).toBe('PARTIAL')
-    expect(paymentCount).toBe(1)
-    expect(returned).toBeNull()
+    expect(await prisma.deviceReturn.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(0)
+    expect((await prisma.device.findUniqueOrThrow({ where: { id: contract.device.id } })).status).toBe('SOLD_NASIYA')
   })
 
   it('rejects a refund method that cannot be reconciled to original receipts', async () => {
@@ -1557,40 +2221,50 @@ describe('real-PostgreSQL route evidence', () => {
     expect(returned.refundAllocations).toHaveLength(0)
   })
 
-  it('rejects a Nasiya return while a payment is being recorded', async () => {
+  it('serializes a Nasiya return against a concurrent payment so exactly one quote wins', async () => {
     const actor = await seedActor('payment_return_race')
     useShopAdmin(actor)
-    const contract = await seedNasiya(actor, 'payment_return_race', 1_000)
+    const contract = await seedReturnableNasiya(actor, 'payment_return_race')
 
     const [paymentResponse, returnResponse] = await Promise.all([
       nasiyaPaymentRequest({
         nasiyaId: contract.nasiya.id,
-        scheduleId: contract.schedule.id,
-        amount: 400,
+        scheduleId: contract.openSchedules[0].id,
+        amount: 100,
         key: 'payment-return-race-payment',
       }),
-      returnDeviceRequest({
-        deviceId: contract.device.id,
+      returnNasiyaRequest({
+        nasiyaId: contract.nasiya.id,
         key: 'payment-return-race-return',
         refundAmount: 0,
+        expectedReceipts: 250,
+        expectedRemaining: 850,
       }),
     ])
 
-    expect(returnResponse.status).toBe(409)
-    expect([200, 409]).toContain(paymentResponse.status)
+    expect([200, 404, 409]).toContain(paymentResponse.status)
+    expect([200, 409]).toContain(returnResponse.status)
+    expect(Number(paymentResponse.status === 200) + Number(returnResponse.status === 200)).toBe(1)
     const [nasiya, returned, payments] = await Promise.all([
       prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
       prisma.deviceReturn.findFirst({ where: { nasiyaId: contract.nasiya.id } }),
       prisma.nasiyaPayment.findMany({ where: { nasiyaId: contract.nasiya.id } }),
     ])
-    const paid = payments.reduce(
-      (sum, payment) => sum + Number(payment.appliedAmountInContractCurrency),
-      0,
-    )
-    expect(nasiya.status).not.toBe('CANCELLED')
-    expect(nasiya.returnedAt).toBeNull()
-    expect(paid).toBe(paymentResponse.status === 200 ? 400 : 0)
-    expect(returned).toBeNull()
+    const racingPayment = payments.find(({ idempotencyKey }) => idempotencyKey === 'payment-return-race-payment')
+    if (returnResponse.status === 200) {
+      expect(nasiya.status).toBe('CANCELLED')
+      expect(nasiya.returnedAt).not.toBeNull()
+      expect(returned).not.toBeNull()
+      expect(racingPayment).toBeUndefined()
+      expect(payments).toHaveLength(2)
+    } else {
+      expect(nasiya.status).not.toBe('CANCELLED')
+      expect(nasiya.returnedAt).toBeNull()
+      expect(returned).toBeNull()
+      expect(racingPayment).toBeDefined()
+      expect(payments).toHaveLength(3)
+      expect(Number(nasiya.contractRemainingAmount)).toBe(750)
+    }
   })
 
   it('recognizes a fully paid cash Sale margin in full on its payment date', async () => {

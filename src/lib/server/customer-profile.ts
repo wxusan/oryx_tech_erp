@@ -226,10 +226,10 @@ export async function getCustomerProfileOverview(input: {
           SELECT "deviceId" AS device_id FROM sale_base UNION SELECT "deviceId" FROM nasiya_base
         ) devices)::integer AS device_count,
         (SELECT count(*) FROM sale_base)::integer AS sale_count,
-        (SELECT count(*) FROM nasiya_base WHERE "status" IN ('ACTIVE', 'OVERDUE') AND "resolutionState" = 'ACTIVE')::integer AS active_nasiya_count,
-        (SELECT count(*) FROM nasiya_base WHERE "status" = 'COMPLETED')::integer AS completed_nasiya_count,
-        (SELECT count(*) FROM nasiya_base WHERE "resolutionState" = 'ARCHIVED')::integer AS archived_nasiya_count,
-        (SELECT count(*) FROM nasiya_base WHERE "resolutionState" = 'WRITTEN_OFF')::integer AS written_off_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "status" IN ('ACTIVE', 'OVERDUE') AND "resolutionState" = 'ACTIVE')::integer AS active_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "status" = 'COMPLETED')::integer AS completed_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "resolutionState" = 'ARCHIVED')::integer AS archived_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "resolutionState" = 'WRITTEN_OFF')::integer AS written_off_nasiya_count,
         (SELECT count(*) FROM refunds)::integer AS return_count
     `),
     getCustomerTrustFactorsForList({ shopId: input.shopId, customerIds: [input.customerId], now: input.now }),
@@ -298,6 +298,8 @@ interface HistoryRow {
   currency: 'UZS' | 'USD' | null
   amount: unknown
   status: string | null
+  retained_amount?: unknown
+  cancelled_debt?: unknown
 }
 
 function historySql(section: CustomerProfileSection, input: { shopId: string; customerId: string }) {
@@ -311,12 +313,14 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
         FROM (
           SELECT 'sale'::text AS source, s."id" AS deal_id, s."createdAt" AS occurred_at,
                  d."id" AS device_id, d."model" AS model, d."storage", d."color", d."imei",
-                 s."contractCurrency" AS currency, s."contractSalePrice" AS amount, d."status"::text AS status
+                 s."contractCurrency" AS currency, s."contractSalePrice" AS amount,
+                 CASE WHEN s."returnedAt" IS NOT NULL THEN 'RETURNED' ELSE d."status"::text END AS status
           FROM "Sale" s JOIN "Device" d ON d."id" = s."deviceId" AND d."shopId" = s."shopId"
           WHERE s."shopId" = ${input.shopId} AND s."customerId" = ${input.customerId} AND s."deletedAt" IS NULL
           UNION ALL
           SELECT 'nasiya', n."id", n."createdAt", d."id", d."model", d."storage", d."color", d."imei",
-                 n."contractCurrency", n."contractTotalAmount", d."status"::text
+                 n."contractCurrency", n."contractTotalAmount",
+                 CASE WHEN n."returnedAt" IS NOT NULL THEN 'RETURNED' ELSE d."status"::text END
           FROM "Nasiya" n JOIN "Device" d ON d."id" = n."deviceId" AND d."shopId" = n."shopId"
           WHERE n."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId} AND n."deletedAt" IS NULL
         ) rows`
@@ -335,7 +339,8 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
         SELECT n."id", n."createdAt" AS occurred_at, 'nasiya'::text AS kind, n."id" AS reference_id,
                d."model" AS title, concat(n."months", ' oy') AS subtitle, n."contractCurrency" AS currency,
                (n."contractDownPayment" + n."contractFinalAmount") AS amount,
-               concat(n."status"::text, ':', n."resolutionState"::text) AS status
+               CASE WHEN n."returnedAt" IS NOT NULL THEN 'RETURNED'
+                    ELSE concat(n."status"::text, ':', n."resolutionState"::text) END AS status
         FROM "Nasiya" n JOIN "Device" d ON d."id" = n."deviceId" AND d."shopId" = n."shopId"
         WHERE n."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId} AND n."deletedAt" IS NULL`
     case 'payments':
@@ -372,12 +377,16 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
         WHERE p."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId} AND p."deletedAt" IS NULL`
     case 'returns':
       return Prisma.sql`
-        SELECT r."id", r."createdAt" AS occurred_at, 'return'::text AS kind, d."id" AS reference_id,
+        SELECT r."id", r."createdAt" AS occurred_at,
+               CASE WHEN r."nasiyaId" IS NOT NULL THEN 'nasiya-return'::text ELSE 'return'::text END AS kind,
+               coalesce(r."nasiyaId", d."id") AS reference_id,
                d."model" AS title, r."note" AS subtitle,
                CASE WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0 THEN 'USD'::"CurrencyCode" ELSE 'UZS'::"CurrencyCode" END AS currency,
                CASE WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
                     WHEN r."contractRefundAmount" > 0 THEN r."contractRefundAmount" ELSE r."refundAmount" END AS amount,
-               'RETURNED'::text AS status
+               'RETURNED'::text AS status,
+               r."contractRetainedAmount" AS retained_amount,
+               r."contractCancelledDebt" AS cancelled_debt
         FROM "DeviceReturn" r
         JOIN "Device" d ON d."id" = r."deviceId" AND d."shopId" = r."shopId"
         LEFT JOIN "Sale" s ON s."id" = r."saleId" AND s."shopId" = r."shopId"
@@ -452,6 +461,8 @@ export async function getCustomerProfileHistory(input: {
       currency: row.currency,
       amount: row.amount == null ? null : Number(row.amount),
       status: row.status,
+      retainedAmount: row.retained_amount == null ? null : Number(row.retained_amount),
+      cancelledDebt: row.cancelled_debt == null ? null : Number(row.cancelled_debt),
     })),
     // Compatibility lower bound for older consumers. It is intentionally not
     // an exact count; take+1 is the only pagination work on the critical path.

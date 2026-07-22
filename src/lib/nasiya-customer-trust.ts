@@ -40,6 +40,8 @@ export const TRUST_TIER_COLORS: Record<TrustTier, TrustColor> = {
 export interface CustomerNasiyaInput {
   status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
   resolutionState?: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
+  /** A physical customer return is neutral and contributes no trust signal. */
+  returnedAt?: Date | string | null
   contractCurrency: CurrencyCode
   schedules: NasiyaScoreScheduleInput[]
 }
@@ -77,12 +79,13 @@ export function computeCustomerTrustRating(
   now: Date = new Date(),
   adminOverride?: TrustTier | null,
 ): CustomerTrustRating {
-  const totalNasiyaCount = nasiyas.length
-  const completedNasiyaCount = nasiyas.filter((n) => n.status === 'COMPLETED').length
-  const activeNasiyaCount = nasiyas.filter(
+  const trustNasiyas = nasiyas.filter((nasiya) => !nasiya.returnedAt)
+  const totalNasiyaCount = trustNasiyas.length
+  const completedNasiyaCount = trustNasiyas.filter((n) => n.status === 'COMPLETED').length
+  const activeNasiyaCount = trustNasiyas.filter(
     (n) => (n.resolutionState ?? 'ACTIVE') === 'ACTIVE' && (n.status === 'ACTIVE' || n.status === 'OVERDUE'),
   ).length
-  const cancelledNasiyaCount = nasiyas.filter((n) => n.status === 'CANCELLED').length
+  const cancelledNasiyaCount = trustNasiyas.filter((n) => n.status === 'CANCELLED').length
 
   let paidInstallmentCount = 0
   let onTimeCount = 0
@@ -90,7 +93,7 @@ export function computeCustomerTrustRating(
   let maxDaysLate = 0
   let currentOverdueScheduleCount = 0
 
-  for (const nasiya of nasiyas) {
+  for (const nasiya of trustNasiyas) {
     // A cancelled deal's schedule rows carry no meaningful payment-timing
     // signal (the deal was voided, not paid off or defaulted on).
     if (nasiya.status === 'CANCELLED') continue

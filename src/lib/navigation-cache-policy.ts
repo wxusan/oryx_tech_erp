@@ -152,8 +152,8 @@ export function navigationImpactForMutation(mutation: NavigationMutation): Navig
       )
     case 'return.created':
       return shopImpact(
-        ['devices', 'sales', 'nasiyas', 'returns', 'customers', 'reports', 'logs', 'overdue'],
-        [...SHOP_INVENTORY_PATHS, '/shop/nasiyalar', '/shop/mijozlar', deviceDetail, nasiyaDetail, ...SHOP_FINANCIAL_PATHS],
+        ['devices', 'sales', 'nasiyas', 'returns', 'customers', 'reports', 'logs', 'overdue', 'debts'],
+        [...SHOP_INVENTORY_PATHS, '/shop/nasiyalar', '/shop/mijozlar', '/shop/qarzlar', deviceDetail, nasiyaDetail, ...SHOP_FINANCIAL_PATHS],
       )
     case 'olibSotdim.created':
       return shopImpact(

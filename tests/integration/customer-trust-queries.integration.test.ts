@@ -76,6 +76,7 @@ describe('bounded customer trust aggregate', () => {
       final: number
       paid: number
       remaining: number
+      returnedAt?: Date
     }) {
       const device = await prisma.device.create({
         data: {
@@ -123,6 +124,8 @@ describe('bounded customer trust aggregate', () => {
           monthlyPayment: input.final,
           startDate: new Date('2026-06-01T00:00:00.000Z'),
           status: input.status,
+          returnedAt: input.returnedAt,
+          returnedBy: input.returnedAt ? owner.id : undefined,
           contractCurrency: 'UZS',
           contractTotalAmount: input.final,
           contractBaseRemainingAmount: input.final,
@@ -160,6 +163,14 @@ describe('bounded customer trust aggregate', () => {
       final: 100,
       paid: 100,
       remaining: 0,
+    })
+    await createContract({
+      suffix: 'RETURNED',
+      status: 'CANCELLED',
+      final: 100,
+      paid: 100,
+      remaining: 0,
+      returnedAt: new Date('2026-07-12T08:00:00.000Z'),
     })
 
     const nested: CustomerNasiyaInput[] = [
@@ -199,6 +210,19 @@ describe('bounded customer trust aggregate', () => {
       },
       {
         status: 'CANCELLED',
+        contractCurrency: 'UZS',
+        schedules: [{
+          status: 'PAID',
+          dueDate: new Date('2026-07-01T00:00:00.000Z'),
+          delayedUntil: null,
+          expectedAmount: 100,
+          paidAmount: 100,
+          paidAt: new Date('2026-07-10T00:00:00.000Z'),
+        }],
+      },
+      {
+        status: 'CANCELLED',
+        returnedAt: new Date('2026-07-12T08:00:00.000Z'),
         contractCurrency: 'UZS',
         schedules: [{
           status: 'PAID',

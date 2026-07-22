@@ -82,7 +82,9 @@ describe('incremental navigation domain invalidation', () => {
   })
 
   it('invalidates customer metrics after returns and Olib-sotdim customer sales', () => {
-    expect(navigationImpactForMutation({ kind: 'return.created' }).domains).toContain('customers')
+    const returned = navigationImpactForMutation({ kind: 'return.created' })
+    expect(returned.domains).toEqual(expect.arrayContaining(['customers', 'debts']))
+    expect(returned.paths).toContain('/shop/qarzlar')
     expect(navigationImpactForMutation({ kind: 'olibSotdim.created' }).domains).toContain('customers')
     expect(navigationImpactForMutation({ kind: 'olibSotdim.paymentRecorded' }).domains).not.toContain('customers')
   })

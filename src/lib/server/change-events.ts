@@ -94,7 +94,7 @@ export function affectedDomainsForChange(
     : mutationKind === 'device.sell'
     ? ['devices', 'sales', 'customers', 'reports', 'logs', 'overdue'] satisfies NavigationDomain[]
     : mutationKind === 'device.return'
-      ? ['devices', 'sales', 'nasiyas', 'returns', 'reports', 'logs', 'overdue'] satisfies NavigationDomain[]
+      ? ['devices', 'sales', 'nasiyas', 'returns', 'customers', 'debts', 'reports', 'logs', 'overdue'] satisfies NavigationDomain[]
       : mutationKind === 'device.restock'
         ? ['devices', 'nasiyas', 'returns', 'reports', 'logs'] satisfies NavigationDomain[]
         : mutationKind
@@ -115,7 +115,7 @@ export function affectedDomainsForChange(
     NasiyaSchedule: ['devices', 'nasiyas', 'payments', 'customers', 'debts', 'reports', 'logs', 'overdue'],
     NasiyaReminder: ['nasiyas', 'logs', 'overdue'],
     Customer: ['customers', 'nasiyas', 'sales', 'reports', 'logs'],
-    DeviceReturn: ['devices', 'sales', 'nasiyas', 'returns', 'reports', 'logs', 'overdue'],
+    DeviceReturn: ['devices', 'sales', 'nasiyas', 'returns', 'customers', 'debts', 'reports', 'logs', 'overdue'],
     SupplierPayable: ['olibSotdim', 'debts', 'devices', 'sales', 'payments', 'reports', 'logs'],
     SupplierPayablePayment: ['olibSotdim', 'debts', 'devices', 'payments', 'reports', 'logs'],
     OlibSotdimOperation: ['olibSotdim', 'debts', 'devices', 'sales', 'nasiyas', 'payments', 'customers', 'reports', 'logs'],

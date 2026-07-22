@@ -232,6 +232,32 @@ describe('cancelled nasiya history is a negative signal', () => {
   })
 })
 
+describe('a physically returned Nasiya is neutral trust history', () => {
+  it('removes the entire deal, including paid and cancelled schedule signals, from the rating', () => {
+    const rating = computeCustomerTrustRating([{
+      status: 'CANCELLED',
+      returnedAt: new Date('2026-07-08T10:00:00.000Z'),
+      contractCurrency: 'UZS',
+      schedules: [
+        paidLate(new Date('2026-05-01'), 30),
+        overdueUnpaid(new Date('2026-06-01')),
+      ],
+    }], now)
+
+    expect(rating.tier).toBe('NEW')
+    expect(rating.factors).toMatchObject({
+      totalNasiyaCount: 0,
+      completedNasiyaCount: 0,
+      activeNasiyaCount: 0,
+      cancelledNasiyaCount: 0,
+      paidInstallmentCount: 0,
+      lateInstallmentCount: 0,
+      currentOverdueScheduleCount: 0,
+      hasCurrentOverdue: false,
+    })
+  })
+})
+
 describe('admin override', () => {
   it('wins over the computed tier but keeps the computed factors and adds a reason', () => {
     const rating = computeCustomerTrustRating([], now, 'HIGH')

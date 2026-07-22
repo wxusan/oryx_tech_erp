@@ -84,6 +84,7 @@ export async function getCustomerTrustFactorsForList(input: {
       ON n."customerId" = c."id"
       AND n."shopId" = c."shopId"
       AND n."deletedAt" IS NULL
+      AND n."returnedAt" IS NULL
     LEFT JOIN "NasiyaSchedule" s
       ON s."nasiyaId" = n."id"
       AND s."shopId" = n."shopId"
