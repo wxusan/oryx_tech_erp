@@ -52,6 +52,9 @@ const RELEASE_MIGRATIONS = [
   '202607150007_reset_current_ops_alerts',
   '202607160001_nasiya_payment_rate_source',
   '202607160002_nasiya_ledger_enforcement',
+  '202607180001_telegram_disable_lifecycle',
+  '202607200001_olib_nasiya_debt_ledger',
+  '202607220001_custom_shop_staff_roles',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))
