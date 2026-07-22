@@ -18,8 +18,8 @@ describe('authenticated and responsive application shells', () => {
 
   it('prevents the shop content column from forcing document-level mobile overflow', () => {
     const shell = read('src/app/(shop)/shop-layout-client.tsx')
-    expect(shell).toContain('flex min-w-0 flex-1 flex-col')
-    expect(shell).toContain('min-w-0 flex-1 overflow-auto')
+    expect(shell).toContain('flex min-h-0 min-w-0 flex-1 flex-col')
+    expect(shell).toContain('min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto')
     expect(shell).toContain('hidden text-sm font-medium text-zinc-900 sm:inline')
   })
 })

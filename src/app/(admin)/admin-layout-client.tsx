@@ -38,7 +38,7 @@ export function AdminLayoutClient({ children, adminName }: { children: React.Rea
   const { currency, saving: currencySaving, error: currencyError, setDisplayCurrency } = useAdminCurrency()
 
   return (
-    <div className="flex min-h-screen flex-col bg-zinc-50 md:h-screen md:flex-row md:overflow-hidden">
+    <div className="flex min-h-dvh flex-col bg-zinc-50 md:h-dvh md:min-h-0 md:flex-row md:overflow-hidden">
       <aside className="flex w-full shrink-0 flex-col border-b border-zinc-200 bg-white/95 md:w-64 md:border-b-0 md:border-r">
         <div className="border-b border-zinc-200 px-5 py-5">
           <div className="flex items-center justify-between gap-2">
@@ -81,7 +81,7 @@ export function AdminLayoutClient({ children, adminName }: { children: React.Rea
         </div>
       </aside>
 
-      <div className="flex min-w-0 flex-1 flex-col md:overflow-hidden">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col md:overflow-hidden">
         <header className="flex h-14 shrink-0 items-center justify-end gap-3 border-b border-zinc-200 bg-white/90 px-4 backdrop-blur sm:px-6">
           <div className="flex items-center rounded-md border border-zinc-200 bg-zinc-50 p-0.5" aria-label="Hisobot valyutasi">
             {(['UZS', 'USD'] as const).map((code) => (
@@ -117,7 +117,7 @@ export function AdminLayoutClient({ children, adminName }: { children: React.Rea
           <SessionControls callbackUrl="/admin/login" idleTimeoutMs={10 * 60 * 1000} />
         </header>
 
-        <main className="flex-1 overflow-y-auto bg-zinc-50 p-4 md:p-8">{children}</main>
+        <main className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto bg-zinc-50 p-4 md:p-8">{children}</main>
       </div>
     </div>
   )
