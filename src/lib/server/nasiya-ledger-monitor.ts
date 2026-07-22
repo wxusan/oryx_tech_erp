@@ -17,6 +17,7 @@ export interface NasiyaLedgerMonitorSummary {
   scheduleIntegrityMismatches: number
   terminalStatusMismatches: number
   completeAllocationMismatches: number
+  settlementIntegrityMismatches: number
   /** Signals can overlap; this is intentionally not a count of contracts. */
   totalMismatchSignals: number
 }
@@ -26,6 +27,7 @@ interface CountRow {
   scheduleIntegrityMismatches: number
   terminalStatusMismatches: number
   completeAllocationMismatches: number
+  settlementIntegrityMismatches: number
 }
 
 const unavailable: NasiyaLedgerMonitorSummary = {
@@ -34,6 +36,7 @@ const unavailable: NasiyaLedgerMonitorSummary = {
   scheduleIntegrityMismatches: 0,
   terminalStatusMismatches: 0,
   completeAllocationMismatches: 0,
+  settlementIntegrityMismatches: 0,
   totalMismatchSignals: 0,
 }
 
@@ -56,13 +59,16 @@ export async function monitorNasiyaLedgerIntegrity(): Promise<NasiyaLedgerMonito
         FROM "Nasiya" n
         LEFT JOIN "NasiyaSchedule" s ON s."nasiyaId" = n.id
         WHERE n."deletedAt" IS NULL
-        GROUP BY n.id, n."contractFinalAmount", n."contractPaidAmount", n."contractRemainingAmount", n."contractCurrency"
+        GROUP BY n.id, n."contractFinalAmount", n."contractPaidAmount", n."contractInterestWaivedAmount", n."contractRemainingAmount", n."contractCurrency"
         HAVING COUNT(s.id) = 0
            OR COALESCE(SUM(s."contractExpectedAmount"), 0) <> n."contractFinalAmount"
            OR COALESCE(SUM(s."contractPaidAmount"), 0) <> n."contractPaidAmount"
+           OR COALESCE(SUM(s."contractInterestWaivedAmount"), 0) <> n."contractInterestWaivedAmount"
            OR COALESCE(SUM(s."contractRemainingAmount"), 0) <> n."contractRemainingAmount"
            OR COALESCE(SUM(s."contractExpectedAmount"), 0)
-                <> COALESCE(SUM(s."contractPaidAmount"), 0) + COALESCE(SUM(s."contractRemainingAmount"), 0)
+                <> COALESCE(SUM(s."contractPaidAmount"), 0)
+                  + COALESCE(SUM(s."contractInterestWaivedAmount"), 0)
+                  + COALESCE(SUM(s."contractRemainingAmount"), 0)
            OR COALESCE(BOOL_OR(s."contractCurrency" <> n."contractCurrency"), FALSE)
       ),
       schedule_integrity_mismatches AS (
@@ -73,9 +79,11 @@ export async function monitorNasiyaLedgerIntegrity(): Promise<NasiyaLedgerMonito
           AND (
             s."contractExpectedAmount" <= 0
             OR s."contractPaidAmount" < 0
-            OR s."contractPaidAmount" > s."contractExpectedAmount"
-            OR s."contractRemainingAmount" <> s."contractExpectedAmount" - s."contractPaidAmount"
-            OR (s.status = 'PAID'::"NasiyaScheduleStatus") <> (s."contractRemainingAmount" = 0)
+            OR s."contractInterestWaivedAmount" < 0
+            OR s."contractPaidAmount" + s."contractInterestWaivedAmount" > s."contractExpectedAmount"
+            OR s."contractRemainingAmount" <> s."contractExpectedAmount" - s."contractPaidAmount" - s."contractInterestWaivedAmount"
+            OR (s.status IN ('PAID'::"NasiyaScheduleStatus", 'SETTLED'::"NasiyaScheduleStatus")) <> (s."contractRemainingAmount" = 0)
+            OR (s.status = 'SETTLED'::"NasiyaScheduleStatus") <> (s."contractInterestWaivedAmount" > 0)
           )
       ),
       terminal_status_mismatches AS (
@@ -95,12 +103,37 @@ export async function monitorNasiyaLedgerIntegrity(): Promise<NasiyaLedgerMonito
           AND n."accountingReconstructionStatus" = 'COMPLETE'
         GROUP BY s.id, s."contractPaidAmount"
         HAVING COALESCE(SUM(a."contractAmount"), 0) <> s."contractPaidAmount"
+      ),
+      settlement_integrity_mismatches AS (
+        SELECT st.id
+        FROM "NasiyaSettlement" st
+        JOIN "Nasiya" n ON n.id = st."nasiyaId" AND n."shopId" = st."shopId"
+        LEFT JOIN "NasiyaSettlementAllocation" a
+          ON a."nasiyaSettlementId" = st.id AND a."shopId" = st."shopId"
+        GROUP BY st.id, st.mode, st."contractRemainingBefore", st."contractCashReceivedAmount",
+          st."contractInterestWaivedAmount", st."contractRemainingAfter",
+          st."cashReceivedAmountUzs", st."interestWaivedAmountUzs",
+          n."contractRemainingAmount", n."contractInterestWaivedAmount", n.status
+        HAVING st."contractRemainingBefore" <> st."contractCashReceivedAmount" + st."contractInterestWaivedAmount" + st."contractRemainingAfter"
+          OR st."contractRemainingAfter" <> 0
+          OR (st.mode = 'FULL_WITH_PROFIT'::"NasiyaSettlementMode" AND (st."contractInterestWaivedAmount" <> 0 OR st."contractCashReceivedAmount" <> st."contractRemainingBefore"))
+          OR (st.mode = 'WAIVE_REMAINING_PROFIT'::"NasiyaSettlementMode" AND st."contractInterestWaivedAmount" <= 0)
+          OR n."contractRemainingAmount" <> 0
+          OR n."contractInterestWaivedAmount" <> st."contractInterestWaivedAmount"
+          OR n.status <> 'COMPLETED'::"NasiyaStatus"
+          OR COALESCE(SUM(a."contractRemainingBefore"), 0) <> st."contractRemainingBefore"
+          OR COALESCE(SUM(a."contractCashAmount"), 0) <> st."contractCashReceivedAmount"
+          OR COALESCE(SUM(a."contractInterestWaivedAmount"), 0) <> st."contractInterestWaivedAmount"
+          OR COALESCE(SUM(a."contractRemainingAfter"), 0) <> st."contractRemainingAfter"
+          OR COALESCE(SUM(a."cashAmountUzs"), 0) <> st."cashReceivedAmountUzs"
+          OR COALESCE(SUM(a."interestWaivedAmountUzs"), 0) <> st."interestWaivedAmountUzs"
       )
       SELECT
         (SELECT COUNT(*)::integer FROM parent_schedule_mismatches) AS "parentScheduleMismatches",
         (SELECT COUNT(*)::integer FROM schedule_integrity_mismatches) AS "scheduleIntegrityMismatches",
         (SELECT COUNT(*)::integer FROM terminal_status_mismatches) AS "terminalStatusMismatches",
-        (SELECT COUNT(*)::integer FROM complete_allocation_mismatches) AS "completeAllocationMismatches"
+        (SELECT COUNT(*)::integer FROM complete_allocation_mismatches) AS "completeAllocationMismatches",
+        (SELECT COUNT(*)::integer FROM settlement_integrity_mismatches) AS "settlementIntegrityMismatches"
     `
 
     if (!row) throw new Error('missing count-only ledger monitor result')
@@ -108,16 +141,19 @@ export async function monitorNasiyaLedgerIntegrity(): Promise<NasiyaLedgerMonito
     const scheduleIntegrityMismatches = count(row.scheduleIntegrityMismatches)
     const terminalStatusMismatches = count(row.terminalStatusMismatches)
     const completeAllocationMismatches = count(row.completeAllocationMismatches)
+    const settlementIntegrityMismatches = count(row.settlementIntegrityMismatches)
     const totalMismatchSignals = parentScheduleMismatches
       + scheduleIntegrityMismatches
       + terminalStatusMismatches
       + completeAllocationMismatches
+      + settlementIntegrityMismatches
     const summary: NasiyaLedgerMonitorSummary = {
       status: totalMismatchSignals === 0 ? 'healthy' : 'mismatch',
       parentScheduleMismatches,
       scheduleIntegrityMismatches,
       terminalStatusMismatches,
       completeAllocationMismatches,
+      settlementIntegrityMismatches,
       totalMismatchSignals,
     }
 

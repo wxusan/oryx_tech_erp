@@ -686,6 +686,38 @@ export function nasiyaCompletedMessage(data: {
   )
 }
 
+/** Sent once for an explicit early-settlement agreement. Cash and waived
+ * profit are intentionally separate so Telegram never calls a waiver paid. */
+export function nasiyaSettlementCompletedMessage(data: {
+  shopName: string
+  customerName: string
+  customerPhone?: string | null
+  device: DeviceSpecs
+  mode: 'FULL_WITH_PROFIT' | 'WAIVE_REMAINING_PROFIT'
+  cashReceived: number
+  interestWaived: number
+  contractCurrency: CurrencyCode
+  reason?: string | null
+  adminName?: string | null
+  currency?: CurrencyContext | null
+}): string {
+  const money = (value: number) => contractMoney(value, data.contractCurrency, data.currency)
+  return compose(
+    '<b>✅ Nasiya kelishuv bilan yopildi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
+    formatDeviceSpecs(data.device, { battery: false }),
+    block(
+      `📌 Yopish turi: ${data.mode === 'FULL_WITH_PROFIT' ? 'Foydasi bilan yopish' : 'Foydani kechib yopish'}`,
+      `💰 Olingan summa: ${money(data.cashReceived)}`,
+      data.interestWaived > 0 ? `🤝 Kechilgan kelgusi foyda: ${money(data.interestWaived)}` : null,
+      '⏳ Qolgan qarz: Yo‘q',
+    ),
+    optionalLine('Sabab', cleanNote(data.reason), '📝'),
+    optionalLine('Admin', data.adminName, '👨‍💼'),
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Olib-sotdim — source a device from another shop/person and sell it to our
 // customer in the same operation. Supplier debt (what WE owe) is always

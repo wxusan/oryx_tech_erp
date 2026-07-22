@@ -61,13 +61,13 @@ ORDER BY s."shopId", s.id;
 SELECT n.id, n."shopId", n."contractCurrency", n.status,
        n."contractTotalAmount", n."contractDownPayment",
        n."contractBaseRemainingAmount", n."contractInterestAmount",
-       n."contractFinalAmount", n."contractPaidAmount", n."contractRemainingAmount"
+       n."contractFinalAmount", n."contractPaidAmount", n."contractInterestWaivedAmount", n."contractRemainingAmount"
 FROM "Nasiya" n
 WHERE n."deletedAt" IS NULL
   AND (
     n."contractTotalAmount" < 0 OR n."contractDownPayment" < 0
     OR n."contractBaseRemainingAmount" < 0 OR n."contractInterestAmount" < 0
-    OR n."contractFinalAmount" < 0 OR n."contractPaidAmount" < 0
+    OR n."contractFinalAmount" < 0 OR n."contractPaidAmount" < 0 OR n."contractInterestWaivedAmount" < 0
     OR n."contractRemainingAmount" < 0
     OR ABS(n."contractBaseRemainingAmount" -
            (n."contractTotalAmount" - n."contractDownPayment")) >=
@@ -75,7 +75,7 @@ WHERE n."deletedAt" IS NULL
     OR ABS(n."contractFinalAmount" -
            (n."contractBaseRemainingAmount" + n."contractInterestAmount")) >=
        CASE WHEN n."contractCurrency" = 'USD'::"CurrencyCode" THEN 0.01 ELSE 1 END
-    OR ABS(n."contractFinalAmount" - n."contractPaidAmount" - n."contractRemainingAmount") >=
+    OR ABS(n."contractFinalAmount" - n."contractPaidAmount" - n."contractInterestWaivedAmount" - n."contractRemainingAmount") >=
        CASE WHEN n."contractCurrency" = 'USD'::"CurrencyCode" THEN 0.01 ELSE 1 END
     OR (n.status <> 'CANCELLED'::"NasiyaStatus" AND
         (n.status = 'COMPLETED'::"NasiyaStatus") <> (n."contractRemainingAmount" = 0))
@@ -96,10 +96,11 @@ WITH schedule_totals AS (
   SELECT n.id AS nasiya_id,
          COALESCE(SUM(s."contractExpectedAmount"), 0) AS expected_sum,
          COALESCE(SUM(s."contractPaidAmount"), 0) AS paid_sum,
-         COALESCE(SUM(GREATEST(s."contractExpectedAmount" - s."contractPaidAmount", 0)), 0) AS remaining_sum,
+         COALESCE(SUM(s."contractInterestWaivedAmount"), 0) AS waived_sum,
+         COALESCE(SUM(s."contractRemainingAmount"), 0) AS remaining_sum,
          COUNT(*) FILTER (WHERE s."contractCurrency" <> n."contractCurrency") AS currency_mismatches,
          COUNT(*) FILTER (WHERE ABS(s."contractRemainingAmount" -
-           GREATEST(s."contractExpectedAmount" - s."contractPaidAmount", 0)) >=
+           (s."contractExpectedAmount" - s."contractPaidAmount" - s."contractInterestWaivedAmount")) >=
            CASE WHEN n."contractCurrency" = 'USD'::"CurrencyCode" THEN 0.01 ELSE 1 END) AS row_balance_mismatches
   FROM "Nasiya" n
   LEFT JOIN "NasiyaSchedule" s ON s."nasiyaId" = n.id
@@ -107,8 +108,8 @@ WITH schedule_totals AS (
   GROUP BY n.id
 )
 SELECT n.id, n."shopId", n."contractCurrency",
-       n."contractFinalAmount", n."contractPaidAmount", n."contractRemainingAmount",
-       t.expected_sum, t.paid_sum, t.remaining_sum,
+       n."contractFinalAmount", n."contractPaidAmount", n."contractInterestWaivedAmount", n."contractRemainingAmount",
+       t.expected_sum, t.paid_sum, t.waived_sum, t.remaining_sum,
        t.currency_mismatches, t.row_balance_mismatches
 FROM "Nasiya" n
 JOIN schedule_totals t ON t.nasiya_id = n.id
@@ -116,6 +117,8 @@ WHERE t.currency_mismatches > 0 OR t.row_balance_mismatches > 0
    OR ABS(n."contractFinalAmount" - t.expected_sum) >=
       CASE WHEN n."contractCurrency" = 'USD'::"CurrencyCode" THEN 0.01 ELSE 1 END
    OR ABS(n."contractPaidAmount" - t.paid_sum) >=
+      CASE WHEN n."contractCurrency" = 'USD'::"CurrencyCode" THEN 0.01 ELSE 1 END
+   OR ABS(n."contractInterestWaivedAmount" - t.waived_sum) >=
       CASE WHEN n."contractCurrency" = 'USD'::"CurrencyCode" THEN 0.01 ELSE 1 END
    OR ABS(n."contractRemainingAmount" - t.remaining_sum) >=
       CASE WHEN n."contractCurrency" = 'USD'::"CurrencyCode" THEN 0.01 ELSE 1 END

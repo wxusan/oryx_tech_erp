@@ -152,6 +152,12 @@ export default function HisobotClient({
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
+  const waivedProfitText = formatPartitionedMoney({
+    amountUzs: stats.waivedNasiyaProfitThisMonthUzs,
+    amountUsd: stats.waivedNasiyaProfitThisMonthUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
   const supplierDebtText = formatPartitionedMoney({
     amountUzs: stats.supplierPayablesOpenAllTimeUzs,
     amountUsd: stats.supplierPayablesOpenAllTimeUsd,
@@ -252,7 +258,7 @@ export default function HisobotClient({
 
       {adminId && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-          Admin filtri shartnomani yaratgan, to'lovni yozgan va qaytarishni yozgan xodim harakatlarini alohida bog'laydi; marja va Nasiya foizi to'lovni yozgan xodimga tegishli.
+          Admin filtri shartnomani yaratgan, to'lovni, qaytarishni yoki nasiya yopish kelishuvini yozgan xodim harakatlarini alohida bog'laydi; marja va Nasiya foizi to'lovni yozgan xodimga tegishli.
           Ombordagi tannarx, faol nasiyalar, kutilayotgan foyda va kechikkan qarzdorlik do'kon bo'yicha ko'rsatiladi.
         </div>
       )}
@@ -369,6 +375,17 @@ export default function HisobotClient({
           <CardContent>
             <div className="text-2xl font-bold text-zinc-900">{expectedInterestText}</div>
             <p className="mt-3 text-xs text-zinc-500">Shu oy to&apos;lanishi kerak, lekin hali tushmagan foiz qismi</p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg border-amber-200 bg-amber-50/40">
+          <CardHeader>
+            <CardDescription className="text-amber-900">Kechilgan nasiya foydasi</CardDescription>
+            <CardAction><HandCoins className="size-4 text-amber-700" /></CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-950">{waivedProfitText}</div>
+            <p className="mt-3 text-xs text-amber-900/70">Tanlangan oyda {stats.waivedNasiyaProfitCountThisMonth} ta muddatidan oldin yopish kelishuvida olinmagan kelgusi foyda</p>
           </CardContent>
         </Card>
 

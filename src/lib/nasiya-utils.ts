@@ -387,7 +387,9 @@ export function scheduleOutstanding(expectedAmount: number, paidAmount: number):
  * as COMPLETED yet, and to decide whether a new payment should complete it.
  */
 export function isNasiyaEffectivelyComplete(schedules: OverdueScheduleInput[]): boolean {
-  return schedules.length > 0 && schedules.every((s) => scheduleOutstanding(s.expectedAmount, s.paidAmount) <= 0)
+  return schedules.length > 0 && schedules.every(
+    (s) => s.status === 'SETTLED' || scheduleOutstanding(s.expectedAmount, s.paidAmount) <= 0,
+  )
 }
 
 /** Effective due instant of a schedule: an active defer (delayedUntil) wins. */
@@ -404,7 +406,7 @@ export function scheduleEffectiveDueTime(schedule: {
  * (shop-stats) and the payment route so every surface agrees.
  */
 export function isScheduleOverdue(schedule: OverdueScheduleInput, now: Date = new Date()): boolean {
-  if (schedule.status === 'PAID') return false
+  if (schedule.status === 'PAID' || schedule.status === 'SETTLED') return false
   if (scheduleOutstanding(schedule.expectedAmount, schedule.paidAmount) <= 0) return false
   return isBeforeTashkentToday(new Date(scheduleEffectiveDueTime(schedule)), now)
 }
@@ -417,6 +419,7 @@ export function isScheduleOverdue(schedule: OverdueScheduleInput, now: Date = ne
  * in the stored status/paidAmount — otherwise the stored status stands.
  */
 export function scheduleDisplayStatus(schedule: OverdueScheduleInput, now: Date = new Date()): string {
+  if (schedule.status === 'SETTLED') return 'SETTLED'
   if (schedule.status !== 'PAID' && scheduleOutstanding(schedule.expectedAmount, schedule.paidAmount) <= 0) {
     return 'PAID'
   }

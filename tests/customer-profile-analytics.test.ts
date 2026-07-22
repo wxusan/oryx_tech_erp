@@ -22,6 +22,7 @@ function ownerAnalytics(): CustomerProfileAnalytics {
       contracts: { UZS: 100, USD: 10 },
       payments: { UZS: 80, USD: 8 },
       refunds: { UZS: 5, USD: 0 },
+      waivedProfit: { UZS: 2, USD: 0 },
       writeOffs: { UZS: 1, USD: 0 },
     }],
     discipline: {
@@ -68,7 +69,7 @@ describe('customer profile analytics contract', () => {
     expect(redacted.activity).toEqual([{ month: '2026-07', contracts: { UZS: 100, USD: 10 } }])
     expect(redacted.caveats).toEqual({})
     const serialized = JSON.stringify(redacted)
-    for (const restricted of ['payments', 'refunds', 'writeOffs', 'legacyUsdPaymentCount']) {
+    for (const restricted of ['payments', 'refunds', 'waivedProfit', 'writeOffs', 'legacyUsdPaymentCount']) {
       expect(serialized).not.toContain(restricted)
     }
   })

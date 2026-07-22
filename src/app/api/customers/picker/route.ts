@@ -17,6 +17,7 @@ import {
 const EMPTY_FACTORS: CustomerTrustFactors = {
   totalNasiyaCount: 0,
   completedNasiyaCount: 0,
+  settledWithWaiverCount: 0,
   activeNasiyaCount: 0,
   cancelledNasiyaCount: 0,
   paidInstallmentCount: 0,

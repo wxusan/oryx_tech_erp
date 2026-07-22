@@ -33,7 +33,7 @@ describe('server call sites pass the shop\'s real currency into the scorer', () 
     expect(source).toContain("import { getShopCurrencyContext } from '@/lib/server/currency'")
     expect(source).toContain('const currency = await getShopCurrencyContext(shopId)')
     const scoreCallIndex = source.indexOf('computeNasiyaPaymentScore(')
-    const scoreCallBlock = source.slice(scoreCallIndex, scoreCallIndex + 500)
+    const scoreCallBlock = source.slice(scoreCallIndex, scoreCallIndex + 700)
     expect(scoreCallBlock).toContain('currency,')
     // Also forwards the deal's own contract currency — never the legacy UZS
     // snapshot — see docs/currency-accounting-model.md.
@@ -43,7 +43,8 @@ describe('server call sites pass the shop\'s real currency into the scorer', () 
   it('/api/nasiya/[id] (detail page score card) fetches and forwards shop currency', () => {
     const source = read('src/app/api/nasiya/[id]/route.ts')
     expect(source).toContain("import { getShopCurrencyContext } from '@/lib/server/currency'")
-    expect(source).toContain('await getShopCurrencyContext(nasiya.shopId)')
+    expect(source).toContain('includePaymentScore ? getShopCurrencyContext(nasiya.shopId)')
+    expect(source).toContain('scoreCurrencyContext,')
   })
 })
 

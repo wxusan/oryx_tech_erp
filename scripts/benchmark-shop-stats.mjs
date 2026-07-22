@@ -128,11 +128,11 @@ const obligationSql = `
       coalesce(s."delayedUntil", s."dueDate") AS effective_due,
       CASE
         WHEN n."contractCurrency" = 'USD'
-          AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01
-          THEN s."contractExpectedAmount" - s."contractPaidAmount"
+          AND s."contractRemainingAmount" >= 0.01
+          THEN s."contractRemainingAmount"
         WHEN n."contractCurrency" = 'UZS'
-          AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1
-          THEN s."contractExpectedAmount" - s."contractPaidAmount"
+          AND s."contractRemainingAmount" >= 1
+          THEN s."contractRemainingAmount"
         ELSE 0
       END AS outstanding
     FROM "NasiyaSchedule" s
@@ -205,11 +205,11 @@ const overdueSummarySql = `
       n."contractCurrency" AS currency,
       sum(CASE
         WHEN n."contractCurrency" = 'USD'
-          AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01
-          THEN s."contractExpectedAmount" - s."contractPaidAmount"
+          AND s."contractRemainingAmount" >= 0.01
+          THEN s."contractRemainingAmount"
         WHEN n."contractCurrency" = 'UZS'
-          AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1
-          THEN s."contractExpectedAmount" - s."contractPaidAmount"
+          AND s."contractRemainingAmount" >= 1
+          THEN s."contractRemainingAmount"
         ELSE 0
       END)::numeric AS outstanding
     FROM "NasiyaSchedule" s
@@ -223,11 +223,11 @@ const overdueSummarySql = `
     GROUP BY n."id", n."contractCurrency"
     HAVING sum(CASE
       WHEN n."contractCurrency" = 'USD'
-        AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01
-        THEN s."contractExpectedAmount" - s."contractPaidAmount"
+        AND s."contractRemainingAmount" >= 0.01
+        THEN s."contractRemainingAmount"
       WHEN n."contractCurrency" = 'UZS'
-        AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1
-        THEN s."contractExpectedAmount" - s."contractPaidAmount"
+        AND s."contractRemainingAmount" >= 1
+        THEN s."contractRemainingAmount"
       ELSE 0
     END) > 0
   ), sale_deals AS (
@@ -267,8 +267,8 @@ const upcomingSql = `
     AND n."returnedAt" IS NULL
     AND n."status" <> 'CANCELLED'
     AND (
-      (n."contractCurrency" = 'USD' AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01)
-      OR (n."contractCurrency" = 'UZS' AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1)
+      (n."contractCurrency" = 'USD' AND s."contractRemainingAmount" >= 0.01)
+      OR (n."contractCurrency" = 'UZS' AND s."contractRemainingAmount" >= 1)
     )
   ORDER BY coalesce(s."delayedUntil", s."dueDate") ASC, s."id" ASC
   LIMIT 5
@@ -277,6 +277,7 @@ const upcomingSql = `
 const hydrateSql = `
   SELECT s."id", s."dueDate", s."delayedUntil", s."expectedAmount", s."paidAmount",
          s."status", s."contractExpectedAmount", s."contractPaidAmount",
+         s."contractInterestWaivedAmount", s."contractRemainingAmount",
          n."id" AS nasiya_id, n."contractCurrency"
   FROM "NasiyaSchedule" s
   JOIN "Nasiya" n ON n."id" = s."nasiyaId" AND n."shopId" = s."shopId"

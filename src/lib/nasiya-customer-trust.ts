@@ -41,12 +41,14 @@ export interface CustomerNasiyaInput {
   status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
   resolutionState?: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
   contractCurrency: CurrencyCode
+  settledWithWaiver?: boolean
   schedules: NasiyaScoreScheduleInput[]
 }
 
 export interface CustomerTrustFactors {
   totalNasiyaCount: number
   completedNasiyaCount: number
+  settledWithWaiverCount: number
   activeNasiyaCount: number
   cancelledNasiyaCount: number
   paidInstallmentCount: number
@@ -78,7 +80,8 @@ export function computeCustomerTrustRating(
   adminOverride?: TrustTier | null,
 ): CustomerTrustRating {
   const totalNasiyaCount = nasiyas.length
-  const completedNasiyaCount = nasiyas.filter((n) => n.status === 'COMPLETED').length
+  const completedNasiyaCount = nasiyas.filter((n) => n.status === 'COMPLETED' && !n.settledWithWaiver).length
+  const settledWithWaiverCount = nasiyas.filter((n) => n.settledWithWaiver).length
   const activeNasiyaCount = nasiyas.filter(
     (n) => (n.resolutionState ?? 'ACTIVE') === 'ACTIVE' && (n.status === 'ACTIVE' || n.status === 'OVERDUE'),
   ).length
@@ -114,6 +117,7 @@ export function computeCustomerTrustRating(
   const factors: CustomerTrustFactors = {
     totalNasiyaCount,
     completedNasiyaCount,
+    settledWithWaiverCount,
     activeNasiyaCount,
     cancelledNasiyaCount,
     paidInstallmentCount,
@@ -139,6 +143,7 @@ export function computeCustomerTrustRatingFromFactors(
   const {
     totalNasiyaCount,
     completedNasiyaCount,
+    settledWithWaiverCount,
     cancelledNasiyaCount,
     paidInstallmentCount,
     onTimeRatio,
@@ -201,6 +206,9 @@ export function computeCustomerTrustRatingFromFactors(
     }
     if (cancelledNasiyaCount > 0) {
       reasons.push(`${cancelledNasiyaCount} ta nasiya bekor qilingan`)
+    }
+    if (settledWithWaiverCount > 0) {
+      reasons.push(`${settledWithWaiverCount} ta nasiya kelgusi foyda kechilib yopilgan`)
     }
   }
 

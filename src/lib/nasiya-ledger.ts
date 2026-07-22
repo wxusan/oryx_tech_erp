@@ -35,6 +35,7 @@ export interface NasiyaLedgerScheduleInput {
   contractCurrency: CurrencyCode | string | null | undefined
   contractExpectedAmount: MoneyValue
   contractPaidAmount: MoneyValue
+  contractInterestWaivedAmount?: MoneyValue
   contractRemainingAmount: MoneyValue
 }
 
@@ -49,6 +50,7 @@ export interface NasiyaLedgerInput {
   contractCurrency: CurrencyCode
   contractFinalAmount: MoneyValue
   contractPaidAmount: MoneyValue
+  contractInterestWaivedAmount?: MoneyValue
   contractRemainingAmount: MoneyValue
   schedules: NasiyaLedgerScheduleInput[]
   /** Only set true once allocation reconstruction has been verified. */
@@ -60,6 +62,7 @@ export interface NasiyaLedgerScheduleDto {
   id: string
   expected: MoneyDto
   paid: MoneyDto
+  waived: MoneyDto
   remaining: MoneyDto
 }
 
@@ -67,8 +70,11 @@ export interface NasiyaLedgerDto {
   contractCurrency: CurrencyCode
   financed: MoneyDto
   paid: MoneyDto
+  waived: MoneyDto
+  fulfilled: MoneyDto
   remaining: MoneyDto
   parentPaid: MoneyDto
+  parentWaived: MoneyDto
   parentRemaining: MoneyDto
   scheduleCount: number
   schedules: NasiyaLedgerScheduleDto[]
@@ -84,6 +90,7 @@ export interface NasiyaLedgerDto {
   /** A write-safe proposal, present only when caches are the sole mismatch. */
   repair: {
     contractPaid: MoneyDto
+    contractWaived: MoneyDto
     contractRemaining: MoneyDto
     status: 'ACTIVE' | 'COMPLETED' | 'OVERDUE' | 'CANCELLED'
   } | null
@@ -115,6 +122,7 @@ function scheduleStatusInput(
   currency: CurrencyCode,
   expected: MoneyDto,
   paid: MoneyDto,
+  waived: MoneyDto,
   remaining: MoneyDto,
 ) {
   return {
@@ -125,6 +133,7 @@ function scheduleStatusInput(
     paidAmount: schedule.paidAmount ?? moneyDtoToAmount(paid),
     contractExpectedAmount: moneyDtoToAmount(expected),
     contractPaidAmount: moneyDtoToAmount(paid),
+    contractInterestWaivedAmount: moneyDtoToAmount(waived),
     contractRemainingAmount: moneyDtoToAmount(remaining),
   }
 }
@@ -132,11 +141,12 @@ function scheduleStatusInput(
 function expectedScheduleStatus(
   schedule: NasiyaLedgerScheduleInput,
   paid: MoneyDto,
+  waived: MoneyDto,
   remaining: MoneyDto,
   now: Date,
-): 'PAID' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED' {
+): 'PAID' | 'SETTLED' | 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED' {
   if (schedule.status === 'CANCELLED') return 'CANCELLED'
-  if (remaining.minorUnits === 0) return 'PAID'
+  if (remaining.minorUnits === 0) return waived.minorUnits > 0 ? 'SETTLED' : 'PAID'
   const effectiveDue = schedule.delayedUntil ?? schedule.dueDate
   if (isBeforeTashkentToday(new Date(effectiveDue), now)) return 'OVERDUE'
   if (schedule.status === 'DEFERRED' && schedule.delayedUntil) return 'DEFERRED'
@@ -152,6 +162,7 @@ export function reconcileNasiyaLedger(input: NasiyaLedgerInput, now: Date = new 
   const currency = input.contractCurrency
   const financed = safeMoney(input.contractFinalAmount, currency, 'contractFinalAmount', reasons)
   const parentPaid = safeMoney(input.contractPaidAmount, currency, 'contractPaidAmount', reasons)
+  const parentWaived = safeMoney(input.contractInterestWaivedAmount, currency, 'contractInterestWaivedAmount', reasons)
   const parentRemaining = safeMoney(input.contractRemainingAmount, currency, 'contractRemainingAmount', reasons)
   if (financed.minorUnits <= 0) reasons.push('contractFinalAmount must be positive')
 
@@ -162,35 +173,37 @@ export function reconcileNasiyaLedger(input: NasiyaLedgerInput, now: Date = new 
     }
     const expected = safeMoney(schedule.contractExpectedAmount, currency, `schedule ${schedule.id} expected`, reasons)
     const paid = safeMoney(schedule.contractPaidAmount, currency, `schedule ${schedule.id} paid`, reasons)
+    const waived = safeMoney(schedule.contractInterestWaivedAmount, currency, `schedule ${schedule.id} waived`, reasons)
     const remaining = safeMoney(schedule.contractRemainingAmount, currency, `schedule ${schedule.id} remaining`, reasons)
 
     try {
-      if (!moneyDtoEquals(expected, addMoneyDto(paid, remaining))) {
-        reasons.push(`schedule ${schedule.id}: expected does not equal paid plus remaining`)
+      if (!moneyDtoEquals(expected, addMoneyDto(addMoneyDto(paid, waived), remaining))) {
+        reasons.push(`schedule ${schedule.id}: expected does not equal paid plus waived plus remaining`)
       }
     } catch {
       reasons.push(`schedule ${schedule.id}: invalid balance`)
     }
 
     if (expected.minorUnits <= 0) reasons.push(`schedule ${schedule.id}: expected amount must be positive`)
-    const expectedStatus = expectedScheduleStatus(schedule, paid, remaining, now)
+    const expectedStatus = expectedScheduleStatus(schedule, paid, waived, remaining, now)
     if (schedule.status === 'CANCELLED' && remaining.minorUnits > 0) {
       reasons.push(`schedule ${schedule.id}: cancelled schedule has remaining debt`)
     } else if (schedule.status !== expectedStatus) {
       reasons.push(`schedule ${schedule.id}: status differs from schedule-derived status`)
     }
 
-    return { source: schedule, expected, paid, remaining }
+    return { source: schedule, expected, paid, waived, remaining }
   })
 
   const scheduleExpected = sumMoney(currency, schedules.map((schedule) => schedule.expected))
   const schedulePaid = sumMoney(currency, schedules.map((schedule) => schedule.paid))
+  const scheduleWaived = sumMoney(currency, schedules.map((schedule) => schedule.waived))
   const scheduleRemaining = sumMoney(currency, schedules.map((schedule) => schedule.remaining))
 
   if (schedules.length === 0) reasons.push('contract has no schedules')
   if (!moneyDtoEquals(scheduleExpected, financed)) reasons.push('schedule total does not equal financed contract amount')
   try {
-    if (!moneyDtoEquals(scheduleExpected, addMoneyDto(schedulePaid, scheduleRemaining))) {
+    if (!moneyDtoEquals(scheduleExpected, addMoneyDto(addMoneyDto(schedulePaid, scheduleWaived), scheduleRemaining))) {
       reasons.push('schedule aggregates do not reconcile')
     }
   } catch {
@@ -227,7 +240,7 @@ export function reconcileNasiyaLedger(input: NasiyaLedgerInput, now: Date = new 
       contractFinalAmount: moneyDtoToAmount(financed),
       // Deliberately use schedule truth rather than the parent cache.
       contractRemainingAmount: moneyDtoToAmount(scheduleRemaining),
-      schedules: schedules.map(({ source, expected, paid, remaining }) => scheduleStatusInput(source, currency, expected, paid, remaining)),
+      schedules: schedules.map(({ source, expected, paid, waived, remaining }) => scheduleStatusInput(source, currency, expected, paid, waived, remaining)),
     },
     now,
   )
@@ -235,10 +248,12 @@ export function reconcileNasiyaLedger(input: NasiyaLedgerInput, now: Date = new 
   const status = derivedStatus.displayStatus
   const parentInSync =
     moneyDtoEquals(parentPaid, schedulePaid) &&
+    moneyDtoEquals(parentWaived, scheduleWaived) &&
     moneyDtoEquals(parentRemaining, scheduleRemaining) &&
     input.status === status
 
   if (!moneyDtoEquals(parentPaid, schedulePaid)) reasons.push('parent paid cache differs from schedules')
+  if (!moneyDtoEquals(parentWaived, scheduleWaived)) reasons.push('parent waived cache differs from schedules')
   if (!moneyDtoEquals(parentRemaining, scheduleRemaining)) reasons.push('parent remaining cache differs from schedules')
   if (input.status !== status) reasons.push('parent status differs from schedule-derived status')
 
@@ -257,11 +272,14 @@ export function reconcileNasiyaLedger(input: NasiyaLedgerInput, now: Date = new 
     contractCurrency: currency,
     financed,
     paid: schedulePaid,
+    waived: scheduleWaived,
+    fulfilled: addMoneyDto(schedulePaid, scheduleWaived),
     remaining: scheduleRemaining,
     parentPaid,
+    parentWaived,
     parentRemaining,
     scheduleCount: schedules.length,
-    schedules: schedules.map(({ source, expected, paid, remaining }) => ({ id: source.id, expected, paid, remaining })),
+    schedules: schedules.map(({ source, expected, paid, waived, remaining }) => ({ id: source.id, expected, paid, waived, remaining })),
     status,
     isOverdue: derivedStatus.isOverdue,
     overdue: createMoneyDto(currency, derivedStatus.overdueAmount),
@@ -272,7 +290,7 @@ export function reconcileNasiyaLedger(input: NasiyaLedgerInput, now: Date = new 
     allocationLedger,
     parentInSync,
     repair: health === 'REPAIRABLE_PARENT_CACHE'
-      ? { contractPaid: schedulePaid, contractRemaining: scheduleRemaining, status }
+      ? { contractPaid: schedulePaid, contractWaived: scheduleWaived, contractRemaining: scheduleRemaining, status }
       : null,
   }
 }

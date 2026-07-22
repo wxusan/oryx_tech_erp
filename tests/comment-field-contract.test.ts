@@ -32,6 +32,11 @@ describe('ordinary comment requiredness contract', () => {
     for (const surface of FORM_SURFACE_CONTRACT) {
       for (const field of surface.fields) {
         if (!ordinaryFieldKeys.has(field.submittedKey)) continue
+        if (surface.id === 'nasiya.settle' && field.submittedKey === 'reason') {
+          expect(field.requirement).toBe('CONDITIONAL')
+          expect(field.requiredWhen).toBe('mode is WAIVE_REMAINING_PROFIT')
+          continue
+        }
         const expected = highRiskSurfaceIds.has(surface.id) ? 'ALWAYS' : 'OPTIONAL'
         expect(field.requirement, `${surface.id}.${field.submittedKey}`).toBe(expected)
       }

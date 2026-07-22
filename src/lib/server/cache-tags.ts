@@ -88,6 +88,23 @@ export function invalidateShopPaymentMutation(shopId: string) {
   )
 }
 
+export function invalidateShopNasiyaSettlementMutation(shopId: string) {
+  invalidateShopCache(
+    shopId,
+    [
+      shopCacheTag.devices,
+      shopCacheTag.sales,
+      shopCacheTag.nasiyalar,
+      shopCacheTag.nasiyaSchedules,
+      shopCacheTag.customers,
+      shopCacheTag.stats,
+      shopCacheTag.reports,
+      shopCacheTag.logs,
+      shopCacheTag.debts,
+    ],
+  )
+}
+
 export function invalidateShopSupplierPayableMutation(shopId: string) {
   invalidateShopCache(
     shopId,

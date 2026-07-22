@@ -36,6 +36,8 @@ export const GRACE_DAYS = 1
 export interface NasiyaScoreScheduleInput extends OverdueScheduleInput {
   /** When the installment was actually paid (null/undefined if still unpaid). */
   paidAt: Date | string | null | undefined
+  /** Non-cash settlement is excluded from both overdue debt and paid history. */
+  interestWaivedAmount?: number | string | null
 }
 
 export type PaymentScoreColor = 'green' | 'yellow' | 'red' | 'gray'
@@ -99,9 +101,13 @@ export function computeNasiyaPaymentScore(
   contractCurrency: CurrencyCode = 'UZS',
 ): NasiyaPaymentScore {
   const schedules = input.schedules
+  const cashAdjustedSchedules = schedules.map((schedule) => ({
+    ...schedule,
+    expectedAmount: Math.max(0, Number(schedule.expectedAmount) - Number(schedule.interestWaivedAmount ?? 0)),
+  }))
 
   // --- 1. Current overdue status (strongest red signal, overrides everything) ---
-  const overdueSchedules = schedules.filter((s) => isContractScheduleOverdue(s, contractCurrency, now))
+  const overdueSchedules = cashAdjustedSchedules.filter((s) => isContractScheduleOverdue(s, contractCurrency, now))
   const currentOverdueAmount = overdueSchedules.reduce(
     (sum, s) => sum + Math.max(0, Number(s.expectedAmount) - Number(s.paidAmount)),
     0,
@@ -110,7 +116,7 @@ export function computeNasiyaPaymentScore(
   const isCurrentlyOverdue = overdueScheduleCount > 0
 
   // --- 2. Payment timing history (paid installments only, real paidAt) ---
-  const paidSchedules = schedules.filter((s) => s.status === 'PAID' && s.paidAt != null)
+  const paidSchedules = cashAdjustedSchedules.filter((s) => s.status === 'PAID' && s.paidAt != null)
   const paidInstallmentCount = paidSchedules.length
 
   let earlyPaymentCount = 0

@@ -97,6 +97,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         contractCurrency: nasiya.contractCurrency,
         contractFinalAmount: nasiya.contractFinalAmount.toString(),
         contractPaidAmount: nasiya.contractPaidAmount.toString(),
+        contractInterestWaivedAmount: nasiya.contractInterestWaivedAmount.toString(),
         contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
         schedules: nasiya.schedules.map((schedule) => ({
           id: schedule.id,
@@ -108,6 +109,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           contractCurrency: schedule.contractCurrency,
           contractExpectedAmount: schedule.contractExpectedAmount.toString(),
           contractPaidAmount: schedule.contractPaidAmount.toString(),
+          contractInterestWaivedAmount: schedule.contractInterestWaivedAmount.toString(),
           contractRemainingAmount: schedule.contractRemainingAmount.toString(),
         })),
         allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE',
@@ -160,6 +162,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         contractCurrency: nasiya.contractCurrency,
         contractFinalAmount: nasiya.contractFinalAmount.toString(),
         contractPaidAmount: nasiya.contractPaidAmount.toString(),
+        contractInterestWaivedAmount: nasiya.contractInterestWaivedAmount.toString(),
         contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
         schedules: updatedSchedules.map((updated) => ({
           id: updated.id,
@@ -171,6 +174,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           contractCurrency: updated.contractCurrency,
           contractExpectedAmount: updated.contractExpectedAmount.toString(),
           contractPaidAmount: updated.contractPaidAmount.toString(),
+          contractInterestWaivedAmount: updated.contractInterestWaivedAmount.toString(),
           contractRemainingAmount: updated.contractRemainingAmount.toString(),
         })),
         allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE',

@@ -529,6 +529,48 @@ export const addNasiyaPaymentSchema = z
 
 export type AddNasiyaPaymentInput = z.infer<typeof addNasiyaPaymentSchema>
 
+// Early settlement is a fixed, server-calculated command. The three minor-unit
+// snapshots are optimistic-concurrency guards from the quote the user reviewed;
+// they are never trusted as accounting inputs.
+export const settleNasiyaSchema = z
+  .object({
+    mode: z.enum(['FULL_WITH_PROFIT', 'WAIVE_REMAINING_PROFIT']),
+    paymentMethod: paymentMethodSchema.optional(),
+    paymentBreakdown: paymentBreakdownSchema,
+    date: z.coerce.date({ error: "Yopish sanasi kiritilishi shart" }),
+    reason: z.string().trim().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
+    inputCurrency: currencyCodeSchema.optional(),
+    expectedContractCurrency: currencyCodeSchema,
+    expectedRemainingMinorUnits: z.number().int().positive(),
+    expectedCashMinorUnits: z.number().int().min(0),
+    expectedWaivedMinorUnits: z.number().int().min(0),
+  })
+  .superRefine((data, ctx) => {
+    if (data.mode === 'WAIVE_REMAINING_PROFIT' && (!data.reason || data.reason.length < 3)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reason'],
+        message: "Foydadan kechish sababi kamida 3 ta belgidan iborat bo'lishi kerak",
+      })
+    }
+    if (data.expectedCashMinorUnits > 0 && !data.paymentMethod && !data.paymentBreakdown) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['paymentMethod'],
+        message: "To'lov usuli tanlanishi shart",
+      })
+    }
+    if (data.expectedCashMinorUnits === 0 && (data.paymentMethod || data.paymentBreakdown)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['paymentMethod'],
+        message: "Pul olinmaydigan yopishda to'lov usuli kiritilmaydi",
+      })
+    }
+  })
+
+export type SettleNasiyaInput = z.infer<typeof settleNasiyaSchema>
+
 // Deferral is deliberately a separate command from payment. It has no amount,
 // payment method, or payment breakdown and therefore cannot accidentally write
 // money through the payment endpoint.

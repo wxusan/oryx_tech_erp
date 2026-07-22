@@ -35,4 +35,23 @@ describe('hasValidNasiyaScheduleNativeLedger', () => {
       status: 'PAID',
     })).toBe(false)
   })
+
+  it('accepts an early-settled schedule only when its waived amount reconciles', () => {
+    expect(hasValidNasiyaScheduleNativeLedger({
+      contractExpectedAmount: 1_000,
+      contractPaidAmount: 800,
+      contractInterestWaivedAmount: 200,
+      contractRemainingAmount: 0,
+      contractCurrency: 'UZS',
+      status: 'SETTLED',
+    })).toBe(true)
+    expect(hasValidNasiyaScheduleNativeLedger({
+      contractExpectedAmount: 1_000,
+      contractPaidAmount: 800,
+      contractInterestWaivedAmount: 200,
+      contractRemainingAmount: 0,
+      contractCurrency: 'UZS',
+      status: 'PAID',
+    })).toBe(false)
+  })
 })

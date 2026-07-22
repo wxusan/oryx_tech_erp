@@ -50,6 +50,7 @@ describe('logical command idempotency', () => {
     for (const relativePath of [
       'src/app/(shop)/shop/qurilmalar/[id]/page.tsx',
       'src/components/shop/nasiya-payment-modal.tsx',
+      'src/components/shop/nasiya-settlement-modal.tsx',
       'src/app/(admin)/admin/shops/[id]/page.tsx',
     ]) {
       const source = readFileSync(resolve(process.cwd(), relativePath), 'utf8')

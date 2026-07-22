@@ -13,6 +13,7 @@ describe('Telegram producer coverage', () => {
     'src/app/api/devices/[id]/return/route.ts',
     'src/app/api/sales/[id]/payment/route.ts',
     'src/app/api/nasiya/[id]/payment/route.ts',
+    'src/app/api/nasiya/[id]/settlement/route.ts',
     'src/app/api/nasiya/import/route.ts',
     'src/app/api/olib-sotdim/route.ts',
     'src/app/api/supplier-payables/[id]/payments/route.ts',

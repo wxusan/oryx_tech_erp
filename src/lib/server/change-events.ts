@@ -108,10 +108,11 @@ export function affectedDomainsForChange(
     // included even though the trigger's primary domain is `sales`.
     Sale: ['devices', 'sales', 'payments', 'customers', 'returns', 'olibSotdim', 'debts', 'reports', 'logs', 'overdue'],
     SalePayment: ['devices', 'sales', 'payments', 'customers', 'debts', 'reports', 'logs', 'overdue'],
-    Nasiya: ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
-    NasiyaPayment: ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
+    Nasiya: ['devices', 'nasiyas', 'payments', 'customers', 'debts', 'reports', 'logs', 'overdue'],
+    NasiyaPayment: ['devices', 'nasiyas', 'payments', 'customers', 'debts', 'reports', 'logs', 'overdue'],
+    NasiyaSettlement: ['devices', 'nasiyas', 'payments', 'customers', 'debts', 'reports', 'logs', 'overdue'],
     // Regular nasiya payments are audited against NasiyaSchedule.
-    NasiyaSchedule: ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
+    NasiyaSchedule: ['devices', 'nasiyas', 'payments', 'customers', 'debts', 'reports', 'logs', 'overdue'],
     NasiyaReminder: ['nasiyas', 'logs', 'overdue'],
     Customer: ['customers', 'nasiyas', 'sales', 'reports', 'logs'],
     DeviceReturn: ['devices', 'sales', 'nasiyas', 'returns', 'reports', 'logs', 'overdue'],

@@ -3,6 +3,8 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
 import { getShopMonthlyAccountingAggregate } from '@/lib/server/shop-stats-queries'
 import { seedBuiltInStaffRoles } from '@/lib/server/shop-staff-roles'
+import { getShopRangeReport } from '@/lib/server/shop-report-range'
+import { resolveReportRange } from '@/lib/report-range'
 
 const authState = vi.hoisted(() => ({ session: null as unknown }))
 
@@ -19,6 +21,7 @@ vi.mock('@/lib/server/cache-tags', () => ({
   invalidateShopCustomerMutation: vi.fn(),
   invalidateShopDeviceMutation: vi.fn(),
   invalidateShopNasiyaMutation: vi.fn(),
+  invalidateShopNasiyaSettlementMutation: vi.fn(),
   invalidateShopPaymentMutation: vi.fn(),
   invalidateShopSaleMutation: vi.fn(),
   invalidateShopReturnMutation: vi.fn(),
@@ -333,6 +336,300 @@ async function seedNasiya(actor: Awaited<ReturnType<typeof seedActor>>, suffix: 
   return { customer, device, nasiya, schedule }
 }
 
+async function seedSettlementNasiya(
+  actor: Awaited<ReturnType<typeof seedActor>>,
+  suffix: string,
+) {
+  const customer = await prisma.customer.create({
+    data: {
+      shopId: actor.shop.id,
+      name: `Settlement customer ${suffix}`,
+      phone: `+99894${suffix.padStart(7, '0').slice(-7)}`,
+      normalizedPhone: `99894${suffix.padStart(7, '0').slice(-7)}`,
+    },
+  })
+  const device = await prisma.device.create({
+    data: {
+      shopId: actor.shop.id,
+      model: `Settlement phone ${suffix}`,
+      purchasePrice: 600,
+      purchaseInputAmount: 600,
+      purchaseAmountUzsSnapshot: 600,
+      imei: `ROUTE-SETTLEMENT-${suffix}`,
+      addedBy: actor.admin.id,
+      status: 'SOLD_NASIYA',
+    },
+  })
+
+  const result = await prisma.$transaction(async (tx) => {
+    const nasiya = await tx.nasiya.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        totalAmount: 1_000,
+        downPayment: 0,
+        baseRemainingAmount: 1_000,
+        interestPercent: 20,
+        interestAmount: 200,
+        finalNasiyaAmount: 1_200,
+        remainingAmount: 600,
+        months: 2,
+        monthlyPayment: 600,
+        startDate: new Date('2026-06-01T00:00:00.000Z'),
+        contractCurrency: 'UZS',
+        contractTotalAmount: 1_000,
+        contractDownPayment: 0,
+        contractBaseRemainingAmount: 1_000,
+        contractInterestAmount: 200,
+        contractFinalAmount: 1_200,
+        contractMonthlyPayment: 600,
+        contractRemainingAmount: 600,
+        contractPaidAmount: 600,
+        contractCostBasisAmount: 600,
+        contractMarginAmount: 400,
+        contractDownPaymentPrincipalAmount: 0,
+        contractDownPaymentMarginAmount: 0,
+        accountingReconstructionStatus: 'COMPLETE',
+        accountingReconstructedAt: new Date('2026-07-01T00:00:00.000Z'),
+        createdBy: actor.admin.id,
+      },
+    })
+    const paidSchedule = await tx.nasiyaSchedule.create({
+      data: {
+        nasiyaId: nasiya.id,
+        shopId: actor.shop.id,
+        monthNumber: 1,
+        dueDate: new Date('2026-07-01T00:00:00.000Z'),
+        expectedAmount: 600,
+        paidAmount: 600,
+        status: 'PAID',
+        paidAt: new Date('2026-07-01T08:00:00.000Z'),
+        paymentMethod: 'CARD',
+        contractCurrency: 'UZS',
+        contractExpectedAmount: 600,
+        contractPaidAmount: 600,
+        contractRemainingAmount: 0,
+        contractPrincipalAmount: 300,
+        contractMarginAmount: 200,
+        contractInterestAmount: 100,
+        contractPrincipalPaidAmount: 300,
+        contractMarginPaidAmount: 200,
+        contractInterestPaidAmount: 100,
+      },
+    })
+    const openSchedule = await tx.nasiyaSchedule.create({
+      data: {
+        nasiyaId: nasiya.id,
+        shopId: actor.shop.id,
+        monthNumber: 2,
+        dueDate: new Date('2026-08-01T00:00:00.000Z'),
+        expectedAmount: 600,
+        paidAmount: 0,
+        status: 'PENDING',
+        contractCurrency: 'UZS',
+        contractExpectedAmount: 600,
+        contractPaidAmount: 0,
+        contractRemainingAmount: 600,
+        contractPrincipalAmount: 300,
+        contractMarginAmount: 200,
+        contractInterestAmount: 100,
+        contractPrincipalPaidAmount: 0,
+        contractMarginPaidAmount: 0,
+        contractInterestPaidAmount: 0,
+      },
+    })
+    const priorPayment = await tx.nasiyaPayment.create({
+      data: {
+        nasiyaId: nasiya.id,
+        nasiyaScheduleId: paidSchedule.id,
+        shopId: actor.shop.id,
+        amount: 600,
+        paymentMethod: 'CARD',
+        paidAt: new Date('2026-07-01T08:00:00.000Z'),
+        note: 'Already paid first instalment',
+        idempotencyKey: `settlement-seed-${suffix}`,
+        paymentInputAmount: 600,
+        paymentInputCurrency: 'UZS',
+        appliedAmountInContractCurrency: 600,
+        createdBy: actor.admin.id,
+      },
+    })
+    await tx.nasiyaPaymentAllocation.create({
+      data: {
+        shopId: actor.shop.id,
+        nasiyaId: nasiya.id,
+        nasiyaPaymentId: priorPayment.id,
+        nasiyaScheduleId: paidSchedule.id,
+        sequence: 1,
+        contractCurrency: 'UZS',
+        contractAmount: 600,
+        contractPrincipalAmount: 300,
+        contractMarginAmount: 200,
+        contractInterestAmount: 100,
+        amountUzs: 600,
+        principalAmountUzs: 300,
+        marginAmountUzs: 200,
+        interestAmountUzs: 100,
+      },
+    })
+    return { nasiya, paidSchedule, openSchedule, priorPayment }
+  })
+
+  return { customer, device, ...result }
+}
+
+async function seedUsdSettlementNasiya(
+  actor: Awaited<ReturnType<typeof seedActor>>,
+  suffix: string,
+) {
+  const creationRate = 12_000
+  const customer = await prisma.customer.create({
+    data: {
+      shopId: actor.shop.id,
+      name: `USD settlement customer ${suffix}`,
+      phone: `+99893${suffix.padStart(7, '0').slice(-7)}`,
+      normalizedPhone: `99893${suffix.padStart(7, '0').slice(-7)}`,
+    },
+  })
+  const device = await prisma.device.create({
+    data: {
+      shopId: actor.shop.id,
+      model: `USD settlement phone ${suffix}`,
+      purchasePrice: 720_000,
+      purchaseCurrency: 'USD',
+      purchaseInputAmount: 60,
+      purchaseExchangeRateAtCreation: creationRate,
+      purchaseAmountUzsSnapshot: 720_000,
+      imei: `ROUTE-USD-SETTLEMENT-${suffix}`,
+      addedBy: actor.admin.id,
+      status: 'SOLD_NASIYA',
+    },
+  })
+
+  const result = await prisma.$transaction(async (tx) => {
+    const nasiya = await tx.nasiya.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        totalAmount: 1_200_000,
+        downPayment: 0,
+        baseRemainingAmount: 1_200_000,
+        interestPercent: 20,
+        interestAmount: 240_000,
+        finalNasiyaAmount: 1_440_000,
+        remainingAmount: 720_000,
+        months: 2,
+        monthlyPayment: 720_000,
+        startDate: new Date('2026-06-01T00:00:00.000Z'),
+        creationCurrency: 'USD',
+        creationExchangeRate: creationRate,
+        contractCurrency: 'USD',
+        contractExchangeRateAtCreation: creationRate,
+        contractTotalAmount: 100,
+        contractDownPayment: 0,
+        contractBaseRemainingAmount: 100,
+        contractInterestAmount: 20,
+        contractFinalAmount: 120,
+        contractMonthlyPayment: 60,
+        contractRemainingAmount: 60,
+        contractPaidAmount: 60,
+        contractCostBasisAmount: 60,
+        contractMarginAmount: 40,
+        contractDownPaymentPrincipalAmount: 0,
+        contractDownPaymentMarginAmount: 0,
+        accountingReconstructionStatus: 'COMPLETE',
+        accountingReconstructedAt: new Date('2026-07-01T00:00:00.000Z'),
+        createdBy: actor.admin.id,
+      },
+    })
+    const paidSchedule = await tx.nasiyaSchedule.create({
+      data: {
+        nasiyaId: nasiya.id,
+        shopId: actor.shop.id,
+        monthNumber: 1,
+        dueDate: new Date('2026-07-01T00:00:00.000Z'),
+        expectedAmount: 720_000,
+        paidAmount: 720_000,
+        status: 'PAID',
+        paidAt: new Date('2026-07-01T08:00:00.000Z'),
+        paymentMethod: 'CARD',
+        contractCurrency: 'USD',
+        contractExpectedAmount: 60,
+        contractPaidAmount: 60,
+        contractRemainingAmount: 0,
+        contractPrincipalAmount: 30,
+        contractMarginAmount: 20,
+        contractInterestAmount: 10,
+        contractPrincipalPaidAmount: 30,
+        contractMarginPaidAmount: 20,
+        contractInterestPaidAmount: 10,
+      },
+    })
+    const openSchedule = await tx.nasiyaSchedule.create({
+      data: {
+        nasiyaId: nasiya.id,
+        shopId: actor.shop.id,
+        monthNumber: 2,
+        dueDate: new Date('2026-08-01T00:00:00.000Z'),
+        expectedAmount: 720_000,
+        paidAmount: 0,
+        status: 'PENDING',
+        contractCurrency: 'USD',
+        contractExpectedAmount: 60,
+        contractPaidAmount: 0,
+        contractRemainingAmount: 60,
+        contractPrincipalAmount: 30,
+        contractMarginAmount: 20,
+        contractInterestAmount: 10,
+        contractPrincipalPaidAmount: 0,
+        contractMarginPaidAmount: 0,
+        contractInterestPaidAmount: 0,
+      },
+    })
+    const priorPayment = await tx.nasiyaPayment.create({
+      data: {
+        nasiyaId: nasiya.id,
+        nasiyaScheduleId: paidSchedule.id,
+        shopId: actor.shop.id,
+        amount: 720_000,
+        paymentMethod: 'CARD',
+        paidAt: new Date('2026-07-01T08:00:00.000Z'),
+        note: 'Already paid first USD instalment',
+        idempotencyKey: `usd-settlement-seed-${suffix}`,
+        paymentInputAmount: 60,
+        paymentInputCurrency: 'USD',
+        paymentExchangeRate: creationRate,
+        paymentExchangeRateSource: 'RECORDED_FROZEN',
+        appliedAmountInContractCurrency: 60,
+        createdBy: actor.admin.id,
+      },
+    })
+    await tx.nasiyaPaymentAllocation.create({
+      data: {
+        shopId: actor.shop.id,
+        nasiyaId: nasiya.id,
+        nasiyaPaymentId: priorPayment.id,
+        nasiyaScheduleId: paidSchedule.id,
+        sequence: 1,
+        contractCurrency: 'USD',
+        contractAmount: 60,
+        contractPrincipalAmount: 30,
+        contractMarginAmount: 20,
+        contractInterestAmount: 10,
+        amountUzs: 720_000,
+        principalAmountUzs: 360_000,
+        marginAmountUzs: 240_000,
+        interestAmountUzs: 120_000,
+      },
+    })
+    return { nasiya, paidSchedule, openSchedule, priorPayment }
+  })
+
+  return { customer, device, ...result }
+}
+
 async function nasiyaPaymentRequest(input: {
   nasiyaId: string
   scheduleId: string
@@ -365,6 +662,45 @@ async function nasiyaDetailRequest(nasiyaId: string) {
   return GET(new NextRequest(`http://localhost/api/nasiya/${nasiyaId}`), {
     params: Promise.resolve({ id: nasiyaId }),
   })
+}
+
+async function nasiyaSettlementQuoteRequest(nasiyaId: string) {
+  const { NextRequest } = await import('next/server')
+  const { GET } = await import('@/app/api/nasiya/[id]/settlement/route')
+  return GET(new NextRequest(`http://localhost/api/nasiya/${nasiyaId}/settlement`), {
+    params: Promise.resolve({ id: nasiyaId }),
+  })
+}
+
+async function nasiyaSettlementRequest(input: {
+  nasiyaId: string
+  mode: 'FULL_WITH_PROFIT' | 'WAIVE_REMAINING_PROFIT'
+  expectedRemaining: number
+  expectedCash: number
+  expectedWaived: number
+  key: string
+  reason?: string
+  inputCurrency?: 'UZS' | 'USD'
+  expectedContractCurrency?: 'UZS' | 'USD'
+  paymentMethod?: 'CASH' | 'CARD'
+}) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/nasiya/[id]/settlement/route')
+  return POST(new NextRequest(`http://localhost/api/nasiya/${input.nasiyaId}/settlement`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': input.key },
+    body: JSON.stringify({
+      mode: input.mode,
+      paymentMethod: input.paymentMethod ?? 'CASH',
+      date: '2026-07-22T08:00:00.000Z',
+      reason: input.reason,
+      inputCurrency: input.inputCurrency ?? 'UZS',
+      expectedContractCurrency: input.expectedContractCurrency ?? 'UZS',
+      expectedRemainingMinorUnits: input.expectedRemaining,
+      expectedCashMinorUnits: input.expectedCash,
+      expectedWaivedMinorUnits: input.expectedWaived,
+    }),
+  }), { params: Promise.resolve({ id: input.nasiyaId }) })
 }
 
 async function nasiyaDeferRequest(input: {
@@ -1657,6 +1993,627 @@ describe('real-PostgreSQL route evidence', () => {
       where: { shopId: actor.shop.id, type: 'RESTOCK', relatedId: device.id },
       select: { telegramId: true },
     })).toEqual([{ telegramId: '810000001' }])
+  })
+
+  it('waives only unpaid Nasiya interest, preserves prior cash, and closes every downstream ledger', async () => {
+    const actor = await seedActor('settlement_waiver')
+    useShopAdmin(actor)
+    await Promise.all([
+      prisma.shop.update({
+        where: { id: actor.shop.id },
+        data: { telegramNotificationsEnabled: true },
+      }),
+      prisma.shopAdmin.update({
+        where: { id: actor.admin.id },
+        data: {
+          telegramId: '820000001',
+          telegramVerifiedAt: new Date('2026-07-01T00:00:00.000Z'),
+          telegramNotificationsEnabled: true,
+        },
+      }),
+    ])
+    const contract = await seedSettlementNasiya(actor, 'settlement_waiver')
+    const payable = await prisma.supplierPayable.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: contract.device.id,
+        origin: 'DEVICE_PURCHASE',
+        supplierName: 'Settlement supplier',
+        supplierPhone: '+998901212121',
+        amount: 400,
+        contractAmount: 400,
+        remainingAmount: 400,
+        contractRemainingAmount: 400,
+        ledgerVersion: 2,
+        dueDate: new Date('2026-08-15T00:00:00.000Z'),
+        createdBy: actor.admin.id,
+      },
+    })
+    await prisma.notification.createMany({
+      data: [
+        {
+          shopId: actor.shop.id,
+          type: 'REMINDER',
+          message: 'Pending parent reminder',
+          telegramId: '820000001',
+          recipientShopAdminId: actor.admin.id,
+          status: 'PENDING',
+          scheduledAt: new Date('2026-07-22T09:00:00.000Z'),
+          relatedId: contract.nasiya.id,
+          relatedType: 'Nasiya',
+        },
+        {
+          shopId: actor.shop.id,
+          type: 'OVERDUE',
+          message: 'Failed schedule reminder',
+          telegramId: '820000001',
+          recipientShopAdminId: actor.admin.id,
+          status: 'FAILED',
+          scheduledAt: new Date('2026-07-21T09:00:00.000Z'),
+          nextAttemptAt: new Date('2026-07-22T09:00:00.000Z'),
+          relatedId: contract.openSchedule.id,
+          relatedType: 'NasiyaSchedule',
+        },
+        {
+          shopId: actor.shop.id,
+          type: 'REMINDER',
+          message: 'Historical sent reminder',
+          telegramId: '820000001',
+          recipientShopAdminId: actor.admin.id,
+          status: 'SENT',
+          scheduledAt: new Date('2026-07-01T09:00:00.000Z'),
+          sentAt: new Date('2026-07-01T09:01:00.000Z'),
+          relatedId: contract.nasiya.id,
+          relatedType: 'Nasiya',
+        },
+      ],
+    })
+
+    const quoteResponse = await nasiyaSettlementQuoteRequest(contract.nasiya.id)
+    expect(quoteResponse.status).toBe(200)
+    const quotePayload = await quoteResponse.json() as {
+      data: {
+        quotes: {
+          full: { cashToReceive: { minorUnits: number }; interestToWaive: { minorUnits: number } }
+          waive: {
+            cashToReceive: { minorUnits: number }
+            interestToWaive: { minorUnits: number }
+            waiverEligible: boolean
+          }
+        }
+      }
+    }
+    expect(quotePayload.data.quotes).toMatchObject({
+      full: { cashToReceive: { minorUnits: 600 }, interestToWaive: { minorUnits: 0 } },
+      waive: {
+        cashToReceive: { minorUnits: 500 },
+        interestToWaive: { minorUnits: 100 },
+        waiverEligible: true,
+      },
+    })
+
+    const response = await nasiyaSettlementRequest({
+      nasiyaId: contract.nasiya.id,
+      mode: 'WAIVE_REMAINING_PROFIT',
+      expectedRemaining: 600,
+      expectedCash: 500,
+      expectedWaived: 100,
+      key: 'settlement-waiver-route-key',
+      reason: 'Customer requested an agreed early closure',
+    })
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+    const payload = await response.json() as {
+      data: {
+        settlement: {
+          mode: string
+          cashReceived: { minorUnits: number }
+          interestWaived: { minorUnits: number }
+        }
+        ledger: {
+          paid: { minorUnits: number }
+          waived: { minorUnits: number }
+          fulfilled: { minorUnits: number }
+          remaining: { minorUnits: number }
+          status: string
+        }
+        duplicate: boolean
+      }
+    }
+    expect(payload.data).toMatchObject({
+      settlement: {
+        mode: 'WAIVE_REMAINING_PROFIT',
+        cashReceived: { minorUnits: 500 },
+        interestWaived: { minorUnits: 100 },
+      },
+      ledger: {
+        paid: { minorUnits: 1_100 },
+        waived: { minorUnits: 100 },
+        fulfilled: { minorUnits: 1_200 },
+        remaining: { minorUnits: 0 },
+        status: 'COMPLETED',
+      },
+      duplicate: false,
+    })
+
+    const [nasiya, schedules, payments, settlement, device, payableAfter, reminders, accounting] = await Promise.all([
+      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
+      prisma.nasiyaSchedule.findMany({
+        where: { nasiyaId: contract.nasiya.id },
+        orderBy: { monthNumber: 'asc' },
+      }),
+      prisma.nasiyaPayment.findMany({
+        where: { nasiyaId: contract.nasiya.id },
+        include: { allocations: true },
+        orderBy: { paidAt: 'asc' },
+      }),
+      prisma.nasiyaSettlement.findUniqueOrThrow({
+        where: { nasiyaId: contract.nasiya.id },
+        include: { allocations: true, payment: true },
+      }),
+      prisma.device.findUniqueOrThrow({ where: { id: contract.device.id } }),
+      prisma.supplierPayable.findUniqueOrThrow({ where: { id: payable.id } }),
+      prisma.notification.findMany({
+        where: {
+          shopId: actor.shop.id,
+          OR: [
+            { relatedId: contract.nasiya.id },
+            { relatedId: contract.openSchedule.id },
+          ],
+        },
+        orderBy: { createdAt: 'asc' },
+      }),
+      getShopMonthlyAccountingAggregate({
+        shopId: actor.shop.id,
+        monthStart: new Date('2026-07-01T00:00:00.000Z'),
+        monthEnd: new Date('2026-08-01T00:00:00.000Z'),
+        adminId: null,
+      }),
+    ])
+    expect(nasiya).toMatchObject({
+      status: 'COMPLETED',
+      reminderEnabled: false,
+      earlyReminderEnabled: false,
+    })
+    expect(Number(nasiya.contractPaidAmount)).toBe(1_100)
+    expect(Number(nasiya.contractInterestWaivedAmount)).toBe(100)
+    expect(Number(nasiya.contractRemainingAmount)).toBe(0)
+    expect(schedules.map((schedule) => ({
+      status: schedule.status,
+      paid: Number(schedule.contractPaidAmount),
+      waived: Number(schedule.contractInterestWaivedAmount),
+      remaining: Number(schedule.contractRemainingAmount),
+      interestPaid: Number(schedule.contractInterestPaidAmount),
+    }))).toEqual([
+      { status: 'PAID', paid: 600, waived: 0, remaining: 0, interestPaid: 100 },
+      { status: 'SETTLED', paid: 500, waived: 100, remaining: 0, interestPaid: 0 },
+    ])
+    expect(payments).toHaveLength(2)
+    expect(payments[0].id).toBe(contract.priorPayment.id)
+    expect(Number(payments[0].appliedAmountInContractCurrency)).toBe(600)
+    expect(payments[0].allocations.map((allocation) => ({
+      principal: Number(allocation.contractPrincipalAmount),
+      margin: Number(allocation.contractMarginAmount),
+      interest: Number(allocation.contractInterestAmount),
+    }))).toEqual([{ principal: 300, margin: 200, interest: 100 }])
+    expect(payments[1].allocations.map((allocation) => ({
+      principal: Number(allocation.contractPrincipalAmount),
+      margin: Number(allocation.contractMarginAmount),
+      interest: Number(allocation.contractInterestAmount),
+    }))).toEqual([{ principal: 300, margin: 200, interest: 0 }])
+    expect(settlement.mode).toBe('WAIVE_REMAINING_PROFIT')
+    expect(settlement.allocations).toHaveLength(1)
+    expect(Number(settlement.contractCashReceivedAmount)).toBe(500)
+    expect(Number(settlement.contractInterestWaivedAmount)).toBe(100)
+    expect(device.status).toBe('SOLD_NASIYA')
+    expect(payableAfter.status).toBe('PENDING')
+    expect(Number(payableAfter.contractRemainingAmount)).toBe(400)
+    expect(reminders
+      .filter((notification) => notification.type !== 'NASIYA_COMPLETED')
+      .map((notification) => notification.status)
+      .sort())
+      .toEqual(['CANCELLED', 'CANCELLED', 'SENT'])
+    expect(await prisma.notification.findMany({
+      where: { shopId: actor.shop.id, type: 'NASIYA_COMPLETED' },
+      select: { telegramId: true, status: true, relatedId: true },
+    })).toEqual([{ telegramId: '820000001', status: 'PENDING', relatedId: contract.nasiya.id }])
+    expect(accounting).toMatchObject({
+      actualProfitUzs: 500,
+      nasiyaInterestReceivedUzs: 100,
+      expectedProfitUzs: 0,
+      expectedInterestUzs: 0,
+      waivedNasiyaProfitUzs: 100,
+      waivedNasiyaProfitFrozenUzs: 100,
+      waivedNasiyaProfitCount: 1,
+    })
+    const reportRange = resolveReportRange({
+      preset: 'single',
+      month: '2026-07',
+      defaultEndMonth: '2026-07',
+    })
+    const [rangeReport, actorRangeReport] = await Promise.all([
+      getShopRangeReport({ shopId: actor.shop.id, range: reportRange, adminId: null }),
+      getShopRangeReport({ shopId: actor.shop.id, range: reportRange, adminId: actor.admin.id }),
+    ])
+    expect(rangeReport.months[0].waivedNasiyaProfit).toEqual({
+      uzs: 100,
+      usd: 0,
+      frozenUzs: 100,
+      count: 1,
+    })
+    expect(rangeReport.totals.waivedNasiyaProfit).toEqual({
+      uzs: 100,
+      usd: 0,
+      frozenUzs: 100,
+      count: 1,
+    })
+    expect(actorRangeReport.totals.waivedNasiyaProfit).toEqual(rangeReport.totals.waivedNasiyaProfit)
+    expect(await prisma.log.count({
+      where: {
+        shopId: actor.shop.id,
+        targetType: 'Nasiya',
+        targetId: contract.nasiya.id,
+        action: 'NASIYA_SETTLED_PROFIT_WAIVED',
+      },
+    })).toBe(1)
+
+    const replay = await nasiyaSettlementRequest({
+      nasiyaId: contract.nasiya.id,
+      mode: 'WAIVE_REMAINING_PROFIT',
+      expectedRemaining: 600,
+      expectedCash: 500,
+      expectedWaived: 100,
+      key: 'settlement-waiver-route-key',
+      reason: 'Customer requested an agreed early closure',
+    })
+    expect(replay.status).toBe(200)
+    expect((await replay.json() as { data: { duplicate: boolean } }).data.duplicate).toBe(true)
+    const changedReplay = await nasiyaSettlementRequest({
+      nasiyaId: contract.nasiya.id,
+      mode: 'WAIVE_REMAINING_PROFIT',
+      expectedRemaining: 600,
+      expectedCash: 500,
+      expectedWaived: 100,
+      key: 'settlement-waiver-route-key',
+      reason: 'Changed replay must be rejected',
+    })
+    expect(changedReplay.status).toBe(409)
+    expect(await prisma.nasiyaSettlement.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(1)
+    expect(await prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(2)
+    expect(await prisma.log.count({ where: { targetId: contract.nasiya.id } })).toBe(1)
+
+    await expect(prisma.nasiyaSettlement.update({
+      where: { id: settlement.id },
+      data: { reason: 'Attempted rewrite' },
+    })).rejects.toThrow()
+    await expect(prisma.nasiyaSettlement.delete({ where: { id: settlement.id } })).rejects.toThrow()
+  })
+
+  it('keeps USD compatibility balances at the creation rate while freezing settlement evidence at the current rate', async () => {
+    const actor = await seedActor('settlement_usd_fx')
+    useShopAdmin(actor)
+    await prisma.currencyRate.create({
+      data: {
+        baseCurrency: 'USD',
+        quoteCurrency: 'UZS',
+        rate: 13_000,
+        source: 'CBU',
+        effectiveDate: new Date('2026-07-22T00:00:00.000Z'),
+        fetchedAt: new Date(),
+      },
+    })
+    const contract = await seedUsdSettlementNasiya(actor, 'settlement_usd_fx')
+
+    const response = await nasiyaSettlementRequest({
+      nasiyaId: contract.nasiya.id,
+      mode: 'WAIVE_REMAINING_PROFIT',
+      expectedRemaining: 6_000,
+      expectedCash: 5_000,
+      expectedWaived: 1_000,
+      key: 'settlement-usd-fx-route-key',
+      reason: 'USD early closure with a changed reporting rate',
+      inputCurrency: 'USD',
+      expectedContractCurrency: 'USD',
+    })
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+
+    const [nasiya, schedules, settlement, payment, accounting] = await Promise.all([
+      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
+      prisma.nasiyaSchedule.findMany({
+        where: { nasiyaId: contract.nasiya.id },
+        orderBy: { monthNumber: 'asc' },
+      }),
+      prisma.nasiyaSettlement.findUniqueOrThrow({
+        where: { nasiyaId: contract.nasiya.id },
+        include: { allocations: true },
+      }),
+      prisma.nasiyaPayment.findFirstOrThrow({
+        where: { nasiyaId: contract.nasiya.id, id: { not: contract.priorPayment.id } },
+        include: { allocations: true },
+      }),
+      getShopMonthlyAccountingAggregate({
+        shopId: actor.shop.id,
+        monthStart: new Date('2026-07-01T00:00:00.000Z'),
+        monthEnd: new Date('2026-08-01T00:00:00.000Z'),
+        adminId: null,
+      }),
+    ])
+
+    expect(nasiya.status).toBe('COMPLETED')
+    expect(Number(nasiya.contractPaidAmount)).toBe(110)
+    expect(Number(nasiya.contractInterestWaivedAmount)).toBe(10)
+    expect(Number(nasiya.contractRemainingAmount)).toBe(0)
+    expect(Number(nasiya.interestWaivedAmount)).toBe(120_000)
+    expect(schedules.map((schedule) => ({
+      status: schedule.status,
+      expectedUzs: Number(schedule.expectedAmount),
+      paidUzs: Number(schedule.paidAmount),
+      waivedUzs: Number(schedule.interestWaivedAmount),
+      paidUsd: Number(schedule.contractPaidAmount),
+      waivedUsd: Number(schedule.contractInterestWaivedAmount),
+      remainingUsd: Number(schedule.contractRemainingAmount),
+    }))).toEqual([
+      {
+        status: 'PAID',
+        expectedUzs: 720_000,
+        paidUzs: 720_000,
+        waivedUzs: 0,
+        paidUsd: 60,
+        waivedUsd: 0,
+        remainingUsd: 0,
+      },
+      {
+        status: 'SETTLED',
+        expectedUzs: 720_000,
+        paidUzs: 600_000,
+        waivedUzs: 120_000,
+        paidUsd: 50,
+        waivedUsd: 10,
+        remainingUsd: 0,
+      },
+    ])
+
+    expect(Number(settlement.contractCashReceivedAmount)).toBe(50)
+    expect(Number(settlement.contractInterestWaivedAmount)).toBe(10)
+    expect(Number(settlement.cashReceivedAmountUzs)).toBe(650_000)
+    expect(Number(settlement.interestWaivedAmountUzs)).toBe(130_000)
+    expect(Number(settlement.frozenUsdUzsRate)).toBe(13_000)
+    expect(settlement.allocations.map((allocation) => ({
+      cashUsd: Number(allocation.contractCashAmount),
+      waivedUsd: Number(allocation.contractInterestWaivedAmount),
+      cashUzs: Number(allocation.cashAmountUzs),
+      waivedUzs: Number(allocation.interestWaivedAmountUzs),
+    }))).toEqual([{ cashUsd: 50, waivedUsd: 10, cashUzs: 650_000, waivedUzs: 130_000 }])
+
+    expect(Number(payment.amount)).toBe(650_000)
+    expect(Number(payment.paymentInputAmount)).toBe(50)
+    expect(payment.paymentInputCurrency).toBe('USD')
+    expect(Number(payment.appliedAmountInContractCurrency)).toBe(50)
+    expect(Number(payment.paymentExchangeRate)).toBe(13_000)
+    expect(payment.allocations.map((allocation) => ({
+      contractAmount: Number(allocation.contractAmount),
+      principal: Number(allocation.contractPrincipalAmount),
+      margin: Number(allocation.contractMarginAmount),
+      interest: Number(allocation.contractInterestAmount),
+      amountUzs: Number(allocation.amountUzs),
+      principalUzs: Number(allocation.principalAmountUzs),
+      marginUzs: Number(allocation.marginAmountUzs),
+      interestUzs: Number(allocation.interestAmountUzs),
+    }))).toEqual([{
+      contractAmount: 50,
+      principal: 30,
+      margin: 20,
+      interest: 0,
+      amountUzs: 650_000,
+      principalUzs: 390_000,
+      marginUzs: 260_000,
+      interestUzs: 0,
+    }])
+    expect(accounting).toMatchObject({
+      actualProfitUzs: 620_000,
+      nasiyaInterestReceivedUzs: 120_000,
+      expectedProfitUsd: 0,
+      expectedInterestUsd: 0,
+      waivedNasiyaProfitUzs: 0,
+      waivedNasiyaProfitUsd: 10,
+      waivedNasiyaProfitFrozenUzs: 130_000,
+      waivedNasiyaProfitCount: 1,
+    })
+
+    const reportRange = resolveReportRange({
+      preset: 'single',
+      month: '2026-07',
+      defaultEndMonth: '2026-07',
+    })
+    const rangeReport = await getShopRangeReport({
+      shopId: actor.shop.id,
+      range: reportRange,
+      adminId: null,
+    })
+    expect(rangeReport.totals.waivedNasiyaProfit).toEqual({
+      uzs: 0,
+      usd: 10,
+      frozenUzs: 130_000,
+      count: 1,
+    })
+  })
+
+  it('takes the full remaining amount with profit and records no waiver', async () => {
+    const actor = await seedActor('settlement_full')
+    useShopAdmin(actor)
+    const contract = await seedSettlementNasiya(actor, 'settlement_full')
+
+    const stale = await nasiyaSettlementRequest({
+      nasiyaId: contract.nasiya.id,
+      mode: 'FULL_WITH_PROFIT',
+      expectedRemaining: 599,
+      expectedCash: 599,
+      expectedWaived: 0,
+      key: 'settlement-stale-quote-key',
+    })
+    expect(stale.status).toBe(409)
+    expect(await prisma.nasiyaSettlement.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(0)
+    expect(Number((await prisma.nasiya.findUniqueOrThrow({
+      where: { id: contract.nasiya.id },
+    })).contractRemainingAmount)).toBe(600)
+
+    const response = await nasiyaSettlementRequest({
+      nasiyaId: contract.nasiya.id,
+      mode: 'FULL_WITH_PROFIT',
+      expectedRemaining: 600,
+      expectedCash: 600,
+      expectedWaived: 0,
+      key: 'settlement-full-route-key',
+    })
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+
+    const [nasiya, schedules, settlement, latestPayment, device, accounting] = await Promise.all([
+      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
+      prisma.nasiyaSchedule.findMany({
+        where: { nasiyaId: contract.nasiya.id },
+        orderBy: { monthNumber: 'asc' },
+      }),
+      prisma.nasiyaSettlement.findUniqueOrThrow({ where: { nasiyaId: contract.nasiya.id } }),
+      prisma.nasiyaPayment.findFirstOrThrow({
+        where: { nasiyaId: contract.nasiya.id, id: { not: contract.priorPayment.id } },
+        include: { allocations: true },
+      }),
+      prisma.device.findUniqueOrThrow({ where: { id: contract.device.id } }),
+      getShopMonthlyAccountingAggregate({
+        shopId: actor.shop.id,
+        monthStart: new Date('2026-07-01T00:00:00.000Z'),
+        monthEnd: new Date('2026-08-01T00:00:00.000Z'),
+        adminId: null,
+      }),
+    ])
+    expect(nasiya.status).toBe('COMPLETED')
+    expect(Number(nasiya.contractPaidAmount)).toBe(1_200)
+    expect(Number(nasiya.contractInterestWaivedAmount)).toBe(0)
+    expect(Number(nasiya.contractRemainingAmount)).toBe(0)
+    expect(schedules.map(({ status }) => status)).toEqual(['PAID', 'PAID'])
+    expect(schedules.map((schedule) => Number(schedule.contractInterestPaidAmount))).toEqual([100, 100])
+    expect(settlement.mode).toBe('FULL_WITH_PROFIT')
+    expect(Number(settlement.contractCashReceivedAmount)).toBe(600)
+    expect(Number(settlement.contractInterestWaivedAmount)).toBe(0)
+    expect(latestPayment.allocations.map((allocation) => Number(allocation.contractInterestAmount))).toEqual([100])
+    expect(device.status).toBe('SOLD_NASIYA')
+    expect(accounting.waivedNasiyaProfitCount).toBe(0)
+    expect(accounting.waivedNasiyaProfitUzs).toBe(0)
+    expect(accounting.actualProfitUzs).toBe(600)
+  })
+
+  it('keeps profit waiver behind its exact staff permission while ordinary full closure remains collectable', async () => {
+    const actor = await seedActor('settlement_staff')
+    const deniedContract = await seedSettlementNasiya(actor, 'settlement_staff_denied')
+    const waiverOnly = await seedStaff(actor, 'settlement_waiver_only', ['NASIYA_PROFIT_WAIVE'])
+    useShopAdmin(waiverOnly)
+    expect((await nasiyaDetailRequest(deniedContract.nasiya.id)).status).toBe(403)
+    expect((await nasiyaSettlementRequest({
+      nasiyaId: deniedContract.nasiya.id,
+      mode: 'WAIVE_REMAINING_PROFIT',
+      expectedRemaining: 600,
+      expectedCash: 500,
+      expectedWaived: 100,
+      key: 'settlement-waiver-only-denied',
+      reason: 'Supplemental waiver grant is not collection authority',
+    })).status).toBe(403)
+
+    const collector = await seedStaff(actor, 'settlement_collector', ['NASIYA_PAYMENT_RECEIVE'])
+    useShopAdmin(collector)
+
+    const denied = await nasiyaSettlementRequest({
+      nasiyaId: deniedContract.nasiya.id,
+      mode: 'WAIVE_REMAINING_PROFIT',
+      expectedRemaining: 600,
+      expectedCash: 500,
+      expectedWaived: 100,
+      key: 'settlement-staff-waiver-denied',
+      reason: 'Staff waiver permission boundary',
+    })
+    expect(denied.status).toBe(403)
+    expect(await prisma.nasiyaSettlement.count({ where: { nasiyaId: deniedContract.nasiya.id } })).toBe(0)
+
+    const full = await nasiyaSettlementRequest({
+      nasiyaId: deniedContract.nasiya.id,
+      mode: 'FULL_WITH_PROFIT',
+      expectedRemaining: 600,
+      expectedCash: 600,
+      expectedWaived: 0,
+      key: 'settlement-staff-full-allowed',
+    })
+    expect(full.status).toBe(200)
+    expect((await prisma.nasiyaSettlement.findUniqueOrThrow({
+      where: { nasiyaId: deniedContract.nasiya.id },
+    })).actorId).toBe(collector.admin.id)
+
+    const allowedContract = await seedSettlementNasiya(actor, 'settlement_staff_allowed')
+    const allowed = await seedStaff(
+      actor,
+      'settlement_waiver_staff',
+      ['NASIYA_PAYMENT_RECEIVE', 'NASIYA_PROFIT_WAIVE'],
+    )
+    useShopAdmin(allowed)
+    const waived = await nasiyaSettlementRequest({
+      nasiyaId: allowedContract.nasiya.id,
+      mode: 'WAIVE_REMAINING_PROFIT',
+      expectedRemaining: 600,
+      expectedCash: 500,
+      expectedWaived: 100,
+      key: 'settlement-staff-waiver-allowed',
+      reason: 'Owner explicitly granted the waiver capability',
+    })
+    expect(waived.status, JSON.stringify(await waived.clone().json())).toBe(200)
+    expect((await prisma.nasiyaSettlement.findUniqueOrThrow({
+      where: { nasiyaId: allowedContract.nasiya.id },
+    })).actorId).toBe(allowed.admin.id)
+  })
+
+  it('isolates tenants and serializes competing early-settlement commands', async () => {
+    const first = await seedActor('settlement_tenant_a')
+    const second = await seedActor('settlement_tenant_b')
+    const foreign = await seedSettlementNasiya(second, 'settlement_foreign')
+    useShopAdmin(first)
+
+    expect((await nasiyaSettlementQuoteRequest(foreign.nasiya.id)).status).toBe(404)
+    expect((await nasiyaSettlementRequest({
+      nasiyaId: foreign.nasiya.id,
+      mode: 'FULL_WITH_PROFIT',
+      expectedRemaining: 600,
+      expectedCash: 600,
+      expectedWaived: 0,
+      key: 'settlement-cross-tenant',
+    })).status).toBe(404)
+    expect(await prisma.nasiyaSettlement.count()).toBe(0)
+
+    const local = await seedSettlementNasiya(first, 'settlement_concurrent')
+    const responses = await Promise.all([
+      nasiyaSettlementRequest({
+        nasiyaId: local.nasiya.id,
+        mode: 'FULL_WITH_PROFIT',
+        expectedRemaining: 600,
+        expectedCash: 600,
+        expectedWaived: 0,
+        key: 'settlement-concurrent-a',
+      }),
+      nasiyaSettlementRequest({
+        nasiyaId: local.nasiya.id,
+        mode: 'FULL_WITH_PROFIT',
+        expectedRemaining: 600,
+        expectedCash: 600,
+        expectedWaived: 0,
+        key: 'settlement-concurrent-b',
+      }),
+    ])
+    expect(responses.map(({ status }) => status).sort()).toEqual([200, 409])
+    const [nasiya, settlementCount, paymentCount] = await Promise.all([
+      prisma.nasiya.findUniqueOrThrow({ where: { id: local.nasiya.id } }),
+      prisma.nasiyaSettlement.count({ where: { nasiyaId: local.nasiya.id } }),
+      prisma.nasiyaPayment.count({ where: { nasiyaId: local.nasiya.id } }),
+    ])
+    expect(nasiya.status).toBe('COMPLETED')
+    expect(Number(nasiya.contractPaidAmount) + Number(nasiya.contractInterestWaivedAmount) + Number(nasiya.contractRemainingAmount))
+      .toBe(Number(nasiya.contractFinalAmount))
+    expect(settlementCount).toBe(1)
+    expect(paymentCount).toBe(2)
   })
 
   it('replays the successful final Nasiya payment before the completed-state guard', async () => {

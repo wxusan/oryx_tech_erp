@@ -83,9 +83,12 @@ describe('GET /api/nasiya/[id] includes customerTrust aggregated across ALL of t
   const source = read('src/app/api/nasiya/[id]/route.ts')
 
   it('queries every nasiya for this customer in this shop, not just the current one', () => {
-    const block = source.slice(source.indexOf('customerNasiyas'), source.indexOf('customerNasiyas') + 400)
-    expect(block).toContain('customerId: nasiya.customer.id')
-    expect(block).toContain('shopId: nasiya.shopId')
+    expect(source).toContain('getCustomerTrustFactorsForList({ shopId: nasiya.shopId, customerIds: [nasiya.customer.id] })')
+    const trustQuery = read('src/lib/server/customer-trust-queries.ts')
+    expect(trustQuery).toContain('WHERE c."shopId" = ${input.shopId}')
+    expect(trustQuery).toContain('ON n."customerId" = c."id"')
+    expect(trustQuery).toContain('AND n."shopId" = c."shopId"')
+    expect(trustQuery).toContain('c."id" IN (${Prisma.join(input.customerIds)})')
   })
 
   it('includes customerTrust only for principals allowed to view customer trust context', () => {

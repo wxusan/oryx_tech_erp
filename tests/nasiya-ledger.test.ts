@@ -73,9 +73,36 @@ describe('reconcileNasiyaLedger', () => {
     expect(ledger.health).toBe('REPAIRABLE_PARENT_CACHE')
     expect(ledger.repair).toEqual({
       contractPaid: { currency: 'UZS', minorUnits: 9_799_942 },
+      contractWaived: { currency: 'UZS', minorUnits: 0 },
       contractRemaining: { currency: 'UZS', minorUnits: 58 },
       status: 'ACTIVE',
     })
+  })
+
+  it('keeps waived interest separate from cash while treating the debt as fulfilled', () => {
+    const ledger = reconcileNasiyaLedger(ledgerInput({
+      status: 'COMPLETED',
+      contractPaidAmount: '800',
+      contractInterestWaivedAmount: '200',
+      contractRemainingAmount: '0',
+      schedules: [{
+        id: 'settled-schedule',
+        status: 'SETTLED',
+        dueDate: FUTURE,
+        delayedUntil: null,
+        contractCurrency: 'UZS',
+        contractExpectedAmount: '1000',
+        contractPaidAmount: '800',
+        contractInterestWaivedAmount: '200',
+        contractRemainingAmount: '0',
+      }],
+    }), NOW)
+
+    expect(ledger.health).toBe('HEALTHY')
+    expect(ledger.paid).toEqual({ currency: 'UZS', minorUnits: 800 })
+    expect(ledger.waived).toEqual({ currency: 'UZS', minorUnits: 200 })
+    expect(ledger.fulfilled).toEqual({ currency: 'UZS', minorUnits: 1000 })
+    expect(ledger.schedules[0]?.waived).toEqual({ currency: 'UZS', minorUnits: 200 })
   })
 
   it('quarantines schedule arithmetic evidence that cannot be safely repaired as a cache', () => {
@@ -94,7 +121,7 @@ describe('reconcileNasiyaLedger', () => {
 
     expect(ledger.health).toBe('QUARANTINED')
     expect(ledger.repair).toBeNull()
-    expect(ledger.reasons).toContain('schedule bad-schedule: expected does not equal paid plus remaining')
+    expect(ledger.reasons).toContain('schedule bad-schedule: expected does not equal paid plus waived plus remaining')
   })
 
   it('quarantines a complete allocation history that disagrees with schedule payment facts', () => {
