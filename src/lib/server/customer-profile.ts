@@ -29,8 +29,6 @@ interface MetricRow {
   refunds_usd: unknown
   writeoffs_uzs: unknown
   writeoffs_usd: unknown
-  waived_profit_uzs: unknown
-  waived_profit_usd: unknown
   accrual_profit_uzs: unknown
   nasiya_interest_uzs: unknown
   legacy_usd_payment_count: number
@@ -172,12 +170,6 @@ export async function getCustomerProfileOverview(input: {
         FROM "NasiyaResolutionEvent" e
         JOIN nasiya_base n ON n."id" = e."nasiyaId" AND n."shopId" = e."shopId"
         WHERE e."shopId" = ${input.shopId}
-      ), settlement_movement AS (
-        SELECT st."contractCurrency" AS currency, st."contractInterestWaivedAmount" AS amount
-        FROM "NasiyaSettlement" st
-        JOIN nasiya_base n ON n."id" = st."nasiyaId" AND n."shopId" = st."shopId"
-        WHERE st."shopId" = ${input.shopId}
-          AND st."contractInterestWaivedAmount" > 0
       ), return_accounting AS (
         SELECT coalesce(sum(r."revenueReversalAmountUzs"), 0) AS revenue_reversal,
                coalesce(sum(r."inventoryCostRecoveryUzs"), 0) AS cost_recovery,
@@ -208,16 +200,27 @@ export async function getCustomerProfileOverview(input: {
         coalesce((SELECT sum(amount) FROM refunds WHERE currency = 'USD'), 0)::numeric AS refunds_usd,
         coalesce((SELECT sum(amount) FROM resolution_movement WHERE currency = 'UZS'), 0)::numeric AS writeoffs_uzs,
         coalesce((SELECT sum(amount) FROM resolution_movement WHERE currency = 'USD'), 0)::numeric AS writeoffs_usd,
-        coalesce((SELECT sum(amount) FROM settlement_movement WHERE currency = 'UZS'), 0)::numeric AS waived_profit_uzs,
-        coalesce((SELECT sum(amount) FROM settlement_movement WHERE currency = 'USD'), 0)::numeric AS waived_profit_usd,
         ((coalesce((SELECT sum("salePrice" - purchase_price) FROM sale_base), 0)
           + coalesce((SELECT sum("totalAmount" - purchase_price) FROM nasiya_base
               WHERE "isImported" = FALSE AND "resolutionState" <> 'ARCHIVED'), 0))
           - (SELECT revenue_reversal FROM return_accounting)
           + (SELECT cost_recovery FROM return_accounting)
           + (SELECT retained_value FROM return_accounting))::numeric AS accrual_profit_uzs,
-        coalesce((SELECT sum("interestAmount" - "interestWaivedAmount") FROM nasiya_base
-            WHERE "isImported" = FALSE AND "resolutionState" <> 'ARCHIVED'), 0)::numeric AS nasiya_interest_uzs,
+        (
+          coalesce((
+            SELECT sum(a."interestAmountUzs")
+            FROM "NasiyaPaymentAllocation" a
+            JOIN "NasiyaPayment" p ON p.id = a."nasiyaPaymentId" AND p."shopId" = a."shopId"
+            JOIN nasiya_base n ON n.id = a."nasiyaId"
+            WHERE a."shopId" = ${input.shopId} AND p."deletedAt" IS NULL
+          ), 0)
+          - coalesce((
+            SELECT sum(pr."recognizedInterestAmountUzs")
+            FROM "ReturnProfitReversal" pr
+            JOIN nasiya_base n ON n.id = pr."nasiyaId"
+            WHERE pr."shopId" = ${input.shopId}
+          ), 0)
+        )::numeric AS nasiya_interest_uzs,
         coalesce((SELECT count(*) FROM payments WHERE legacy_usd), 0)::integer AS legacy_usd_payment_count,
         (SELECT count(DISTINCT device_id) FROM (
           SELECT "deviceId" AS device_id FROM sale_base UNION SELECT "deviceId" FROM nasiya_base
@@ -234,7 +237,7 @@ export async function getCustomerProfileOverview(input: {
 
   const row = metricRows[0]
   const fallbackFactors: CustomerTrustFactors = {
-    totalNasiyaCount: 0, completedNasiyaCount: 0, settledWithWaiverCount: 0, activeNasiyaCount: 0, cancelledNasiyaCount: 0,
+    totalNasiyaCount: 0, completedNasiyaCount: 0, activeNasiyaCount: 0, cancelledNasiyaCount: 0,
     paidInstallmentCount: 0, onTimeRatio: null, lateInstallmentCount: 0, maxDaysLate: 0,
     currentOverdueScheduleCount: 0, hasCurrentOverdue: false,
   }
@@ -250,7 +253,6 @@ export async function getCustomerProfileOverview(input: {
     overdue: money(row?.overdue_uzs, row?.overdue_usd),
     refunds: money(row?.refunds_uzs, row?.refunds_usd),
     writeOffs: money(row?.writeoffs_uzs, row?.writeoffs_usd),
-    waivedNasiyaProfit: money(row?.waived_profit_uzs, row?.waived_profit_usd),
     accountingAccrualGrossProfitUzs: Number(row?.accrual_profit_uzs ?? 0),
     nasiyaInterestUzs: Number(row?.nasiya_interest_uzs ?? 0),
     legacyUsdPaymentCount: Number(row?.legacy_usd_payment_count ?? 0),

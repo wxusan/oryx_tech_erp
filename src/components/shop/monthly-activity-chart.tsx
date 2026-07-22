@@ -17,7 +17,6 @@ export interface MonthlyActivityPoint {
   contracts: MonthlyActivityNativeMoney
   payments?: MonthlyActivityNativeMoney
   refunds?: MonthlyActivityNativeMoney
-  waivedProfit?: MonthlyActivityNativeMoney
   writeOffs?: MonthlyActivityNativeMoney
 }
 
@@ -25,7 +24,6 @@ const ACTIVITY_CONFIG = {
   contracts: { label: 'Yangi shartnomalar', color: '#18181b' },
   payments: { label: 'Tushgan to‘lovlar', color: '#059669' },
   refunds: { label: 'Qaytarilgan pul', color: '#f59e0b' },
-  waivedProfit: { label: 'Kechilgan nasiya foydasi', color: '#e11d48' },
   writeOffs: { label: 'Hisobdan chiqarish', color: '#dc2626' },
 } satisfies ChartConfig
 
@@ -83,14 +81,12 @@ export function MonthlyActivityChart({
     contracts: row.contracts[currency],
     payments: row.payments?.[currency] ?? 0,
     refunds: -(row.refunds?.[currency] ?? 0),
-    waivedProfit: -(row.waivedProfit?.[currency] ?? 0),
     writeOffs: -(row.writeOffs?.[currency] ?? 0),
   }))
   const hasActivity = chartRows.some((row) => (
     row.contracts !== 0
     || (showFinancials && row.payments !== 0)
     || (showFinancials && row.refunds !== 0)
-    || (showFinancials && row.waivedProfit !== 0)
     || (showFinancials && showWriteOffs && row.writeOffs !== 0)
   ))
   const tickInterval = chartRows.length > 24 ? 2 : chartRows.length > 12 ? 1 : 0
@@ -122,7 +118,6 @@ export function MonthlyActivityChart({
           <LegendItem color="#18181b" label="Shartnomalar" />
           {showFinancials && <LegendItem color="#059669" label="To‘lovlar" />}
           {showFinancials && <LegendItem color="#f59e0b" label="Qaytarishlar (pastda)" />}
-          {showFinancials && <LegendItem color="#e11d48" label="Kechilgan foyda (pastda)" />}
           {showFinancials && showWriteOffs && <LegendItem color="#dc2626" label="Hisobdan chiqarish (pastda)" />}
         </div>
       </CardHeader>
@@ -151,7 +146,6 @@ export function MonthlyActivityChart({
               <Bar dataKey="contracts" fill="var(--color-contracts)" radius={[4, 4, 0, 0]} isAnimationActive={false} />
               {showFinancials && <Bar dataKey="payments" fill="var(--color-payments)" radius={[4, 4, 0, 0]} isAnimationActive={false} />}
               {showFinancials && <Bar dataKey="refunds" fill="var(--color-refunds)" radius={[0, 0, 4, 4]} isAnimationActive={false} />}
-              {showFinancials && <Bar dataKey="waivedProfit" fill="var(--color-waivedProfit)" radius={[0, 0, 4, 4]} isAnimationActive={false} />}
               {showFinancials && showWriteOffs && <Bar dataKey="writeOffs" fill="var(--color-writeOffs)" radius={[0, 0, 4, 4]} isAnimationActive={false} />}
             </BarChart>
           </ChartContainer>
@@ -169,7 +163,6 @@ export function MonthlyActivityChart({
                 <span className="font-mono sm:text-right">
                   Shartnoma {currencyMoneyLabel(row.contracts, currency)}
                   {showFinancials ? ` · To‘lov ${currencyMoneyLabel(row.payments, currency)} · Qaytarish ${currencyMoneyLabel(Math.abs(row.refunds), currency)}` : ''}
-                  {showFinancials && row.waivedProfit !== 0 ? ` · Kechilgan foyda ${currencyMoneyLabel(Math.abs(row.waivedProfit), currency)}` : ''}
                   {showFinancials && showWriteOffs ? ` · Hisobdan chiqarish ${currencyMoneyLabel(Math.abs(row.writeOffs), currency)}` : ''}
                 </span>
               </li>

@@ -44,7 +44,7 @@ export async function getShopStats(session: Session, shopId: string, options: Sh
 
   return unstable_cache(
     () => getShopStatsFresh(role, shopId, monthKey, adminId),
-    ['shop-stats:v5-nasiya-settlement', shopId, role, monthKey ?? 'current', adminId ?? 'all'],
+    ['shop-stats:v6-realized-profit-only', shopId, role, monthKey ?? 'current', adminId ?? 'all'],
     {
       // Money/overdue figures are high-churn. Keep the TTL short and expire
       // these tags immediately after sale/payment/return mutations.
@@ -266,10 +266,6 @@ export function redactFinancialShopStats(stats: ShopStatsResult): ShopStatsResul
     nasiyaInterestExpectedThisMonth: 0,
     nasiyaInterestExpectedThisMonthUzs: 0,
     nasiyaInterestExpectedThisMonthUsd: 0,
-    waivedNasiyaProfitThisMonthUzs: 0,
-    waivedNasiyaProfitThisMonthUsd: 0,
-    waivedNasiyaProfitThisMonthFrozenUzs: 0,
-    waivedNasiyaProfitCountThisMonth: 0,
     expectedProfitWithInterestThisMonth: 0,
     grossCashInThisMonth: 0,
     cashCollectedThisMonth: 0,

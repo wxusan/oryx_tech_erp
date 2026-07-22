@@ -127,7 +127,6 @@ describe('worker server boundary release guard', () => {
       cashCollected: { UZS: 750_000, USD: 0 },
       refunds: { UZS: 10_000, USD: 0 },
       writeOffs: { UZS: 20_000, USD: 0 },
-      waivedNasiyaProfit: { UZS: 30_000, USD: 0 },
       accountingAccrualGrossProfitUzs: 300_000,
       nasiyaInterestUzs: 50_000,
       legacyUsdPaymentCount: 1,

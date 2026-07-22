@@ -51,6 +51,9 @@ function KoLink({ href, enabled, label = "Ko'rish" }: { href: string; enabled: b
 }
 
 function activityLabel(action: string) {
+  if (action === 'NASIYA_SETTLED_FULL_WITH_PROFIT' || action === 'NASIYA_SETTLED_PROFIT_WAIVED') {
+    return 'Nasiya yopildi'
+  }
   return logActionLabel(action)
 }
 
@@ -101,12 +104,6 @@ export default function DashboardClient({ initialStats, financialView }: { initi
   const interestExpectedText = formatPartitionedMoney({
     amountUzs: stats.nasiyaInterestExpectedThisMonthUzs,
     amountUsd: stats.nasiyaInterestExpectedThisMonthUsd,
-    displayCurrency: currency.currency,
-    rate: currency.usdUzsRate,
-  })
-  const waivedProfitText = formatPartitionedMoney({
-    amountUzs: stats.waivedNasiyaProfitThisMonthUzs,
-    amountUsd: stats.waivedNasiyaProfitThisMonthUsd,
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
@@ -182,10 +179,6 @@ export default function DashboardClient({ initialStats, financialView }: { initi
                 <span>Shu oy kutilayotgan foyda</span>
                 <span className="font-semibold text-zinc-800">{expectedText}</span>
               </div>
-              {stats.waivedNasiyaProfitCountThisMonth > 0 && <div className="mt-2 flex items-center justify-between gap-3 border-t border-zinc-200 pt-2 text-xs text-amber-800">
-                <span>Kechilgan nasiya foydasi · {stats.waivedNasiyaProfitCountThisMonth} ta</span>
-                <span className="font-semibold">{waivedProfitText}</span>
-              </div>}
             </div>
             <KoLink href="/shop/hisobot" enabled={canViewReports} />
           </CardContent>

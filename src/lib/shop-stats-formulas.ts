@@ -43,10 +43,6 @@ export interface ShopStatsRows {
     expectedProfitUsd: unknown
     expectedInterestUzs: unknown
     expectedInterestUsd: unknown
-    waivedNasiyaProfitUzs?: unknown
-    waivedNasiyaProfitUsd?: unknown
-    waivedNasiyaProfitFrozenUzs?: unknown
-    waivedNasiyaProfitCount?: number
     reconstructionGapCount: number
   }
   /** Sum of SalePayment.amount (legacy UZS) with paidAt this month — CASH basis. */
@@ -211,10 +207,6 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
       }
     : { uzs: 0, usd: 0 }
   const nasiyaInterestExpectedThisMonth = partitionTotalUzs(expectedInterestPartition)
-  const waivedNasiyaProfitThisMonthUzs = Number(monthlyAccountingAggregate?.waivedNasiyaProfitUzs ?? 0)
-  const waivedNasiyaProfitThisMonthUsd = Number(monthlyAccountingAggregate?.waivedNasiyaProfitUsd ?? 0)
-  const waivedNasiyaProfitThisMonthFrozenUzs = Number(monthlyAccountingAggregate?.waivedNasiyaProfitFrozenUzs ?? 0)
-  const waivedNasiyaProfitCountThisMonth = Number(monthlyAccountingAggregate?.waivedNasiyaProfitCount ?? 0)
   const overdueSchedules = obligationAggregate
     ? []
     : nasiyaSchedulesForStats.filter((schedule) => {
@@ -301,10 +293,6 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
     nasiyaInterestExpectedThisMonthUzs: expectedInterestPartition.uzs,
     nasiyaInterestExpectedThisMonthUsd: expectedInterestPartition.usd,
     nasiyaInterestExpectedThisMonthComplete: expectedInterestPartition.usd === 0 || Boolean(usdUzsRate),
-    waivedNasiyaProfitThisMonthUzs,
-    waivedNasiyaProfitThisMonthUsd,
-    waivedNasiyaProfitThisMonthFrozenUzs,
-    waivedNasiyaProfitCountThisMonth,
     expectedProfitWithInterestThisMonth: expectedProfitThisMonth,
     accountingReconstructionGapCount: monthlyAccountingAggregate?.reconstructionGapCount ?? 0,
     grossCashInThisMonth: cashReceivedThisMonth,

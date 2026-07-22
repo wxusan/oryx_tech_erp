@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
+import { getCustomerProfileOverview } from '@/lib/server/customer-profile'
 import { getShopMonthlyAccountingAggregate } from '@/lib/server/shop-stats-queries'
 import { seedBuiltInStaffRoles } from '@/lib/server/shop-staff-roles'
 import { getShopRangeReport } from '@/lib/server/shop-report-range'
@@ -2221,10 +2222,17 @@ describe('real-PostgreSQL route evidence', () => {
       nasiyaInterestReceivedUzs: 100,
       expectedProfitUzs: 0,
       expectedInterestUzs: 0,
-      waivedNasiyaProfitUzs: 100,
-      waivedNasiyaProfitFrozenUzs: 100,
-      waivedNasiyaProfitCount: 1,
     })
+    expect(accounting).not.toHaveProperty('waivedNasiyaProfitUzs')
+    expect(accounting).not.toHaveProperty('waivedNasiyaProfitCount')
+    const customerOverview = await getCustomerProfileOverview({
+      shopId: actor.shop.id,
+      customerId: contract.customer.id,
+      now: new Date('2026-07-22T10:00:00.000Z'),
+      visibility: { includeOwnerFinancials: true },
+    })
+    expect(customerOverview?.metrics.nasiyaInterestUzs).toBe(100)
+    expect(customerOverview?.metrics).not.toHaveProperty('waivedNasiyaProfit')
     const reportRange = resolveReportRange({
       preset: 'single',
       month: '2026-07',
@@ -2234,19 +2242,15 @@ describe('real-PostgreSQL route evidence', () => {
       getShopRangeReport({ shopId: actor.shop.id, range: reportRange, adminId: null }),
       getShopRangeReport({ shopId: actor.shop.id, range: reportRange, adminId: actor.admin.id }),
     ])
-    expect(rangeReport.months[0].waivedNasiyaProfit).toEqual({
-      uzs: 100,
-      usd: 0,
-      frozenUzs: 100,
-      count: 1,
+    expect(rangeReport.months[0]).toMatchObject({
+      grossProfitUzs: 500,
+      interestProfitUzs: 100,
+      expectedProfit: { uzs: 0, usd: 0 },
+      nasiyaInterestExpected: { uzs: 0, usd: 0 },
     })
-    expect(rangeReport.totals.waivedNasiyaProfit).toEqual({
-      uzs: 100,
-      usd: 0,
-      frozenUzs: 100,
-      count: 1,
-    })
-    expect(actorRangeReport.totals.waivedNasiyaProfit).toEqual(rangeReport.totals.waivedNasiyaProfit)
+    expect(rangeReport.months[0]).not.toHaveProperty('waivedNasiyaProfit')
+    expect(rangeReport.totals).not.toHaveProperty('waivedNasiyaProfit')
+    expect(actorRangeReport.totals).not.toHaveProperty('waivedNasiyaProfit')
     expect(await prisma.log.count({
       where: {
         shopId: actor.shop.id,
@@ -2413,11 +2417,9 @@ describe('real-PostgreSQL route evidence', () => {
       nasiyaInterestReceivedUzs: 120_000,
       expectedProfitUsd: 0,
       expectedInterestUsd: 0,
-      waivedNasiyaProfitUzs: 0,
-      waivedNasiyaProfitUsd: 10,
-      waivedNasiyaProfitFrozenUzs: 130_000,
-      waivedNasiyaProfitCount: 1,
     })
+    expect(accounting).not.toHaveProperty('waivedNasiyaProfitUsd')
+    expect(accounting).not.toHaveProperty('waivedNasiyaProfitCount')
 
     const reportRange = resolveReportRange({
       preset: 'single',
@@ -2429,12 +2431,9 @@ describe('real-PostgreSQL route evidence', () => {
       range: reportRange,
       adminId: null,
     })
-    expect(rangeReport.totals.waivedNasiyaProfit).toEqual({
-      uzs: 0,
-      usd: 10,
-      frozenUzs: 130_000,
-      count: 1,
-    })
+    expect(rangeReport.totals).not.toHaveProperty('waivedNasiyaProfit')
+    expect(rangeReport.totals.grossProfitUzs).toBe(620_000)
+    expect(rangeReport.totals.interestProfitUzs).toBe(120_000)
   })
 
   it('takes the full remaining amount with profit and records no waiver', async () => {
@@ -2496,8 +2495,8 @@ describe('real-PostgreSQL route evidence', () => {
     expect(Number(settlement.contractInterestWaivedAmount)).toBe(0)
     expect(latestPayment.allocations.map((allocation) => Number(allocation.contractInterestAmount))).toEqual([100])
     expect(device.status).toBe('SOLD_NASIYA')
-    expect(accounting.waivedNasiyaProfitCount).toBe(0)
-    expect(accounting.waivedNasiyaProfitUzs).toBe(0)
+    expect(accounting).not.toHaveProperty('waivedNasiyaProfitCount')
+    expect(accounting).not.toHaveProperty('waivedNasiyaProfitUzs')
     expect(accounting.actualProfitUzs).toBe(600)
   })
 

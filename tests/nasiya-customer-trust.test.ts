@@ -141,12 +141,11 @@ describe('multiple fully-completed, all-on-time nasiyas -> VERY_HIGH', () => {
   })
 })
 
-describe('profit-waived settlement is neutral, not a fully-paid trust reward', () => {
-  it('keeps prior paid history but excludes the settlement from completed-deal credit', () => {
+describe('profit-waived settlement metadata does not affect trust statistics', () => {
+  it('uses only completion status and actual payment timing', () => {
     const rating = computeCustomerTrustRating([{
       status: 'COMPLETED',
       contractCurrency: 'UZS',
-      settledWithWaiver: true,
       schedules: [
         paidOnTime(new Date('2026-05-01'), new Date('2026-05-01')),
         {
@@ -161,12 +160,10 @@ describe('profit-waived settlement is neutral, not a fully-paid trust reward', (
       ],
     }], now)
 
-    expect(rating.factors.completedNasiyaCount).toBe(0)
-    expect(rating.factors.settledWithWaiverCount).toBe(1)
+    expect(rating.factors.completedNasiyaCount).toBe(1)
+    expect(rating.factors).not.toHaveProperty('settledWithWaiverCount')
     expect(rating.factors.paidInstallmentCount).toBe(1)
-    expect(rating.tier).not.toBe('HIGH')
-    expect(rating.tier).not.toBe('VERY_HIGH')
-    expect(rating.reasons).toContain('1 ta nasiya kelgusi foyda kechilib yopilgan')
+    expect(rating.reasons.join(' ')).not.toContain('kechilib')
   })
 })
 

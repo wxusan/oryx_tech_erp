@@ -12,7 +12,6 @@ export interface CustomerProfileMetrics {
   cashCollected: CustomerProfileNativeMoney
   refunds: CustomerProfileNativeMoney
   writeOffs: CustomerProfileNativeMoney
-  waivedNasiyaProfit: CustomerProfileNativeMoney
   accountingAccrualGrossProfitUzs: number
   nasiyaInterestUzs: number
   legacyUsdPaymentCount: number

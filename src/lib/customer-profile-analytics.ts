@@ -22,7 +22,6 @@ export interface CustomerProfileActivityMonth {
   contracts: CustomerProfileNativeMoney
   payments?: CustomerProfileNativeMoney
   refunds?: CustomerProfileNativeMoney
-  waivedProfit?: CustomerProfileNativeMoney
   writeOffs?: CustomerProfileNativeMoney
 }
 

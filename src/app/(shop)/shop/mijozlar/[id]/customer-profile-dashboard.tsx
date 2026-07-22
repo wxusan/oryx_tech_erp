@@ -19,7 +19,6 @@ function hasCurrencyData(analytics: CustomerProfileAnalytics, currency: Customer
     row.contracts[currency] !== 0
     || (row.payments?.[currency] ?? 0) !== 0
     || (row.refunds?.[currency] ?? 0) !== 0
-    || (row.waivedProfit?.[currency] ?? 0) !== 0
     || (row.writeOffs?.[currency] ?? 0) !== 0
   ))
 }
