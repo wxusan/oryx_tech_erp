@@ -3,6 +3,7 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
 import { getCustomerProfileHistory, getCustomerProfileOverview } from '@/lib/server/customer-profile'
 import { getShopMonthlyAccountingAggregate } from '@/lib/server/shop-stats-queries'
+import { SHOP_LOGIN_TAKEN_MESSAGE } from '@/lib/shop-login-conflict'
 import { seedBuiltInStaffRoles } from '@/lib/server/shop-staff-roles'
 import { getShopRangeReport } from '@/lib/server/shop-report-range'
 import { resolveReportRange } from '@/lib/report-range'
@@ -197,6 +198,16 @@ async function createStaffRequest(body: Record<string, unknown>) {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
   }))
+}
+
+async function createOwnerRequest(shopId: string, body: Record<string, unknown>) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/shops/[id]/admins/route')
+  return POST(new NextRequest(`http://localhost/api/shops/${shopId}/admins`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }), { params: Promise.resolve({ id: shopId }) })
 }
 
 async function staffListRequest() {
@@ -1178,6 +1189,55 @@ describe('real-PostgreSQL route evidence', () => {
     expect(await prisma.log.count({
       where: { shopId: actor.shop.id, action: 'STAFF_CREATE', targetId: member.id },
     })).toBe(1)
+  })
+
+  it('returns actionable feedback when a staff login already exists', async () => {
+    const actor = await seedActor('staff_duplicate_login')
+    useShopAdmin(actor)
+
+    const response = await createStaffRequest({
+      name: 'Duplicate login staff',
+      phone: '+998901010109',
+      login: actor.admin.login,
+      password: 'safe-password',
+    })
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      error: SHOP_LOGIN_TAKEN_MESSAGE,
+    })
+    expect(await prisma.shopAdmin.count({ where: { login: actor.admin.login } })).toBe(1)
+  })
+
+  it('returns the same actionable feedback when an owner login already exists', async () => {
+    const actor = await seedActor('owner_duplicate_login')
+    const unresolvedShop = await prisma.shop.create({
+      data: {
+        name: 'Unresolved duplicate owner shop',
+        ownerName: 'Pending owner',
+        ownerPhone: '+998901010110',
+        shopNumber: 'owner-duplicate-login',
+        address: 'Disposable integration test',
+        subscriptionDue: new Date('2099-01-01T00:00:00.000Z'),
+        createdById: actor.owner.id,
+      },
+    })
+    await useSuperAdmin(actor)
+
+    const response = await createOwnerRequest(unresolvedShop.id, {
+      name: 'Duplicate owner',
+      phone: '+998901010111',
+      login: actor.admin.login,
+      password: 'safe-password',
+    })
+
+    expect(response.status).toBe(409)
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      error: SHOP_LOGIN_TAKEN_MESSAGE,
+    })
+    expect(await prisma.shopAdmin.count({ where: { shopId: unresolvedShop.id } })).toBe(0)
   })
 
   it('lets STAFF_CREATE create only a default-deny member and blocks delegated escalation', async () => {
