@@ -26,7 +26,7 @@ import {
 import { SHOP_FEATURE_CODES } from '@/lib/access-control'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
-import { normalizePhone } from '@/lib/phone'
+import { prepareSearchNeedle } from '@/lib/search-needle'
 import { createTelegramDisableTransitionInTransaction } from '@/lib/server/telegram-lifecycle'
 import { seedBuiltInStaffRoles } from '@/lib/server/shop-staff-roles'
 
@@ -50,14 +50,14 @@ export async function GET(req: NextRequest) {
     const guarded = await requireSuperAdmin()
     if (!guarded.ok) return guarded.response
     const includeDeleted = req.nextUrl.searchParams.get('includeDeleted') === 'true'
-    const search = req.nextUrl.searchParams.get('search')?.trim()
-    if (search && search.length > 100) return badRequest('Qidiruv 100 ta belgidan oshmasligi kerak')
+    const preparedSearch = prepareSearchNeedle(req.nextUrl.searchParams.get('search'))
+    if (preparedSearch.exceedsMaxLength) return badRequest('Qidiruv 100 ta belgidan oshmasligi kerak')
+    const search = preparedSearch.query
     const statusParam = req.nextUrl.searchParams.get('status')?.trim()
     if (statusParam && !['ACTIVE', 'SUSPENDED', 'DELETED'].includes(statusParam)) {
       return badRequest("Do'kon statusi noto'g'ri")
     }
     const status = statusParam as 'ACTIVE' | 'SUSPENDED' | 'DELETED' | undefined
-    const searchDigits = search ? normalizePhone(search) : null
     const requestedTake = Number(req.nextUrl.searchParams.get('take') ?? 200)
     const requestedSkip = Number(req.nextUrl.searchParams.get('skip') ?? 0)
     const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 500)) : 200
@@ -69,11 +69,13 @@ export async function GET(req: NextRequest) {
         ...(status ? { status } : {}),
         ...(search ? {
           OR: [
-            { name: { contains: search, mode: 'insensitive' as const } },
-            { ownerName: { contains: search, mode: 'insensitive' as const } },
-            { ownerPhone: { contains: search, mode: 'insensitive' as const } },
-            ...(searchDigits ? [{ ownerPhone: { contains: searchDigits } }] : []),
-            { shopNumber: { contains: search, mode: 'insensitive' as const } },
+            { name: { contains: preparedSearch.escapedText, mode: 'insensitive' as const } },
+            { ownerName: { contains: preparedSearch.escapedText, mode: 'insensitive' as const } },
+            { ownerPhone: { contains: preparedSearch.escapedText, mode: 'insensitive' as const } },
+            ...(preparedSearch.identifierDigits
+              ? [{ ownerPhone: { contains: preparedSearch.identifierDigits } }]
+              : []),
+            { shopNumber: { contains: preparedSearch.escapedText, mode: 'insensitive' as const } },
           ],
         } : {}),
       },

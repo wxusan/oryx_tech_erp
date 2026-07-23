@@ -8,6 +8,8 @@ import { customerSearchWhere } from '@/lib/server/customer-search'
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
 import { computeCustomerTrustRatingFromFactors, isValidTrustTier, type CustomerTrustFactors } from '@/lib/nasiya-customer-trust'
 import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
+import { isValidPassportIdentifier } from '@/lib/customer-passport'
+import { searchMatchEvidence, type SearchMatchEvidence } from '@/lib/search-match-evidence'
 import {
   isInvalidRequestBody,
   isRequestBodyTooLarge,
@@ -79,11 +81,22 @@ export async function POST(req: NextRequest) {
         factors.get(customer.id) ?? EMPTY_FACTORS,
         isValidTrustTier(trustOverride) ? trustOverride : null,
       )
+      const additionalPhoneEvidence = searchMatchEvidence(parsed.data.search, customer.additionalPhones.map((value) => ({
+        field: 'ADDITIONAL_PHONE' as const,
+        value,
+        mode: 'identifier' as const,
+      })))
+      const matchEvidence: SearchMatchEvidence[] = additionalPhoneEvidence.length > 0
+        ? additionalPhoneEvidence
+        : isValidPassportIdentifier(parsed.data.search) && passportIdentifierLast4
+          ? [{ field: 'PASSPORT' }]
+          : []
       return {
         ...customer,
         passportMasked: passportIdentifierLast4 ? `••••${passportIdentifierLast4}` : null,
         hasPassportPhoto: isPrivateUploadStoredKey({ key: passportPhotoUrl, shopId: resolved.shopId, kind: 'passport' }),
         trust: { tier: trust.tier, label: trust.label, color: trust.color },
+        ...(matchEvidence.length > 0 ? { matchEvidence } : {}),
       }
     }), 'Mijoz qidiruvi')
     response.headers.set('Cache-Control', 'private, no-store')

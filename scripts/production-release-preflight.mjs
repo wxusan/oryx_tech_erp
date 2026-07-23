@@ -58,6 +58,7 @@ const RELEASE_MIGRATIONS = [
   '202607220002_nasiya_early_settlement',
   '202607220003_nasiya_return_refund',
   '202607230001_return_currency_refund_method',
+  '202607230002_contiguous_search_phone_document',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))
@@ -790,6 +791,19 @@ const nasiyaPaymentRateSourceChecks = [
   },
 ]
 
+const contiguousSearchPhoneDocumentChecks = [
+  {
+    name: 'customer_phone_search_document_mismatches',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "Customer"
+      WHERE "phoneSearchDigits" IS DISTINCT FROM
+        "customer_phone_search_digits"("phone", "additionalPhones")
+    `,
+  },
+]
+
 function logSummary(summary) {
   // Count-only output is safe to retain in deployment logs. Never add entity
   // identifiers, Telegram IDs, customer data, or connection details here.
@@ -848,6 +862,9 @@ try {
       : []),
     ...(phase === 'post' && appliedMigrationSet.has('202607230001_return_currency_refund_method')
       ? returnCurrencyMethodChecks
+      : []),
+    ...(phase === 'post' && appliedMigrationSet.has('202607230002_contiguous_search_phone_document')
+      ? contiguousSearchPhoneDocumentChecks
       : []),
   ]
   for (const check of applicableChecks) {

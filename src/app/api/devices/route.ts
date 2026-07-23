@@ -31,6 +31,8 @@ import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailabl
 import { createSupplierPayableCore } from '@/lib/server/supplier-payable-payments'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { validatePaymentBreakdown } from '@/lib/payment-breakdown'
+import { prepareSearchNeedle } from '@/lib/search-needle'
+import { searchMatchEvidence } from '@/lib/search-match-evidence'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED', 'DELETED'] as const
 
@@ -76,7 +78,9 @@ export async function GET(req: NextRequest) {
     const status = statusParam as (typeof deviceStatuses)[number] | undefined
     const conditionParam = searchParams.get('condition') ?? undefined
     if (conditionParam && conditionParam !== 'NEW' && conditionParam !== 'USED') return badRequest("Qurilma holati noto'g'ri")
-    const search = searchParams.get('search') ?? undefined // IMEI / model / color / note / customer name/phone
+    const preparedSearch = prepareSearchNeedle(searchParams.get('search'))
+    if (preparedSearch.exceedsMaxLength) return badRequest('Qidiruv 100 ta belgidan oshmasligi kerak')
+    const search = preparedSearch.query || undefined // IMEI / model / color / note / customer name/phone
 
     if (actionPickerPurpose) {
       const can = (permission: 'DEVICE_EDIT' | 'DEVICE_DELETE' | 'DEVICE_RESTOCK' | 'SALE_VIEW' | 'SALE_EDIT' | 'SALE_REMINDER_MANAGE') => (
@@ -112,6 +116,11 @@ export async function GET(req: NextRequest) {
             color: true,
             storage: true,
             imei: true,
+            imeis: {
+              where: { deletedAt: null },
+              orderBy: { slot: 'asc' },
+              select: { slot: true, value: true },
+            },
             status: true,
             createdAt: true,
             // These never leave the server. They are only used to calculate
@@ -136,7 +145,7 @@ export async function GET(req: NextRequest) {
                       paymentMethod: true,
                       paidFully: true,
                       createdAt: true,
-                      customer: { select: { name: true, phone: true } },
+                      customer: { select: { name: true, phone: true, additionalPhones: true } },
                     },
                   },
                 }
@@ -147,7 +156,11 @@ export async function GET(req: NextRequest) {
       ])
       return ok({
         items: rows.map((row) => {
-          const sale = 'sales' in row ? row.sales[0] : null
+          const sale = 'sales' in row
+            ? row.sales[0] as (typeof row.sales)[number] & {
+                customer: { name: string; phone: string; additionalPhones: string[] }
+              }
+            : null
           const contractProfit = includeOwnerFinancials && sale
             ? computeSaleContractMargin(
                 Number(sale.contractSalePrice),
@@ -169,10 +182,34 @@ export async function GET(req: NextRequest) {
             imei: displayImei(row.imei),
             status: row.status,
             createdAt: row.createdAt,
+            ...(search
+              ? {
+                  matchEvidence: searchMatchEvidence(search, [
+                    {
+                      field: 'SECONDARY_IMEI',
+                      value: row.imeis.find((entry) => entry.slot === 'SECONDARY')?.value,
+                      mode: 'identifier',
+                    },
+                    ...(sale?.customer.additionalPhones ?? []).map((value) => ({
+                      field: 'ADDITIONAL_PHONE' as const,
+                      value,
+                      mode: 'identifier' as const,
+                      exposeValue: false,
+                    })),
+                  ]),
+                }
+              : {}),
             ...('sales' in row
               ? {
                   sale: sale
-                    ? { ...sale, ...(includeOwnerFinancials ? { contractProfit } : {}) }
+                    ? {
+                        ...sale,
+                        customer: {
+                          name: sale.customer.name,
+                          phone: sale.customer.phone,
+                        },
+                        ...(includeOwnerFinancials ? { contractProfit } : {}),
+                      }
                     : null,
                 }
               : {}),
@@ -211,18 +248,23 @@ export async function GET(req: NextRequest) {
             color: true,
             storage: true,
             imei: true,
+            imeis: {
+              where: { deletedAt: null },
+              orderBy: { slot: 'asc' },
+              select: { slot: true, value: true },
+            },
             status: true,
             sales: {
               where: { deletedAt: null, returnedAt: null },
               orderBy: { createdAt: 'desc' },
               take: 1,
-              select: { id: true, contractCurrency: true, customer: { select: { name: true, phone: true } } },
+              select: { id: true, contractCurrency: true, customer: { select: { name: true, phone: true, additionalPhones: true } } },
             },
             nasiya: {
               where: { deletedAt: null, returnedAt: null, status: { not: 'CANCELLED' } },
               orderBy: { createdAt: 'desc' },
               take: 1,
-              select: { id: true, contractCurrency: true, customer: { select: { name: true, phone: true } } },
+              select: { id: true, contractCurrency: true, customer: { select: { name: true, phone: true, additionalPhones: true } } },
             },
           },
         }),
@@ -241,7 +283,26 @@ export async function GET(req: NextRequest) {
             contractType: row.sales[0] ? 'SALE' as const : 'NASIYA' as const,
             contractId: contract?.id ?? null,
             contractCurrency: contract?.contractCurrency ?? 'UZS',
-            customer: contract?.customer ?? null,
+            customer: contract?.customer
+              ? { name: contract.customer.name, phone: contract.customer.phone }
+              : null,
+            ...(search
+              ? {
+                  matchEvidence: searchMatchEvidence(search, [
+                    {
+                      field: 'SECONDARY_IMEI',
+                      value: row.imeis.find((entry) => entry.slot === 'SECONDARY')?.value,
+                      mode: 'identifier',
+                    },
+                    ...(contract?.customer.additionalPhones ?? []).map((value) => ({
+                      field: 'ADDITIONAL_PHONE' as const,
+                      value,
+                      mode: 'identifier' as const,
+                      exposeValue: false,
+                    })),
+                  ]),
+                }
+              : {}),
           }
         }),
         total,
@@ -295,6 +356,15 @@ export async function GET(req: NextRequest) {
             storageDisplay: formatDeviceStorage(device) || null,
             secondaryImei: device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
             conditionLabel: deviceConditionLabel(device.conditionCode),
+            ...(search
+              ? {
+                  matchEvidence: searchMatchEvidence(search, [{
+                    field: 'SECONDARY_IMEI',
+                    value: device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value,
+                    mode: 'identifier',
+                  }]),
+                }
+              : {}),
           })),
           total,
           skip,

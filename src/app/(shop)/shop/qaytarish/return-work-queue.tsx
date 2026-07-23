@@ -22,8 +22,14 @@ import { formatUzPhoneDisplay } from '@/lib/phone'
 import { QueryActivity } from '@/components/query-activity'
 import { AsyncButton } from '@/components/ui/async-button'
 import { markQueryIntent } from '@/lib/client-performance'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
-interface ReturnCandidate {
+interface ReturnCandidate extends SearchEvidenceCarrier {
   id: string
   model: string
   color: string | null
@@ -34,6 +40,11 @@ interface ReturnCandidate {
   contractId: string | null
   contractCurrency: 'UZS' | 'USD'
   customer: { name: string; phone: string } | null
+}
+
+interface ReturnCandidatesPayload extends SearchEvidenceCarrier {
+  items?: ReturnCandidate[]
+  matchEvidenceById?: unknown
 }
 
 async function apiError(response: Response) {
@@ -74,14 +85,18 @@ export default function ReturnWorkQueue() {
       if (committedSearch) params.set('search', committedSearch)
       const response = await fetch(`/api/devices?${params.toString()}`, { signal, cache: 'no-store' })
       if (!response.ok) throw new Error(await apiError(response))
-      const payload = await response.json() as { data?: { items?: ReturnCandidate[] } }
-      return payload.data?.items ?? []
+      const payload = await response.json() as { data?: ReturnCandidatesPayload }
+      return payload.data ?? { items: [] }
     },
     placeholderData: keepPreviousData,
   })
-  const items = candidatesQuery.data ?? []
+  const candidatesPayload = candidatesQuery.data
+  const items = candidatesPayload?.items ?? []
   const loading = candidatesQuery.isPending
   const error = candidatesQuery.error instanceof Error ? candidatesQuery.error.message : ''
+  const highlightQuery = search.trim() === committedSearch && !candidatesQuery.isPlaceholderData
+    ? committedSearch
+    : ''
 
   function open(candidate: ReturnCandidate) {
     setSelected(candidate)
@@ -138,9 +153,9 @@ export default function ReturnWorkQueue() {
       }
       command.committed()
       await commitNavigationMutation({ kind: 'return.created', deviceId: selected.id })
-      queryClient.setQueryData<ReturnCandidate[]>(
+      queryClient.setQueryData<ReturnCandidatesPayload>(
         ['return-work-queue', committedSearch],
-        (current) => current?.filter((item) => item.id !== selected.id) ?? [],
+        (current) => ({ ...current, items: current?.items?.filter((item) => item.id !== selected.id) ?? [] }),
       )
       setSelected(null)
     } catch (caught) {
@@ -177,11 +192,16 @@ export default function ReturnWorkQueue() {
           {items.map((item) => (
             <div key={item.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0">
-                <div className="font-semibold text-zinc-900">{item.model}{item.storage ? ` · ${item.storage}` : ''}</div>
-                <div className="mt-1 text-xs text-zinc-500">IMEI: {displayImei(item.imei)}</div>
-                <div className="mt-1 text-sm text-zinc-600">
-                  {item.customer?.name ?? 'Mijoz'}{item.customer?.phone ? ` · ${formatUzPhoneDisplay(item.customer.phone)}` : ''}
+                <div className="font-semibold text-zinc-900">
+                  <HighlightedText value={item.model} query={highlightQuery} mode="text" />
+                  {item.storage && <> · <HighlightedText value={item.storage} query={highlightQuery} mode="auto" /></>}
                 </div>
+                <div className="mt-1 text-xs text-zinc-500">IMEI: <HighlightedText value={displayImei(item.imei)} query={highlightQuery} mode="identifier" /></div>
+                <div className="mt-1 text-sm text-zinc-600">
+                  <HighlightedText value={item.customer?.name ?? 'Mijoz'} query={highlightQuery} mode="text" />
+                  {item.customer?.phone && <> · <HighlightedText value={formatUzPhoneDisplay(item.customer.phone)} query={highlightQuery} mode="identifier" /></>}
+                </div>
+                <SearchEvidence evidence={searchEvidenceFor(item.id, item, candidatesPayload)} query={highlightQuery} />
               </div>
               <Button type="button" variant="outline" onClick={() => open(item)}>
                 <Undo2 className="size-4" /> Sotuvni qaytarish

@@ -38,6 +38,12 @@ import { QueryActivity } from '@/components/query-activity'
 import { AsyncButton } from '@/components/ui/async-button'
 import { markQueryIntent } from '@/lib/client-performance'
 import { ExportDownloadButton } from '@/components/shop/export-download-button'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
 const TRUST_TIER_LABELS: Record<TrustTier, string> = {
   NEW: 'Yangi mijoz',
@@ -51,7 +57,7 @@ interface CustomerTrust extends TrustBadgeData {
   reasons?: string[]
 }
 
-interface Customer {
+interface Customer extends SearchEvidenceCarrier {
   id: string
   name: string
   phone: string
@@ -70,11 +76,12 @@ interface Customer {
 const PER_PAGE = 25
 const SEARCH_DEBOUNCE_MS = 275
 
-interface CustomersPageData {
+interface CustomersPageData extends SearchEvidenceCarrier {
   items: Customer[]
   total: number
   skip: number
   take: number
+  matchEvidenceById?: unknown
 }
 
 export default function CustomersClient({
@@ -141,7 +148,11 @@ export default function CustomersClient({
           take: PER_PAGE,
         }, signal),
       )
-      const json = await response.json() as { success: boolean; data?: { items: Customer[]; total: number }; error?: string }
+      const json = await response.json() as {
+        success: boolean
+        data?: { items: Customer[]; total: number } & CustomersPageData
+        error?: string
+      }
       if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Mijozlar yuklanmadi')
       return json.data
     },
@@ -166,6 +177,9 @@ export default function CustomersClient({
   const loading = customersQuery.isPending && !customersQuery.data
   const error = customersQuery.error instanceof Error ? customersQuery.error.message : null
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
+  const highlightQuery = search.trim() === debouncedSearch && !customersQuery.isPlaceholderData
+    ? debouncedSearch
+    : ''
 
   function openEdit(customer: Customer) {
     setCreating(false)
@@ -322,12 +336,13 @@ export default function CustomersClient({
                         aria-label={`${customer.name} mijoz profilini ochish`}
                         className="font-medium text-zinc-900 hover:underline"
                       >
-                        {customer.name}
+                        <HighlightedText value={customer.name} query={highlightQuery} mode="text" />
                       </StretchedLink>
-                    ) : customer.name}
+                    ) : <HighlightedText value={customer.name} query={highlightQuery} mode="text" />}
+                    <SearchEvidence evidence={searchEvidenceFor(customer.id, customer, customersQuery.data)} query={highlightQuery} />
                   </td>
                   <td className="px-4 py-3 font-mono text-zinc-600">
-                    <div>{formatUzPhoneDisplay(customer.phone)}</div>
+                    <div><HighlightedText value={formatUzPhoneDisplay(customer.phone)} query={highlightQuery} mode="identifier" /></div>
                     {customer.phoneNormalizationNeedsReview && (
                       <span className="mt-1 inline-flex rounded bg-amber-50 px-2 py-0.5 font-sans text-[11px] font-medium text-amber-800" title="Eski telefon raqamini tekshirib, to'g'ri formatda saqlang">
                         Telefon tekshirilsin
@@ -371,8 +386,9 @@ export default function CustomersClient({
               )}
               <div className="pointer-events-none relative z-10 flex items-start justify-between gap-2">
                 <div>
-                  <div className="font-medium text-zinc-900">{customer.name}</div>
-                  <div className="text-xs font-mono text-zinc-500 mt-0.5">{formatUzPhoneDisplay(customer.phone)}</div>
+                  <div className="font-medium text-zinc-900"><HighlightedText value={customer.name} query={highlightQuery} mode="text" /></div>
+                  <div className="text-xs font-mono text-zinc-500 mt-0.5"><HighlightedText value={formatUzPhoneDisplay(customer.phone)} query={highlightQuery} mode="identifier" /></div>
+                  <SearchEvidence evidence={searchEvidenceFor(customer.id, customer, customersQuery.data)} query={highlightQuery} />
                   {customer.phoneNormalizationNeedsReview && (
                     <span className="mt-1 inline-flex rounded bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
                       Telefon tekshirilsin

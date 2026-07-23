@@ -22,6 +22,13 @@ import { QueryActivity } from '@/components/query-activity'
 import { markQueryIntent } from '@/lib/client-performance'
 import { nasiyaOperationContextQueryOptions } from '@/lib/use-nasiya-operation-context'
 import { ExportDownloadButton } from '@/components/shop/export-download-button'
+import { displayImei } from '@/lib/device-display'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
 type VisibleNasiyaStatus = Exclude<NasiyaStatus, 'CANCELLED'>
 type DisplayStatus = 'Faol' | 'Muddati o‘tgan' | 'To‘liq yopilgan'
@@ -51,7 +58,7 @@ interface CollectionWorkItem {
   preferredScheduleId: string
 }
 
-interface Nasiya {
+interface Nasiya extends SearchEvidenceCarrier {
   id: string
   interestPercent: number
   contractCurrency: 'UZS' | 'USD'
@@ -83,9 +90,10 @@ interface ApiResponse<T> {
   error?: string
 }
 
-interface NasiyalarPayload {
+interface NasiyalarPayload extends SearchEvidenceCarrier {
   items: Nasiya[]
   total: number
+  matchEvidenceById?: unknown
 }
 
 const statusMap: Record<VisibleNasiyaStatus, DisplayStatus> = {
@@ -260,6 +268,9 @@ export default function NasiyalarClient({
   const error = nasiyalarQuery.error instanceof Error ? nasiyalarQuery.error.message : null
   const loading = nasiyalarQuery.isPending && !nasiyalarQuery.data
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
+  const highlightQuery = search.trim() === debouncedSearch.trim() && !nasiyalarQuery.isPlaceholderData
+    ? debouncedSearch.trim()
+    : ''
 
   function prefetchFilter(filter: ListFilter) {
     const key = buildRequestKey(debouncedSearch, filter, 1)
@@ -402,7 +413,7 @@ export default function NasiyalarClient({
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="mb-1 flex flex-wrap items-center gap-1.5">
-                          <span className="font-medium text-sm text-zinc-900">{n.customer.name}</span>
+                          <span className="font-medium text-sm text-zinc-900"><HighlightedText value={n.customer.name} query={highlightQuery} mode="text" /></span>
                           {collectionWorkItem ? <CollectionCohortBadge cohort={collectionWorkItem.cohort} /> : <StatusBadge status={n.displayStatus} />}
                           {collectionWorkItem?.cohort === 'DUE_TODAY' && n.isOverdue && (
                             <span className="inline-block rounded bg-red-50 px-2 py-0.5 text-xs font-medium text-red-700">Shartnomada eski qarz bor</span>
@@ -413,8 +424,13 @@ export default function NasiyalarClient({
                           {n.isImported && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Avvalgi nasiya</span>}
                         </div>
                         <div className="text-xs text-zinc-500">
-                          {n.device.model} · {formatUzPhoneDisplay(n.customer.phone)}
+                          <HighlightedText value={n.device.model} query={highlightQuery} mode="text" />
+                          {' · '}
+                          <HighlightedText value={formatUzPhoneDisplay(n.customer.phone)} query={highlightQuery} mode="identifier" />
+                          {' · IMEI '}
+                          <HighlightedText value={displayImei(n.device.imei)} query={highlightQuery} mode="identifier" />
                         </div>
+                        <SearchEvidence evidence={searchEvidenceFor(n.id, n, nasiyalarQuery.data)} query={highlightQuery} />
                         {collectionDateLabel && <div className="mt-1 text-xs text-zinc-500">{collectionDateLabel}</div>}
                       </div>
                       <div className="shrink-0 text-right">
@@ -490,8 +506,8 @@ export default function NasiyalarClient({
                   </StretchedLink>
                   <div className="pointer-events-none relative z-10 flex items-start justify-between gap-2">
                     <div>
-                      <div className="font-medium text-zinc-900">{n.customer.name}</div>
-                      <div className="text-xs font-mono text-zinc-500 mt-0.5">{formatUzPhoneDisplay(n.customer.phone)}</div>
+                      <div className="font-medium text-zinc-900"><HighlightedText value={n.customer.name} query={highlightQuery} mode="text" /></div>
+                      <div className="text-xs font-mono text-zinc-500 mt-0.5"><HighlightedText value={formatUzPhoneDisplay(n.customer.phone)} query={highlightQuery} mode="identifier" /></div>
                     </div>
                     <div className="flex flex-wrap justify-end gap-1">
                       {collectionWorkItem ? <CollectionCohortBadge cohort={collectionWorkItem.cohort} /> : <StatusBadge status={n.displayStatus} />}
@@ -500,7 +516,12 @@ export default function NasiyalarClient({
                       )}
                     </div>
                   </div>
-                  <div className="pointer-events-none relative z-10 text-xs text-zinc-500">{n.device.model}</div>
+                  <div className="pointer-events-none relative z-10 text-xs text-zinc-500">
+                    <HighlightedText value={n.device.model} query={highlightQuery} mode="text" />
+                    {' · IMEI '}
+                    <HighlightedText value={displayImei(n.device.imei)} query={highlightQuery} mode="identifier" />
+                    <SearchEvidence evidence={searchEvidenceFor(n.id, n, nasiyalarQuery.data)} query={highlightQuery} />
+                  </div>
                   <div className="pointer-events-none relative z-10 flex flex-wrap items-center gap-2">
                     <PaymentScoreBadge score={n.paymentScore} />
                     {ledgerQuarantined && <span className="inline-block rounded bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-800">Tekshiruv kerak</span>}

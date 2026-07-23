@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import Link from 'next/link'
 import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { Pencil, Trash2, Undo2 } from 'lucide-react'
@@ -9,14 +9,25 @@ import { Input } from '@/components/ui/input'
 import { useShopAccess } from '@/components/shop/shop-access-context'
 import { QueryActivity } from '@/components/query-activity'
 import { markQueryIntent } from '@/lib/client-performance'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
-interface DeviceActionItem {
+interface DeviceActionItem extends SearchEvidenceCarrier {
   id: string
   model: string
   color: string | null
   storage: string | null
   imei: string
   status: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA' | 'RETURNED'
+}
+
+interface DeviceActionPayload extends SearchEvidenceCarrier {
+  items: DeviceActionItem[]
+  matchEvidenceById?: unknown
 }
 
 const statusLabels: Record<DeviceActionItem['status'], string> = {
@@ -45,9 +56,9 @@ export default function DeviceActionQueue() {
       const params = new URLSearchParams({ view: 'action-picker', purpose: 'device', take: '50' })
       if (committedSearch) params.set('search', committedSearch)
       const response = await fetch(`/api/devices?${params}`, { signal, cache: 'no-store' })
-      const json = await response.json() as { success?: boolean; data?: { items: DeviceActionItem[] }; error?: string }
+      const json = await response.json() as { success?: boolean; data?: DeviceActionPayload; error?: string }
       if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Qurilmalar yuklanmadi')
-      return json.data.items
+      return json.data
     },
     placeholderData: keepPreviousData,
   })
@@ -57,6 +68,10 @@ export default function DeviceActionQueue() {
     ...(can('DEVICE_RESTOCK') ? [{ icon: Undo2, label: 'Omborga qaytarish' }] : []),
     ...(can('SALE_RETURN_REFUND') ? [{ icon: Undo2, label: 'Sotuvni qaytarish' }] : []),
   ]
+  const highlightQuery = search.trim() === committedSearch && !query.isPlaceholderData
+    ? committedSearch
+    : ''
+  const items = query.data?.items ?? []
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 p-6">
@@ -79,12 +94,20 @@ export default function DeviceActionQueue() {
       <div className="divide-y divide-zinc-200 rounded-lg border border-zinc-200 bg-white">
         {query.isPending ? (
           <div className="p-8 text-center text-sm text-zinc-500">Yuklanmoqda...</div>
-        ) : query.data?.length ? query.data.map((device) => (
+        ) : items.length ? items.map((device) => (
           <div key={device.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="min-w-0">
-              <div className="font-medium text-zinc-900">{device.model}</div>
-              <div className="mt-1 text-xs text-zinc-500">{[device.color, device.storage, statusLabels[device.status]].filter(Boolean).join(' · ')}</div>
-              <div className="mt-1 font-mono text-xs text-zinc-400">{device.imei}</div>
+              <div className="font-medium text-zinc-900"><HighlightedText value={device.model} query={highlightQuery} mode="text" /></div>
+              <div className="mt-1 text-xs text-zinc-500">
+                {[device.color, device.storage, statusLabels[device.status]].filter(Boolean).map((value, index) => (
+                  <Fragment key={`${value}-${index}`}>
+                    {index > 0 && ' · '}
+                    <HighlightedText value={value} query={highlightQuery} mode="auto" />
+                  </Fragment>
+                ))}
+              </div>
+              <div className="mt-1 font-mono text-xs text-zinc-400"><HighlightedText value={device.imei} query={highlightQuery} mode="identifier" /></div>
+              <SearchEvidence evidence={searchEvidenceFor(device.id, device, query.data)} query={highlightQuery} />
             </div>
             <Button render={<Link href={`/shop/qurilmalar/${device.id}?purpose=device`} />} nativeButton={false} variant="outline">Amalni ochish</Button>
           </div>

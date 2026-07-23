@@ -1,3 +1,5 @@
+import type { SearchMatchEvidence } from '@/lib/search-match-evidence'
+
 export interface SalesListItem {
   id: string
   dueDate: string | null
@@ -14,7 +16,9 @@ export interface SalesListItem {
     color: string | null
     storage: string | null
     imei: string
+    secondaryImei: string | null
   }
+  matchEvidence?: SearchMatchEvidence[]
 }
 
 export interface SalesListPage {

@@ -196,17 +196,25 @@ describe('search: olib-sotdim list is searchable by supplier/customer/device/IME
   const route = read('src/app/api/olib-sotdim/route.ts')
 
   it('the GET query is scoped to the resolved shopId', () => {
-    const whereBlock = route.slice(route.indexOf('const where: Prisma.SupplierPayableWhereInput'), route.indexOf('const [rows, total]'))
+    const whereBlock = route.slice(
+      route.indexOf('export function buildOlibSotdimWhere'),
+      route.indexOf('export async function GET'),
+    )
     expect(whereBlock).toContain('shopId,')
+    expect(whereBlock).toContain('deletedAt: null')
+    expect(route).toContain('buildOlibSotdimWhere(shopId, { search, status })')
   })
 
   it('search matches supplier name/phone, customer name/phone, device model/IMEI', () => {
-    expect(route).toContain('supplierName: { contains: search')
-    expect(route).toContain('supplierPhone: { contains: search')
-    expect(route).toContain("olibSotdimOperation: { customer: { name: { contains: search")
-    expect(route).toContain("olibSotdimOperation: { customer: { phone: { contains: search")
-    expect(route).toContain("device: { model: { contains: search")
-    expect(route).toContain("device: { imei: { contains: search")
+    const escapedText = String.raw`(?:prepared\.escapedText|search)`
+    expect(route).toMatch(new RegExp(`supplierName: \\{ contains: ${escapedText}`))
+    expect(route).toMatch(new RegExp(`supplierPhone: \\{ contains: ${escapedText}`))
+    expect(route).toMatch(new RegExp(`olibSotdimOperation: \\{ customer: \\{ name: \\{ contains: ${escapedText}`))
+    expect(route).toMatch(new RegExp(`olibSotdimOperation: \\{ customer: \\{ phone: \\{ contains: ${escapedText}`))
+    expect(route).toMatch(new RegExp(`device: \\{ model: \\{ contains: ${escapedText}`))
+    expect(route).toMatch(new RegExp(`device: \\{ imei: \\{ contains: ${escapedText}`))
+    expect(route).toContain('normalizedValue: { contains: prepared.identifierDigits }')
+    expect(route).toContain('phoneSearchDigits: { contains: prepared.identifierDigits }')
   })
 })
 

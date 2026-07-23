@@ -1,5 +1,6 @@
 import type { CurrencyCode } from '@/lib/currency'
 import type { DeviceStatus } from '@/lib/domain-types'
+import type { SearchMatchEvidence } from '@/lib/search-match-evidence'
 export type { DeviceStatus } from '@/lib/domain-types'
 
 export interface DeviceListSaleInfo {
@@ -47,6 +48,7 @@ export interface DeviceListItem {
   supplierName: string | null
   supplierPhone: string | null
   saleInfo: DeviceListSaleInfo | null
+  matchEvidence?: SearchMatchEvidence[]
 }
 
 export interface DeviceListPage {

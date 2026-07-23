@@ -640,6 +640,11 @@ model Customer {
   name                          String
   phone                         String
   normalizedPhone               String?
+  // Database-maintained, delimiter-separated digit document for contiguous
+  // partial search across the primary and every additional phone. The trigger
+  // in 202607230002_contiguous_search_phone_document owns this value; app code
+  // must never construct it independently.
+  phoneSearchDigits              String    @default("")
   // Additional contact numbers beyond the primary `phone` — e.g. a relative's
   // or second personal number. Stored normalized (digits-only, `phone.ts`
   // convention) so search can match them the same way as the primary phone.

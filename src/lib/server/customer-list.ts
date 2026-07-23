@@ -10,6 +10,8 @@ import { customerSearchWhere } from '@/lib/server/customer-search'
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
 import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
 import { timeRequestPhase, timeRequestPhaseSync } from '@/lib/server/request-context'
+import { isValidPassportIdentifier } from '@/lib/customer-passport'
+import { searchMatchEvidence, type SearchMatchEvidence } from '@/lib/search-match-evidence'
 
 const EMPTY_TRUST_FACTORS: CustomerTrustFactors = {
   totalNasiyaCount: 0,
@@ -85,6 +87,19 @@ export async function getCustomerList(input: CustomerListInput) {
         trustFactors.get(rest.id) ?? EMPTY_TRUST_FACTORS,
         override,
       )
+      const ordinaryEvidence = searchMatchEvidence(input.search, [
+        ...rest.additionalPhones.map((value) => ({
+          field: 'ADDITIONAL_PHONE' as const,
+          value,
+          mode: 'identifier' as const,
+        })),
+        { field: 'NOTE', value: rest.note, mode: 'text', exposeValue: false },
+      ])
+      const matchEvidence: SearchMatchEvidence[] = ordinaryEvidence.length > 0
+        ? ordinaryEvidence
+        : isValidPassportIdentifier(input.search?.trim() ?? '') && rest.passportIdentifierLast4
+          ? [{ field: 'PASSPORT' }]
+          : []
       return {
         ...rest,
         createdAt: rest.createdAt.toISOString(),
@@ -93,6 +108,7 @@ export async function getCustomerList(input: CustomerListInput) {
         passportIdentifierLast4: undefined,
         passportPhotoUrl: undefined,
         trust: { tier: trust.tier, label: trust.label, color: trust.color },
+        ...(matchEvidence.length > 0 ? { matchEvidence } : {}),
       }
     })
 
@@ -104,18 +120,39 @@ export function scopeCustomerList(
   data: Awaited<ReturnType<typeof getCustomerList>>,
   visibility: CustomerListVisibility,
 ) {
-  if (visibility.canViewCustomers) return data
+  const scopeEvidence = <T extends { matchEvidence?: SearchMatchEvidence[] }>(item: T) => {
+    if (!item.matchEvidence) return item
+    const matchEvidence = item.matchEvidence.filter((evidence) => {
+      if (evidence.field === 'PASSPORT') return visibility.canUsePassport
+      if (evidence.field === 'ADDITIONAL_PHONE') {
+        return visibility.canViewCustomers || visibility.canEditCustomer
+      }
+      if (evidence.field === 'NOTE') {
+        return visibility.canViewCustomers || visibility.canEditCustomer
+      }
+      return true
+    })
+    if (matchEvidence.length > 0) return { ...item, matchEvidence }
+    const safeItem = { ...item }
+    delete safeItem.matchEvidence
+    return safeItem
+  }
+
+  if (visibility.canViewCustomers) {
+    return { ...data, items: data.items.map(scopeEvidence) }
+  }
   return {
     ...data,
-    items: data.items.map((item) => ({
-      id: item.id,
-      name: item.name,
-      phone: item.phone,
-      phoneNormalizationNeedsReview: item.phoneNormalizationNeedsReview,
-      createdAt: item.createdAt,
-      ...(visibility.canEditCustomer ? { additionalPhones: item.additionalPhones, note: item.note } : {}),
-      ...(visibility.canUsePassport ? { passportMasked: item.passportMasked, hasPassportPhoto: item.hasPassportPhoto } : {}),
-      ...(visibility.canOverrideTrust ? { trust: item.trust } : {}),
-    })),
+    items: data.items.map((item) => scopeEvidence({
+        id: item.id,
+        name: item.name,
+        phone: item.phone,
+        phoneNormalizationNeedsReview: item.phoneNormalizationNeedsReview,
+        createdAt: item.createdAt,
+        ...(visibility.canEditCustomer ? { additionalPhones: item.additionalPhones, note: item.note } : {}),
+        ...(visibility.canUsePassport ? { passportMasked: item.passportMasked, hasPassportPhoto: item.hasPassportPhoto } : {}),
+        ...(visibility.canOverrideTrust ? { trust: item.trust } : {}),
+        ...(item.matchEvidence ? { matchEvidence: item.matchEvidence } : {}),
+      })),
   }
 }

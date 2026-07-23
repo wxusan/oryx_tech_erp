@@ -38,6 +38,12 @@ import { useShopAccess } from '@/components/shop/shop-access-context'
 import { QueryActivity } from '@/components/query-activity'
 import { AsyncButton } from '@/components/ui/async-button'
 import { markQueryIntent } from '@/lib/client-performance'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
 type PayableStatus = SupplierPayableStatus
 
@@ -57,7 +63,7 @@ const statusStyles: Record<PayableStatus, string> = {
   OVERDUE: 'bg-red-100 text-red-700',
 }
 
-interface OlibSotdimRow {
+interface OlibSotdimRow extends SearchEvidenceCarrier {
   id: string
   amount: number
   paidAmount: number
@@ -95,6 +101,12 @@ interface OlibSotdimRow {
   } | null
   /** Owner-only margin, omitted for staff. */
   profit?: number | null
+}
+
+interface OlibSotdimPayload extends SearchEvidenceCarrier {
+  items: OlibSotdimRow[]
+  total: number
+  matchEvidenceById?: unknown
 }
 
 export default function OlibSotdimClient({ initialSearch, initialPage }: { initialSearch: string; initialPage: number }) {
@@ -145,7 +157,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
         take: String(pageSize),
       })
       const response = await fetch(`/api/olib-sotdim?${params.toString()}`, { signal, cache: 'no-store' })
-      const json = await response.json() as { success: boolean; data?: { items: OlibSotdimRow[]; total: number }; error?: string }
+      const json = await response.json() as { success: boolean; data?: OlibSotdimPayload; error?: string }
       if (!response.ok || !json.success || !json.data) throw new Error(json.error || "Ro'yxat yuklanmadi")
       return json.data
     },
@@ -166,6 +178,9 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
   const total = rowsQuery.data?.total ?? 0
   const loading = rowsQuery.isPending && !rowsQuery.data
   const error = rowsQuery.error instanceof Error ? rowsQuery.error.message : ''
+  const highlightQuery = search.trim() === committedSearch && !rowsQuery.isPlaceholderData
+    ? committedSearch
+    : ''
 
   function openPay(row: OlibSotdimRow) {
     setPayFor(row)
@@ -269,18 +284,22 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
             )}
             <div className="pointer-events-none relative z-10 flex items-start justify-between gap-3">
               <div>
-                <div className="font-medium text-zinc-900">{row.device.model}</div>
-                <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'}</div>
+                <div className="font-medium text-zinc-900"><HighlightedText value={row.device.model} query={highlightQuery} mode="text" /></div>
+                <div className="text-xs text-zinc-500"><HighlightedText value={row.device.storageDisplay || row.device.storage || '—'} query={highlightQuery} mode="auto" /></div>
                 <DeviceConditionBadge label={row.device.conditionLabel} className="mt-1" />
-                <div className="font-mono text-xs text-zinc-400">Asosiy IMEI: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · Qo‘shimcha IMEI: ${displayImei(row.device.secondaryImei)}` : ''}</div>
+                <div className="font-mono text-xs text-zinc-400">
+                  Asosiy IMEI: <HighlightedText value={displayImei(row.device.imei)} query={highlightQuery} mode="identifier" />
+                  {row.device.secondaryImei && <> · Qo‘shimcha IMEI: <HighlightedText value={displayImei(row.device.secondaryImei)} query={highlightQuery} mode="identifier" /></>}
+                </div>
+                <SearchEvidence evidence={searchEvidenceFor(row.id, row, rowsQuery.data)} query={highlightQuery} />
               </div>
               <span className={`shrink-0 rounded px-2 py-0.5 text-xs font-medium ${statusStyles[row.status]}`}>
                 {statusLabels[row.status]}
               </span>
             </div>
             <dl className="pointer-events-none relative z-10 grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
-              <div><dt className="text-zinc-400">Yetkazib beruvchi</dt><dd className="mt-0.5 text-zinc-800">{row.supplierName}</dd></div>
-              <div><dt className="text-zinc-400">Mijoz</dt><dd className="mt-0.5 text-zinc-800">{row.customer?.name ?? '—'}</dd></div>
+              <div><dt className="text-zinc-400">Yetkazib beruvchi</dt><dd className="mt-0.5 text-zinc-800"><HighlightedText value={row.supplierName} query={highlightQuery} mode="text" /></dd><dd className="text-zinc-500"><HighlightedText value={formatUzPhoneDisplay(row.supplierPhone)} query={highlightQuery} mode="identifier" /></dd></div>
+              <div><dt className="text-zinc-400">Mijoz</dt><dd className="mt-0.5 text-zinc-800"><HighlightedText value={row.customer?.name ?? '—'} query={highlightQuery} mode="text" /></dd>{row.customer?.phone && <dd className="text-zinc-500"><HighlightedText value={formatUzPhoneDisplay(row.customer.phone)} query={highlightQuery} mode="identifier" /></dd>}</div>
               {canSeeOwnerFinancials && row.device.purchasePrice != null && row.device.purchaseCurrency && (
                 <div><dt className="text-zinc-400">Olingan</dt><dd className="mt-0.5 font-medium text-zinc-900">{fmt(row.device.purchasePrice, row.device.purchaseCurrency)}</dd></div>
               )}
@@ -344,18 +363,22 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
                     ) : uzDate(row.createdAt)}
                   </td>
                   <td className="px-4 py-3">
-                    <div className="font-medium text-zinc-900">{row.device.model}</div>
-                    <div className="text-xs text-zinc-500">{row.device.storageDisplay || row.device.storage || '—'}</div>
+                    <div className="font-medium text-zinc-900"><HighlightedText value={row.device.model} query={highlightQuery} mode="text" /></div>
+                    <div className="text-xs text-zinc-500"><HighlightedText value={row.device.storageDisplay || row.device.storage || '—'} query={highlightQuery} mode="auto" /></div>
                     <DeviceConditionBadge label={row.device.conditionLabel} className="mt-1" />
-                    <div className="text-xs text-zinc-400 font-mono">Asosiy IMEI: {displayImei(row.device.imei)}{row.device.secondaryImei ? ` · Qo‘shimcha IMEI: ${displayImei(row.device.secondaryImei)}` : ''}</div>
+                    <div className="text-xs text-zinc-400 font-mono">
+                      Asosiy IMEI: <HighlightedText value={displayImei(row.device.imei)} query={highlightQuery} mode="identifier" />
+                      {row.device.secondaryImei && <> · Qo‘shimcha IMEI: <HighlightedText value={displayImei(row.device.secondaryImei)} query={highlightQuery} mode="identifier" /></>}
+                    </div>
+                    <SearchEvidence evidence={searchEvidenceFor(row.id, row, rowsQuery.data)} query={highlightQuery} />
                   </td>
                   <td className="px-4 py-3">
-                    <div className="text-zinc-900">{row.supplierName}</div>
-                    <div className="text-xs text-zinc-500">{formatUzPhoneDisplay(row.supplierPhone)}</div>
+                    <div className="text-zinc-900"><HighlightedText value={row.supplierName} query={highlightQuery} mode="text" /></div>
+                    <div className="text-xs text-zinc-500"><HighlightedText value={formatUzPhoneDisplay(row.supplierPhone)} query={highlightQuery} mode="identifier" /></div>
                   </td>
                   <td className="px-4 py-3">
-                    <div className="text-zinc-900">{row.customer?.name ?? '—'}</div>
-                    <div className="text-xs text-zinc-500">{row.customer ? formatUzPhoneDisplay(row.customer.phone) : '—'}</div>
+                    <div className="text-zinc-900"><HighlightedText value={row.customer?.name ?? '—'} query={highlightQuery} mode="text" /></div>
+                    <div className="text-xs text-zinc-500"><HighlightedText value={row.customer ? formatUzPhoneDisplay(row.customer.phone) : '—'} query={highlightQuery} mode="identifier" /></div>
                   </td>
                   {canSeeOwnerFinancials && (
                     <td className="px-4 py-3 text-zinc-900 font-medium">

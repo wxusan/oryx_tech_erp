@@ -3,8 +3,9 @@ import 'server-only'
 import type { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { displayImei } from '@/lib/device-display'
-import { normalizePhone } from '@/lib/phone'
 import { computeSaleContractMargin } from '@/lib/nasiya-contract'
+import { prepareSearchNeedle } from '@/lib/search-needle'
+import { searchMatchEvidence } from '@/lib/search-match-evidence'
 import type { SalesListPage } from '@/lib/sales-list-contract'
 import { timeRequestPhase, timeRequestPhaseSync } from '@/lib/server/request-context'
 
@@ -16,10 +17,9 @@ export interface SalesListInput {
   includeOwnerFinancials: boolean
 }
 
-function salesWhere(shopId: string, searchValue?: string | null): Prisma.SaleWhereInput {
-  const search = searchValue?.trim()
-  const digits = search ? normalizePhone(search) : null
-  const normalizedImei = search?.replace(/[\s-]/g, '') || null
+export function buildSalesWhere(shopId: string, searchValue?: string | null): Prisma.SaleWhereInput {
+  const prepared = prepareSearchNeedle(searchValue)
+  const search = prepared.query
   return {
     shopId,
     deletedAt: null,
@@ -28,17 +28,29 @@ function salesWhere(shopId: string, searchValue?: string | null): Prisma.SaleWhe
     ...(search
       ? {
           OR: [
-            { device: { model: { contains: search, mode: 'insensitive' } } },
-            { device: { imei: { contains: search, mode: 'insensitive' } } },
-            ...(normalizedImei
-              ? [{ device: { imeis: { some: { deletedAt: null, normalizedValue: { contains: normalizedImei } } } } }]
-              : []),
-            { customer: { name: { contains: search, mode: 'insensitive' } } },
-            { customer: { phone: { contains: search, mode: 'insensitive' } } },
-            ...(digits
+            { device: { model: { contains: prepared.escapedText, mode: 'insensitive' } } },
+            { device: { imei: { contains: prepared.escapedText, mode: 'insensitive' } } },
+            {
+              device: {
+                imeis: {
+                  some: {
+                    deletedAt: null,
+                    OR: [
+                      { value: { contains: prepared.escapedText, mode: 'insensitive' } },
+                      ...(prepared.identifierDigits
+                        ? [{ normalizedValue: { contains: prepared.identifierDigits } }]
+                        : []),
+                    ],
+                  },
+                },
+              },
+            },
+            { customer: { name: { contains: prepared.escapedText, mode: 'insensitive' } } },
+            { customer: { phone: { contains: prepared.escapedText, mode: 'insensitive' } } },
+            ...(prepared.identifierDigits
               ? [
-                  { customer: { normalizedPhone: { contains: digits } } },
-                  { customer: { additionalPhones: { has: digits } } },
+                  { device: { imei: { contains: prepared.identifierDigits } } },
+                  { customer: { phoneSearchDigits: { contains: prepared.identifierDigits } } },
                 ]
               : []),
           ],
@@ -52,7 +64,7 @@ export async function getSalesList(input: SalesListInput): Promise<SalesListPage
   const take = Math.trunc(Math.min(Math.max(input.take ?? 25, 1), 100))
   const skip = Math.trunc(Math.max(input.skip ?? 0, 0))
   const rows = await timeRequestPhase('database', () => prisma.sale.findMany({
-    where: salesWhere(input.shopId, input.search),
+    where: buildSalesWhere(input.shopId, input.search),
     orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
     skip,
     take: take + 1,
@@ -65,7 +77,7 @@ export async function getSalesList(input: SalesListInput): Promise<SalesListPage
       contractRemainingAmount: true,
       contractExchangeRateAtCreation: true,
       createdAt: true,
-      customer: { select: { id: true, name: true, phone: true } },
+      customer: { select: { id: true, name: true, phone: true, additionalPhones: true } },
       device: {
         select: {
           id: true,
@@ -73,6 +85,11 @@ export async function getSalesList(input: SalesListInput): Promise<SalesListPage
           color: true,
           storage: true,
           imei: true,
+          imeis: {
+            where: { deletedAt: null },
+            orderBy: { slot: 'asc' },
+            select: { slot: true, value: true },
+          },
           purchaseCurrency: true,
           purchaseInputAmount: true,
           purchaseAmountUzsSnapshot: true,
@@ -105,14 +122,36 @@ export async function getSalesList(input: SalesListInput): Promise<SalesListPage
       contractRemainingAmount: Number(sale.contractRemainingAmount),
       ...(input.includeOwnerFinancials ? { contractProfit } : {}),
       createdAt: sale.createdAt.toISOString(),
-      customer: sale.customer,
+      customer: {
+        id: sale.customer.id,
+        name: sale.customer.name,
+        phone: sale.customer.phone,
+      },
       device: {
         id: sale.device.id,
         model: sale.device.model,
         color: sale.device.color,
         storage: sale.device.storage,
         imei: displayImei(sale.device.imei),
+        secondaryImei: sale.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
       },
+      ...(input.search
+        ? {
+            matchEvidence: searchMatchEvidence(input.search, [
+              {
+                field: 'SECONDARY_IMEI',
+                value: sale.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value,
+                mode: 'identifier',
+              },
+              ...sale.customer.additionalPhones.map((value) => ({
+                field: 'ADDITIONAL_PHONE' as const,
+                value,
+                mode: 'identifier' as const,
+                exposeValue: false,
+              })),
+            ]),
+          }
+        : {}),
     }
     })
 

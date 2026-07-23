@@ -15,8 +15,19 @@ import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { replaceListUrlState } from '@/lib/list-url-state'
 import { markQueryIntent } from '@/lib/client-performance'
 import type { SalesListPage } from '@/lib/sales-list-contract'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
 const DEBOUNCE_MS = 275
+type SalesItem = SalesListPage['items'][number] & SearchEvidenceCarrier
+type SalesPayload = Omit<SalesListPage, 'items'> & {
+  items: SalesItem[]
+  matchEvidenceById?: unknown
+}
 
 export default function SalesWorkQueue({
   initialData,
@@ -60,16 +71,19 @@ export default function SalesWorkQueue({
       })
       if (debouncedSearch) params.set('search', debouncedSearch)
       const response = await fetch(`/api/sales?${params.toString()}`, { signal, cache: 'no-store' })
-      const json = await response.json() as { success?: boolean; data?: SalesListPage; error?: string }
+      const json = await response.json() as { success?: boolean; data?: SalesPayload; error?: string }
       if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Sotuvlar yuklanmadi')
       return json.data
     },
-    initialData: !debouncedSearch && page === initialPage ? initialData : undefined,
+    initialData: !debouncedSearch && page === initialPage ? initialData as SalesPayload : undefined,
     placeholderData: keepPreviousData,
   })
-  const data = query.data ?? initialData
+  const data: SalesPayload = query.data ?? (initialData as SalesPayload)
   const error = query.error instanceof Error ? query.error.message : null
   const searchPending = search.trim() !== debouncedSearch || query.isFetching
+  const highlightQuery = search.trim() === debouncedSearch && !query.isPlaceholderData
+    ? debouncedSearch
+    : ''
 
   function changePage(nextPage: number) {
     markQueryIntent('sales')
@@ -114,8 +128,12 @@ export default function SalesWorkQueue({
                 <tr><td colSpan={showProfit ? 8 : 7} className="p-8 text-center text-zinc-500">Yuklanmoqda...</td></tr>
               ) : data.items.length ? data.items.map((sale) => (
                 <tr key={sale.id} className="border-b border-zinc-100 last:border-0">
-                  <td className="px-4 py-3"><div className="font-medium text-zinc-900">{sale.device.model}</div><div className="font-mono text-xs text-zinc-400">{sale.device.imei}</div></td>
-                  <td className="px-4 py-3"><div>{sale.customer.name}</div><div className="text-xs text-zinc-500">{formatUzPhoneDisplay(sale.customer.phone)}</div></td>
+                  <td className="px-4 py-3">
+                    <div className="font-medium text-zinc-900"><HighlightedText value={sale.device.model} query={highlightQuery} mode="text" /></div>
+                    <div className="font-mono text-xs text-zinc-400"><HighlightedText value={sale.device.imei} query={highlightQuery} mode="identifier" /></div>
+                    <SearchEvidence evidence={searchEvidenceFor(sale.id, sale, data as SalesPayload)} query={highlightQuery} />
+                  </td>
+                  <td className="px-4 py-3"><div><HighlightedText value={sale.customer.name} query={highlightQuery} mode="text" /></div><div className="text-xs text-zinc-500"><HighlightedText value={formatUzPhoneDisplay(sale.customer.phone)} query={highlightQuery} mode="identifier" /></div></td>
                   <td className="px-4 py-3 font-medium">{formatUserFacingMoney({ amount: sale.contractSalePrice, amountCurrency: sale.contractCurrency, displayCurrency: sale.contractCurrency })}</td>
                   {showProfit && <td className="px-4 py-3 font-medium text-emerald-600">{sale.contractProfit == null ? '—' : formatUserFacingMoney({ amount: sale.contractProfit, amountCurrency: sale.contractCurrency, displayCurrency: sale.contractCurrency })}</td>}
                   <td className="px-4 py-3 font-medium">{formatUserFacingMoney({ amount: sale.contractRemainingAmount, amountCurrency: sale.contractCurrency, displayCurrency: sale.contractCurrency })}</td>

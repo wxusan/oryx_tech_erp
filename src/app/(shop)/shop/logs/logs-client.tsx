@@ -22,10 +22,16 @@ import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { StretchedLink } from '@/components/ui/stretched-link'
 import { QueryActivity } from '@/components/query-activity'
 import { markQueryIntent } from '@/lib/client-performance'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
 type ActorType = 'SUPER_ADMIN' | 'SHOP_ADMIN'
 
-interface LogEntry {
+interface LogEntry extends SearchEvidenceCarrier {
   id: string
   createdAt: string
   actorId: string
@@ -46,12 +52,13 @@ interface ApiResponse<T> {
   error?: string
 }
 
-interface LogsPayload {
+interface LogsPayload extends SearchEvidenceCarrier {
   logs: LogEntry[]
   total: number
+  matchEvidenceById?: unknown
 }
 
-interface DisplayLog {
+interface DisplayLog extends SearchEvidenceCarrier {
   id: string
   datetime: string
   actor: string
@@ -91,6 +98,9 @@ function displayLog(log: LogEntry, currency: CurrencyContext): DisplayLog {
     note: log.note || formatLogValue(log.newValue, currency),
     targetType: log.targetType,
     href: log.href,
+    matchedOn: log.matchedOn,
+    matchEvidence: log.matchEvidence,
+    searchEvidence: log.searchEvidence,
   }
 }
 
@@ -194,6 +204,9 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
     return map
   }, [currentLogsPayload, initialPayload, queryClient, scope])
   const totalPages = Math.max(1, Math.ceil(totalLogs / PER_PAGE))
+  const highlightQuery = search.trim() === debouncedSearch.trim() && !logsQuery.isPlaceholderData
+    ? debouncedSearch.trim()
+    : ''
 
   return (
     <div className="p-6 space-y-4">
@@ -331,9 +344,12 @@ export default function ShopLogsClient({ initialPayload, initialRequestKey, curr
                       {logCategoryLabel(log.category)}
                     </Badge>
                   </TableCell>
-                  <TableCell className="text-sm text-zinc-700">{log.action}</TableCell>
-                  <TableCell className="text-sm text-zinc-600">{log.target}</TableCell>
-                  <TableCell className="pr-5 text-xs text-zinc-400">{log.note || '—'}</TableCell>
+                  <TableCell className="text-sm text-zinc-700"><HighlightedText value={log.action} query={highlightQuery} mode="text" /></TableCell>
+                  <TableCell className="text-sm text-zinc-600">
+                    <HighlightedText value={log.target} query={highlightQuery} mode="auto" />
+                    <SearchEvidence evidence={searchEvidenceFor(log.id, log, logsQuery.data)} query={highlightQuery} />
+                  </TableCell>
+                  <TableCell className="pr-5 text-xs text-zinc-400"><HighlightedText value={log.note || '—'} query={highlightQuery} mode="auto" /></TableCell>
                 </TableRow>
               ))
             )}

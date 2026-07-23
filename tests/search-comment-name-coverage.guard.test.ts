@@ -22,7 +22,7 @@ describe('server-side search covers note/comment fields', () => {
     const helper = read('src/lib/server/customer-search.ts')
     expect(route).toContain('getCustomerList({')
     expect(query).toContain('customerSearchWhere(input.shopId, input.search, { includeNote: true })')
-    expect(helper).toMatch(/options\.includeNote\s*\?\s*\[\{\s*note:\s*\{\s*contains:\s*search/)
+    expect(helper).toMatch(/options\.includeNote[\s\S]*\[\{\s*note:\s*\{\s*contains:\s*prepared\.escapedText/)
     expect(helper).toContain('shopId,')
     expect(helper).toContain('deletedAt: null')
   })
@@ -65,25 +65,28 @@ describe('server-side search covers customer name (item 14)', () => {
 })
 
 describe('server-side search matches additional customer phones (item 4)', () => {
-  it('POST /api/customers/search matches additionalPhones', () => {
+  it('POST /api/customers/search matches a partial number in the delimiter-safe phone document', () => {
     const route = read('src/app/api/customers/search/route.ts')
     const query = read('src/lib/server/customer-list.ts')
     const helper = read('src/lib/server/customer-search.ts')
     expect(route).toContain('getCustomerList({')
     expect(query).toContain('customerSearchWhere(input.shopId, input.search, { includeNote: true })')
-    expect(helper).toContain('additionalPhones: { has: digits }')
+    expect(helper).toMatch(/phoneSearchDigits:\s*\{\s*contains:/)
+    expect(helper).not.toMatch(/additionalPhones:\s*\{\s*has:/)
     expect(helper).toContain('shopId,')
     expect(helper).toContain('deletedAt: null')
   })
 
-  it('GET /api/devices matches additionalPhones on the sale/nasiya customer', () => {
+  it('GET /api/devices matches a partial sale/nasiya customer phone', () => {
     const source = read('src/lib/server/shop-lists.ts')
-    expect(source).toMatch(/customer:\s*\{\s*additionalPhones:\s*\{\s*has:\s*searchDigits/)
+    expect(source).toMatch(/customer:\s*\{\s*phoneSearchDigits:\s*\{\s*contains:/)
+    expect(source).not.toMatch(/additionalPhones:\s*\{\s*has:/)
   })
 
-  it('GET /api/nasiya matches additionalPhones on the customer', () => {
+  it('GET /api/nasiya matches a partial customer phone', () => {
     // See the note-field test above — logic now lives in shop-lists.ts.
     const source = read('src/lib/server/shop-lists.ts')
-    expect(source).toMatch(/customer:\s*\{\s*additionalPhones:\s*\{\s*has:\s*searchDigits/)
+    expect(source).toMatch(/customer:\s*\{\s*phoneSearchDigits:\s*\{\s*contains:/)
+    expect(source).not.toMatch(/additionalPhones:\s*\{\s*has:/)
   })
 })

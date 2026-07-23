@@ -145,4 +145,76 @@ describe('CustomerCombobox', () => {
     await user.click(screen.getByRole('button', { name: /ma'lumotlarini tahrirlash/ }))
     expect(onEdit).toHaveBeenCalledWith(expect.objectContaining({ id: 'customer-1' }))
   })
+
+  it('highlights only the committed contiguous match and preserves option text', async () => {
+    const user = userEvent.setup()
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      data: {
+        items: [{
+          id: 'customer-2446',
+          name: 'Ali 2446 Valiyev',
+          phone: '+998901111111',
+        }],
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    renderPicker()
+
+    await user.type(screen.getByRole('combobox'), '2446')
+    const option = await screen.findByRole('option', { name: /Ali 2446 Valiyev/ })
+    expect(option.querySelector('mark')?.textContent).toBe('2446')
+    expect(option.textContent).toContain('Ali 2446 Valiyev')
+    expect(option.textContent).toContain('+998 90 111 11 11')
+  })
+
+  it('suppresses placeholder-result highlights as soon as a newer raw query is typed', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        data: {
+          items: [{
+            id: 'customer-old',
+            name: 'Old 2446 result',
+            phone: '+998901111111',
+          }],
+        },
+      }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
+      .mockImplementation(() => new Promise<Response>(() => {}))
+    vi.stubGlobal('fetch', fetchMock)
+    renderPicker()
+
+    const combobox = screen.getByRole('combobox')
+    await user.type(combobox, '2446')
+    const oldOption = await screen.findByRole('option', { name: /Old 2446 result/ })
+    expect(oldOption.querySelectorAll('mark')).toHaveLength(1)
+
+    await user.clear(combobox)
+    await user.type(combobox, 'sanasi')
+    expect(screen.queryByRole('option', { name: /Old 2446 result/ })).toBeNull()
+    expect(document.querySelectorAll('mark')).toHaveLength(0)
+  })
+
+  it('renders exact passport evidence as a neutral marker without echoing private input', async () => {
+    const user = userEvent.setup()
+    const passport = 'AA 1234567'
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      success: true,
+      data: {
+        items: [{
+          id: 'customer-passport',
+          name: 'Passport customer',
+          phone: '+998901111111',
+          matchEvidence: [{ field: 'PASSPORT' }],
+        }],
+      },
+    }), { status: 200, headers: { 'Content-Type': 'application/json' } })))
+    renderPicker()
+
+    await user.type(screen.getByRole('combobox'), passport)
+    const option = await screen.findByRole('option', { name: /Passport customer/ })
+    expect(option.textContent).toContain("Pasport:bo'yicha mos")
+    expect(option.textContent).not.toContain(passport)
+    expect(option.querySelector('mark')).toBeNull()
+  })
 })

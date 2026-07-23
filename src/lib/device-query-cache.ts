@@ -4,30 +4,44 @@ import type { QueryClient } from '@tanstack/react-query'
 import type { DeviceListItem, DeviceListPage } from '@/lib/device-list-contract'
 import { deviceListQueryFromKey, queryKeys, type DeviceListQuery } from '@/lib/query-keys'
 import type { AuthenticatedQueryScope } from '@/lib/query-scope'
+import { matchesSearchValue } from '@/lib/search-needle'
 
-function normalizedSearch(value: string) {
-  return value.trim().toLocaleLowerCase('uz')
+type SearchableCachedDevice = DeviceListItem & {
+  imeis?: Array<{ value: string } | string> | null
+  customerPhone?: string | null
+  additionalPhones?: string[] | null
 }
 
 export function deviceMatchesListQuery(device: DeviceListItem, query: DeviceListQuery) {
   if (query.status !== 'Barchasi' && device.status !== query.status) return false
   if (query.condition && query.condition !== 'ALL' && device.conditionCode !== query.condition) return false
-  const search = normalizedSearch(query.search)
+  const search = query.search.trim()
   if (!search) return true
+  const searchable = device as SearchableCachedDevice
+  const relatedImeis = (searchable.imeis ?? []).map((entry) => (
+    typeof entry === 'string' ? entry : entry.value
+  ))
   return [
-    device.model,
-    device.imei,
-    device.primaryImei,
-    device.secondaryImei,
-    device.color,
-    device.storage,
-    device.storageDisplay,
-    device.conditionLabel,
-    device.note,
-    device.supplierName,
-    device.supplierPhone,
-    device.saleInfo?.customerName,
-  ].some((value) => value?.toLocaleLowerCase('uz').includes(search))
+    [device.model, 'text'],
+    [device.imei, 'identifier'],
+    [device.primaryImei, 'identifier'],
+    [device.secondaryImei, 'identifier'],
+    ...relatedImeis.map((value) => [value, 'identifier']),
+    [device.color, 'text'],
+    [device.storage, 'text'],
+    [device.storageDisplay, 'text'],
+    [device.conditionLabel, 'text'],
+    [device.note, 'text'],
+    [device.supplierName, 'text'],
+    [device.supplierPhone, 'identifier'],
+    [device.saleInfo?.customerName, 'text'],
+    [searchable.customerPhone, 'identifier'],
+    ...(searchable.additionalPhones ?? []).map((value) => [value, 'identifier']),
+  ].some(([value, mode]) => matchesSearchValue(
+    value as string | null | undefined,
+    search,
+    mode as 'text' | 'identifier',
+  ))
 }
 
 function sortDevices(items: DeviceListItem[]) {
@@ -44,6 +58,14 @@ export function patchDeviceUpsert(
     if (!current) continue
     const query = deviceListQueryFromKey(key)
     if (!query) continue
+    // A server search can match privacy-scoped fields that are intentionally
+    // absent from the cached DTO (for example an additional customer phone).
+    // Keep the visible rows stable and let the authoritative bounded query
+    // decide membership instead of locally removing a valid result.
+    if (query.search.trim()) {
+      void queryClient.invalidateQueries({ queryKey: key, exact: true, refetchType: 'active' })
+      continue
+    }
     const index = current.items.findIndex((item) => item.id === device.id)
     const matches = deviceMatchesListQuery(device, query)
     let next = current
