@@ -29,8 +29,6 @@ interface MetricRow {
   refunds_usd: unknown
   writeoffs_uzs: unknown
   writeoffs_usd: unknown
-  waived_profit_uzs: unknown
-  waived_profit_usd: unknown
   accrual_profit_uzs: unknown
   nasiya_interest_uzs: unknown
   legacy_usd_payment_count: number
@@ -172,12 +170,6 @@ export async function getCustomerProfileOverview(input: {
         FROM "NasiyaResolutionEvent" e
         JOIN nasiya_base n ON n."id" = e."nasiyaId" AND n."shopId" = e."shopId"
         WHERE e."shopId" = ${input.shopId}
-      ), settlement_movement AS (
-        SELECT st."contractCurrency" AS currency, st."contractInterestWaivedAmount" AS amount
-        FROM "NasiyaSettlement" st
-        JOIN nasiya_base n ON n."id" = st."nasiyaId" AND n."shopId" = st."shopId"
-        WHERE st."shopId" = ${input.shopId}
-          AND st."contractInterestWaivedAmount" > 0
       ), return_accounting AS (
         SELECT coalesce(sum(r."revenueReversalAmountUzs"), 0) AS revenue_reversal,
                coalesce(sum(r."inventoryCostRecoveryUzs"), 0) AS cost_recovery,
@@ -208,25 +200,36 @@ export async function getCustomerProfileOverview(input: {
         coalesce((SELECT sum(amount) FROM refunds WHERE currency = 'USD'), 0)::numeric AS refunds_usd,
         coalesce((SELECT sum(amount) FROM resolution_movement WHERE currency = 'UZS'), 0)::numeric AS writeoffs_uzs,
         coalesce((SELECT sum(amount) FROM resolution_movement WHERE currency = 'USD'), 0)::numeric AS writeoffs_usd,
-        coalesce((SELECT sum(amount) FROM settlement_movement WHERE currency = 'UZS'), 0)::numeric AS waived_profit_uzs,
-        coalesce((SELECT sum(amount) FROM settlement_movement WHERE currency = 'USD'), 0)::numeric AS waived_profit_usd,
         ((coalesce((SELECT sum("salePrice" - purchase_price) FROM sale_base), 0)
           + coalesce((SELECT sum("totalAmount" - purchase_price) FROM nasiya_base
               WHERE "isImported" = FALSE AND "resolutionState" <> 'ARCHIVED'), 0))
           - (SELECT revenue_reversal FROM return_accounting)
           + (SELECT cost_recovery FROM return_accounting)
           + (SELECT retained_value FROM return_accounting))::numeric AS accrual_profit_uzs,
-        coalesce((SELECT sum("interestAmount" - "interestWaivedAmount") FROM nasiya_base
-            WHERE "isImported" = FALSE AND "resolutionState" <> 'ARCHIVED'), 0)::numeric AS nasiya_interest_uzs,
+        (
+          coalesce((
+            SELECT sum(a."interestAmountUzs")
+            FROM "NasiyaPaymentAllocation" a
+            JOIN "NasiyaPayment" p ON p.id = a."nasiyaPaymentId" AND p."shopId" = a."shopId"
+            JOIN nasiya_base n ON n.id = a."nasiyaId"
+            WHERE a."shopId" = ${input.shopId} AND p."deletedAt" IS NULL
+          ), 0)
+          - coalesce((
+            SELECT sum(pr."recognizedInterestAmountUzs")
+            FROM "ReturnProfitReversal" pr
+            JOIN nasiya_base n ON n.id = pr."nasiyaId"
+            WHERE pr."shopId" = ${input.shopId}
+          ), 0)
+        )::numeric AS nasiya_interest_uzs,
         coalesce((SELECT count(*) FROM payments WHERE legacy_usd), 0)::integer AS legacy_usd_payment_count,
         (SELECT count(DISTINCT device_id) FROM (
           SELECT "deviceId" AS device_id FROM sale_base UNION SELECT "deviceId" FROM nasiya_base
         ) devices)::integer AS device_count,
         (SELECT count(*) FROM sale_base)::integer AS sale_count,
-        (SELECT count(*) FROM nasiya_base WHERE "status" IN ('ACTIVE', 'OVERDUE') AND "resolutionState" = 'ACTIVE')::integer AS active_nasiya_count,
-        (SELECT count(*) FROM nasiya_base WHERE "status" = 'COMPLETED')::integer AS completed_nasiya_count,
-        (SELECT count(*) FROM nasiya_base WHERE "resolutionState" = 'ARCHIVED')::integer AS archived_nasiya_count,
-        (SELECT count(*) FROM nasiya_base WHERE "resolutionState" = 'WRITTEN_OFF')::integer AS written_off_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "status" IN ('ACTIVE', 'OVERDUE') AND "resolutionState" = 'ACTIVE')::integer AS active_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "status" = 'COMPLETED')::integer AS completed_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "resolutionState" = 'ARCHIVED')::integer AS archived_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "resolutionState" = 'WRITTEN_OFF')::integer AS written_off_nasiya_count,
         (SELECT count(*) FROM refunds)::integer AS return_count
     `),
     getCustomerTrustFactorsForList({ shopId: input.shopId, customerIds: [input.customerId], now: input.now }),
@@ -234,7 +237,7 @@ export async function getCustomerProfileOverview(input: {
 
   const row = metricRows[0]
   const fallbackFactors: CustomerTrustFactors = {
-    totalNasiyaCount: 0, completedNasiyaCount: 0, settledWithWaiverCount: 0, activeNasiyaCount: 0, cancelledNasiyaCount: 0,
+    totalNasiyaCount: 0, completedNasiyaCount: 0, activeNasiyaCount: 0, cancelledNasiyaCount: 0,
     paidInstallmentCount: 0, onTimeRatio: null, lateInstallmentCount: 0, maxDaysLate: 0,
     currentOverdueScheduleCount: 0, hasCurrentOverdue: false,
   }
@@ -250,7 +253,6 @@ export async function getCustomerProfileOverview(input: {
     overdue: money(row?.overdue_uzs, row?.overdue_usd),
     refunds: money(row?.refunds_uzs, row?.refunds_usd),
     writeOffs: money(row?.writeoffs_uzs, row?.writeoffs_usd),
-    waivedNasiyaProfit: money(row?.waived_profit_uzs, row?.waived_profit_usd),
     accountingAccrualGrossProfitUzs: Number(row?.accrual_profit_uzs ?? 0),
     nasiyaInterestUzs: Number(row?.nasiya_interest_uzs ?? 0),
     legacyUsdPaymentCount: Number(row?.legacy_usd_payment_count ?? 0),
@@ -296,6 +298,8 @@ interface HistoryRow {
   currency: 'UZS' | 'USD' | null
   amount: unknown
   status: string | null
+  retained_amount?: unknown
+  cancelled_debt?: unknown
 }
 
 function historySql(section: CustomerProfileSection, input: { shopId: string; customerId: string }) {
@@ -309,12 +313,14 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
         FROM (
           SELECT 'sale'::text AS source, s."id" AS deal_id, s."createdAt" AS occurred_at,
                  d."id" AS device_id, d."model" AS model, d."storage", d."color", d."imei",
-                 s."contractCurrency" AS currency, s."contractSalePrice" AS amount, d."status"::text AS status
+                 s."contractCurrency" AS currency, s."contractSalePrice" AS amount,
+                 CASE WHEN s."returnedAt" IS NOT NULL THEN 'RETURNED' ELSE d."status"::text END AS status
           FROM "Sale" s JOIN "Device" d ON d."id" = s."deviceId" AND d."shopId" = s."shopId"
           WHERE s."shopId" = ${input.shopId} AND s."customerId" = ${input.customerId} AND s."deletedAt" IS NULL
           UNION ALL
           SELECT 'nasiya', n."id", n."createdAt", d."id", d."model", d."storage", d."color", d."imei",
-                 n."contractCurrency", n."contractTotalAmount", d."status"::text
+                 n."contractCurrency", n."contractTotalAmount",
+                 CASE WHEN n."returnedAt" IS NOT NULL THEN 'RETURNED' ELSE d."status"::text END
           FROM "Nasiya" n JOIN "Device" d ON d."id" = n."deviceId" AND d."shopId" = n."shopId"
           WHERE n."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId} AND n."deletedAt" IS NULL
         ) rows`
@@ -333,7 +339,8 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
         SELECT n."id", n."createdAt" AS occurred_at, 'nasiya'::text AS kind, n."id" AS reference_id,
                d."model" AS title, concat(n."months", ' oy') AS subtitle, n."contractCurrency" AS currency,
                (n."contractDownPayment" + n."contractFinalAmount") AS amount,
-               concat(n."status"::text, ':', n."resolutionState"::text) AS status
+               CASE WHEN n."returnedAt" IS NOT NULL THEN 'RETURNED'
+                    ELSE concat(n."status"::text, ':', n."resolutionState"::text) END AS status
         FROM "Nasiya" n JOIN "Device" d ON d."id" = n."deviceId" AND d."shopId" = n."shopId"
         WHERE n."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId} AND n."deletedAt" IS NULL`
     case 'payments':
@@ -370,12 +377,16 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
         WHERE p."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId} AND p."deletedAt" IS NULL`
     case 'returns':
       return Prisma.sql`
-        SELECT r."id", r."createdAt" AS occurred_at, 'return'::text AS kind, d."id" AS reference_id,
+        SELECT r."id", r."createdAt" AS occurred_at,
+               CASE WHEN r."nasiyaId" IS NOT NULL THEN 'nasiya-return'::text ELSE 'return'::text END AS kind,
+               coalesce(r."nasiyaId", d."id") AS reference_id,
                d."model" AS title, r."note" AS subtitle,
                CASE WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0 THEN 'USD'::"CurrencyCode" ELSE 'UZS'::"CurrencyCode" END AS currency,
                CASE WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
                     WHEN r."contractRefundAmount" > 0 THEN r."contractRefundAmount" ELSE r."refundAmount" END AS amount,
-               'RETURNED'::text AS status
+               'RETURNED'::text AS status,
+               r."contractRetainedAmount" AS retained_amount,
+               r."contractCancelledDebt" AS cancelled_debt
         FROM "DeviceReturn" r
         JOIN "Device" d ON d."id" = r."deviceId" AND d."shopId" = r."shopId"
         LEFT JOIN "Sale" s ON s."id" = r."saleId" AND s."shopId" = r."shopId"
@@ -450,6 +461,8 @@ export async function getCustomerProfileHistory(input: {
       currency: row.currency,
       amount: row.amount == null ? null : Number(row.amount),
       status: row.status,
+      retainedAmount: row.retained_amount == null ? null : Number(row.retained_amount),
+      cancelledDebt: row.cancelled_debt == null ? null : Number(row.cancelled_debt),
     })),
     // Compatibility lower bound for older consumers. It is intentionally not
     // an exact count; take+1 is the only pagination work on the critical path.

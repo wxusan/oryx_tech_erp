@@ -38,9 +38,9 @@ function staffWithOnly(permission: ActiveShopPermissionCode): ShopPrincipalAcces
 }
 
 describe('Staff Permissions V2 behavioral authorization kernel', () => {
-  it('has exactly 59 unique active capabilities with complete operational metadata', () => {
-    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(59)
-    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(59)
+  it('has exactly 60 unique active capabilities with complete operational metadata', () => {
+    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(60)
+    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(60)
 
     for (const code of ACTIVE_SHOP_PERMISSION_CODES) {
       const definition = permissionDefinition(code)
@@ -154,6 +154,11 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
     }
   })
 
+  it('never turns the retired generic return grant into Nasiya return/refund access', () => {
+    expect(LEGACY_PERMISSION_EXPANSIONS.RETURN_MANAGE).not.toContain('NASIYA_RETURN_REFUND')
+    expect(expandShopPermissionCodes(['RETURN_MANAGE'])).not.toContain('NASIYA_RETURN_REFUND')
+  })
+
   it('materializes legacy full access conservatively and package-bounded', () => {
     const expected = SHOP_PERMISSION_CATALOG
       .filter((item) => !item.retired && item.legacyOperational)
@@ -161,6 +166,7 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
     expect(legacyStaffPermissionCodes(allFeatures)).toEqual(expected)
     expect(expected).toContain('LOG_VIEW')
     expect(expected).not.toContain('SALE_RETURN_REFUND')
+    expect(expected).not.toContain('NASIYA_RETURN_REFUND')
     expect(expected).not.toContain('DASHBOARD_FINANCIAL_VIEW')
     expect(expected).not.toContain('REPORT_VIEW')
     expect(expected).not.toContain('STAFF_PERMISSION_MANAGE')

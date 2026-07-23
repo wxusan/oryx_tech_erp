@@ -24,6 +24,7 @@ export const HIGH_RISK_AUDIT_REASON_SURFACE_IDS = [
   'device.restock',
   'nasiya.resolve',
   'nasiya.settle',
+  'nasiya.return',
 ] as const
 
 /** Every editable ordinary-comment UI surface.  Add an entry with any new

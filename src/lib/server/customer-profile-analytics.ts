@@ -60,7 +60,6 @@ function activityMonths(value: unknown): CustomerProfileActivityMonth[] {
       contracts: nativeMoney(row.contracts),
       payments: nativeMoney(row.payments),
       refunds: nativeMoney(row.refunds),
-      waivedProfit: nativeMoney(row.waivedProfit),
       writeOffs: nativeMoney(row.writeOffs),
     }]
   })
@@ -191,13 +190,6 @@ export async function getCustomerProfileAnalytics(input: {
       FROM "NasiyaResolutionEvent" e
       JOIN nasiya_base n ON n."id" = e."nasiyaId"
       WHERE e."shopId" = ${input.shopId}
-    ), settlement_movement AS (
-      SELECT st."settledAt" AS occurred_at, st."contractCurrency" AS currency,
-             st."contractInterestWaivedAmount" AS amount
-      FROM "NasiyaSettlement" st
-      JOIN nasiya_base n ON n."id" = st."nasiyaId"
-      WHERE st."shopId" = ${input.shopId}
-        AND st."contractInterestWaivedAmount" > 0
     ), activity_events AS (
       SELECT s."createdAt" AS occurred_at, 'contracts'::text AS category, s."contractCurrency" AS currency,
              s."contractSalePrice" AS amount
@@ -223,10 +215,6 @@ export async function getCustomerProfileAnalytics(input: {
 
       UNION ALL
 
-      SELECT st.occurred_at, 'waivedProfit', st.currency, st.amount FROM settlement_movement st
-
-      UNION ALL
-
       SELECT e.occurred_at, 'writeOffs', e.currency, e.amount FROM resolution_movement e
     ), months AS (
       SELECT generate_series(
@@ -242,8 +230,6 @@ export async function getCustomerProfileAnalytics(input: {
         coalesce(sum(e.amount) FILTER (WHERE e.category = 'payments' AND e.currency = 'USD'), 0)::numeric AS payments_usd,
         coalesce(sum(e.amount) FILTER (WHERE e.category = 'refunds' AND e.currency = 'UZS'), 0)::numeric AS refunds_uzs,
         coalesce(sum(e.amount) FILTER (WHERE e.category = 'refunds' AND e.currency = 'USD'), 0)::numeric AS refunds_usd,
-        coalesce(sum(e.amount) FILTER (WHERE e.category = 'waivedProfit' AND e.currency = 'UZS'), 0)::numeric AS waived_profit_uzs,
-        coalesce(sum(e.amount) FILTER (WHERE e.category = 'waivedProfit' AND e.currency = 'USD'), 0)::numeric AS waived_profit_usd,
         coalesce(sum(e.amount) FILTER (WHERE e.category = 'writeOffs' AND e.currency = 'UZS'), 0)::numeric AS writeoffs_uzs,
         coalesce(sum(e.amount) FILTER (WHERE e.category = 'writeOffs' AND e.currency = 'USD'), 0)::numeric AS writeoffs_usd
       FROM months m
@@ -257,7 +243,6 @@ export async function getCustomerProfileAnalytics(input: {
         'contracts', jsonb_build_object('UZS', contracts_uzs, 'USD', contracts_usd),
         'payments', jsonb_build_object('UZS', payments_uzs, 'USD', payments_usd),
         'refunds', jsonb_build_object('UZS', refunds_uzs, 'USD', refunds_usd),
-        'waivedProfit', jsonb_build_object('UZS', waived_profit_uzs, 'USD', waived_profit_usd),
         'writeOffs', jsonb_build_object('UZS', writeoffs_uzs, 'USD', writeoffs_usd)
       ) ORDER BY month_start) AS activity
       FROM month_values

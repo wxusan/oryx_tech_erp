@@ -440,6 +440,16 @@ export const FORM_SURFACE_CONTRACT = [
     ],
   },
   {
+    id: 'nasiya.return', source: 'src/components/shop/nasiya-return-modal.tsx', endpoint: 'POST /api/nasiya/[id]/return', schemaSource: 'src/app/api/nasiya/[id]/return/route.ts#returnNasiyaSchema', fields: [
+      always('nasiya.return', 'note'),
+      always('nasiya.return', 'refundAmount', 'MONEY'),
+      conditional('nasiya.return', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER'),
+      always('nasiya.return', 'inputCurrency', 'STATUS_FILTER'),
+      always('nasiya.return', 'expectedReceiptsMinorUnits', 'MONEY'),
+      always('nasiya.return', 'expectedRemainingMinorUnits', 'MONEY'),
+    ],
+  },
+  {
     id: 'nasiya.defer', source: 'src/components/shop/nasiya-defer-modal.tsx', endpoint: 'POST /api/nasiya/[id]/defer', schemaSource: 'src/lib/validations.ts#deferNasiyaScheduleSchema', fields: [always('nasiya.defer', 'nasiyaScheduleId', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Selected from the tenant-bound contract schedule.' }), always('nasiya.defer', 'newDueDate', 'DATE_FILTER'), optional('nasiya.defer', 'reason')],
   },
   {

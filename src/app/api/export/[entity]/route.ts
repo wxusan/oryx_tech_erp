@@ -163,10 +163,6 @@ function reportExportData(report: ShopRangeReport): ExportData {
     month.writeOffs.uzs,
     month.writeOffs.usd,
     month.writeOffs.frozenUzs,
-    month.waivedNasiyaProfit.uzs,
-    month.waivedNasiyaProfit.usd,
-    month.waivedNasiyaProfit.frozenUzs,
-    month.waivedNasiyaProfit.count,
     month.returnCount,
     month.writeOffCount,
     month.reopenCount,
@@ -194,10 +190,6 @@ function reportExportData(report: ShopRangeReport): ExportData {
       'legacyWriteOffAuditUzs',
       'legacyWriteOffAuditUsd',
       'legacyWriteOffAuditFrozenUzs',
-      'waivedNasiyaProfitUzs',
-      'waivedNasiyaProfitUsd',
-      'waivedNasiyaProfitFrozenUzs',
-      'waivedNasiyaProfitCount',
       'returnCount',
       'writeOffCount',
       'reopenCount',
@@ -594,8 +586,9 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         n.settlement?.reason ?? '',
         n.settlement?.actorId ?? '',
         n.months,
-        nasiyaStatusLabel(
-          deriveContractNasiyaStatus(
+        n.returnedAt
+          ? nasiyaStatusLabel('RETURNED')
+          : nasiyaStatusLabel(deriveContractNasiyaStatus(
             {
               status: n.status,
               contractCurrency: n.contractCurrency,
@@ -613,8 +606,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
               })),
             },
             exportNow,
-          ).displayStatus,
-        ),
+          ).displayStatus),
         nasiyaResolutionLabel(n.resolutionState),
         n.resolutionUpdatedAt,
         resolution ? nasiyaResolutionEventLabel(resolution.eventType) : '',
@@ -752,6 +744,9 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         skip,
         take,
         select: {
+          id: true,
+          saleId: true,
+          nasiyaId: true,
           refundAmount: true,
           refundInputAmount: true,
           refundInputCurrency: true,
@@ -778,6 +773,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
             },
           },
           note: true,
+          createdBy: true,
           createdAt: true,
           device: { select: { model: true, imei: true } },
           sale: { select: { customer: { select: { name: true } } } },
@@ -787,6 +783,9 @@ async function exportData(entity: string, shopId: string, role: string): Promise
     )
     return {
       headers: [
+        'returnId',
+        'saleId',
+        'nasiyaId',
         'device',
         'imei',
         'customer',
@@ -808,9 +807,13 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'retainedValueAmountUzs',
         'refundAllocations',
         'note',
+        'operatorId',
         'createdAt',
       ],
       rows: returns.map((item) => [
+        item.id,
+        item.saleId ?? '',
+        item.nasiyaId ?? '',
         item.device.model,
         displayImei(item.device.imei),
         item.sale?.customer.name ?? item.nasiya?.customer.name ?? '',
@@ -840,6 +843,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
           refundMethod: paymentMethodLabel(allocation.refundMethod),
         }))),
         item.note,
+        item.createdBy,
         item.createdAt,
       ]),
     }

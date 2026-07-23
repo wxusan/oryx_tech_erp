@@ -31,10 +31,6 @@ interface MonthlyAccountingRow {
   expected_profit_usd: unknown
   expected_interest_uzs: unknown
   expected_interest_usd: unknown
-  waived_profit_uzs: unknown
-  waived_profit_usd: unknown
-  waived_profit_frozen_uzs: unknown
-  waived_profit_count: number
   reconstruction_gap_count: number
 }
 
@@ -48,10 +44,6 @@ export interface ShopMonthlyAccountingAggregate {
   expectedProfitUsd: number
   expectedInterestUzs: number
   expectedInterestUsd: number
-  waivedNasiyaProfitUzs: number
-  waivedNasiyaProfitUsd: number
-  waivedNasiyaProfitFrozenUzs: number
-  waivedNasiyaProfitCount: number
   reconstructionGapCount: number
 }
 
@@ -76,10 +68,6 @@ export async function getShopMonthlyAccountingAggregate(input: {
   const returnActor = input.adminId
     ? Prisma.sql`AND r."createdBy" = ${input.adminId}`
     : Prisma.empty
-  const settlementActor = input.adminId
-    ? Prisma.sql`AND st."actorId" = ${input.adminId}`
-    : Prisma.empty
-
   const [row] = await prisma.$queryRaw<MonthlyAccountingRow[]>(Prisma.sql`
     WITH sale_paid AS (
       SELECT coalesce(sum(p."marginAmountUzs"), 0)::numeric AS margin_uzs
@@ -114,18 +102,6 @@ export async function getShopMonthlyAccountingAggregate(input: {
         AND r."createdAt" >= ${input.monthStart}
         AND r."createdAt" < ${input.monthEnd}
         ${returnActor}
-    ), settlement_waiver AS (
-      SELECT
-        coalesce(sum(st."contractInterestWaivedAmount") FILTER (WHERE st."contractCurrency" = 'UZS'), 0)::numeric AS waived_profit_uzs,
-        coalesce(sum(st."contractInterestWaivedAmount") FILTER (WHERE st."contractCurrency" = 'USD'), 0)::numeric AS waived_profit_usd,
-        coalesce(sum(st."interestWaivedAmountUzs"), 0)::numeric AS waived_profit_frozen_uzs,
-        count(*)::integer AS waived_profit_count
-      FROM "NasiyaSettlement" st
-      WHERE st."shopId" = ${input.shopId}
-        AND st."contractInterestWaivedAmount" > 0
-        AND st."settledAt" >= ${input.monthStart}
-        AND st."settledAt" < ${input.monthEnd}
-        ${settlementActor}
     ), expected_schedule AS (
       SELECT
         n."contractCurrency" AS currency,
@@ -193,17 +169,12 @@ export async function getShopMonthlyAccountingAggregate(input: {
       coalesce(sum(expected.expected_profit) FILTER (WHERE expected.currency = 'USD'), 0)::numeric AS expected_profit_usd,
       coalesce(sum(expected.expected_interest) FILTER (WHERE expected.currency = 'UZS'), 0)::numeric AS expected_interest_uzs,
       coalesce(sum(expected.expected_interest) FILTER (WHERE expected.currency = 'USD'), 0)::numeric AS expected_interest_usd,
-      settlement_waiver.waived_profit_uzs,
-      settlement_waiver.waived_profit_usd,
-      settlement_waiver.waived_profit_frozen_uzs,
-      settlement_waiver.waived_profit_count,
       gaps.gap_count AS reconstruction_gap_count
-    FROM sale_paid CROSS JOIN nasiya_paid CROSS JOIN return_adjustment CROSS JOIN settlement_waiver CROSS JOIN gaps
+    FROM sale_paid CROSS JOIN nasiya_paid CROSS JOIN return_adjustment CROSS JOIN gaps
     LEFT JOIN expected ON true
     GROUP BY sale_paid.margin_uzs, nasiya_paid.margin_uzs, nasiya_paid.interest_uzs,
       return_adjustment.profit_uzs, return_adjustment.interest_reversal_uzs,
-      settlement_waiver.waived_profit_uzs, settlement_waiver.waived_profit_usd,
-      settlement_waiver.waived_profit_frozen_uzs, settlement_waiver.waived_profit_count, gaps.gap_count
+      gaps.gap_count
   `)
 
   return {
@@ -216,10 +187,6 @@ export async function getShopMonthlyAccountingAggregate(input: {
     expectedProfitUsd: Number(row?.expected_profit_usd ?? 0),
     expectedInterestUzs: Number(row?.expected_interest_uzs ?? 0),
     expectedInterestUsd: Number(row?.expected_interest_usd ?? 0),
-    waivedNasiyaProfitUzs: Number(row?.waived_profit_uzs ?? 0),
-    waivedNasiyaProfitUsd: Number(row?.waived_profit_usd ?? 0),
-    waivedNasiyaProfitFrozenUzs: Number(row?.waived_profit_frozen_uzs ?? 0),
-    waivedNasiyaProfitCount: Number(row?.waived_profit_count ?? 0),
     reconstructionGapCount: Number(row?.reconstruction_gap_count ?? 0),
   }
 }

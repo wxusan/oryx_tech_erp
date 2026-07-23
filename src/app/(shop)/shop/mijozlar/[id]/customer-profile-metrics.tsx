@@ -68,7 +68,6 @@ export function CustomerProfileMetrics({
     { label: 'Bu oy to‘lashi kutilmoqda', value: nativeMoneyLabel(overview.metrics.dueThisMonth), hint: 'Shu oy muddati kelgan ochiq qoldiq; oy boshidan kechikkanlari ham kiradi', icon: CalendarClock },
     ...(overview.metrics.refunds ? [{ label: 'Qaytarilgan pul', value: nativeMoneyLabel(overview.metrics.refunds), hint: 'Qaytarish dalolatnomalari', icon: RotateCcw }] : []),
     ...(overview.metrics.writeOffs ? [{ label: 'Hisobdan chiqarilgan', value: nativeMoneyLabel(overview.metrics.writeOffs), hint: 'Qayta ochishlar ayirilgan', icon: ReceiptText }] : []),
-    ...(overview.metrics.waivedNasiyaProfit ? [{ label: 'Kechilgan nasiya foydasi', value: nativeMoneyLabel(overview.metrics.waivedNasiyaProfit), hint: 'Muddatidan oldin yopish kelishuvlari', icon: HandCoins }] : []),
     ...(overview.metrics.accountingAccrualGrossProfitUzs != null ? [{
       label: 'Yalpi foyda',
       value: formatMoneyByCurrency(overview.metrics.accountingAccrualGrossProfitUzs, currency.currency, currency.usdUzsRate),
@@ -78,7 +77,7 @@ export function CustomerProfileMetrics({
     ...(overview.metrics.nasiyaInterestUzs != null ? [{
       label: 'Nasiya foizi',
       value: formatMoneyByCurrency(overview.metrics.nasiyaInterestUzs, currency.currency, currency.usdUzsRate),
-      hint: 'Faol hisob siyosati bo‘yicha',
+      hint: 'Tasdiqlangan to‘lovlardan olingan; qaytarishlar ayirilgan',
       icon: Banknote,
     }] : []),
   ] : []

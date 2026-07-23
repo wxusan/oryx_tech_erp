@@ -44,7 +44,7 @@ describe('getShopStats: month/admin filter is additive, existing callers unaffec
   })
 
   it('the cache key includes month + admin so filtered views never collide with the default cache entry', () => {
-    expect(source).toContain("['shop-stats:v5-nasiya-settlement', shopId, role, monthKey ?? 'current', adminId ?? 'all']")
+    expect(source).toContain("['shop-stats:v6-realized-profit-only', shopId, role, monthKey ?? 'current', adminId ?? 'all']")
   })
 })
 

@@ -334,6 +334,38 @@ export function nasiyaCreatedMessage(data: {
   )
 }
 
+export function nasiyaReturnedMessage(data: {
+  shopName: string
+  customerName: string
+  customerPhone?: string | null
+  device: DeviceSpecs
+  receipts: number
+  refund: number
+  retained: number
+  cancelledDebt: number
+  contractCurrency: CurrencyCode
+  refundMethod?: string | null
+  reason: string
+  adminName?: string | null
+  currency?: CurrencyContext | null
+}): string {
+  const money = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency)
+  return compose(
+    '<b>↩️ Nasiya qaytarildi</b>',
+    optionalLine('Do‘kon', data.shopName, '🏪'),
+    block(optionalLine('Mijoz', data.customerName, '👤'), optionalLine('Tel', data.customerPhone, '📞')),
+    formatDeviceSpecs(data.device),
+    block(
+      `💰 Jami olingan: ${money(data.receipts)}`,
+      `💵 Mijozga qaytarildi: ${money(data.refund)}`,
+      `🏪 Do‘konda qoldi: ${money(data.retained)}`,
+      `🧾 Bekor qilingan qarz: ${money(data.cancelledDebt)}`,
+      data.refund > 0 ? optionalLine('Qaytarish usuli', formatPaymentMethod(data.refundMethod), '💳') : null,
+    ),
+    block(optionalLine('Sabab', cleanNote(data.reason), '📝'), optionalLine('Admin', data.adminName, '👨‍💼')),
+  )
+}
+
 export function nasiyaPaymentMessage(data: {
   shopName: string
   customerName: string

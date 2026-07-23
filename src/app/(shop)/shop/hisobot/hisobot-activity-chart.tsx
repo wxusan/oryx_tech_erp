@@ -12,7 +12,6 @@ function hasCurrencyActivity(months: ShopMonthlyReportPoint[], currency: Monthly
     month.contracts[key] !== 0
     || month.cashCollected[key] !== 0
     || month.refunds[key] !== 0
-    || month.waivedNasiyaProfit[key] !== 0
     || month.writeOffs[key] !== 0
   ))
 }
@@ -40,7 +39,6 @@ export default function HisobotActivityChart({
     contracts: { UZS: month.contracts.uzs, USD: month.contracts.usd },
     payments: { UZS: month.cashCollected.uzs, USD: month.cashCollected.usd },
     refunds: { UZS: month.refunds.uzs, USD: month.refunds.usd },
-    waivedProfit: { UZS: month.waivedNasiyaProfit.uzs, USD: month.waivedNasiyaProfit.usd },
     writeOffs: { UZS: month.writeOffs.uzs, USD: month.writeOffs.usd },
   }))
   const toolbar = availableCurrencies.length > 1 ? (

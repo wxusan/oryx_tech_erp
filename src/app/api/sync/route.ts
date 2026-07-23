@@ -53,12 +53,13 @@ function allowedDomainsForGuard(guarded: Awaited<ReturnType<typeof requireApiSes
     'NASIYA_CREATE',
     'NASIYA_EDIT',
     'NASIYA_PAYMENT_RECEIVE',
+    'NASIYA_RETURN_REFUND',
     'NASIYA_DEFER',
     'NASIYA_REMINDER_MANAGE',
     'NASIYA_ARCHIVE',
     'NASIYA_REOPEN',
   ], ['nasiyas'], 'NASIYA')
-  allow(['SALE_RETURN_REFUND', 'DEVICE_RESTOCK'], ['returns'])
+  allow(['SALE_RETURN_REFUND', 'NASIYA_RETURN_REFUND', 'DEVICE_RESTOCK'], ['returns'])
   allow([
     'CUSTOMER_VIEW',
     'CUSTOMER_CREATE',

@@ -130,6 +130,8 @@ export function invalidateShopReturnMutation(shopId: string) {
       shopCacheTag.stats,
       shopCacheTag.reports,
       shopCacheTag.logs,
+      shopCacheTag.customers,
+      shopCacheTag.debts,
     ],
   )
 }

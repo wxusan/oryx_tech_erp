@@ -21,6 +21,7 @@ export default async function NasiyalarPage({ searchParams }: NasiyalarPageProps
   const guarded = await requireCurrentShopAnyPermission([
     'NASIYA_VIEW',
     'NASIYA_EDIT',
+    'NASIYA_RETURN_REFUND',
     'NASIYA_REMINDER_MANAGE',
     'NASIYA_ARCHIVE',
     'NASIYA_REOPEN',

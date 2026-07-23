@@ -9,11 +9,12 @@ function read(rel: string): string {
 describe('GET /api/nasiya/[id] — schedule-authoritative display status', () => {
   const route = read('src/app/api/nasiya/[id]/route.ts')
 
-  it('derives displayStatus/isOverdue/overdueAmount from the shared reconciled schedule projection', () => {
+  it('derives financial status from the reconciled schedule projection and applies the immutable return state', () => {
     expect(route).toContain("import { reconcileNasiyaLedger } from '@/lib/nasiya-ledger'")
     expect(route).toContain('const ledger = reconcileNasiyaLedger({')
     expect(route).toContain('contractCurrency: nasiya.contractCurrency')
-    expect(route).toContain('displayStatus: ledger.status,')
+    expect(route).toContain('const returned = nasiya.returnedAt != null')
+    expect(route).toContain("displayStatus: returned ? 'RETURNED' : ledger.status,")
     expect(route).toContain('isOverdue: ledger.isOverdue,')
     expect(route).toContain('overdueAmount: ledger.overdue,')
     expect(route).toContain('ledger,')

@@ -26,7 +26,7 @@ function historyAmount(item: CustomerProfileHistoryItem) {
 
 function historyHref(item: CustomerProfileHistoryItem) {
   if (!item.referenceId) return null
-  if (item.kind === 'nasiya' || item.kind === 'nasiya-payment' || item.kind === 'resolution' || item.kind === 'settlement') {
+  if (item.kind === 'nasiya' || item.kind === 'nasiya-payment' || item.kind === 'nasiya-return' || item.kind === 'resolution' || item.kind === 'settlement') {
     return `/shop/nasiyalar/${item.referenceId}`
   }
   if (item.kind === 'device' || item.kind === 'sale' || item.kind === 'sale-payment' || item.kind === 'return') {
@@ -108,7 +108,19 @@ export function CustomerProfileHistorySection({
                     </p>
                   </div>
                   <div className="shrink-0 text-left sm:text-right">
-                    <p className="text-sm font-semibold text-zinc-800">{historyAmount(item)}</p>
+                    <p className="text-sm font-semibold text-zinc-800">
+                      {item.kind.endsWith('return') ? `Qaytarilgan: ${historyAmount(item)}` : historyAmount(item)}
+                    </p>
+                    {item.kind.endsWith('return') && item.retainedAmount != null && item.currency && (
+                      <p className="mt-0.5 text-[11px] text-zinc-500">
+                        Do‘konda qolgan: {formatMoneyByCurrency(item.retainedAmount, item.currency, null)}
+                      </p>
+                    )}
+                    {item.kind === 'nasiya-return' && item.cancelledDebt != null && item.currency && (
+                      <p className="mt-0.5 text-[11px] text-zinc-500">
+                        Bekor qilingan qarz: {formatMoneyByCurrency(item.cancelledDebt, item.currency, null)}
+                      </p>
+                    )}
                     {item.status && <p className="mt-0.5 text-[11px] text-zinc-500">{historyStatusLabel(item.status)}</p>}
                   </div>
                 </>

@@ -65,6 +65,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
           select: {
             status: true,
             resolutionState: true,
+            returnedAt: true,
             contractCurrency: true,
             schedules: {
               select: {
@@ -85,6 +86,7 @@ export async function GET(_req: NextRequest, ctx: RouteContext) {
     const nasiyaInputs: CustomerNasiyaInput[] = customer.nasiya.map((n) => ({
       status: n.status,
       resolutionState: n.resolutionState,
+      returnedAt: n.returnedAt,
       contractCurrency: n.contractCurrency,
       schedules: n.schedules.map((s) => ({
         status: s.status,

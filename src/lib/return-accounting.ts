@@ -32,6 +32,8 @@ interface ReceiptBucket {
   contractAmount: number
 }
 
+const RETURN_PAYMENT_METHODS: readonly PaymentBreakdownMethod[] = ['CASH', 'CARD', 'TRANSFER', 'OTHER']
+
 function isPaymentBreakdown(value: unknown): value is PaymentBreakdownPart[] {
   return Array.isArray(value) && value.length > 0 && value.every((part) => {
     if (!part || typeof part !== 'object') return false
@@ -88,6 +90,33 @@ function receiptBuckets(
 
   if (!source.paymentMethod) return []
   return [{ source, method: source.paymentMethod, contractAmount: applied }]
+}
+
+/**
+ * Contract-native money that can be refunded through each original receipt
+ * method. The return ledger requires a refund to use the same method as the
+ * receipts it reverses, so the UI and mutation share this exact projection.
+ */
+export function returnRefundCapacityByMethod({
+  sources,
+  contractCurrency,
+  frozenUsdUzsRate,
+}: {
+  sources: ReturnReceiptSource[]
+  contractCurrency: CurrencyCode
+  frozenUsdUzsRate: number | null
+}): Record<PaymentBreakdownMethod, number> {
+  const capacities = Object.fromEntries(
+    RETURN_PAYMENT_METHODS.map((method) => [method, 0]),
+  ) as Record<PaymentBreakdownMethod, number>
+
+  for (const bucket of sources.flatMap((source) => receiptBuckets(source, contractCurrency, frozenUsdUzsRate))) {
+    capacities[bucket.method] = roundContractMoney(
+      capacities[bucket.method] + bucket.contractAmount,
+      contractCurrency,
+    )
+  }
+  return capacities
 }
 
 /**

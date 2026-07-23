@@ -30,7 +30,6 @@ const analytics: CustomerProfileAnalytics = {
     contracts: { UZS: 1_000_000, USD: 100 },
     payments: { UZS: 500_000, USD: 50 },
     refunds: { UZS: 25_000, USD: 2 },
-    waivedProfit: { UZS: 10_000, USD: 1 },
     writeOffs: { UZS: 0, USD: 0 },
   }],
   discipline: {

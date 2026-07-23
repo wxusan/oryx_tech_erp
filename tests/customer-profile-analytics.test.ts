@@ -22,7 +22,6 @@ function ownerAnalytics(): CustomerProfileAnalytics {
       contracts: { UZS: 100, USD: 10 },
       payments: { UZS: 80, USD: 8 },
       refunds: { UZS: 5, USD: 0 },
-      waivedProfit: { UZS: 2, USD: 0 },
       writeOffs: { UZS: 1, USD: 0 },
     }],
     discipline: {

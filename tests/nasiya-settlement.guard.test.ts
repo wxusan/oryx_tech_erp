@@ -115,7 +115,7 @@ describe('Nasiya early-settlement release contract', () => {
     expect(route).toContain("'NASIYA_SETTLED_PROFIT_WAIVED'")
   })
 
-  it('propagates waived profit through exports, reports, trust, customer history, and cache invalidation', () => {
+  it('keeps waiver evidence in audit exports but excludes it from every analytical statistic', () => {
     const exportRoute = read('src/app/api/export/[entity]/route.ts')
     const rangeReport = read('src/lib/server/shop-report-range.ts')
     const stats = read('src/lib/server/shop-stats-queries.ts')
@@ -123,14 +123,25 @@ describe('Nasiya early-settlement release contract', () => {
     const trust = read('src/lib/nasiya-customer-trust.ts')
     const score = read('src/lib/nasiya-payment-score.ts')
     const cache = read('src/lib/server/cache-tags.ts')
+    const dashboard = read('src/app/(shop)/shop/dashboard/dashboard-client.tsx')
+    const report = read('src/app/(shop)/shop/hisobot/hisobot-client.tsx')
+    const rangePanel = read('src/app/(shop)/shop/hisobot/shop-range-report-panel.tsx')
+    const activityChart = read('src/components/shop/monthly-activity-chart.tsx')
 
     expect(exportRoute).toContain('contractInterestWaivedAmount')
     expect(exportRoute).toContain('settlementMode')
-    expect(rangeReport).toContain('waivedNasiyaProfit')
-    expect(stats).toContain('settlement_waiver AS')
-    expect(stats).toContain('waivedNasiyaProfitUzs')
-    expect(customerProfile).toContain('waivedNasiyaProfit')
-    expect(trust).toContain('settledWithWaiverCount')
+    expect(rangeReport).not.toContain('waivedNasiyaProfit')
+    expect(stats).not.toContain('settlement_waiver AS')
+    expect(stats).not.toContain('waivedNasiyaProfitUzs')
+    expect(customerProfile).not.toContain('waivedNasiyaProfit')
+    expect(trust).not.toContain('settledWithWaiverCount')
+    expect(customerProfile).toContain('sum(a."interestAmountUzs")')
+    expect(customerProfile).toContain('sum(pr."recognizedInterestAmountUzs")')
+    for (const surface of [dashboard, report, rangePanel, activityChart]) {
+      expect(surface).not.toContain('Kechilgan nasiya foydasi')
+      expect(surface).not.toContain('Kechilgan foyda (pastda)')
+    }
+    expect(dashboard).toContain("return 'Nasiya yopildi'")
     expect(score).toContain('interestWaivedAmount?:')
     expect(score).toContain('Number(schedule.interestWaivedAmount ?? 0)')
     expect(cache).toContain('invalidateShopNasiyaSettlementMutation')

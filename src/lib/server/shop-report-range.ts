@@ -37,15 +37,11 @@ interface MonthlyReportRow {
   write_off_uzs: unknown
   write_off_usd: unknown
   write_off_frozen_uzs: unknown
-  waived_profit_uzs: unknown
-  waived_profit_usd: unknown
-  waived_profit_frozen_uzs: unknown
   gross_profit_uzs: unknown
   interest_profit_uzs: unknown
   return_count: number
   write_off_count: number
   reopen_count: number
-  waived_profit_count: number
 }
 
 export interface ShopMonthlyReportPoint {
@@ -62,7 +58,6 @@ export interface ShopMonthlyReportPoint {
   supplierPaymentsMade: { uzs: number; usd: number; count: number }
   refunds: { uzs: number; usd: number }
   writeOffs: { uzs: number; usd: number; frozenUzs: number }
-  waivedNasiyaProfit: { uzs: number; usd: number; frozenUzs: number; count: number }
   grossProfitUzs: number
   interestProfitUzs: number
   returnCount: number
@@ -133,9 +128,6 @@ export async function getShopRangeReport(input: {
     : Prisma.empty
   const resolutionActor = input.adminId
     ? Prisma.sql`AND e."actorId" = ${input.adminId}`
-    : Prisma.empty
-  const settlementActor = input.adminId
-    ? Prisma.sql`AND st."actorId" = ${input.adminId}`
     : Prisma.empty
   const supplierPaymentActor = input.adminId
     ? Prisma.sql`AND p."createdBy" = ${input.adminId}`
@@ -443,20 +435,6 @@ export async function getShopRangeReport(input: {
         AND r."createdAt" < ${input.range.end}
         ${returnActor}
       GROUP BY month_key
-    ), settlement_months AS (
-      SELECT
-        to_char(st."settledAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
-        coalesce(sum(st."contractInterestWaivedAmount") FILTER (WHERE st."contractCurrency" = 'UZS'), 0)::numeric AS waived_profit_uzs,
-        coalesce(sum(st."contractInterestWaivedAmount") FILTER (WHERE st."contractCurrency" = 'USD'), 0)::numeric AS waived_profit_usd,
-        coalesce(sum(st."interestWaivedAmountUzs"), 0)::numeric AS waived_profit_frozen_uzs,
-        count(*)::integer AS waived_profit_count
-      FROM "NasiyaSettlement" st
-      WHERE st."shopId" = ${input.shopId}
-        AND st."contractInterestWaivedAmount" > 0
-        AND st."settledAt" >= ${input.range.start}
-        AND st."settledAt" < ${input.range.end}
-        ${settlementActor}
-      GROUP BY month_key
     ), resolution_months AS (
       SELECT
         to_char(e."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
@@ -515,15 +493,11 @@ export async function getShopRangeReport(input: {
       coalesce(w.write_off_uzs, 0)::numeric AS write_off_uzs,
       coalesce(w.write_off_usd, 0)::numeric AS write_off_usd,
       coalesce(w.write_off_frozen_uzs, 0)::numeric AS write_off_frozen_uzs,
-      coalesce(st.waived_profit_uzs, 0)::numeric AS waived_profit_uzs,
-      coalesce(st.waived_profit_usd, 0)::numeric AS waived_profit_usd,
-      coalesce(st.waived_profit_frozen_uzs, 0)::numeric AS waived_profit_frozen_uzs,
       (coalesce(a.gross_profit_uzs, 0) + coalesce(r.profit_adjustment_uzs, 0))::numeric AS gross_profit_uzs,
       (coalesce(a.interest_profit_uzs, 0) - coalesce(r.interest_reversal_uzs, 0))::numeric AS interest_profit_uzs,
       coalesce(r.return_count, 0)::integer AS return_count,
       coalesce(w.write_off_count, 0)::integer AS write_off_count,
-      coalesce(w.reopen_count, 0)::integer AS reopen_count,
-      coalesce(st.waived_profit_count, 0)::integer AS waived_profit_count
+      coalesce(w.reopen_count, 0)::integer AS reopen_count
     FROM months m
     LEFT JOIN contract_months c ON c.month_key = m.month_key
     LEFT JOIN payment_months p ON p.month_key = m.month_key
@@ -534,7 +508,6 @@ export async function getShopRangeReport(input: {
     LEFT JOIN supplier_payment_months spp ON spp.month_key = m.month_key
     LEFT JOIN expected_profit_months ep ON ep.month_key = m.month_key
     LEFT JOIN return_months r ON r.month_key = m.month_key
-    LEFT JOIN settlement_months st ON st.month_key = m.month_key
     LEFT JOIN resolution_months w ON w.month_key = m.month_key
     ORDER BY m.ordinal ASC
   `)
@@ -572,12 +545,6 @@ export async function getShopRangeReport(input: {
       uzs: number(row.write_off_uzs),
       usd: number(row.write_off_usd),
       frozenUzs: number(row.write_off_frozen_uzs),
-    },
-    waivedNasiyaProfit: {
-      uzs: number(row.waived_profit_uzs),
-      usd: number(row.waived_profit_usd),
-      frozenUzs: number(row.waived_profit_frozen_uzs),
-      count: Number(row.waived_profit_count ?? 0),
     },
     grossProfitUzs: number(row.gross_profit_uzs),
     interestProfitUzs: number(row.interest_profit_uzs),
@@ -640,12 +607,6 @@ export async function getShopRangeReport(input: {
       usd: sum.writeOffs.usd + month.writeOffs.usd,
       frozenUzs: sum.writeOffs.frozenUzs + month.writeOffs.frozenUzs,
     },
-    waivedNasiyaProfit: {
-      uzs: sum.waivedNasiyaProfit.uzs + month.waivedNasiyaProfit.uzs,
-      usd: sum.waivedNasiyaProfit.usd + month.waivedNasiyaProfit.usd,
-      frozenUzs: sum.waivedNasiyaProfit.frozenUzs + month.waivedNasiyaProfit.frozenUzs,
-      count: sum.waivedNasiyaProfit.count + month.waivedNasiyaProfit.count,
-    },
     grossProfitUzs: sum.grossProfitUzs + month.grossProfitUzs,
     interestProfitUzs: sum.interestProfitUzs + month.interestProfitUzs,
     returnCount: sum.returnCount + month.returnCount,
@@ -664,7 +625,6 @@ export async function getShopRangeReport(input: {
     supplierPaymentsMade: { uzs: 0, usd: 0, count: 0 },
     refunds: { uzs: 0, usd: 0 },
     writeOffs: { uzs: 0, usd: 0, frozenUzs: 0 },
-    waivedNasiyaProfit: { uzs: 0, usd: 0, frozenUzs: 0, count: 0 },
     grossProfitUzs: 0,
     interestProfitUzs: 0,
     returnCount: 0,

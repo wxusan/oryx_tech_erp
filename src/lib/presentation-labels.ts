@@ -55,6 +55,7 @@ export const NASIYA_STATUS_LABELS = {
   COMPLETED: 'To‘liq yopilgan',
   OVERDUE: 'Muddati o‘tgan',
   CANCELLED: 'Bekor qilingan',
+  RETURNED: 'Qaytarilgan',
 } as const
 
 export const NASIYA_RESOLUTION_LABELS = {
@@ -531,6 +532,7 @@ export const SHOP_PERMISSION_LABELS: Readonly<Record<string, string>> = {
   NASIYA_EDIT: 'Nasiya ma’lumotlarini tahrirlash',
   NASIYA_PAYMENT_RECEIVE: 'Nasiya to‘lovini qabul qilish',
   NASIYA_PROFIT_WAIVE: 'Nasiya foydasidan kechish',
+  NASIYA_RETURN_REFUND: 'Nasiyani qaytarish va pulni qaytarish',
   NASIYA_DEFER: 'Nasiya to‘lovi muddatini uzaytirish',
   NASIYA_REMINDER_MANAGE: 'Nasiya eslatmalarini boshqarish',
   NASIYA_ARCHIVE: 'Nasiyani arxivga olish',

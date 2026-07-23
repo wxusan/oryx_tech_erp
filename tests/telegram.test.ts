@@ -14,6 +14,7 @@ import {
   deviceRestockedMessage,
   nasiyaCreatedMessage,
   nasiyaImportedMessage,
+  nasiyaReturnedMessage,
   nasiyaPaymentMessage,
   nasiyaDueTodayMessage,
   nasiyaOverdueMessage,
@@ -306,6 +307,33 @@ describe('nasiya messages', () => {
     nextPaymentDate: new Date(2026, 7, 1),
     adminName: 'Dilshod',
   }
+
+  it('reports only received, refunded, retained, and cancelled-debt facts for a Nasiya return', () => {
+    const msg = nasiyaReturnedMessage({
+      shopName: 'Malika',
+      customerName: 'Ali',
+      customerPhone: '+998900000000',
+      device: fullDevice,
+      receipts: 250,
+      refund: 100,
+      retained: 150,
+      cancelledDebt: 850,
+      contractCurrency: 'USD',
+      refundMethod: 'CASH',
+      reason: 'Mijoz qolgan oylarni to‘lay olmaydi',
+      adminName: 'Dilshod',
+      currency: { currency: 'USD', usdUzsRate: 13_000 },
+    })
+
+    expect(msg).toContain('Jami olingan: $250.00')
+    expect(msg).toContain('Mijozga qaytarildi: $100.00')
+    expect(msg).toContain('Do‘konda qoldi: $150.00')
+    expect(msg).toContain('Bekor qilingan qarz: $850.00')
+    expect(msg).toContain('Qaytarish usuli: Naqd pul')
+    expect(msg).toContain('Sabab: Mijoz qolgan oylarni to‘lay olmaydi')
+    expect(msg).toContain('Admin: Dilshod')
+    expect(msg).not.toContain('Kelgusi foyda')
+  })
 
   it('0% nasiya omits interest lines', () => {
     const msg = nasiyaCreatedMessage({
