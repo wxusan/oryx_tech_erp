@@ -56,6 +56,7 @@ const RELEASE_MIGRATIONS = [
   '202607200001_olib_nasiya_debt_ledger',
   '202607220001_custom_shop_staff_roles',
   '202607220002_nasiya_early_settlement',
+  '202607220003_nasiya_return_refund',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))
@@ -672,6 +673,18 @@ const nasiyaSettlementChecks = [
   },
 ]
 
+const nasiyaReturnChecks = [
+  {
+    name: 'nasiya_return_permission_definition_missing',
+    blocking: true,
+    sql: `
+      SELECT CASE WHEN COUNT(*) = 1 THEN 0 ELSE 1 END::integer AS count
+      FROM "PermissionDefinition"
+      WHERE "code" = 'NASIYA_RETURN_REFUND' AND "isActive" = TRUE AND "featureCode" = 'NASIYA'
+    `,
+  },
+]
+
 const nasiyaPaymentRateSourceChecks = [
   {
     name: 'nasiya_payment_fx_snapshot_issues',
@@ -767,6 +780,9 @@ try {
       : []),
     ...(appliedMigrationSet.has('202607220002_nasiya_early_settlement')
       ? nasiyaSettlementChecks
+      : []),
+    ...(phase === 'post' && appliedMigrationSet.has('202607220003_nasiya_return_refund')
+      ? nasiyaReturnChecks
       : []),
   ]
   for (const check of applicableChecks) {
