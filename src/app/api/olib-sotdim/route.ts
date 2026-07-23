@@ -5,8 +5,9 @@ import { prisma } from '@/lib/prisma'
 import { requireShopAnyPermission, requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { badRequest, conflict, created, forbidden, notFound, ok, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { createOlibSotdimSchema } from '@/lib/validations'
-import { normalizePhone } from '@/lib/phone'
 import { normalizeImei, formatDeviceStorage, deviceConditionLabel, presentDeviceSpecs } from '@/lib/device-specs'
+import { prepareSearchNeedle } from '@/lib/search-needle'
+import { searchMatchEvidence } from '@/lib/search-match-evidence'
 import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 import { CustomerSelectionError, resolveCustomerSelection } from '@/lib/server/customer-selection'
 import { CustomerPassportConfigurationError } from '@/lib/customer-passport'
@@ -30,6 +31,60 @@ import { logger } from '@/lib/logger'
 import type { ZodError } from 'zod'
 
 const payableStatuses = ['PENDING', 'PARTIAL', 'PAID', 'CANCELLED', 'OVERDUE'] as const
+type PayableStatus = (typeof payableStatuses)[number]
+
+export function buildOlibSotdimWhere(
+  shopId: string,
+  input: { search?: string | null; status?: PayableStatus },
+): Prisma.SupplierPayableWhereInput {
+  const prepared = prepareSearchNeedle(input.search)
+  return {
+    shopId,
+    origin: 'OLIB_SOTDIM',
+    deletedAt: null,
+    ...(input.status ? { status: input.status } : {}),
+    ...(prepared.query ? {
+      OR: [
+        { supplierName: { contains: prepared.escapedText, mode: 'insensitive' } },
+        { supplierPhone: { contains: prepared.escapedText, mode: 'insensitive' } },
+        { supplierNote: { contains: prepared.escapedText, mode: 'insensitive' } },
+        { device: { model: { contains: prepared.escapedText, mode: 'insensitive' } } },
+        { device: { color: { contains: prepared.escapedText, mode: 'insensitive' } } },
+        { device: { imei: { contains: prepared.escapedText, mode: 'insensitive' } } },
+        {
+          device: {
+            imeis: {
+              some: {
+                deletedAt: null,
+                OR: [
+                  { value: { contains: prepared.escapedText, mode: 'insensitive' } },
+                  ...(prepared.identifierDigits
+                    ? [{ normalizedValue: { contains: prepared.identifierDigits } }]
+                    : []),
+                ],
+              },
+            },
+          },
+        },
+        { olibSotdimOperation: { customer: { name: { contains: prepared.escapedText, mode: 'insensitive' } } } },
+        { olibSotdimOperation: { customer: { phone: { contains: prepared.escapedText, mode: 'insensitive' } } } },
+        ...(prepared.identifierDigits
+          ? [
+              { supplierPhone: { contains: prepared.identifierDigits } },
+              { device: { imei: { contains: prepared.identifierDigits } } },
+              {
+                olibSotdimOperation: {
+                  customer: {
+                    phoneSearchDigits: { contains: prepared.identifierDigits },
+                  },
+                },
+              },
+            ]
+          : []),
+      ],
+    } : {}),
+  }
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -42,8 +97,9 @@ export async function GET(req: NextRequest) {
     const resolved = await resolveActiveShopId(session, req.nextUrl.searchParams.get('shopId'))
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
-    const search = req.nextUrl.searchParams.get('search')?.trim()
-    const searchDigits = search ? normalizePhone(search) : null
+    const preparedSearch = prepareSearchNeedle(req.nextUrl.searchParams.get('search'))
+    if (preparedSearch.exceedsMaxLength) return badRequest('Qidiruv 100 ta belgidan oshmasligi kerak')
+    const search = preparedSearch.query
     const statusParam = req.nextUrl.searchParams.get('status')
     const status = payableStatuses.find((candidate) => candidate === statusParam)
     const requestedTake = Number(req.nextUrl.searchParams.get('take') ?? 25)
@@ -52,20 +108,7 @@ export async function GET(req: NextRequest) {
     const skip = Number.isFinite(requestedSkip) ? Math.trunc(Math.max(requestedSkip, 0)) : 0
     const where: Prisma.SupplierPayableWhereInput = {
       shopId,
-      origin: 'OLIB_SOTDIM',
-      deletedAt: null,
-      ...(status ? { status } : {}),
-      ...(search ? {
-        OR: [
-          { supplierName: { contains: search, mode: 'insensitive' } },
-          { supplierPhone: { contains: search, mode: 'insensitive' } },
-          ...(searchDigits ? [{ supplierPhone: { contains: searchDigits } }] : []),
-          { device: { model: { contains: search, mode: 'insensitive' } } },
-          { device: { imei: { contains: search, mode: 'insensitive' } } },
-          { olibSotdimOperation: { customer: { name: { contains: search, mode: 'insensitive' } } } },
-          { olibSotdimOperation: { customer: { phone: { contains: search, mode: 'insensitive' } } } },
-        ],
-      } : {}),
+      ...buildOlibSotdimWhere(shopId, { search, status }),
     }
     const [rows, total] = await Promise.all([
       prisma.supplierPayable.findMany({
@@ -77,7 +120,7 @@ export async function GET(req: NextRequest) {
           id: true, origin: true, amount: true, contractAmount: true, contractCurrency: true,
           paidAmount: true, remainingAmount: true, contractPaidAmount: true, contractRemainingAmount: true,
           status: true, dueDate: true, paidAt: true, lastPaymentAt: true, paymentMethod: true,
-          supplierName: true, supplierPhone: true, supplierLocation: true, createdAt: true,
+          supplierName: true, supplierPhone: true, supplierLocation: true, supplierNote: true, createdAt: true,
           device: { select: {
             id: true, model: true, imei: true, color: true, storage: true, storageAmount: true,
             storageUnit: true, conditionCode: true, purchaseInputAmount: true, purchaseCurrency: true,
@@ -85,7 +128,7 @@ export async function GET(req: NextRequest) {
           } },
           olibSotdimOperation: { select: {
             id: true, dealType: true,
-            customer: { select: { id: true, name: true, phone: true } },
+            customer: { select: { id: true, name: true, phone: true, additionalPhones: true } },
             sale: { select: { id: true, contractSalePrice: true, contractCurrency: true, contractRemainingAmount: true } },
             nasiya: { select: { id: true, contractFinalAmount: true, contractCurrency: true, contractRemainingAmount: true, months: true, monthlyPayment: true } },
           } },
@@ -129,7 +172,13 @@ export async function GET(req: NextRequest) {
           supplierPhone: row.supplierPhone,
           supplierLocation: row.supplierLocation,
           createdAt: row.createdAt.toISOString(),
-          customer: operation?.customer ?? null,
+          customer: operation?.customer
+            ? {
+                id: operation.customer.id,
+                name: operation.customer.name,
+                phone: operation.customer.phone,
+              }
+            : null,
           customerOutcome,
           device: {
             id: row.device.id,
@@ -147,6 +196,24 @@ export async function GET(req: NextRequest) {
               purchaseCurrency: row.device.purchaseCurrency,
             } : {}),
           },
+          ...(search
+            ? {
+                matchEvidence: searchMatchEvidence(search, [
+                  {
+                    field: 'SECONDARY_IMEI',
+                    value: row.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value,
+                    mode: 'identifier',
+                  },
+                  ...(operation?.customer.additionalPhones ?? []).map((value) => ({
+                    field: 'ADDITIONAL_PHONE' as const,
+                    value,
+                    mode: 'identifier' as const,
+                    exposeValue: false,
+                  })),
+                  { field: 'NOTE', value: row.supplierNote, mode: 'text', exposeValue: false },
+                ]),
+              }
+            : {}),
           ...(includeOwnerFinancials && customerOutcome ? {
             profit: customerOutcome.type === 'SALE' && customerOutcome.contractCurrency === row.contractCurrency
               ? customerOutcome.total - Number(row.contractAmount)

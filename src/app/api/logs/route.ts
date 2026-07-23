@@ -17,6 +17,8 @@ import { isLogCategory, logCategoryWhere } from '@/lib/log-categories'
 import { redactShopStaffLogValue } from '@/lib/log-financial-redaction'
 import { logger } from '@/lib/logger'
 import { timeRequestPhase, timeRequestPhaseSync } from '@/lib/server/request-context'
+import { prepareSearchNeedle } from '@/lib/search-needle'
+import { buildLogSearchWhere } from '@/lib/server/log-search'
 
 function parseDateParam(value: string | null | undefined, endOfDay = false) {
   if (!value) return null
@@ -44,7 +46,8 @@ export async function GET(req: NextRequest) {
       : (searchParams.get('actorType') ?? undefined)
     const from = searchParams.get('from') ?? undefined
     const to = searchParams.get('to') ?? undefined
-    const search = searchParams.get('search')?.trim()
+    const preparedSearch = prepareSearchNeedle(searchParams.get('search'))
+    if (preparedSearch.exceedsMaxLength) return badRequest('Qidiruv 100 ta belgidan oshmasligi kerak')
     const categoryParam = searchParams.get('category')?.trim()
     const targetIds = searchParams
       .getAll('targetId')
@@ -73,17 +76,7 @@ export async function GET(req: NextRequest) {
     }
     const category = isLogCategory(categoryParam) ? categoryParam : 'all'
     const categoryWhere = logCategoryWhere(category)
-    const searchWhere: Prisma.LogWhereInput = search
-      ? {
-          OR: [
-            { action: { contains: search, mode: 'insensitive' } },
-            { targetType: { contains: search, mode: 'insensitive' } },
-            { targetId: { contains: search, mode: 'insensitive' } },
-            { note: { contains: search, mode: 'insensitive' } },
-            { shop: { name: { contains: search, mode: 'insensitive' } } },
-          ],
-        }
-      : {}
+    const searchWhere = buildLogSearchWhere(preparedSearch.query)
 
     const where: Prisma.LogWhereInput = {
       ...(shopId && shopId !== 'all' ? { shopId } : {}),

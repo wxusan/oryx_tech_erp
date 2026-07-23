@@ -158,11 +158,29 @@ describe('customer CRM protected routes', () => {
     expect(response.headers.get('cache-control')).toBe('private, no-store')
     expect(payload).toMatchObject({
       success: true,
-      data: { items: [{ id: own.id, name: own.name, passportMasked: '••••8135' }], total: 1 },
+      data: {
+        items: [{
+          id: own.id,
+          name: own.name,
+          passportMasked: '••••8135',
+          matchEvidence: [{ field: 'PASSPORT' }],
+        }],
+        total: 1,
+      },
     })
     expect(JSON.stringify(payload)).not.toContain('AE2468135')
     expect(JSON.stringify(payload)).not.toContain(own.passportIdentifierCiphertext!)
     expect(JSON.stringify(payload)).not.toContain(own.passportIdentifierHash!)
+
+    const partialResponse = await POST(new NextRequest('http://localhost/api/customers/search', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ search: 'AE2468', skip: 0, take: 25 }),
+    }))
+    const partialPayload = await partialResponse.json()
+    expect(partialResponse.status).toBe(200)
+    expect(partialPayload).toMatchObject({ success: true, data: { items: [], total: 0 } })
+    expect(JSON.stringify(partialPayload)).not.toContain('AE2468')
   })
 
   it('uses explicit existing/new customer commands and never overwrites a phone match', async () => {

@@ -10,8 +10,14 @@ import { formatUzPhoneDisplay } from '@/lib/phone'
 import { cn } from '@/lib/utils'
 import { queryKeys } from '@/lib/query-keys'
 import { customerSearchRequest } from '@/lib/customer-search-transport'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
-export interface CustomerPickerOption {
+export interface CustomerPickerOption extends SearchEvidenceCarrier {
   id: string
   name: string
   phone: string
@@ -33,9 +39,14 @@ interface CustomerComboboxProps {
   className?: string
 }
 
+interface CustomerOptionsPayload extends SearchEvidenceCarrier {
+  items: CustomerPickerOption[]
+  matchEvidenceById?: unknown
+}
+
 interface CustomersResponse {
   success: boolean
-  data?: CustomerPickerOption[] | { items: CustomerPickerOption[] }
+  data?: CustomerPickerOption[] | CustomerOptionsPayload
   error?: string
 }
 
@@ -86,11 +97,12 @@ export function CustomerCombobox({
       if (!response.ok || !json.success || !json.data) {
         throw new Error(json.error || 'Mijozlarni qidirib bo\'lmadi')
       }
-      return Array.isArray(json.data) ? json.data : json.data.items
+      return Array.isArray(json.data) ? { items: json.data } satisfies CustomerOptionsPayload : json.data
     },
   })
 
-  const options = useMemo(() => query.data ?? [], [query.data])
+  const optionsPayload = query.data
+  const options = useMemo(() => optionsPayload?.items ?? [], [optionsPayload])
   const searchText = search.trim()
   const searchReady = searchText.length >= 2
   // Show feedback from the first keystroke that can trigger a search, including
@@ -99,6 +111,9 @@ export function CustomerCombobox({
   const visibleOptions = searchPending ? [] : options
   const optionCount = visibleOptions.length
   const activeOptionIndex = activeIndex >= 0 && activeIndex < optionCount ? activeIndex : -1
+  const highlightQuery = searchText === debouncedSearch && !query.isPlaceholderData
+    ? debouncedSearch
+    : ''
 
   function choose(customer: CustomerPickerOption) {
     onSelect(customer)
@@ -262,11 +277,12 @@ export function CustomerCombobox({
                   activeOptionIndex === index && 'bg-zinc-100',
                 )}
               >
-                <span className="block truncate text-sm font-medium text-zinc-900">{customer.name}</span>
+                <span className="block truncate text-sm font-medium text-zinc-900"><HighlightedText value={customer.name} query={highlightQuery} mode="text" /></span>
                 <span className="mt-0.5 block text-xs text-zinc-500">
-                  {formatUzPhoneDisplay(customer.phone)}
+                  <HighlightedText value={formatUzPhoneDisplay(customer.phone)} query={highlightQuery} mode="identifier" />
                   {customer.trust?.label ? ` · ${customer.trust.label}` : ''}
                 </span>
+                <SearchEvidence evidence={searchEvidenceFor(customer.id, customer, optionsPayload)} query={highlightQuery} />
               </button>
             </li>
           )) : (

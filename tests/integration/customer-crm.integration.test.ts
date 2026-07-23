@@ -97,16 +97,117 @@ describe('customer CRM database privacy and set-based metrics', () => {
     })
 
     const rows = await prisma.customer.findMany({
-      where: customerSearchWhere(first.id, 'ab-7654321'),
+      where: customerSearchWhere(first.id, 'AB 7654321'),
       select: { id: true, name: true, passportIdentifierLast4: true },
     })
     expect(rows).toEqual([{ id: target.id, name: 'Passport target', passportIdentifierLast4: '4321' }])
+    expect(await prisma.customer.findMany({
+      where: customerSearchWhere(first.id, 'AB7654'),
+      select: { id: true },
+    })).toEqual([])
     expect(JSON.stringify(rows)).not.toContain('AB7654321')
     expect(await getCustomerProfileOverview({
       shopId: second.id,
       customerId: target.id,
       visibility: { includeOwnerFinancials: true },
     })).toBeNull()
+  })
+
+  it('trigger-maintains delimiter-safe partial phone search across Prisma and direct SQL updates', async () => {
+    const [{ shop: first }, { shop: second }] = await Promise.all([createShop('203'), createShop('204')])
+    const target = await prisma.customer.create({
+      data: {
+        shopId: first.id,
+        name: 'Additional phone target',
+        phone: '+998 (90) 111-22-33',
+        normalizedPhone: '998901112233',
+        additionalPhones: ['+998 (95) 002-44-67', '+998 93 700 00 00'],
+      },
+    })
+    const crossBoundary = await prisma.customer.create({
+      data: {
+        shopId: first.id,
+        name: 'Cross phone boundary decoy',
+        phone: '+998 90 000 00 24',
+        normalizedPhone: '998900000024',
+        additionalPhones: ['46', '+998 91 100 00 00'],
+      },
+    })
+    await prisma.customer.create({
+      data: {
+        shopId: first.id,
+        name: 'Separated digits decoy',
+        phone: '+998 90 200 40 04',
+        normalizedPhone: '998902004004',
+        additionalPhones: ['+998 90 200 40 06'],
+      },
+    })
+    await prisma.customer.create({
+      data: {
+        shopId: second.id,
+        name: 'Other tenant phone target',
+        phone: '+998 90 124 46 78',
+        normalizedPhone: '998901244678',
+      },
+    })
+    const deleted = await prisma.customer.create({
+      data: {
+        shopId: first.id,
+        name: 'Deleted phone target',
+        phone: '+998 90 124 46 79',
+        normalizedPhone: '998901244679',
+      },
+    })
+    await prisma.customer.update({
+      where: { id: deleted.id },
+      data: { deletedAt: new Date(), deletedBy: 'integration', deleteNote: 'search scope' },
+    })
+
+    const partialMatches = await prisma.customer.findMany({
+      where: customerSearchWhere(first.id, '2446'),
+      select: { id: true },
+      orderBy: { id: 'asc' },
+    })
+    expect(partialMatches.map(({ id }) => id)).toEqual([target.id])
+    expect(partialMatches.map(({ id }) => id)).not.toContain(crossBoundary.id)
+
+    const [document] = await prisma.$queryRaw<Array<{ phoneSearchDigits: string }>>(Prisma.sql`
+      SELECT "phoneSearchDigits"
+      FROM "Customer"
+      WHERE "id" = ${target.id}
+    `)
+    expect(document.phoneSearchDigits).toContain('|998901112233|')
+    expect(document.phoneSearchDigits).toContain('|998950024467|')
+    expect(document.phoneSearchDigits).toContain('|998937000000|')
+
+    await prisma.customer.update({
+      where: { id: target.id },
+      data: { additionalPhones: ['+998 (97) 008-80-81'] },
+    })
+    expect(await prisma.customer.findMany({
+      where: customerSearchWhere(first.id, '8808'),
+      select: { id: true },
+    })).toEqual([{ id: target.id }])
+    expect(await prisma.customer.findMany({
+      where: customerSearchWhere(first.id, '2446'),
+      select: { id: true },
+    })).toEqual([])
+
+    await prisma.$executeRaw(Prisma.sql`
+      UPDATE "Customer"
+      SET "phone" = '+998 (88) 700-24-46',
+          "normalizedPhone" = '998887002446',
+          "additionalPhones" = ARRAY['+998 (99) 300-30-30']::text[]
+      WHERE "id" = ${target.id}
+    `)
+    expect(await prisma.customer.findMany({
+      where: customerSearchWhere(first.id, '2446'),
+      select: { id: true },
+    })).toEqual([{ id: target.id }])
+    expect(await prisma.customer.findMany({
+      where: customerSearchWhere(first.id, '8808'),
+      select: { id: true },
+    })).toEqual([])
   })
 
   it('partitions currencies, respects Tashkent due boundaries, and paginates every history', async () => {

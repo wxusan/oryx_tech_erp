@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useEffect, useMemo, useState } from 'react'
+import { Fragment, createContext, memo, useContext, useEffect, useMemo, useState } from 'react'
 import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-query'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -23,9 +23,20 @@ import { useShopAccess } from '@/components/shop/shop-access-context'
 import { QueryActivity } from '@/components/query-activity'
 import { markQueryIntent } from '@/lib/client-performance'
 import { ExportDownloadButton } from '@/components/shop/export-download-button'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
 type DisplayStatus = 'Omborda' | 'Naqdga sotilgan' | 'Qarzga sotilgan' | 'Nasiyaga sotilgan' | 'Qaytarilgan' | 'O‘chirilgan'
-type Device = DeviceListItem
+type Device = DeviceListItem & SearchEvidenceCarrier
+type DeviceListPayload = Omit<DeviceListPage, 'items'> & {
+  items: Device[]
+  matchEvidenceById?: unknown
+}
+const DeviceSearchHighlightContext = createContext<{ query: string; envelope?: DeviceListPayload }>({ query: '' })
 
 interface ApiResponse<T> {
   success: boolean
@@ -107,6 +118,8 @@ const DeviceTableRow = memo(function DeviceTableRow({
   currency: CurrencyContext
   showOwnerFinancials: boolean
 }) {
+  const { query: highlightQuery, envelope } = useContext(DeviceSearchHighlightContext)
+  const evidence = searchEvidenceFor(d.id, d, envelope)
   return (
     <tr className="relative border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
       <td className="px-4 py-3 font-medium text-zinc-900">
@@ -115,19 +128,20 @@ const DeviceTableRow = memo(function DeviceTableRow({
           aria-label={`${d.model} qurilmasi ma'lumotlarini ochish`}
           className="font-medium text-zinc-900 hover:underline"
         >
-          <div>{d.model}</div>
+          <div><HighlightedText value={d.model} query={highlightQuery} mode="text" /></div>
           <DeviceConditionBadge label={d.conditionLabel} className="mt-1" />
+          <SearchEvidence evidence={evidence} query={highlightQuery} />
         </StretchedLink>
       </td>
-      <td className="px-4 py-3 text-zinc-600">{d.color ?? '—'}</td>
-      <td className="px-4 py-3 text-zinc-600">{d.storageDisplay || '—'}</td>
+      <td className="px-4 py-3 text-zinc-600"><HighlightedText value={d.color ?? '—'} query={highlightQuery} mode="text" /></td>
+      <td className="px-4 py-3 text-zinc-600"><HighlightedText value={d.storageDisplay || '—'} query={highlightQuery} mode="auto" /></td>
       <td className="px-4 py-3 text-zinc-600">{d.batteryHealth != null ? `${d.batteryHealth}%` : '—'}</td>
       {showOwnerFinancials && (
         <td className="px-4 py-3 font-medium text-zinc-900">
           {d.purchasePrice != null ? formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate) : '—'}
         </td>
       )}
-      <td className="px-4 py-3 font-mono text-xs text-zinc-400"><div>{displayImei(d.primaryImei)}</div>{d.secondaryImei && <div className="mt-0.5">{displayImei(d.secondaryImei)}</div>}</td>
+      <td className="px-4 py-3 font-mono text-xs text-zinc-400"><div><HighlightedText value={displayImei(d.primaryImei)} query={highlightQuery} mode="identifier" /></div>{d.secondaryImei && <div className="mt-0.5"><HighlightedText value={displayImei(d.secondaryImei)} query={highlightQuery} mode="identifier" /></div>}</td>
       <td className="px-4 py-3"><StatusBadge status={d.status} /></td>
       <td className="px-4 py-3 font-medium text-zinc-900">
         {d.saleInfo ? (
@@ -142,7 +156,7 @@ const DeviceTableRow = memo(function DeviceTableRow({
         ) : '—'}
       </td>
       {showOwnerFinancials && <td className="px-4 py-3"><ProfitValue d={d} currency={currency} /></td>}
-      <td className="px-4 py-3 text-zinc-600">{d.saleInfo?.customerName ?? '—'}</td>
+      <td className="px-4 py-3 text-zinc-600"><HighlightedText value={d.saleInfo?.customerName ?? '—'} query={highlightQuery} mode="text" /></td>
       <td className="px-4 py-3 text-zinc-500">{uzDate(d.createdAt)}</td>
     </tr>
   )
@@ -157,6 +171,8 @@ const DeviceMobileCard = memo(function DeviceMobileCard({
   currency: CurrencyContext
   showOwnerFinancials: boolean
 }) {
+  const { query: highlightQuery, envelope } = useContext(DeviceSearchHighlightContext)
+  const evidence = searchEvidenceFor(d.id, d, envelope)
   return (
     <IntentPrefetchLink
       href={`/shop/qurilmalar/${d.id}`}
@@ -165,14 +181,24 @@ const DeviceMobileCard = memo(function DeviceMobileCard({
     >
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="font-medium text-zinc-900">{d.model}</div>
+          <div className="font-medium text-zinc-900"><HighlightedText value={d.model} query={highlightQuery} mode="text" /></div>
           <DeviceConditionBadge label={d.conditionLabel} className="mt-1" />
-          <div className="mt-0.5 font-mono text-xs text-zinc-500">{displayImei(d.primaryImei)}{d.secondaryImei && ` · ${displayImei(d.secondaryImei)}`}</div>
+          <div className="mt-0.5 font-mono text-xs text-zinc-500">
+            <HighlightedText value={displayImei(d.primaryImei)} query={highlightQuery} mode="identifier" />
+            {d.secondaryImei && <Fragment> · <HighlightedText value={displayImei(d.secondaryImei)} query={highlightQuery} mode="identifier" /></Fragment>}
+          </div>
+          <SearchEvidence evidence={evidence} query={highlightQuery} />
         </div>
         <StatusBadge status={d.status} />
       </div>
       <div className="text-xs text-zinc-500">
-        {[d.color, d.storageDisplay, d.batteryHealth != null ? `${d.batteryHealth}%` : null].filter(Boolean).join(' · ') || '—'}
+        {[d.color, d.storageDisplay, d.batteryHealth != null ? `${d.batteryHealth}%` : null].filter(Boolean).map((value, index) => (
+          <Fragment key={`${value}-${index}`}>
+            {index > 0 && ' · '}
+            <HighlightedText value={value} query={highlightQuery} mode={index < 2 ? 'auto' : 'text'} />
+          </Fragment>
+        ))}
+        {!d.color && !d.storageDisplay && d.batteryHealth == null ? '—' : null}
       </div>
       <div className="flex items-center justify-between text-xs text-zinc-600">
         {showOwnerFinancials && <span>Kelish: {d.purchasePrice != null ? formatMoneyByCurrency(d.purchasePrice, currency.currency, currency.usdUzsRate) : '—'}</span>}
@@ -185,7 +211,7 @@ const DeviceMobileCard = memo(function DeviceMobileCard({
       )}
       {showOwnerFinancials && d.saleInfo && (
         <div className="flex items-center justify-between text-xs">
-          <span className="text-zinc-500">{d.saleInfo.customerName ?? '—'}</span>
+          <span className="text-zinc-500"><HighlightedText value={d.saleInfo.customerName ?? '—'} query={highlightQuery} mode="text" /></span>
           <ProfitValue d={d} currency={currency} />
         </div>
       )}
@@ -273,7 +299,7 @@ export default function QurilmalarClient({
     queryKey: queryKeys.devices.list(scope, listQuery),
     queryFn: async ({ signal }) => {
       const response = await fetch(`/api/devices?${requestKey}`, { signal, cache: 'no-store' })
-      const json = await response.json() as ApiResponse<DeviceListPage>
+      const json = await response.json() as ApiResponse<DeviceListPayload>
       if (!response.ok || !json.success || !json.data) {
         throw new Error(json.error || 'Qurilmalar yuklanmadi')
       }
@@ -301,6 +327,9 @@ export default function QurilmalarClient({
   const error = devicesQuery.error instanceof Error ? devicesQuery.error.message : null
   const loading = devicesQuery.isPending && !devicesQuery.data
   const totalPages = Math.max(1, Math.ceil(total / PER_PAGE))
+  const highlightQuery = search.trim() === debouncedSearch.trim() && !devicesQuery.isPlaceholderData
+    ? debouncedSearch.trim()
+    : ''
 
   function prefetchStatus(status: DeviceStatus | 'Barchasi') {
     const query: DeviceListQuery = {
@@ -316,7 +345,7 @@ export default function QurilmalarClient({
       queryKey: queryKeys.devices.list(scope, query),
       queryFn: async ({ signal }) => {
         const response = await fetch(`/api/devices?${key}`, { signal, cache: 'no-store' })
-        const json = await response.json() as ApiResponse<DeviceListPage>
+        const json = await response.json() as ApiResponse<DeviceListPayload>
         if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Qurilmalar yuklanmadi')
         return json.data
       },
@@ -394,6 +423,7 @@ export default function QurilmalarClient({
         </Select>
       </div>
 
+      <DeviceSearchHighlightContext.Provider value={{ query: highlightQuery, envelope: devicesQuery.data }}>
       <QueryActivity
         isFetching={devicesQuery.isFetching}
         isInitialLoading={loading}
@@ -490,6 +520,7 @@ export default function QurilmalarClient({
         </div>
       )}
       </QueryActivity>
+      </DeviceSearchHighlightContext.Provider>
     </div>
   )
 }

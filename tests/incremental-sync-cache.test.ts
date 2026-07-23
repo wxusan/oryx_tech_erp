@@ -123,6 +123,21 @@ describe('device query membership and structural patching', () => {
     expect(client.getQueryData<DeviceListPage>(keyB)?.items).toEqual([row])
   })
 
+  it('retains searched rows and invalidates for authoritative hidden-field membership', () => {
+    const client = new QueryClient()
+    const searchedQuery = { ...baseQuery, search: '2446' }
+    const key = queryKeys.devices.list(scopeA, searchedQuery)
+    const row = device('1', {
+      matchEvidence: [{ field: 'ADDITIONAL_PHONE' }],
+    })
+    client.setQueryData(key, page([row], 1))
+
+    patchDeviceUpsert(client, scopeA, { ...row, matchEvidence: undefined })
+
+    expect(client.getQueryData<DeviceListPage>(key)?.items).toEqual([row])
+    expect(client.getQueryState(key)?.isInvalidated).toBe(true)
+  })
+
   it('applies a tombstone idempotently', () => {
     const client = new QueryClient()
     const key = queryKeys.devices.list(scopeA, baseQuery)

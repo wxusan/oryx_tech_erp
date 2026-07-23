@@ -28,4 +28,41 @@ describe('canonical shop list filters', () => {
     const where = buildShopNasiyalarWhere('shop-1', { search: '---' })
     expect(JSON.stringify(where)).not.toContain('"normalizedValue":{"contains":""}')
   })
+
+  it('uses one contiguous 2446 needle across text, primary/secondary IMEI, and phone documents', () => {
+    const device = JSON.stringify(buildShopDevicesWhere('shop-1', { search: '2446' }))
+    const nasiya = JSON.stringify(buildShopNasiyalarWhere('shop-1', { search: '2446' }))
+
+    for (const serialized of [device, nasiya]) {
+      expect(serialized).toContain('"contains":"2446"')
+      expect(serialized).toContain('"normalizedValue":{"contains":"2446"}')
+      expect(serialized).toContain('"phoneSearchDigits":{"contains":"2446"}')
+      expect(serialized).not.toContain('"additionalPhones":{"has":"2446"}')
+    }
+    expect(device).toContain('"model":{"contains":"2446"')
+    expect(device).toContain('"note":{"contains":"2446"')
+    expect(nasiya).toContain('"device":{"model":{"contains":"2446"')
+    expect(nasiya).toContain('"note":{"contains":"2446"')
+  })
+
+  it('does not add identifier predicates for mixed model text such as iPhone 13', () => {
+    const device = JSON.stringify(buildShopDevicesWhere('shop-1', { search: 'iPhone 13' }))
+    const nasiya = JSON.stringify(buildShopNasiyalarWhere('shop-1', { search: 'iPhone 13' }))
+
+    expect(device).toContain('"model":{"contains":"iPhone 13"')
+    expect(nasiya).toContain('"model":{"contains":"iPhone 13"')
+    for (const serialized of [device, nasiya]) {
+      expect(serialized).not.toContain('"phoneSearchDigits"')
+      expect(serialized).not.toContain('"normalizedValue"')
+    }
+  })
+
+  it('retains tenant and soft-delete scope with bounded pagination-independent filters', () => {
+    for (const where of [
+      buildShopDevicesWhere('shop-1', { search: '2446' }),
+      buildShopNasiyalarWhere('shop-1', { search: '2446' }),
+    ]) {
+      expect(where).toMatchObject({ shopId: 'shop-1', deletedAt: null })
+    }
+  })
 })

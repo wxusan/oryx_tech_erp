@@ -115,4 +115,60 @@ describe('disposable PostgreSQL migration foundation', () => {
     expect(constraints).toHaveLength(4)
     expect(constraints.every((row) => row.convalidated)).toBe(true)
   })
+
+  it('installs the derived partial-phone document, synchronization trigger, and active trigram indexes', async () => {
+    const columns = await prisma.$queryRaw<Array<{ column_name: string; column_default: string | null; is_nullable: string }>>`
+      SELECT column_name, column_default, is_nullable
+      FROM information_schema.columns
+      WHERE table_schema = 'public'
+        AND table_name = 'Customer'
+        AND column_name = 'phoneSearchDigits'
+    `
+    expect(columns).toHaveLength(1)
+    expect(columns[0]).toMatchObject({ column_name: 'phoneSearchDigits', is_nullable: 'NO' })
+    expect(columns[0].column_default).toContain("''")
+
+    const triggerFunctions = await prisma.$queryRaw<Array<{ trigger_definition: string; function_definition: string }>>`
+      SELECT
+        pg_get_triggerdef(t.oid) AS trigger_definition,
+        pg_get_functiondef(p.oid) AS function_definition
+      FROM pg_trigger t
+      JOIN pg_proc p ON p.oid = t.tgfoid
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relname = 'Customer'
+        AND NOT t.tgisinternal
+        AND pg_get_functiondef(p.oid) LIKE '%phoneSearchDigits%'
+    `
+    expect(triggerFunctions).toHaveLength(1)
+    expect(triggerFunctions[0].trigger_definition).toMatch(/BEFORE (INSERT OR UPDATE|UPDATE OR INSERT)/)
+    expect(triggerFunctions[0].function_definition).toContain('additionalPhones')
+
+    const searchDocumentFunctions = await prisma.$queryRaw<Array<{ function_definition: string }>>`
+      SELECT pg_get_functiondef(p.oid) AS function_definition
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public'
+        AND p.proname = 'customer_phone_search_digits'
+    `
+    expect(searchDocumentFunctions).toHaveLength(1)
+    expect(searchDocumentFunctions[0].function_definition).toContain('|')
+
+    const indexes = await prisma.$queryRaw<Array<{ tablename: string; indexdef: string }>>`
+      SELECT tablename, indexdef
+      FROM pg_indexes
+      WHERE schemaname = 'public'
+        AND (
+          (tablename = 'Customer' AND indexdef LIKE '%"phoneSearchDigits"%gin_trgm_ops%')
+          OR
+          (tablename = 'DeviceImei' AND indexdef LIKE '%"normalizedValue"%gin_trgm_ops%')
+        )
+      ORDER BY tablename
+    `
+    expect(indexes.map(({ tablename }) => tablename)).toEqual(['Customer', 'DeviceImei'])
+    expect(indexes.every(({ indexdef }) => /WHERE \({1,2}"deletedAt" IS NULL/.test(indexdef))).toBe(true)
+    expect(indexes.find(({ tablename }) => tablename === 'DeviceImei')?.indexdef)
+      .toContain('"normalizedValue" IS NOT NULL')
+  })
 })

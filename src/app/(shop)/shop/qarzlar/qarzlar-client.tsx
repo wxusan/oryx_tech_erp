@@ -18,11 +18,18 @@ import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { SupplierPayablePaymentDialog } from '@/components/shop/supplier-payable-payment-dialog'
 import { ImageViewer, useImageViewer } from '@/components/ui/image-viewer'
 import { ImageViewerTrigger } from '@/components/ui/image-viewer-trigger'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
 type OutgoingResult = Extract<DebtQueryResult, { tab: 'outgoing' }>
 type IncomingResult = Extract<DebtQueryResult, { tab: 'incoming' }>
-type OutgoingItem = OutgoingResult['items'][number]
-type IncomingItem = IncomingResult['items'][number]
+type OutgoingItem = OutgoingResult['items'][number] & SearchEvidenceCarrier
+type IncomingItem = IncomingResult['items'][number] & SearchEvidenceCarrier
+type DebtPayload = DebtQueryResult & SearchEvidenceCarrier & { matchEvidenceById?: unknown }
 
 const statusLabels: Record<string, string> = {
   PENDING: 'Kutilmoqda',
@@ -175,11 +182,11 @@ export default function QarzlarClient({
         signal,
         cache: 'no-store',
       })
-      const json = await response.json() as { success?: boolean; data?: DebtQueryResult; error?: string }
+      const json = await response.json() as { success?: boolean; data?: DebtPayload; error?: string }
       if (!response.ok || !json.success || !json.data) throw new Error(json.error || 'Qarzlar yuklanmadi')
       return json.data
     },
-    initialData: initialData.tab === tab && month === initialMonth && status === initialStatus && !cursor && searchRevision === 0 ? initialData : undefined,
+    initialData: initialData.tab === tab && month === initialMonth && status === initialStatus && !cursor && searchRevision === 0 ? initialData as DebtPayload : undefined,
     placeholderData: keepPreviousData,
   })
   const data = query.data
@@ -188,6 +195,9 @@ export default function QarzlarClient({
   const nextCursor = activeData?.nextCursor ?? null
   const filtered = Boolean(debouncedSearch) || status !== 'ALL'
   const offline = !useSyncExternalStore(subscribeOnlineStatus, onlineSnapshot, onlineServerSnapshot)
+  const highlightQuery = search.trim() === debouncedSearch && !query.isPlaceholderData
+    ? debouncedSearch
+    : ''
 
   function changeTab(next: DebtTab) {
     if ((next === 'outgoing' && !canOutgoing) || (next === 'incoming' && !canIncoming)) return
@@ -241,10 +251,11 @@ export default function QarzlarClient({
               <div className="flex gap-3">
                 <DevicePicture item={item.device} onExpand={(trigger) => openDeviceImages(item.device, trigger)} />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-2"><h2 className="truncate font-semibold text-zinc-900">{item.device.model}</h2><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${item.status === 'OVERDUE' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}`}>{statusLabels[item.status] ?? item.status}</span></div>
-                  <p className="mt-0.5 text-xs text-zinc-500">{item.device.storage || '—'} · IMEI {item.device.imei}</p>
-                  <p className="mt-2 text-sm font-medium text-zinc-800">{item.supplier.name}</p>
-                  <p className="text-xs text-zinc-500">{formatUzPhoneDisplay(item.supplier.phone)}</p>
+                  <div className="flex items-start justify-between gap-2"><h2 className="truncate font-semibold text-zinc-900"><HighlightedText value={item.device.model} query={highlightQuery} mode="text" /></h2><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${item.status === 'OVERDUE' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}`}>{statusLabels[item.status] ?? item.status}</span></div>
+                  <p className="mt-0.5 text-xs text-zinc-500"><HighlightedText value={item.device.storage || '—'} query={highlightQuery} mode="auto" /> · IMEI <HighlightedText value={item.device.imei} query={highlightQuery} mode="identifier" /></p>
+                  <p className="mt-2 text-sm font-medium text-zinc-800"><HighlightedText value={item.supplier.name} query={highlightQuery} mode="text" /></p>
+                  <p className="text-xs text-zinc-500"><HighlightedText value={formatUzPhoneDisplay(item.supplier.phone)} query={highlightQuery} mode="identifier" /></p>
+                  <SearchEvidence evidence={searchEvidenceFor(item.id, item, activeData)} query={highlightQuery} />
                 </div>
               </div>
               <AmountSummary original={item.originalAmount} paid={item.paidAmount} remaining={item.remainingAmount} />
@@ -262,10 +273,11 @@ export default function QarzlarClient({
               <div className="flex gap-3">
                 <DevicePicture item={item.device} onExpand={(trigger) => openDeviceImages(item.device, trigger)} />
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-2"><h2 className="truncate font-semibold text-zinc-900">{item.device.model}</h2><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${item.status === 'OVERDUE' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-800'}`}>{statusLabels[item.status]}</span></div>
-                  <p className="mt-0.5 text-xs text-zinc-500">{item.device.storage || '—'} · IMEI {item.device.imei}</p>
-                  <p className="mt-2 text-sm font-medium text-zinc-800">{item.customer.name}</p>
-                  <p className="text-xs text-zinc-500">{formatUzPhoneDisplay(item.customer.phone)}</p>
+                  <div className="flex items-start justify-between gap-2"><h2 className="truncate font-semibold text-zinc-900"><HighlightedText value={item.device.model} query={highlightQuery} mode="text" /></h2><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${item.status === 'OVERDUE' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-800'}`}>{statusLabels[item.status]}</span></div>
+                  <p className="mt-0.5 text-xs text-zinc-500"><HighlightedText value={item.device.storage || '—'} query={highlightQuery} mode="auto" /> · IMEI <HighlightedText value={item.device.imei} query={highlightQuery} mode="identifier" /></p>
+                  <p className="mt-2 text-sm font-medium text-zinc-800"><HighlightedText value={item.customer.name} query={highlightQuery} mode="text" /></p>
+                  <p className="text-xs text-zinc-500"><HighlightedText value={formatUzPhoneDisplay(item.customer.phone)} query={highlightQuery} mode="identifier" /></p>
+                  <SearchEvidence evidence={searchEvidenceFor(item.id, item, activeData)} query={highlightQuery} />
                 </div>
               </div>
               <AmountSummary original={item.originalAmount} paid={item.paidAmount} remaining={item.remainingAmount} />

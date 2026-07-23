@@ -11,12 +11,14 @@ import { getShopCurrencyContext } from '@/lib/server/currency'
 import { computeSaleContractMargin, type PurchaseCostLike } from '@/lib/nasiya-contract'
 import { addMoneyDto, createMoneyDto, type CurrencyCode, type MoneyDto } from '@/lib/currency'
 import { reconcileNasiyaLedger, type NasiyaLedgerDto } from '@/lib/nasiya-ledger'
-import { normalizePhone } from '@/lib/phone'
 import type { DeviceListItem, DeviceListSaleInfo } from '@/lib/device-list-contract'
 import { deviceConditionLabel, formatDeviceStorage } from '@/lib/device-specs'
 import { tashkentDayRange } from '@/lib/timezone'
 import type { DeviceStatus, NasiyaStatus } from '@/lib/domain-types'
 import { logCategoryWhere, type LogCategory } from '@/lib/log-categories'
+import { escapeLikeSearchValue, prepareSearchNeedle } from '@/lib/search-needle'
+import { searchMatchEvidence, type SearchMatchEvidence } from '@/lib/search-match-evidence'
+import { buildLogSearchWhere } from '@/lib/server/log-search'
 
 /**
  * Real page/skip/take pagination envelope for the devices/nasiyalar list
@@ -111,8 +113,9 @@ export interface ShopNasiyaListItem {
   nextPaymentDate: string | null
   createdAt: string
   note: string | null
-  device: { id: string; model: string; imei: string }
+  device: { id: string; model: string; imei: string; secondaryImei: string | null }
   customer: { id: string; name: string; phone: string }
+  matchEvidence?: SearchMatchEvidence[]
   schedules: {
     id: string
     dueDate: string
@@ -179,20 +182,33 @@ export interface ShopDevicesQuery {
 }
 
 export function buildShopDevicesWhere(shopId: string, query: Pick<ShopDevicesQuery, 'search' | 'status' | 'condition'>): Prisma.DeviceWhereInput {
-  const search = query.search?.trim() || undefined
-  const searchDigits = search ? normalizePhone(search) : null
-  const searchImei = search?.replace(/[\s-]/g, '') || null
+  const prepared = prepareSearchNeedle(query.search)
+  const hasSearch = prepared.query.length > 0
+  const search = prepared.escapedText
+  const searchImei = prepared.identifierDigits
 
   return {
     shopId,
     deletedAt: null,
     ...(query.status ? { status: query.status } : {}),
     ...(query.condition ? { conditionCode: query.condition } : {}),
-    ...(search
+    ...(hasSearch
       ? {
           OR: [
             { imei: { contains: search, mode: 'insensitive' as const } },
-            { imeis: { some: { deletedAt: null, OR: [{ value: { contains: search, mode: 'insensitive' as const } }, ...(searchImei ? [{ normalizedValue: { contains: searchImei } }] : [])] } } },
+            {
+              imeis: {
+                some: {
+                  deletedAt: null,
+                  OR: [
+                    { value: { contains: search, mode: 'insensitive' as const } },
+                    ...(searchImei
+                      ? [{ normalizedValue: { contains: searchImei } }]
+                      : []),
+                  ],
+                },
+              },
+            },
             { model: { contains: search, mode: 'insensitive' as const } },
             { color: { contains: search, mode: 'insensitive' as const } },
             { storage: { contains: search, mode: 'insensitive' as const } },
@@ -204,10 +220,13 @@ export function buildShopDevicesWhere(shopId: string, query: Pick<ShopDevicesQue
             { sales: { some: { customer: { name: { contains: search, mode: 'insensitive' as const } } } } },
             { nasiya: { some: { customer: { phone: { contains: search, mode: 'insensitive' as const } } } } },
             { nasiya: { some: { customer: { name: { contains: search, mode: 'insensitive' as const } } } } },
-            ...(searchDigits
+            ...(searchImei
               ? [
-                  { sales: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
-                  { nasiya: { some: { customer: { additionalPhones: { has: searchDigits } } } } },
+                  { imei: { contains: searchImei } },
+                  { supplierPhone: { contains: searchImei } },
+                  { supplier: { phone: { contains: searchImei } } },
+                  { sales: { some: { customer: { phoneSearchDigits: { contains: searchImei } } } } },
+                  { nasiya: { some: { customer: { phoneSearchDigits: { contains: searchImei } } } } },
                 ]
               : []),
           ],
@@ -235,7 +254,7 @@ const shopDeviceListSelect = {
   createdAt: true,
   note: true,
   supplierPhone: true,
-  supplier: { select: { name: true } },
+  supplier: { select: { name: true, phone: true } },
   sales: {
     where: { deletedAt: null },
     orderBy: { createdAt: 'desc' as const },
@@ -243,7 +262,7 @@ const shopDeviceListSelect = {
     select: {
       salePrice: true,
       createdAt: true,
-      customer: { select: { name: true } },
+      customer: { select: { name: true, phone: true, additionalPhones: true } },
       contractCurrency: true,
       contractSalePrice: true,
       contractRemainingAmount: true,
@@ -259,7 +278,7 @@ const shopDeviceListSelect = {
       totalAmount: true,
       interestAmount: true,
       createdAt: true,
-      customer: { select: { name: true } },
+      customer: { select: { name: true, phone: true, additionalPhones: true } },
       contractCurrency: true,
       contractTotalAmount: true,
       contractExchangeRateAtCreation: true,
@@ -462,7 +481,24 @@ export async function getShopDevicesList(
   return {
     items: orderedRows.map((row) => {
       const item = mapShopDeviceListRow(row)
-      return visibility.includeOwnerFinancials ? item : redactShopDeviceOwnerFinancials(item)
+      const latestSale = row.sales[0]
+      const latestNasiya = row.nasiya[0]
+      const customer = latestNasiya && (!latestSale || latestNasiya.createdAt > latestSale.createdAt)
+        ? latestNasiya.customer
+        : latestSale?.customer
+      const matchEvidence = searchMatchEvidence(query.search, [
+        { field: 'SECONDARY_IMEI', value: item.secondaryImei, mode: 'identifier' },
+        ...(customer?.additionalPhones ?? []).map((value) => ({
+          field: 'ADDITIONAL_PHONE' as const,
+          value,
+          mode: 'identifier' as const,
+          exposeValue: false,
+        })),
+      ])
+      const withEvidence = matchEvidence.length > 0 ? { ...item, matchEvidence } : item
+      return visibility.includeOwnerFinancials
+        ? withEvidence
+        : redactShopDeviceOwnerFinancials(withEvidence)
     }),
     total,
     skip,
@@ -473,6 +509,62 @@ export async function getShopDevicesList(
 interface DebtDeviceIdRow {
   id: string
   total: bigint
+}
+
+function rawDeviceCustomerSearchPredicate(searchValue?: string) {
+  const prepared = prepareSearchNeedle(searchValue)
+  if (!prepared.query) return Prisma.empty
+  const literalPattern = `%${escapeLikeSearchValue(prepared.query)}%`
+  const identifierPattern = prepared.identifierDigits
+    ? `%${prepared.identifierDigits}%`
+    : null
+  const identifierPredicate = identifierPattern
+    ? Prisma.sql`
+        OR d."imei" LIKE ${identifierPattern}
+        OR d."supplierPhone" LIKE ${identifierPattern}
+        OR c."phoneSearchDigits" LIKE ${identifierPattern}
+        OR EXISTS (
+          SELECT 1 FROM "DeviceImei" di
+          WHERE di."deviceId" = d."id"
+            AND di."shopId" = d."shopId"
+            AND di."deletedAt" IS NULL
+            AND di."normalizedValue" LIKE ${identifierPattern}
+        )
+        OR EXISTS (
+          SELECT 1 FROM "Supplier" supplier
+          WHERE supplier."id" = d."supplierId"
+            AND supplier."shopId" = d."shopId"
+            AND supplier."phone" LIKE ${identifierPattern}
+        )`
+    : Prisma.empty
+
+  return Prisma.sql`AND (
+    d."imei" ILIKE ${literalPattern} ESCAPE '\\'
+    OR d."model" ILIKE ${literalPattern} ESCAPE '\\'
+    OR d."color" ILIKE ${literalPattern} ESCAPE '\\'
+    OR d."storage" ILIKE ${literalPattern} ESCAPE '\\'
+    OR d."note" ILIKE ${literalPattern} ESCAPE '\\'
+    OR d."supplierPhone" ILIKE ${literalPattern} ESCAPE '\\'
+    OR c."name" ILIKE ${literalPattern} ESCAPE '\\'
+    OR c."phone" ILIKE ${literalPattern} ESCAPE '\\'
+    OR EXISTS (
+      SELECT 1 FROM "DeviceImei" di
+      WHERE di."deviceId" = d."id"
+        AND di."shopId" = d."shopId"
+        AND di."deletedAt" IS NULL
+        AND di."value" ILIKE ${literalPattern} ESCAPE '\\'
+    )
+    OR EXISTS (
+      SELECT 1 FROM "Supplier" supplier
+      WHERE supplier."id" = d."supplierId"
+        AND supplier."shopId" = d."shopId"
+        AND (
+          supplier."name" ILIKE ${literalPattern} ESCAPE '\\'
+          OR supplier."phone" ILIKE ${literalPattern} ESCAPE '\\'
+        )
+    )
+    ${identifierPredicate}
+  )`
 }
 
 /**
@@ -490,38 +582,11 @@ async function findShopDebtDeviceIdsByPriority(input: {
   take: number
   now?: Date
 }) {
-  const search = input.search?.trim() || null
-  const searchDigits = search ? normalizePhone(search) : null
-  const searchImei = search?.replace(/[\s-]/g, '') || null
   const { start, end } = tashkentDayRange(input.now ?? new Date())
   const conditionPredicate = input.condition
     ? Prisma.sql`AND d."conditionCode" = ${input.condition}`
     : Prisma.empty
-  const searchPredicate = search
-    ? Prisma.sql`AND (
-        d."imei" ILIKE '%' || ${search} || '%'
-        OR d."model" ILIKE '%' || ${search} || '%'
-        OR d."color" ILIKE '%' || ${search} || '%'
-        OR d."storage" ILIKE '%' || ${search} || '%'
-        OR d."note" ILIKE '%' || ${search} || '%'
-        OR d."supplierPhone" ILIKE '%' || ${search} || '%'
-        OR c."name" ILIKE '%' || ${search} || '%'
-        OR c."phone" ILIKE '%' || ${search} || '%'
-        OR EXISTS (
-          SELECT 1 FROM "DeviceImei" di
-          WHERE di."deviceId" = d."id" AND di."shopId" = d."shopId" AND di."deletedAt" IS NULL
-            AND (di."value" ILIKE '%' || ${search} || '%'
-              OR (${searchImei}::text IS NOT NULL AND di."normalizedValue" ILIKE '%' || ${searchImei} || '%'))
-        )
-        OR EXISTS (
-          SELECT 1 FROM "Supplier" supplier
-          WHERE supplier."id" = d."supplierId" AND supplier."shopId" = d."shopId"
-            AND (supplier."name" ILIKE '%' || ${search} || '%'
-              OR supplier."phone" ILIKE '%' || ${search} || '%')
-        )
-        OR (${searchDigits}::text IS NOT NULL AND c."additionalPhones" @> ARRAY[${searchDigits}]::text[])
-      )`
-    : Prisma.empty
+  const searchPredicate = rawDeviceCustomerSearchPredicate(input.search)
 
   const rows = await prisma.$queryRaw<DebtDeviceIdRow[]>(Prisma.sql`
     WITH debt_devices AS (
@@ -615,9 +680,10 @@ export function buildShopNasiyalarWhere(
   shopId: string,
   query: Pick<ShopNasiyalarQuery, 'search' | 'resolutionState'>,
 ): Prisma.NasiyaWhereInput {
-  const search = query.search?.trim() || undefined
-  const searchDigits = search ? normalizePhone(search) : null
-  const searchImei = search?.replace(/[\s-]/g, '') || null
+  const prepared = prepareSearchNeedle(query.search)
+  const hasSearch = prepared.query.length > 0
+  const search = prepared.escapedText
+  const searchImei = prepared.identifierDigits
 
   return {
     shopId,
@@ -626,7 +692,7 @@ export function buildShopNasiyalarWhere(
     // longer supported, so they are intentionally outside every live list.
     status: { not: 'CANCELLED' },
     resolutionState: query.resolutionState ?? 'ACTIVE',
-    ...(search
+    ...(hasSearch
       ? {
           OR: [
             { customer: { name: { contains: search, mode: 'insensitive' as const } } },
@@ -640,14 +706,21 @@ export function buildShopNasiyalarWhere(
                     deletedAt: null,
                     OR: [
                       { value: { contains: search, mode: 'insensitive' as const } },
-                      ...(searchImei ? [{ normalizedValue: { contains: searchImei } }] : []),
+                      ...(searchImei
+                        ? [{ normalizedValue: { contains: searchImei } }]
+                        : []),
                     ],
                   },
                 },
               },
             },
             { note: { contains: search, mode: 'insensitive' as const } },
-            ...(searchDigits ? [{ customer: { additionalPhones: { has: searchDigits } } }] : []),
+            ...(searchImei
+              ? [
+                  { customer: { phoneSearchDigits: { contains: searchImei } } },
+                  { device: { imei: { contains: searchImei } } },
+                ]
+              : []),
           ],
         }
       : {}),
@@ -717,6 +790,43 @@ function deriveNasiyaCollectionWorkItem(input: {
   }
 }
 
+function rawNasiyaSearchPredicate(searchValue?: string) {
+  const prepared = prepareSearchNeedle(searchValue)
+  if (!prepared.query) return Prisma.empty
+  const literalPattern = `%${escapeLikeSearchValue(prepared.query)}%`
+  const identifierPattern = prepared.identifierDigits
+    ? `%${prepared.identifierDigits}%`
+    : null
+  const identifierPredicate = identifierPattern
+    ? Prisma.sql`
+        OR c."phoneSearchDigits" LIKE ${identifierPattern}
+        OR d."imei" LIKE ${identifierPattern}
+        OR EXISTS (
+          SELECT 1 FROM "DeviceImei" di
+          WHERE di."deviceId" = d."id"
+            AND di."shopId" = n."shopId"
+            AND di."deletedAt" IS NULL
+            AND di."normalizedValue" LIKE ${identifierPattern}
+        )`
+    : Prisma.empty
+
+  return Prisma.sql`AND (
+    c."name" ILIKE ${literalPattern} ESCAPE '\\'
+    OR c."phone" ILIKE ${literalPattern} ESCAPE '\\'
+    OR d."model" ILIKE ${literalPattern} ESCAPE '\\'
+    OR d."imei" ILIKE ${literalPattern} ESCAPE '\\'
+    OR n."note" ILIKE ${literalPattern} ESCAPE '\\'
+    OR EXISTS (
+      SELECT 1 FROM "DeviceImei" di
+      WHERE di."deviceId" = d."id"
+        AND di."shopId" = n."shopId"
+        AND di."deletedAt" IS NULL
+        AND di."value" ILIKE ${literalPattern} ESCAPE '\\'
+    )
+    ${identifierPredicate}
+  )`
+}
+
 /**
  * Page a derived nasiya status in PostgreSQL instead of loading every contract
  * and filtering in Node. The SQL mirrors deriveContractNasiyaStatus for the
@@ -732,26 +842,8 @@ export async function findShopNasiyaIdsByDerivedStatus(input: {
   take: number
   now?: Date
 }) {
-  const search = input.search?.trim() || null
-  const searchDigits = search ? normalizePhone(search) : null
-  const searchImei = search?.replace(/[\s-]/g, '') || null
   const { start } = tashkentDayRange(input.now ?? new Date())
-  const searchPredicate = search
-    ? Prisma.sql`AND (
-        c."name" ILIKE '%' || ${search} || '%'
-        OR c."phone" ILIKE '%' || ${search} || '%'
-        OR d."model" ILIKE '%' || ${search} || '%'
-        OR d."imei" ILIKE '%' || ${search} || '%'
-        OR n."note" ILIKE '%' || ${search} || '%'
-        OR EXISTS (
-          SELECT 1 FROM "DeviceImei" di
-          WHERE di."deviceId" = d."id" AND di."shopId" = n."shopId" AND di."deletedAt" IS NULL
-            AND (di."value" ILIKE '%' || ${search} || '%'
-              OR (${searchImei}::text IS NOT NULL AND di."normalizedValue" ILIKE '%' || ${searchImei} || '%'))
-        )
-        OR (${searchDigits}::text IS NOT NULL AND c."additionalPhones" @> ARRAY[${searchDigits}]::text[])
-      )`
-    : Prisma.empty
+  const searchPredicate = rawNasiyaSearchPredicate(input.search)
   const rows = await prisma.$queryRaw<DerivedStatusIdRow[]>(Prisma.sql`
     WITH contract_rows AS (
       SELECT
@@ -819,26 +911,8 @@ export async function findShopNasiyaIdsByCohort(input: {
   take: number
   now?: Date
 }) {
-  const search = input.search?.trim() || null
-  const searchDigits = search ? normalizePhone(search) : null
-  const searchImei = search?.replace(/[\s-]/g, '') || null
   const { start, end } = tashkentDayRange(input.now ?? new Date())
-  const searchPredicate = search
-    ? Prisma.sql`AND (
-        c."name" ILIKE '%' || ${search} || '%'
-        OR c."phone" ILIKE '%' || ${search} || '%'
-        OR d."model" ILIKE '%' || ${search} || '%'
-        OR d."imei" ILIKE '%' || ${search} || '%'
-        OR n."note" ILIKE '%' || ${search} || '%'
-        OR EXISTS (
-          SELECT 1 FROM "DeviceImei" di
-          WHERE di."deviceId" = d."id" AND di."shopId" = n."shopId" AND di."deletedAt" IS NULL
-            AND (di."value" ILIKE '%' || ${search} || '%'
-              OR (${searchImei}::text IS NOT NULL AND di."normalizedValue" ILIKE '%' || ${searchImei} || '%'))
-        )
-        OR (${searchDigits}::text IS NOT NULL AND c."additionalPhones" @> ARRAY[${searchDigits}]::text[])
-      )`
-    : Prisma.empty
+  const searchPredicate = rawNasiyaSearchPredicate(input.search)
   // Keep the selected work queue explicit in the generated SQL rather than
   // binding a text parameter into boolean expressions. Besides avoiding a
   // PostgreSQL type-inference edge case, this makes the schedule-level
@@ -998,6 +1072,7 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
           id: true,
           name: true,
           phone: true,
+          additionalPhones: true,
         },
       },
       device: {
@@ -1005,6 +1080,11 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
           id: true,
           model: true,
           imei: true,
+          imeis: {
+            where: { deletedAt: null },
+            orderBy: { slot: 'asc' },
+            select: { slot: true, value: true },
+          },
         },
       },
       schedules: {
@@ -1105,8 +1185,35 @@ export async function getShopNasiyalarList(shopId: string, query: ShopNasiyalarQ
         nextPaymentDate: ledger.nextPaymentDate,
         createdAt: nasiya.createdAt.toISOString(),
         note: nasiya.note,
-        customer: nasiya.customer,
-        device: nasiya.device,
+        customer: {
+          id: nasiya.customer.id,
+          name: nasiya.customer.name,
+          phone: nasiya.customer.phone,
+        },
+        device: {
+          id: nasiya.device.id,
+          model: nasiya.device.model,
+          imei: nasiya.device.imei,
+          secondaryImei: nasiya.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null,
+        },
+        ...(query.search
+          ? {
+              matchEvidence: searchMatchEvidence(query.search, [
+                {
+                  field: 'SECONDARY_IMEI',
+                  value: nasiya.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value,
+                  mode: 'identifier',
+                },
+                ...nasiya.customer.additionalPhones.map((value) => ({
+                  field: 'ADDITIONAL_PHONE' as const,
+                  value,
+                  mode: 'identifier' as const,
+                  exposeValue: false,
+                })),
+                { field: 'NOTE', value: nasiya.note, mode: 'text', exposeValue: false },
+              ]),
+            }
+          : {}),
         schedules: nasiya.schedules.map((schedule) => ({
           id: schedule.id,
           dueDate: schedule.dueDate.toISOString(),
@@ -1148,18 +1255,7 @@ export async function getShopLogsInitial(
   const fromDate = query.dateFrom ? new Date(query.dateFrom) : null
   const toDate = query.dateTo ? new Date(`${query.dateTo}T23:59:59.999Z`) : null
   const categoryWhere = logCategoryWhere(query.category ?? 'all')
-  const search = query.search?.trim()
-  const searchWhere: Prisma.LogWhereInput = search
-    ? {
-        OR: [
-          { action: { contains: search, mode: 'insensitive' } },
-          { targetType: { contains: search, mode: 'insensitive' } },
-          { targetId: { contains: search, mode: 'insensitive' } },
-          { note: { contains: search, mode: 'insensitive' } },
-          { shop: { name: { contains: search, mode: 'insensitive' } } },
-        ],
-      }
-    : {}
+  const searchWhere = buildLogSearchWhere(query.search)
   const where: Prisma.LogWhereInput = {
     shopId,
     actorType: 'SHOP_ADMIN' as const,

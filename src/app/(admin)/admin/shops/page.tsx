@@ -19,11 +19,17 @@ import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { ShopStatusBadge } from '@/components/admin/shop-status-badge'
 import type { ShopStatus } from '@/lib/domain-types'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
 type FilterTab = 'barchasi' | ShopStatus
 type PaymentView = 'all' | 'overdue'
 
-interface Shop {
+interface Shop extends SearchEvidenceCarrier {
   id: string
   name: string
   ownerName: string
@@ -31,6 +37,11 @@ interface Shop {
   shopNumber: string
   status: ShopStatus
   subscriptionDue: string
+}
+
+interface ShopsPayload extends SearchEvidenceCarrier {
+  items: Shop[]
+  matchEvidenceById?: unknown
 }
 
 const tabs: { key: FilterTab; label: string }[] = [
@@ -87,27 +98,23 @@ export default function ShopsPage() {
       if (debouncedSearch) params.set('search', debouncedSearch)
       if (activeTab !== 'barchasi') params.set('status', activeTab)
       const response = await fetch(`/api/shops?${params.toString()}`, { signal, cache: 'no-store' })
-      const json = await response.json() as { success: boolean; data?: Shop[]; error?: string }
+      const json = await response.json() as { success: boolean; data?: Shop[] | ShopsPayload; error?: string }
       if (!response.ok || !json.success || !json.data) throw new Error(json.error ?? "Do'konlar yuklanmadi")
-      return json.data
+      return Array.isArray(json.data) ? { items: json.data } satisfies ShopsPayload : json.data
     },
     placeholderData: keepPreviousData,
   })
-  const shops = shopsQuery.data ?? []
+  const shopsPayload = shopsQuery.data
+  const shops = shopsPayload?.items ?? []
   const loading = shopsQuery.isPending && !shopsQuery.data
   const error = shopsQuery.error instanceof Error ? shopsQuery.error.message : null
+  const highlightQuery = search.trim() === debouncedSearch && !shopsQuery.isPlaceholderData
+    ? debouncedSearch
+    : ''
 
   const filtered = shops
     .filter((s) => {
-      const matchTab = activeTab === 'barchasi' || s.status === activeTab
-      const q = debouncedSearch.toLowerCase()
-      const matchSearch =
-        !q ||
-        s.name.toLowerCase().includes(q) ||
-        s.ownerName.toLowerCase().includes(q) ||
-        s.ownerPhone.includes(q) ||
-        s.shopNumber.includes(q)
-      return matchTab && matchSearch
+      return activeTab === 'barchasi' || s.status === activeTab
     })
     .sort((a, b) => {
       if (paymentView === 'overdue') {
@@ -198,12 +205,13 @@ export default function ShopsPage() {
                         aria-label={`${shop.name} do'koni ma'lumotlarini ochish`}
                         className="font-medium text-zinc-900 hover:underline"
                       >
-                        {shop.name}
+                        <HighlightedText value={shop.name} query={highlightQuery} mode="text" />
                       </StretchedLink>
+                      <SearchEvidence evidence={searchEvidenceFor(shop.id, shop, shopsPayload)} query={highlightQuery} />
                     </TableCell>
-                    <TableCell className="text-sm text-zinc-600">{shop.ownerName}</TableCell>
-                    <TableCell className="text-sm text-zinc-500 font-mono">{formatUzPhoneDisplay(shop.ownerPhone)}</TableCell>
-                    <TableCell className="text-sm text-zinc-500">{shop.shopNumber}</TableCell>
+                    <TableCell className="text-sm text-zinc-600"><HighlightedText value={shop.ownerName} query={highlightQuery} mode="text" /></TableCell>
+                    <TableCell className="text-sm text-zinc-500 font-mono"><HighlightedText value={formatUzPhoneDisplay(shop.ownerPhone)} query={highlightQuery} mode="identifier" /></TableCell>
+                    <TableCell className="text-sm text-zinc-500"><HighlightedText value={shop.shopNumber} query={highlightQuery} mode="auto" /></TableCell>
                     <TableCell>
                       <ShopStatusBadge status={shop.status} />
                     </TableCell>

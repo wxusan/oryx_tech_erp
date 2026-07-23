@@ -17,6 +17,7 @@ import { ok, badRequest, forbidden, serverError } from '@/lib/api-helpers'
 import { logger } from '@/lib/logger'
 import { getShopNasiyalarList, type NasiyaCohortFilter, type NasiyaStatusFilter } from '@/lib/server/shop-lists'
 import { principalHasPermission } from '@/lib/server/shop-access'
+import { prepareSearchNeedle } from '@/lib/search-needle'
 
 const nasiyaStatuses = ['ACTIVE', 'COMPLETED', 'OVERDUE'] as const
 const resolutionFilters = ['ARCHIVED'] as const
@@ -72,7 +73,9 @@ export async function GET(req: NextRequest) {
       return forbidden("Arxivlangan nasiyalar uchun ruxsat berilmagan")
     }
     const status = resolutionState || cohort ? undefined : statusParam as NasiyaStatusFilter | undefined
-    const search = searchParams.get('search')?.trim()
+    const preparedSearch = prepareSearchNeedle(searchParams.get('search'))
+    if (preparedSearch.exceedsMaxLength) return badRequest('Qidiruv 100 ta belgidan oshmasligi kerak')
+    const search = preparedSearch.query
     const requestedTake = Number(searchParams.get('take') ?? 25)
     const requestedSkip = Number(searchParams.get('skip') ?? 0)
     const take = Number.isFinite(requestedTake) ? Math.trunc(Math.min(Math.max(requestedTake, 1), 100)) : 25

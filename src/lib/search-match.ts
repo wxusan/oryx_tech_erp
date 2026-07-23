@@ -4,19 +4,17 @@
  * without rendering React; both the client component and its tests import
  * from here.
  *
- * Phone matching handles spaces/plus signs by also comparing normalized
- * (digits-only) forms, so "90 123 45 67" matches "+998901234567".
+ * Identifier matching compares one digits-only contiguous needle when, and
+ * only when, the whole query is identifier-like. Mixed model text such as
+ * "iPhone 13" therefore never falls back to an unrelated phone containing 13.
  */
 
-import { normalizePhone } from '@/lib/phone'
-
-function norm(value: string | null | undefined): string {
-  return (value ?? '').toLowerCase()
-}
+import { matchesSearchValue } from '@/lib/search-needle'
 
 export interface DeviceSearchable {
   model: string
   imei: string
+  imeis?: Array<{ value: string } | string> | null
   color?: string | null
   storage?: string | null
   batteryHealth?: number | null
@@ -26,48 +24,60 @@ export interface DeviceSearchable {
   // The sold-to/nasiya customer's name, if this device has been sold —
   // lets "devices" search find e.g. "which device did Aziz buy". See item 14.
   customerName?: string | null
+  customerPhone?: string | null
+  additionalPhones?: string[] | null
 }
 
 export function matchesDeviceSearch(device: DeviceSearchable, query: string): boolean {
-  const q = query.trim().toLowerCase()
-  if (!q) return true
-  const qDigits = normalizePhone(query) ?? ''
+  if (!query.trim()) return true
+  const imeis = (device.imeis ?? []).map((entry) => typeof entry === 'string' ? entry : entry.value)
 
-  return (
-    norm(device.model).includes(q) ||
-    device.imei.toLowerCase().includes(q) ||
-    norm(device.color).includes(q) ||
-    norm(device.storage).includes(q) ||
-    norm(device.note).includes(q) ||
-    norm(device.supplierName).includes(q) ||
-    norm(device.supplierPhone).includes(q) ||
-    norm(device.customerName).includes(q) ||
-    (qDigits.length > 0 && (normalizePhone(device.supplierPhone ?? '') ?? '').includes(qDigits))
-  )
+  return [
+    [device.model, 'text'],
+    [device.imei, 'identifier'],
+    ...imeis.map((value) => [value, 'identifier']),
+    [device.color, 'text'],
+    [device.storage, 'text'],
+    [device.note, 'text'],
+    [device.supplierName, 'text'],
+    [device.supplierPhone, 'identifier'],
+    [device.customerName, 'text'],
+    [device.customerPhone, 'identifier'],
+    ...(device.additionalPhones ?? []).map((value) => [value, 'identifier']),
+  ].some(([value, mode]) => matchesSearchValue(
+    value as string | null | undefined,
+    query,
+    mode as 'text' | 'identifier',
+  ))
 }
 
 export interface NasiyaSearchable {
   customerName: string
   customerPhone: string
+  additionalPhones?: string[] | null
   deviceModel: string
   imei: string
+  imeis?: Array<{ value: string } | string> | null
   note?: string | null
   statusLabel?: string | null
 }
 
 export function matchesNasiyaSearch(nasiya: NasiyaSearchable, query: string): boolean {
-  const q = query.trim().toLowerCase()
-  if (!q) return true
-  const qDigits = normalizePhone(query) ?? ''
-  const customerPhoneDigits = normalizePhone(nasiya.customerPhone) ?? ''
+  if (!query.trim()) return true
+  const imeis = (nasiya.imeis ?? []).map((entry) => typeof entry === 'string' ? entry : entry.value)
 
-  return (
-    norm(nasiya.customerName).includes(q) ||
-    norm(nasiya.customerPhone).includes(q) ||
-    (qDigits.length > 0 && customerPhoneDigits.includes(qDigits)) ||
-    norm(nasiya.deviceModel).includes(q) ||
-    nasiya.imei.toLowerCase().includes(q) ||
-    norm(nasiya.note).includes(q) ||
-    norm(nasiya.statusLabel).includes(q)
-  )
+  return [
+    [nasiya.customerName, 'text'],
+    [nasiya.customerPhone, 'identifier'],
+    ...(nasiya.additionalPhones ?? []).map((value) => [value, 'identifier']),
+    [nasiya.deviceModel, 'text'],
+    [nasiya.imei, 'identifier'],
+    ...imeis.map((value) => [value, 'identifier']),
+    [nasiya.note, 'text'],
+    [nasiya.statusLabel, 'text'],
+  ].some(([value, mode]) => matchesSearchValue(
+    value as string | null | undefined,
+    query,
+    mode as 'text' | 'identifier',
+  ))
 }

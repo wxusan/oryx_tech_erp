@@ -4,7 +4,8 @@ import { Prisma } from '@/generated/prisma/client'
 import { prisma } from '@/lib/prisma'
 import { createMoneyDto } from '@/lib/currency'
 import { tashkentDayRange, tashkentDaysUntil, tashkentMonthRangeFromKey, isBeforeTashkentToday } from '@/lib/timezone'
-import { normalizePhone } from '@/lib/phone'
+import { prepareSearchNeedle } from '@/lib/search-needle'
+import { searchMatchEvidence, type SearchMatchEvidence } from '@/lib/search-match-evidence'
 import { createPrivateUploadReference, isPrivateUploadStoredKey, privateUploadPreviewUrl } from '@/lib/server/private-upload-reference'
 
 export type DebtTab = 'outgoing' | 'incoming'
@@ -82,12 +83,99 @@ function cursorWhere(cursor: ReturnType<typeof decodeCursor>) {
   } : {}
 }
 
+export function buildOutgoingDebtSearchWhere(
+  searchValue: string | null | undefined,
+): Prisma.SupplierPayableWhereInput {
+  const prepared = prepareSearchNeedle(searchValue)
+  if (!prepared.query) return {}
+
+  return {
+    AND: [{
+      OR: [
+        { supplierName: { contains: prepared.escapedText, mode: 'insensitive' } },
+        { supplierPhone: { contains: prepared.escapedText, mode: 'insensitive' } },
+        { device: { model: { contains: prepared.escapedText, mode: 'insensitive' } } },
+        { device: { imei: { contains: prepared.escapedText, mode: 'insensitive' } } },
+        {
+          device: {
+            imeis: {
+              some: {
+                deletedAt: null,
+                OR: [
+                  { value: { contains: prepared.escapedText, mode: 'insensitive' } },
+                  ...(prepared.identifierDigits
+                    ? [{ normalizedValue: { contains: prepared.identifierDigits } }]
+                    : []),
+                ],
+              },
+            },
+          },
+        },
+        ...(prepared.identifierDigits
+          ? [
+              { supplierPhone: { contains: prepared.identifierDigits } },
+              { device: { imei: { contains: prepared.identifierDigits } } },
+            ]
+          : []),
+      ],
+    }],
+  }
+}
+
+export function buildIncomingDebtSearchWhere(
+  searchValue: string | null | undefined,
+): Prisma.SaleWhereInput {
+  const prepared = prepareSearchNeedle(searchValue)
+  if (!prepared.query) return {}
+
+  return {
+    AND: [{
+      OR: [
+        { customer: { name: { contains: prepared.escapedText, mode: 'insensitive' } } },
+        { customer: { phone: { contains: prepared.escapedText, mode: 'insensitive' } } },
+        { device: { model: { contains: prepared.escapedText, mode: 'insensitive' } } },
+        { device: { imei: { contains: prepared.escapedText, mode: 'insensitive' } } },
+        {
+          device: {
+            imeis: {
+              some: {
+                deletedAt: null,
+                OR: [
+                  { value: { contains: prepared.escapedText, mode: 'insensitive' } },
+                  ...(prepared.identifierDigits
+                    ? [{ normalizedValue: { contains: prepared.identifierDigits } }]
+                    : []),
+                ],
+              },
+            },
+          },
+        },
+        ...(prepared.identifierDigits
+          ? [
+              { customer: { phoneSearchDigits: { contains: prepared.identifierDigits } } },
+              { device: { imei: { contains: prepared.identifierDigits } } },
+            ]
+          : []),
+      ],
+    }],
+  }
+}
+
+function maskedImeiEvidence(evidence: SearchMatchEvidence[], secondaryImei: string | null) {
+  if (evidence[0]?.field !== 'SECONDARY_IMEI' || !secondaryImei) return evidence
+  return [{
+    field: 'SECONDARY_IMEI' as const,
+    displayText: maskedImei(secondaryImei),
+    mode: 'masked' as const,
+    highlightable: false,
+  }]
+}
+
 export async function queryOutgoingDebts(shopId: string, input: Omit<DebtQueryInput, 'tab'>) {
   const { start, end, monthKey } = debtMonthScope(input.month)
   const cursor = decodeCursor(input.cursor)
   const take = Math.min(Math.max(Math.trunc(input.take ?? 18), 1), 30)
   const search = input.search?.trim()
-  const digits = search ? normalizePhone(search) : null
   const status = input.status ?? 'ALL'
   const now = new Date()
   const { start: todayStart } = tashkentDayRange(now)
@@ -101,17 +189,7 @@ export async function queryOutgoingDebts(shopId: string, input: Omit<DebtQueryIn
     ...cursorWhere(cursor),
     ...(status === 'PENDING' ? { status: 'PENDING' } : {}),
     ...(status === 'PARTIAL' ? { status: 'PARTIAL' } : {}),
-    ...(search ? {
-      AND: [{
-        OR: [
-          { supplierName: { contains: search, mode: 'insensitive' } },
-          { supplierPhone: { contains: search, mode: 'insensitive' } },
-          ...(digits ? [{ supplierPhone: { contains: digits } }] : []),
-          { device: { model: { contains: search, mode: 'insensitive' } } },
-          { device: { imei: { contains: search, mode: 'insensitive' } } },
-        ],
-      }],
-    } : {}),
+    ...buildOutgoingDebtSearchWhere(search),
   }
   const rows = await prisma.supplierPayable.findMany({
     where,
@@ -124,6 +202,11 @@ export async function queryOutgoingDebts(shopId: string, input: Omit<DebtQueryIn
       device: { select: {
         id: true, model: true, color: true, storage: true, batteryHealth: true,
         conditionCode: true, imei: true, imageUrls: true,
+        imeis: {
+          where: { deletedAt: null },
+          orderBy: { slot: 'asc' },
+          select: { slot: true, value: true },
+        },
       } },
       payments: {
         orderBy: [{ paidAt: 'desc' }, { id: 'desc' }],
@@ -160,6 +243,15 @@ export async function queryOutgoingDebts(shopId: string, input: Omit<DebtQueryIn
         imei: maskedImei(row.device.imei),
         imageUrls: safeDeviceImages(shopId, row.device.imageUrls),
       },
+      ...(search
+        ? {
+            matchEvidence: maskedImeiEvidence(searchMatchEvidence(search, [{
+              field: 'SECONDARY_IMEI',
+              value: row.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value,
+              mode: 'identifier',
+            }]), row.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null),
+          }
+        : {}),
       payments: row.payments.map((payment) => ({
         id: payment.id,
         amount: createMoneyDto(payment.paymentInputCurrency, payment.paymentInputAmount.toString()),
@@ -176,7 +268,6 @@ export async function queryIncomingPayLaterDebts(shopId: string, input: Omit<Deb
   const cursor = decodeCursor(input.cursor)
   const take = Math.min(Math.max(Math.trunc(input.take ?? 18), 1), 30)
   const search = input.search?.trim()
-  const digits = search ? normalizePhone(search) : null
   const status = input.status ?? 'ALL'
   const now = new Date()
   const { start: todayStart } = tashkentDayRange(now)
@@ -191,17 +282,7 @@ export async function queryIncomingPayLaterDebts(shopId: string, input: Omit<Deb
     ...cursorWhere(cursor),
     ...(status === 'PENDING' ? { contractAmountPaid: 0 } : {}),
     ...(status === 'PARTIAL' ? { contractAmountPaid: { gt: 0 } } : {}),
-    ...(search ? {
-      AND: [{
-        OR: [
-          { customer: { name: { contains: search, mode: 'insensitive' } } },
-          { customer: { phone: { contains: search, mode: 'insensitive' } } },
-          ...(digits ? [{ customer: { normalizedPhone: { contains: digits } } }] : []),
-          { device: { model: { contains: search, mode: 'insensitive' } } },
-          { device: { imei: { contains: search, mode: 'insensitive' } } },
-        ],
-      }],
-    } : {}),
+    ...buildIncomingDebtSearchWhere(search),
   }
   const rows = await prisma.sale.findMany({
     where,
@@ -211,10 +292,15 @@ export async function queryIncomingPayLaterDebts(shopId: string, input: Omit<Deb
       id: true, contractCurrency: true, contractSalePrice: true, contractAmountPaid: true,
       contractRemainingAmount: true, dueDate: true, createdAt: true, reminderEnabled: true,
       olibSotdimOperation: { select: { id: true } },
-      customer: { select: { id: true, name: true, phone: true } },
+      customer: { select: { id: true, name: true, phone: true, additionalPhones: true } },
       device: { select: {
         id: true, model: true, color: true, storage: true, batteryHealth: true,
         conditionCode: true, imei: true, imageUrls: true,
+        imeis: {
+          where: { deletedAt: null },
+          orderBy: { slot: 'asc' },
+          select: { slot: true, value: true },
+        },
       } },
       payments: {
         orderBy: [{ paidAt: 'desc' }, { id: 'desc' }],
@@ -231,7 +317,11 @@ export async function queryIncomingPayLaterDebts(shopId: string, input: Omit<Deb
     items: visible.map((row) => ({
       id: row.id,
       origin: row.olibSotdimOperation ? 'OLIB_SOTDIM_SALE' as const : 'ORDINARY_SALE' as const,
-      customer: row.customer,
+      customer: {
+        id: row.customer.id,
+        name: row.customer.name,
+        phone: row.customer.phone,
+      },
       originalAmount: createMoneyDto(row.contractCurrency, row.contractSalePrice.toString()),
       paidAmount: createMoneyDto(row.contractCurrency, row.contractAmountPaid.toString()),
       remainingAmount: createMoneyDto(row.contractCurrency, row.contractRemainingAmount.toString()),
@@ -251,6 +341,23 @@ export async function queryIncomingPayLaterDebts(shopId: string, input: Omit<Deb
         imei: maskedImei(row.device.imei),
         imageUrls: safeDeviceImages(shopId, row.device.imageUrls),
       },
+      ...(search
+        ? {
+            matchEvidence: maskedImeiEvidence(searchMatchEvidence(search, [
+              {
+                field: 'SECONDARY_IMEI',
+                value: row.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value,
+                mode: 'identifier',
+              },
+              ...row.customer.additionalPhones.map((value) => ({
+                field: 'ADDITIONAL_PHONE' as const,
+                value,
+                mode: 'identifier' as const,
+                exposeValue: false,
+              })),
+            ]), row.device.imeis.find((entry) => entry.slot === 'SECONDARY')?.value ?? null),
+          }
+        : {}),
       payments: row.payments.map((payment) => ({
         id: payment.id,
         amount: createMoneyDto(payment.paymentInputCurrency ?? 'UZS', (payment.paymentInputAmount ?? payment.amount).toString()),

@@ -159,7 +159,7 @@ export const LOG_TARGET_LABELS = {
   ShopPackageVersion: 'Paket narxi',
 } as const
 
-const DIRECT_ACTION_LABELS: Readonly<Record<string, string>> = {
+export const LOG_DIRECT_ACTION_LABELS: Readonly<Record<string, string>> = {
   IMPORT: 'Ma’lumotlar import qilindi',
   CREATE_NASIYA: 'Yangi nasiya yaratildi',
   IMPORT_NASIYA: 'Avvalgi nasiya import qilindi',
@@ -205,7 +205,7 @@ const DIRECT_ACTION_LABELS: Readonly<Record<string, string>> = {
   NASIYA_NATIVE_LEDGER_STRUCTURAL_REPAIR: 'Nasiya hisob-kitobi tuzilmasi tiklandi',
 }
 
-const CONTEXT_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+export const LOG_CONTEXT_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   PAYMENT: {
     NasiyaSchedule: 'Nasiya to‘lovi qabul qilindi',
     Nasiya: 'Nasiya to‘lovi qabul qilindi',
@@ -263,9 +263,9 @@ const CONTEXT_ACTION_LABELS: Readonly<Record<string, Readonly<Record<string, str
 
 export function logActionLabel(action: string | null | undefined, targetType?: string | null) {
   if (!action) return 'Noma’lum amal'
-  const contextual = CONTEXT_ACTION_LABELS[action]
+  const contextual = LOG_CONTEXT_ACTION_LABELS[action]
   if (contextual) return contextual[targetType ?? ''] ?? contextual['*']
-  return DIRECT_ACTION_LABELS[action] ?? 'Noma’lum amal'
+  return LOG_DIRECT_ACTION_LABELS[action] ?? 'Noma’lum amal'
 }
 
 export function logTargetLabel(value?: string | null) {

@@ -1,16 +1,22 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { Check } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { displayImei } from '@/lib/device-display'
 import { useShopAccess } from '@/components/shop/shop-access-context'
+import {
+  HighlightedText,
+  SearchEvidence,
+  searchEvidenceFor,
+  type SearchEvidenceCarrier,
+} from '@/components/highlighted-text'
 
 const PAGE_SIZE = 25
 const SEARCH_DEBOUNCE_MS = 250
 
-export interface InStockPickerDevice {
+export interface InStockPickerDevice extends SearchEvidenceCarrier {
   id: string
   model: string
   color: string | null
@@ -30,6 +36,7 @@ interface PageEnvelope {
   total: number
   skip: number
   take: number
+  matchEvidenceById?: unknown
 }
 
 interface ApiResponse<T> {
@@ -46,17 +53,31 @@ interface Props {
   formatPrice: (price: number) => string
 }
 
-function deviceMeta(device: InStockPickerDevice) {
-  return [
-    device.color,
-    device.storageDisplay || device.storage,
-    device.batteryHealth != null ? `${device.batteryHealth}%` : null,
-    device.conditionLabel,
-    `IMEI: ${displayImei(device.imei)}`,
-    device.secondaryImei ? `Qo‘shimcha IMEI: ${displayImei(device.secondaryImei)}` : null,
-  ]
-    .filter(Boolean)
-    .join(' · ')
+function DeviceMeta({ device, query }: { device: InStockPickerDevice; query: string }) {
+  const fields = [
+    { value: device.color, mode: 'text' as const },
+    { value: device.storageDisplay || device.storage, mode: 'auto' as const },
+    { value: device.batteryHealth != null ? `${device.batteryHealth}%` : null, mode: 'text' as const },
+    { value: device.conditionLabel, mode: 'text' as const },
+  ].filter((field) => field.value)
+
+  return (
+    <>
+      {fields.map((field, index) => (
+        <Fragment key={`${field.value}-${index}`}>
+          {index > 0 && ' · '}
+          <HighlightedText value={field.value} query={query} mode={field.mode} />
+        </Fragment>
+      ))}
+      {fields.length > 0 && ' · '}
+      IMEI: <HighlightedText value={displayImei(device.imei)} query={query} mode="identifier" />
+      {device.secondaryImei && (
+        <Fragment>
+          {' · '}Qo‘shimcha IMEI: <HighlightedText value={displayImei(device.secondaryImei)} query={query} mode="identifier" />
+        </Fragment>
+      )}
+    </>
+  )
 }
 
 function normalizeDevice(device: InStockPickerDevice): InStockPickerDevice {
@@ -73,6 +94,8 @@ export function InStockDevicePicker({ purpose, selectedDevice, onSelect, onDeepL
   const [query, setQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
   const [devices, setDevices] = useState<InStockPickerDevice[]>([])
+  const [matchEvidenceById, setMatchEvidenceById] = useState<unknown>()
+  const [resultQuery, setResultQuery] = useState('')
   const [total, setTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [loadingMore, setLoadingMore] = useState(false)
@@ -119,10 +142,14 @@ export function InStockDevicePicker({ purpose, selectedDevice, onSelect, onDeepL
 
         setDevices(json.data.items.map(normalizeDevice))
         setTotal(json.data.total)
+        setMatchEvidenceById(json.data.matchEvidenceById)
+        setResultQuery(debouncedQuery)
       } catch (loadError) {
         if (controller.signal.aborted) return
         setDevices([])
         setTotal(0)
+        setMatchEvidenceById(undefined)
+        setResultQuery('')
         setError(loadError instanceof Error ? loadError.message : 'Xatolik yuz berdi')
       } finally {
         if (!controller.signal.aborted) setLoading(false)
@@ -186,6 +213,12 @@ export function InStockDevicePicker({ purpose, selectedDevice, onSelect, onDeepL
         const knownIds = new Set(current.map((device) => device.id))
         return [...current, ...json.data.items.map(normalizeDevice).filter((device) => !knownIds.has(device.id))]
       })
+      setMatchEvidenceById((current: unknown) => {
+        const next = json.data.matchEvidenceById
+        if (!current || typeof current !== 'object' || Array.isArray(current)) return next
+        if (!next || typeof next !== 'object' || Array.isArray(next)) return current
+        return { ...current, ...next }
+      })
       setTotal(json.data.total)
     } catch (loadError) {
       if (controller.signal.aborted) return
@@ -227,6 +260,7 @@ export function InStockDevicePicker({ purpose, selectedDevice, onSelect, onDeepL
           <>
             {devices.map((device, index) => {
               const isSelected = selectedDevice?.id === device.id
+              const highlightQuery = !loading && query.trim() === resultQuery ? resultQuery : ''
               return (
                 <button
                   key={device.id}
@@ -247,8 +281,12 @@ export function InStockDevicePicker({ purpose, selectedDevice, onSelect, onDeepL
                         {isSelected && <Check size={12} />}
                       </span>
                       <div className="min-w-0">
-                        <div className="truncate text-sm font-medium text-zinc-900">{device.model}</div>
-                        <div className="mt-0.5 truncate text-xs text-zinc-500">{deviceMeta(device)}</div>
+                        <div className="truncate text-sm font-medium text-zinc-900"><HighlightedText value={device.model} query={highlightQuery} mode="text" /></div>
+                        <div className="mt-0.5 truncate text-xs text-zinc-500"><DeviceMeta device={device} query={highlightQuery} /></div>
+                        <SearchEvidence
+                          evidence={searchEvidenceFor(device.id, device, { matchEvidenceById })}
+                          query={highlightQuery}
+                        />
                       </div>
                     </div>
                     <div className="flex shrink-0 items-center gap-2">

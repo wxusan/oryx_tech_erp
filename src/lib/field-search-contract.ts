@@ -511,19 +511,28 @@ export const SEARCH_SURFACE_CONTRACT = [
     id: 'device-list', source: 'src/app/api/devices/route.ts', endpoint: 'GET /api/devices', transport: 'QUERY', parameters: ['search', 'status', 'condition'], searchableFields: ['Device.model', 'Device.imei/DeviceImei', 'Device.color', 'Device.storage', 'Device.conditionCode', 'Device.note', 'Supplier.name', 'Supplier.phone', 'Customer.name/phone'], scope: 'SHOP_SESSION', privacy: 'Every predicate is nested under the resolved shopId.',
   },
   {
+    id: 'device-action-queue', source: 'src/app/api/devices/route.ts', endpoint: 'GET /api/devices?view=action-picker', transport: 'QUERY', parameters: ['search', 'purpose'], searchableFields: ['Device.model', 'Device.imei/DeviceImei', 'Device.color', 'Device.storage', 'Device.note', 'Supplier.name/phone', 'Customer.name/phone/additionalPhones'], scope: 'SHOP_SESSION', privacy: 'Resolved shopId, permission-derived status cohorts, bounded projection, and field-only evidence for otherwise hidden additional phones.',
+  },
+  {
     id: 'device-picker', source: 'src/app/api/devices/route.ts', endpoint: 'GET /api/devices?view=picker', transport: 'QUERY', parameters: ['search'], searchableFields: ['Device.model', 'Device.imei/DeviceImei', 'Device.color', 'Device.storage', 'Device.note', 'Supplier.name/phone'], scope: 'SHOP_SESSION', privacy: 'Resolved shopId plus IN_STOCK-only bounded projection.',
+  },
+  {
+    id: 'sales-list', source: 'src/app/api/sales/route.ts', endpoint: 'GET /api/sales', transport: 'QUERY', parameters: ['search'], searchableFields: ['Customer.name/phone/additionalPhones', 'Device.model', 'Device.imei/DeviceImei'], scope: 'SHOP_SESSION', privacy: 'Resolved shopId, active non-returned sales only, bounded projection, and field-only evidence for otherwise hidden additional phones.',
+  },
+  {
+    id: 'return-queue', source: 'src/app/api/devices/route.ts', endpoint: 'GET /api/devices?view=return-picker', transport: 'QUERY', parameters: ['search'], searchableFields: ['Customer.name/phone/additionalPhones', 'Device.model', 'Device.imei/DeviceImei', 'Device.color', 'Device.storage'], scope: 'SHOP_SESSION', privacy: 'Resolved shopId, explicit return permission/status cohort, bounded projection, and field-only evidence for otherwise hidden additional phones.',
   },
   {
     id: 'nasiya-list', source: 'src/app/api/nasiya/route.ts', endpoint: 'GET /api/nasiya', transport: 'QUERY', parameters: ['search', 'status'], searchableFields: ['Customer.name/phone/additionalPhones', 'Device.model', 'Device.imei/DeviceImei', 'Nasiya.note', 'derived status', 'resolution state'], scope: 'SHOP_SESSION', privacy: 'shopId is resolved server-side; status and resolution use explicit filters.',
   },
   {
-    id: 'olib-sotdim-list', source: 'src/app/api/olib-sotdim/route.ts', endpoint: 'GET /api/olib-sotdim', transport: 'QUERY', parameters: ['search', 'status'], searchableFields: ['Supplier.name/phone/note', 'Customer.name/phone', 'Device.model/imei/secondaryImei'], scope: 'SHOP_SESSION', privacy: 'All joins remain constrained to the resolved shopId.',
+    id: 'olib-sotdim-list', source: 'src/app/api/olib-sotdim/route.ts', endpoint: 'GET /api/olib-sotdim', transport: 'QUERY', parameters: ['search', 'status'], searchableFields: ['Supplier.name/phone/note', 'Customer.name/phone/additionalPhones', 'Device.model/color/imei/secondaryImei'], scope: 'SHOP_SESSION', privacy: 'All joins remain constrained to the resolved shopId; supplier-note and hidden additional-phone evidence never returns their raw values.',
   },
   {
-    id: 'debt-list', source: 'src/app/api/debts/query/route.ts', endpoint: 'POST /api/debts/query', transport: 'JSON_BODY', parameters: ['search', 'tab', 'month', 'status'], searchableFields: ['Supplier.name/phone', 'Customer.name/phone', 'Device.model/imei', 'explicit due month and status'], scope: 'SHOP_SESSION', privacy: 'Private POST-body search, bounded take+1 keyset pagination, exact permission projection, and resolved shopId; raw search never enters URLs or query keys.',
+    id: 'debt-list', source: 'src/app/api/debts/query/route.ts', endpoint: 'POST /api/debts/query', transport: 'JSON_BODY', parameters: ['search', 'tab', 'month', 'status'], searchableFields: ['Supplier.name/phone', 'Customer.name/phone/additionalPhones', 'Device.model/imei/secondaryImei', 'explicit due month and status'], scope: 'SHOP_SESSION', privacy: 'Private POST-body search, bounded take+1 keyset pagination, exact permission projection, and resolved shopId; raw search never enters URLs or query keys.',
   },
   {
-    id: 'audit-log-list', source: 'src/app/api/logs/route.ts', endpoint: 'GET /api/logs', transport: 'QUERY', parameters: ['search', 'actorType', 'actorId', 'targetType', 'category', 'from', 'to'], searchableFields: ['Log.action', 'Log.targetType', 'Log.targetId', 'Log.note', 'Shop.name', 'explicit date range'], scope: 'SHOP_SESSION', privacy: 'Shop sessions are forced to their tenant; super admin may explicitly select a shop.',
+    id: 'audit-log-list', source: 'src/app/api/logs/route.ts', endpoint: 'GET /api/logs', transport: 'QUERY', parameters: ['search', 'actorType', 'actorId', 'targetType', 'category', 'from', 'to'], searchableFields: ['Log.action and localized action label', 'Log.targetType and localized target label', 'Log.targetId', 'Log.note', 'Shop.name', 'explicit date range'], scope: 'SHOP_SESSION', privacy: 'Shop sessions are forced to their tenant; localized labels map only to a bounded action/target code catalog and super admin may explicitly select a shop.',
   },
   {
     id: 'receivables-list', source: 'src/app/api/receivables/route.ts', endpoint: 'GET /api/receivables', transport: 'QUERY', parameters: ['cohort'], searchableFields: ['authoritative DUE_TODAY/OVERDUE cohort'], scope: 'SHOP_SESSION', privacy: 'No free-text money/date matching; Tashkent date cohort is an explicit tenant-scoped filter.',
