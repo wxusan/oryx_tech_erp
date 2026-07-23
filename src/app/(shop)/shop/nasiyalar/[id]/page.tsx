@@ -49,6 +49,8 @@ import type {
   NasiyaReturnRecordDto,
 } from '@/lib/nasiya-return'
 import { nasiyaScheduleStatusAfterReturn } from '@/lib/nasiya-return'
+import { ImageViewer, useImageViewer } from '@/components/ui/image-viewer'
+import { ImageViewerTrigger } from '@/components/ui/image-viewer-trigger'
 import {
   exchangeRateSourceLabel,
   nasiyaResolutionEventLabel,
@@ -221,6 +223,7 @@ function AuthorizedNasiyaDetailPage() {
   const [detailDataLoading, setDetailDataLoading] = useState(false)
 
   const [passportUrl, setPassportUrl] = useState<string | null>(null)
+  const passportImageViewer = useImageViewer()
   const [unavailablePassportCustomerId, setUnavailablePassportCustomerId] = useState<string | null>(null)
   const [passportRequested, setPassportRequested] = useState(false)
   const [reminderSubmitting, setReminderSubmitting] = useState(false)
@@ -1029,6 +1032,10 @@ function AuthorizedNasiyaDetailPage() {
           ) : passportPhotoAvailable && passportUrl ? (
             <div className="relative aspect-[4/3] max-h-80 w-full overflow-hidden rounded border border-zinc-200 bg-zinc-50">
               <Image src={passportUrl} alt="Pasport rasmi" fill sizes="(max-width: 640px) 100vw, 720px" unoptimized className="object-contain" />
+              <ImageViewerTrigger
+                label="Pasport rasmini kattalashtirish"
+                onClick={(trigger) => passportImageViewer.openAt(0, trigger)}
+              />
             </div>
           ) : passportPhotoAvailable && !passportUrl ? (
             <div className="text-sm text-zinc-400">Yuklanmoqda...</div>
@@ -1036,6 +1043,17 @@ function AuthorizedNasiyaDetailPage() {
             <div className="text-sm text-zinc-400">Pasport rasmi yuklanmagan</div>
           )}
         </div>
+        <ImageViewer
+          images={passportUrl && passportCustomerId
+            ? [{ id: passportCustomerId, src: passportUrl, alt: 'Pasport rasmi' }]
+            : []}
+          open={passportImageViewer.open}
+          activeIndex={passportImageViewer.activeIndex}
+          onOpenChange={passportImageViewer.onOpenChange}
+          onActiveIndexChange={passportImageViewer.onActiveIndexChange}
+          finalFocusRef={passportImageViewer.finalFocusRef}
+          title="Pasport rasmi"
+        />
       </div>}
 
       <NasiyaHistorySections

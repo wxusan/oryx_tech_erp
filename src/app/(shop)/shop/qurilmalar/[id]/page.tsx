@@ -44,6 +44,8 @@ import { DeviceActionHistory, type DeviceActionLog as DeviceLog } from '@/compon
 import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
+import { ImageViewer, useImageViewer } from '@/components/ui/image-viewer'
+import { ImageViewerTrigger } from '@/components/ui/image-viewer-trigger'
 import { SupplierPayablePaymentDialog } from '@/components/shop/supplier-payable-payment-dialog'
 
 interface Supplier {
@@ -268,6 +270,7 @@ function AuthorizedQurilmaDetailPage() {
   const { currency } = useShopCurrency()
 
   const [device, setDevice] = useState<Device | null>(null)
+  const imageViewer = useImageViewer()
   const [supplierPaymentOpen, setSupplierPaymentOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -917,33 +920,49 @@ function AuthorizedQurilmaDetailPage() {
       </div>
 
       {device.imageUrls.length > 0 && (
-        <div className="border border-zinc-200 rounded overflow-hidden">
-          <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
-            <span className="text-sm font-semibold text-zinc-900">Qurilma rasmlari</span>
-          </div>
-          <div className="p-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {device.imageUrls.map((imageUrl, index) => (
-                <a
-                  key={`${imageUrl}-${index}`}
-                  href={getDeviceImageSrc(imageUrl)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="relative block aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50 hover:opacity-90"
-                >
-                  <Image
-                    src={getDeviceImageSrc(imageUrl)}
-                    alt={`${device.model} rasmi ${index + 1}`}
-                    fill
-                    sizes="(max-width: 640px) 50vw, 220px"
-                    unoptimized
-                    className="object-cover"
-                  />
-                </a>
-              ))}
+        <>
+          <div className="border border-zinc-200 rounded overflow-hidden">
+            <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
+              <span className="text-sm font-semibold text-zinc-900">Qurilma rasmlari</span>
+            </div>
+            <div className="p-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {device.imageUrls.map((imageUrl, index) => (
+                  <div
+                    key={`${imageUrl}-${index}`}
+                    className="relative aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50"
+                  >
+                    <Image
+                      src={getDeviceImageSrc(imageUrl)}
+                      alt={`${device.model} rasmi ${index + 1}`}
+                      fill
+                      sizes="(max-width: 640px) 50vw, 220px"
+                      unoptimized
+                      className="object-cover"
+                    />
+                    <ImageViewerTrigger
+                      label={`${device.model} ${index + 1}-rasmini kattalashtirish`}
+                      onClick={(trigger) => imageViewer.openAt(index, trigger)}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+          <ImageViewer
+            images={device.imageUrls.map((imageUrl, index) => ({
+              id: `${imageUrl}-${index}`,
+              src: getDeviceImageSrc(imageUrl),
+              alt: `${device.model} rasmi ${index + 1}`,
+            }))}
+            open={imageViewer.open}
+            activeIndex={imageViewer.activeIndex}
+            onOpenChange={imageViewer.onOpenChange}
+            onActiveIndexChange={imageViewer.onActiveIndexChange}
+            finalFocusRef={imageViewer.finalFocusRef}
+            title={`${device.model} rasmlari`}
+          />
+        </>
       )}
 
       {/* Device info card */}
