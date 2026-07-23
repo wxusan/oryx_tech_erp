@@ -125,6 +125,24 @@ describe('production release guard', () => {
     expect(releaseWorkflow).not.toContain('curl --fail --silent --show-error --retry 3')
   })
 
+  it('proves application and health functions are in bom1 before promotion', () => {
+    const inspectionStart = releaseWorkflow.indexOf(
+      'inspect_json="$(npx vercel@51.7.0 inspect',
+    )
+    const promotionStart = releaseWorkflow.indexOf(
+      'npx vercel@51.7.0 promote',
+    )
+
+    expect(inspectionStart).toBeGreaterThan(-1)
+    expect(promotionStart).toBeGreaterThan(inspectionStart)
+    const verificationBlock = releaseWorkflow.slice(inspectionStart, promotionStart)
+    expect(verificationBlock).toContain('.readyState == "READY"')
+    expect(verificationBlock).toContain('.lambda.deployedTo[]?')
+    expect(verificationBlock).toContain('.path != "_middleware"')
+    expect(verificationBlock).toContain('.path == "api/health"')
+    expect(verificationBlock).toContain('.lambda.deployedTo == ["bom1"]')
+  })
+
   it('promotes the verified immutable deployment inside the configured Vercel scope', () => {
     expect(releaseWorkflow).toContain('--format=json --scope="$VERCEL_ORG_ID"')
     expect(releaseWorkflow).toContain("deployment_id=\"$(jq -r '.id // empty'")

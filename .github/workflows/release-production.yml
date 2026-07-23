@@ -126,6 +126,18 @@ jobs:
         id: verify
         run: |
           inspect_json="$(npx vercel@51.7.0 inspect "${{ steps.deploy.outputs.url }}" --format=json --scope="$VERCEL_ORG_ID" --token="${{ secrets.VERCEL_TOKEN }}")"
+          jq -e '
+            .readyState == "READY"
+            and ([.builds[].config.vercelConfig.regions[]?] | unique) == ["bom1"]
+            and ([.builds[].output[]?
+                  | select(.lambda != null and .path != "_middleware")
+                  | .lambda.deployedTo[]?] | length) > 0
+            and ([.builds[].output[]?
+                  | select(.lambda != null and .path != "_middleware")
+                  | .lambda.deployedTo[]?] | unique) == ["bom1"]
+            and any(.builds[].output[]?;
+              .path == "api/health" and .lambda.deployedTo == ["bom1"])
+          ' <<< "$inspect_json"
           deployment_id="$(jq -r '.id // empty' <<< "$inspect_json")"
           [[ "$deployment_id" == dpl_* ]]
           echo "deployment_id=$deployment_id" >> "$GITHUB_OUTPUT"
