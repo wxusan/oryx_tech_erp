@@ -11,8 +11,8 @@ import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { invalidateShopPaymentMutation } from '@/lib/server/cache-tags'
-import { moneyInputToUzs, moneyInputMeta } from '@/lib/server/money-input'
-import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
+import { moneyInputMeta, moneyInputToUzsForContract } from '@/lib/server/money-input'
+import { getShopCurrencyContext, getUsdUzsRateSnapshot } from '@/lib/server/currency'
 import { convertPaymentToContractCurrency } from '@/lib/nasiya-contract'
 import { applySalePaymentToContractLedger } from '@/lib/sale-contract-payment'
 import { validatePaymentBreakdown, representativePaymentMethod } from '@/lib/payment-breakdown'
@@ -26,6 +26,7 @@ type RouteContext = { params: Promise<{ id: string }> }
 
 type ExistingSalePaymentForReplay = {
   saleId: string
+  createdBy: string
   amount: unknown
   paymentMethod: string
   paymentBreakdown: unknown
@@ -41,6 +42,7 @@ function matchesExistingSalePaymentPayload(
   existing: ExistingSalePaymentForReplay,
   submitted: {
     saleId: string
+    actorId: string
     amount: number
     inputCurrency: 'UZS' | 'USD'
     paymentMethod: string
@@ -51,6 +53,7 @@ function matchesExistingSalePaymentPayload(
   },
 ) {
   if (existing.saleId !== submitted.saleId) return false
+  if (existing.createdBy !== submitted.actorId) return false
   const storedCurrency = existing.paymentInputCurrency ?? 'UZS'
   if (storedCurrency !== submitted.inputCurrency) return false
   if (!sameMoney(existing.paymentInputAmount ?? existing.amount, submitted.amount, storedCurrency)) return false
@@ -81,8 +84,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
 
     const idempotencyKey = req.headers.get('idempotency-key')?.trim() || parsed.data.idempotencyKey?.trim()
-    if (!idempotencyKey) {
-      return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
     }
 
     // Item 12 — split payment (e.g. half cash, half card). Parts must sum
@@ -104,14 +107,55 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
-    // Distributed when Upstash is configured; bounded in-process fallback otherwise.
+    const committedReplay = await prisma.salePayment.findUnique({
+      where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+    })
+    if (committedReplay) {
+      if (!matchesExistingSalePaymentPayload(committedReplay, {
+        saleId,
+        actorId: session.user.id,
+        amount: parsed.data.amount,
+        inputCurrency: parsed.data.inputCurrency,
+        paymentMethod: effectivePaymentMethod,
+        paymentBreakdown: parsed.data.paymentBreakdown,
+        paidAt: parsed.data.paidAt,
+        nextDueDate: parsed.data.nextDueDate,
+        note: parsed.data.reason?.trim() || parsed.data.note?.trim() || undefined,
+      })) {
+        return conflict("Idempotency-Key boshqa yoki o'zgartirilgan sotuv to'lovi uchun ishlatilgan")
+      }
+      return ok(
+        { payment: committedReplay, duplicate: true },
+        "To'lov allaqachon qabul qilingan",
+      )
+    }
+
+    // A committed retry is not a new mutation. Resolve it before consulting
+    // the distributed limiter so an ambiguous success stays recoverable.
     const rate = await checkRateLimitDistributed(rateLimitKey('sale-payment', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
-    const currency = await getShopCurrencyContext(shopId)
-    let amountInput: Awaited<ReturnType<typeof moneyInputToUzs>>
+    const [currency, contractLookup] = await Promise.all([
+      getShopCurrencyContext(shopId),
+      prisma.sale.findFirst({
+        where: { id: saleId, shopId, deletedAt: null, returnedAt: null },
+        select: {
+          contractCurrency: true,
+          contractExchangeRateAtCreation: true,
+        },
+      }),
+    ])
+    if (!contractLookup) return notFound('Sotuv topilmadi')
+
+    let amountInput: Awaited<ReturnType<typeof moneyInputToUzsForContract>>
     try {
-      amountInput = await moneyInputToUzs(parsed.data.amount, parsed.data.inputCurrency)
+      amountInput = await moneyInputToUzsForContract({
+        amount: parsed.data.amount,
+        inputCurrency: parsed.data.inputCurrency,
+        contractCurrency: contractLookup.contractCurrency,
+        contractExchangeRateAtCreation: contractLookup.contractExchangeRateAtCreation,
+        currencyContext: currency,
+      })
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
@@ -119,15 +163,18 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // Native contract-currency conversion — computed once, before the
     // transaction (same reasoning as the nasiya payment route: no slow I/O
     // held inside the serializable transaction). See docs/currency-accounting-model.md.
-    const contractLookup = await prisma.sale.findFirst({
-      where: { id: saleId, shopId, deletedAt: null, returnedAt: null },
-      select: { contractCurrency: true },
-    })
-    const contractCurrency = contractLookup?.contractCurrency ?? 'UZS'
+    const contractCurrency = contractLookup.contractCurrency
     let contractRate: number | null = amountInput.exchangeRateUsed
+    let contractRateSource = amountInput.exchangeRateSource
+    let contractRateEffectiveAt = amountInput.exchangeRateEffectiveAt
+    let contractRateFetchedAt = amountInput.exchangeRateFetchedAt
     if (amountInput.inputCurrency !== contractCurrency && contractRate == null) {
       try {
-        contractRate = await getUsdUzsRate()
+        const quote = await getUsdUzsRateSnapshot()
+        contractRate = quote.rate
+        contractRateSource = quote.source
+        contractRateEffectiveAt = quote.effectiveAt
+        contractRateFetchedAt = quote.fetchedAt
       } catch (err) {
         return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
       }
@@ -151,6 +198,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           if (existingPayment) {
             if (!matchesExistingSalePaymentPayload(existingPayment, {
               saleId,
+              actorId: session.user.id,
               amount: parsed.data.amount,
               inputCurrency: amountInput.inputCurrency,
               paymentMethod: effectivePaymentMethod,
@@ -246,6 +294,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               paymentInputAmount: parsed.data.amount,
               paymentInputCurrency: amountInput.inputCurrency,
               paymentExchangeRate: contractRate,
+              paymentExchangeRateSource: contractRateSource,
+              paymentExchangeRateEffectiveAt: contractRateEffectiveAt,
+              paymentExchangeRateFetchedAt: contractRateFetchedAt,
+              evidenceVersion: 2,
+              evidenceStatus: 'CAPTURED',
               appliedAmountInContractCurrency: contractPayment.appliedAmountInContractCurrency,
               paymentDateExplicit: parsed.data.paidAt !== undefined,
               requestedNextDueDate: parsed.data.nextDueDate,
@@ -315,6 +368,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 ...(auditNote ? { auditReason: auditNote } : {}),
                 inputAmount: parsed.data.amount,
                 ...moneyInputMeta(amountInput),
+                exchangeRateUsed: contractRate,
+                exchangeRateSource: contractRateSource,
+                exchangeRateEffectiveAt: contractRateEffectiveAt?.toISOString() ?? null,
+                exchangeRateFetchedAt: contractRateFetchedAt?.toISOString() ?? null,
               },
               note: auditNote,
             },

@@ -89,6 +89,17 @@ enum AccountingReconstructionStatus {
   UNRECONSTRUCTABLE
 }
 
+// Provenance quality for immutable financial facts. Version 1 is reserved for
+// historic/compatibility-window rows whose original evidence was not captured;
+// every current writer explicitly stores version 2 + CAPTURED.
+enum FinancialEvidenceStatus {
+  LEGACY_UNKNOWN
+  CAPTURED
+  VERIFIED_RECONSTRUCTION
+  PARTIAL
+  UNRECONSTRUCTABLE
+}
+
 enum NotificationStatus {
   PENDING
   PROCESSING
@@ -246,6 +257,7 @@ model Shop {
   nasiyaSettlements           NasiyaSettlement[]
   nasiyaSettlementAllocations NasiyaSettlementAllocation[]
   returnProfitReversals       ReturnProfitReversal[]
+  devicePurchaseReceipts      DevicePurchaseReceipt[]
 
   @@unique([ownerAdminId, id])
   @@index([status])
@@ -256,33 +268,38 @@ model Shop {
 // ---------------------------------------------------------------------------
 
 model ShopPayment {
-  id                           String                         @id @default(cuid())
-  shopId                       String
-  amount                       Decimal                        @db.Decimal(12, 2)
-  months                       Int
-  paymentMethod                PaymentMethod
-  note                         String?
-  idempotencyKey               String?
-  commandHash                  String?
-  paidAt                       DateTime                       @default(now())
-  deletedAt                    DateTime?
-  deletedBy                    String?
-  deleteNote                   String?
-  allocationStatus             ShopPaymentAllocationStatus    @default(LEGACY_UNALLOCATED)
-  currency                     CurrencyCode
+  id                             String                         @id @default(cuid())
+  shopId                         String
+  amount                         Decimal                        @db.Decimal(12, 2)
+  months                         Int
+  paymentMethod                  PaymentMethod
+  note                           String?
+  idempotencyKey                 String?
+  commandHash                    String?
+  paidAt                         DateTime                       @default(now())
+  deletedAt                      DateTime?
+  deletedBy                      String?
+  deleteNote                     String?
+  allocationStatus               ShopPaymentAllocationStatus    @default(LEGACY_UNALLOCATED)
+  currency                       CurrencyCode
   // Immutable reporting snapshots. Native `amount` + `currency` remain the
   // receipt source of truth; these two fields let Super Admin reports switch
   // currencies without revaluing historical cash at today's rate.
-  exchangeRateAtPayment        Decimal?                       @db.Decimal(12, 4)
-  amountUzsSnapshot            Decimal?                       @db.Decimal(12, 2)
-  amountUsdSnapshot            Decimal?                       @db.Decimal(12, 2)
-  currencyReconstructionStatus AccountingReconstructionStatus @default(PENDING)
-  packageVersionId             String?
-  packageMonthlyPriceSnapshot  Decimal?                       @db.Decimal(12, 2)
-  servicePeriodStart           DateTime?                      @db.Date
-  servicePeriodEnd             DateTime?                      @db.Date
-  dueBefore                    DateTime?
-  dueAfter                     DateTime?
+  exchangeRateAtPayment          Decimal?                       @db.Decimal(12, 4)
+  exchangeRateSourceAtPayment    String?
+  exchangeRateEffectiveAtPayment DateTime?
+  exchangeRateFetchedAtPayment   DateTime?
+  amountUzsSnapshot              Decimal?                       @db.Decimal(12, 2)
+  amountUsdSnapshot              Decimal?                       @db.Decimal(12, 2)
+  currencyReconstructionStatus   AccountingReconstructionStatus @default(PENDING)
+  evidenceVersion                Int                            @default(1)
+  evidenceStatus                 FinancialEvidenceStatus        @default(LEGACY_UNKNOWN)
+  packageVersionId               String?
+  packageMonthlyPriceSnapshot    Decimal?                       @db.Decimal(12, 2)
+  servicePeriodStart             DateTime?                      @db.Date
+  servicePeriodEnd               DateTime?                      @db.Date
+  dueBefore                      DateTime?
+  dueAfter                       DateTime?
 
   // FK
   recordedById   String
@@ -301,16 +318,22 @@ model ShopPayment {
 // ---------------------------------------------------------------------------
 
 model CurrencyRate {
-  id            String       @id @default(cuid())
-  baseCurrency  CurrencyCode
-  quoteCurrency CurrencyCode
-  rate          Decimal      @db.Decimal(12, 4)
-  source        String       @default("CBU")
-  fetchedAt     DateTime
-  effectiveDate DateTime?
-  createdAt     DateTime     @default(now())
+  id                String                  @id @default(cuid())
+  baseCurrency      CurrencyCode
+  quoteCurrency     CurrencyCode
+  rate              Decimal                 @db.Decimal(12, 4)
+  source            String
+  fetchedAt         DateTime
+  effectiveDate     DateTime?
+  providerReference String?
+  recordedById      String?
+  recordedByType    ActorType?
+  createdAt         DateTime                @default(now())
+  evidenceVersion   Int                     @default(1)
+  evidenceStatus    FinancialEvidenceStatus @default(LEGACY_UNKNOWN)
 
   @@index([baseCurrency, quoteCurrency, fetchedAt])
+  @@index([source, providerReference])
   @@index([source, fetchedAt])
 }
 
@@ -547,58 +570,64 @@ model Supplier {
 // ---------------------------------------------------------------------------
 
 model Device {
-  id                             String               @id @default(cuid())
-  shopId                         String
-  model                          String
-  color                          String?
-  storage                        String?
-  storageAmount                  Decimal?             @db.Decimal(10, 2)
-  storageUnit                    StorageUnit?
-  batteryHealth                  Int?
-  purchasePrice                  Decimal              @db.Decimal(12, 2)
+  id                              String                  @id @default(cuid())
+  shopId                          String
+  model                           String
+  color                           String?
+  storage                         String?
+  storageAmount                   Decimal?                @db.Decimal(10, 2)
+  storageUnit                     StorageUnit?
+  batteryHealth                   Int?
+  purchasePrice                   Decimal                 @db.Decimal(12, 2)
   // Native purchase-currency context, additive — `purchasePrice` above stays
   // exactly as-is (UZS compatibility snapshot, dual-written in lockstep).
   // See docs/currency-accounting-model.md. Pre-existing rows are backfilled
   // to UZS (never an invented historical currency/rate).
-  purchaseCurrency               CurrencyCode         @default(UZS)
-  purchaseInputAmount            Decimal              @default(0) @db.Decimal(12, 2)
-  purchaseExchangeRateAtCreation Decimal?             @db.Decimal(12, 4)
-  purchaseAmountUzsSnapshot      Decimal              @default(0) @db.Decimal(12, 2)
-  imei                           String
-  supplierId                     String?
-  supplierPhone                  String?
-  imageUrls                      String[]
-  status                         DeviceStatus         @default(IN_STOCK)
-  addedBy                        String
-  note                           String?
-  condition                      String?
-  conditionCode                  DeviceConditionCode?
+  purchaseCurrency                CurrencyCode            @default(UZS)
+  purchaseInputAmount             Decimal                 @default(0) @db.Decimal(12, 2)
+  purchaseExchangeRateAtCreation  Decimal?                @db.Decimal(12, 4)
+  purchaseExchangeRateSource      String?
+  purchaseExchangeRateEffectiveAt DateTime?
+  purchaseExchangeRateFetchedAt   DateTime?
+  purchaseAmountUzsSnapshot       Decimal                 @default(0) @db.Decimal(12, 2)
+  evidenceVersion                 Int                     @default(1)
+  evidenceStatus                  FinancialEvidenceStatus @default(LEGACY_UNKNOWN)
+  imei                            String
+  supplierId                      String?
+  supplierPhone                   String?
+  imageUrls                       String[]
+  status                          DeviceStatus            @default(IN_STOCK)
+  addedBy                         String
+  note                            String?
+  condition                       String?
+  conditionCode                   DeviceConditionCode?
   // A device created only to carry an imported (pre-Oryx) nasiya. It is created
   // as SOLD_NASIYA (never IN_STOCK), so it never enters sellable inventory or
   // inventory-cost stats. Its purchasePrice is 0 (original cost unknown).
-  isImported                     Boolean              @default(false)
+  isImported                      Boolean                 @default(false)
   // "Olib-sotdim": sourced from another shop/person and sold to our customer in
   // the same operation. Created directly as SOLD_CASH (never IN_STOCK), so it
   // never becomes available for a later normal sale/nasiya and never enters
   // inventoryPurchaseCost (that stat only sums IN_STOCK devices).
   // purchasePrice IS real (what we paid the external supplier) — unlike
   // isImported, this does count toward this month's cost/profit normally.
-  isExternalSourced              Boolean              @default(false)
-  createdAt                      DateTime             @default(now())
-  updatedAt                      DateTime             @updatedAt
-  deletedAt                      DateTime?
-  deletedBy                      String?
-  deleteNote                     String?
+  isExternalSourced               Boolean                 @default(false)
+  createdAt                       DateTime                @default(now())
+  updatedAt                       DateTime                @updatedAt
+  deletedAt                       DateTime?
+  deletedBy                       String?
+  deleteNote                      String?
 
   // Relations
-  shop                Shop                 @relation(fields: [shopId], references: [id])
-  supplier            Supplier?            @relation(fields: [supplierId], references: [id])
+  shop                Shop                   @relation(fields: [shopId], references: [id])
+  supplier            Supplier?              @relation(fields: [supplierId], references: [id])
   sales               Sale[]
   nasiya              Nasiya[]
   returns             DeviceReturn[]
   supplierPayables    SupplierPayable[]
   olibSotdimOperation OlibSotdimOperation?
   imeis               DeviceImei[]
+  purchaseReceipt     DevicePurchaseReceipt?
 
   @@unique([id, shopId])
   // ACTIVE-ONLY IMEI UNIQUENESS is enforced by a raw-SQL PARTIAL UNIQUE index
@@ -610,6 +639,43 @@ model Device {
   @@index([shopId, imei])
   @@index([shopId])
   @@index([status])
+}
+
+// Immutable cash-acquisition evidence for a device bought with PAID_NOW.
+// Device.purchase* remains the inventory-cost projection; this receipt freezes
+// what was entered, the canonical native amount, the UZS snapshot, payment
+// method, actor, idempotency identity, and the governed quote used at purchase.
+model DevicePurchaseReceipt {
+  id                      String                  @id @default(cuid())
+  shopId                  String
+  deviceId                String                  @unique
+  inputAmount             Decimal                 @db.Decimal(12, 2)
+  inputCurrency           CurrencyCode
+  nativeAmount            Decimal                 @db.Decimal(12, 2)
+  nativeCurrency          CurrencyCode
+  amountUzsSnapshot       Decimal                 @db.Decimal(12, 2)
+  paymentMethod           PaymentMethod
+  paymentBreakdown        Json?
+  exchangeRate            Decimal?                @db.Decimal(12, 4)
+  exchangeRateSource      String?
+  exchangeRateEffectiveAt DateTime?
+  exchangeRateFetchedAt   DateTime?
+  paidAt                  DateTime                @default(now())
+  actorId                 String
+  actorType               ActorType
+  idempotencyKey          String
+  commandHash             String
+  evidenceVersion         Int                     @default(2)
+  evidenceStatus          FinancialEvidenceStatus @default(CAPTURED)
+  createdAt               DateTime                @default(now())
+
+  shop   Shop   @relation(fields: [shopId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  device Device @relation(fields: [deviceId, shopId], references: [id, shopId], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([id, shopId])
+  @@unique([deviceId, shopId])
+  @@unique([shopId, idempotencyKey])
+  @@index([shopId, paidAt, id])
 }
 
 model DeviceImei {
@@ -694,32 +760,35 @@ model Customer {
 // ---------------------------------------------------------------------------
 
 model Sale {
-  id                             String                         @id @default(cuid())
-  shopId                         String
-  deviceId                       String
-  customerId                     String
-  salePrice                      Decimal                        @db.Decimal(12, 2)
+  id                              String                         @id @default(cuid())
+  shopId                          String
+  deviceId                        String
+  customerId                      String
+  salePrice                       Decimal                        @db.Decimal(12, 2)
   // Null only when no money was received at creation ("Pay later", paid now
   // = 0). Every real SalePayment continues to require its own method.
-  paymentMethod                  PaymentMethod?
-  paidFully                      Boolean                        @default(true)
-  amountPaid                     Decimal                        @db.Decimal(12, 2)
-  remainingAmount                Decimal                        @default(0) @db.Decimal(12, 2)
-  dueDate                        DateTime?
-  reminderEnabled                Boolean                        @default(false)
+  paymentMethod                   PaymentMethod?
+  paidFully                       Boolean                        @default(true)
+  amountPaid                      Decimal                        @db.Decimal(12, 2)
+  remainingAmount                 Decimal                        @default(0) @db.Decimal(12, 2)
+  dueDate                         DateTime?
+  reminderEnabled                 Boolean                        @default(false)
   // Same early-reminder mechanism as Nasiya, for a later-payment cash sale's
   // single dueDate.
-  earlyReminderEnabled           Boolean                        @default(false)
-  earlyReminderDays              Int?
-  note                           String?
+  earlyReminderEnabled            Boolean                        @default(false)
+  earlyReminderDays               Int?
+  note                            String?
   // Informational only — the shop's selected display currency + USD/UZS rate
   // at the moment this sale was created. Never used in debt/report math
   // (salePrice/amountPaid/remainingAmount stay the UZS ledger source of
   // truth); purely lets the UI note "this deal was made in USD" even after
   // the shop later switches preferredCurrency. Null for older rows (assume
   // UZS, no rate to show) — see docs/currency-accounting-model.md.
-  creationCurrency               CurrencyCode?
-  creationExchangeRate           Decimal?                       @db.Decimal(12, 4)
+  creationCurrency                CurrencyCode?
+  creationExchangeRate            Decimal?                       @db.Decimal(12, 4)
+  creationExchangeRateSource      String?
+  creationExchangeRateEffectiveAt DateTime?
+  creationExchangeRateFetchedAt   DateTime?
   // --- Native contract-currency ledger (source of truth for debt) ------------
   // Additive, alongside the untouched legacy UZS fields above (kept exactly
   // as-is for report/profit/Telegram compatibility). contractCurrency is
@@ -729,32 +798,34 @@ model Sale {
   // docs/currency-accounting-model.md (Phase 10: schema-only for this pass;
   // display/reminders/Telegram remain on the legacy UZS ledger, documented
   // as deferred).
-  contractCurrency               CurrencyCode                   @default(UZS)
-  contractExchangeRateAtCreation Decimal?                       @db.Decimal(12, 4)
-  contractSalePrice              Decimal                        @default(0) @db.Decimal(12, 2)
-  contractAmountPaid             Decimal                        @default(0) @db.Decimal(12, 2)
-  contractRemainingAmount        Decimal                        @default(0) @db.Decimal(12, 2)
+  contractCurrency                CurrencyCode                   @default(UZS)
+  contractExchangeRateAtCreation  Decimal?                       @db.Decimal(12, 4)
+  contractSalePrice               Decimal                        @default(0) @db.Decimal(12, 2)
+  contractAmountPaid              Decimal                        @default(0) @db.Decimal(12, 2)
+  contractRemainingAmount         Decimal                        @default(0) @db.Decimal(12, 2)
   // Payment-basis profit ledger. Cost/margin are frozen in the contract's
   // native currency and paid accumulators advance only when money is received.
-  contractCostBasisAmount        Decimal                        @default(0) @db.Decimal(12, 2)
-  contractMarginAmount           Decimal                        @default(0) @db.Decimal(12, 2)
-  contractPrincipalPaidAmount    Decimal                        @default(0) @db.Decimal(12, 2)
-  contractMarginPaidAmount       Decimal                        @default(0) @db.Decimal(12, 2)
-  accountingReconstructionStatus AccountingReconstructionStatus @default(PENDING)
-  accountingReconstructionReason String?
-  accountingReconstructedAt      DateTime?
-  createdAt                      DateTime                       @default(now())
-  createdBy                      String
-  creationIdempotencyKey         String?
-  creationCommandHash            String?
+  contractCostBasisAmount         Decimal                        @default(0) @db.Decimal(12, 2)
+  contractMarginAmount            Decimal                        @default(0) @db.Decimal(12, 2)
+  contractPrincipalPaidAmount     Decimal                        @default(0) @db.Decimal(12, 2)
+  contractMarginPaidAmount        Decimal                        @default(0) @db.Decimal(12, 2)
+  accountingReconstructionStatus  AccountingReconstructionStatus @default(PENDING)
+  accountingReconstructionReason  String?
+  accountingReconstructedAt       DateTime?
+  evidenceVersion                 Int                            @default(1)
+  evidenceStatus                  FinancialEvidenceStatus        @default(LEGACY_UNKNOWN)
+  createdAt                       DateTime                       @default(now())
+  createdBy                       String
+  creationIdempotencyKey          String?
+  creationCommandHash             String?
   // A physical return closes the operational debt without deleting or
   // rewriting the original contract. The immutable DeviceReturn records the
   // financial reversal in the return period.
-  returnedAt                     DateTime?
-  returnedBy                     String?
-  deletedAt                      DateTime?
-  deletedBy                      String?
-  deleteNote                     String?
+  returnedAt                      DateTime?
+  returnedBy                      String?
+  deletedAt                       DateTime?
+  deletedBy                       String?
+  deleteNote                      String?
 
   // Relations
   shop                Shop                   @relation(fields: [shopId], references: [id])
@@ -782,12 +853,12 @@ model Sale {
 // ---------------------------------------------------------------------------
 
 model SalePayment {
-  id                              String        @id @default(cuid())
+  id                              String                  @id @default(cuid())
   saleId                          String
   shopId                          String
-  amount                          Decimal       @db.Decimal(12, 2)
+  amount                          Decimal                 @db.Decimal(12, 2)
   paymentMethod                   PaymentMethod
-  paidAt                          DateTime      @default(now())
+  paidAt                          DateTime                @default(now())
   note                            String?
   idempotencyKey                  String?
   // What the customer actually entered/paid, preserved for historical display
@@ -796,13 +867,16 @@ model SalePayment {
   // and the schedule ledger are the authoritative debt evidence. The quote
   // fields retain exactly what was known at receipt time. Null for older rows
   // or UZS payments where no conversion was needed.
-  paymentInputAmount              Decimal?      @db.Decimal(12, 2)
+  paymentInputAmount              Decimal?                @db.Decimal(12, 2)
   paymentInputCurrency            CurrencyCode?
-  paymentExchangeRate             Decimal?      @db.Decimal(12, 4)
+  paymentExchangeRate             Decimal?                @db.Decimal(12, 4)
+  paymentExchangeRateSource       String?
+  paymentExchangeRateEffectiveAt  DateTime?
+  paymentExchangeRateFetchedAt    DateTime?
   // The payment amount actually applied to the sale's contract-currency debt
   // — frozen forever, never recomputed. `amount` above already serves as the
   // UZS-applied snapshot (unchanged role). See docs/currency-accounting-model.md.
-  appliedAmountInContractCurrency Decimal?      @db.Decimal(12, 2)
+  appliedAmountInContractCurrency Decimal?                @db.Decimal(12, 2)
   // Split-payment breakdown — e.g. half cash, half card. `[{ method:
   // PaymentMethod, amount: number }]`, amounts in the same currency as
   // `paymentInputAmount`/`amount` above, summing to the payment total.
@@ -814,16 +888,18 @@ model SalePayment {
   paymentBreakdown                Json?
   // Durable replay metadata: distinguishes a server-assigned payment time
   // from an explicitly supplied one and freezes the requested next due date.
-  paymentDateExplicit             Boolean       @default(false)
+  paymentDateExplicit             Boolean                 @default(false)
   requestedNextDueDate            DateTime?
   // Frozen payment-date component split. UZS fields are the reporting facts;
   // contract fields preserve the native-currency allocation exactly.
-  contractPrincipalAmount         Decimal       @default(0) @db.Decimal(12, 2)
-  contractMarginAmount            Decimal       @default(0) @db.Decimal(12, 2)
-  principalAmountUzs              Decimal       @default(0) @db.Decimal(12, 2)
-  marginAmountUzs                 Decimal       @default(0) @db.Decimal(12, 2)
+  contractPrincipalAmount         Decimal                 @default(0) @db.Decimal(12, 2)
+  contractMarginAmount            Decimal                 @default(0) @db.Decimal(12, 2)
+  principalAmountUzs              Decimal                 @default(0) @db.Decimal(12, 2)
+  marginAmountUzs                 Decimal                 @default(0) @db.Decimal(12, 2)
   createdBy                       String
-  createdAt                       DateTime      @default(now())
+  createdAt                       DateTime                @default(now())
+  evidenceVersion                 Int                     @default(1)
+  evidenceStatus                  FinancialEvidenceStatus @default(LEGACY_UNKNOWN)
   deletedAt                       DateTime?
   deletedBy                       String?
   deleteNote                      String?
@@ -892,53 +968,58 @@ model OlibSotdimOperation {
 }
 
 model SupplierPayable {
-  id                             String                @id @default(cuid())
-  shopId                         String
-  deviceId                       String
-  saleId                         String?               @unique
-  olibSotdimOperationId          String?               @unique
-  supplierId                     String?
-  origin                         SupplierPayableOrigin @default(OLIB_SOTDIM)
+  id                                      String                  @id @default(cuid())
+  shopId                                  String
+  deviceId                                String
+  saleId                                  String?                 @unique
+  olibSotdimOperationId                   String?                 @unique
+  supplierId                              String?
+  origin                                  SupplierPayableOrigin   @default(OLIB_SOTDIM)
   // Free-text — an ad-hoc bazaar contact, not the formal Supplier model (which
   // represents a registered long-term inventory supplier tied to Device.supplierId).
-  supplierName                   String
-  supplierPhone                  String
-  supplierLocation               String?
-  supplierNote                   String?
-  amount                         Decimal               @db.Decimal(12, 2)
+  supplierName                            String
+  supplierPhone                           String
+  supplierLocation                        String?
+  supplierNote                            String?
+  amount                                  Decimal                 @db.Decimal(12, 2)
   // Native contract-currency ledger — the currency this payable was actually
   // agreed in, frozen at creation. `amount` above stays the UZS ledger
   // (unchanged). Paying a supplier payable is a binary PENDING->PAID status
   // flip with no partial-payment amount entry, so no allocation/payment-time
   // conversion is needed here (unlike Nasiya). See docs/currency-accounting-model.md.
-  contractCurrency               CurrencyCode          @default(UZS)
-  contractExchangeRateAtCreation Decimal?              @db.Decimal(12, 4)
-  contractAmount                 Decimal               @default(0) @db.Decimal(12, 2)
-  paidAmount                     Decimal               @default(0) @db.Decimal(12, 2)
-  remainingAmount                Decimal               @default(0) @db.Decimal(12, 2)
-  contractPaidAmount             Decimal               @default(0) @db.Decimal(12, 2)
-  contractRemainingAmount        Decimal               @default(0) @db.Decimal(12, 2)
-  ledgerVersion                  Int                   @default(1)
-  status                         SupplierPayableStatus @default(PENDING)
-  dueDate                        DateTime
-  reminderEnabled                Boolean               @default(true)
-  earlyReminderEnabled           Boolean               @default(false)
-  earlyReminderDays              Int?
-  paidAt                         DateTime?
-  lastPaymentAt                  DateTime?
-  paymentMethod                  PaymentMethod?
+  contractCurrency                        CurrencyCode            @default(UZS)
+  contractExchangeRateAtCreation          Decimal?                @db.Decimal(12, 4)
+  contractExchangeRateSourceAtCreation    String?
+  contractExchangeRateEffectiveAtCreation DateTime?
+  contractExchangeRateFetchedAtCreation   DateTime?
+  contractAmount                          Decimal                 @default(0) @db.Decimal(12, 2)
+  paidAmount                              Decimal                 @default(0) @db.Decimal(12, 2)
+  remainingAmount                         Decimal                 @default(0) @db.Decimal(12, 2)
+  contractPaidAmount                      Decimal                 @default(0) @db.Decimal(12, 2)
+  contractRemainingAmount                 Decimal                 @default(0) @db.Decimal(12, 2)
+  ledgerVersion                           Int                     @default(1)
+  evidenceVersion                         Int                     @default(1)
+  evidenceStatus                          FinancialEvidenceStatus @default(LEGACY_UNKNOWN)
+  status                                  SupplierPayableStatus   @default(PENDING)
+  dueDate                                 DateTime
+  reminderEnabled                         Boolean                 @default(true)
+  earlyReminderEnabled                    Boolean                 @default(false)
+  earlyReminderDays                       Int?
+  paidAt                                  DateTime?
+  lastPaymentAt                           DateTime?
+  paymentMethod                           PaymentMethod?
   // Split-payment breakdown — see the identical field on SalePayment for the
   // full rationale. Null for a normal single-method payment.
-  paymentBreakdown               Json?
-  note                           String?
-  createdBy                      String
-  creationIdempotencyKey         String?
-  creationCommandHash            String?
-  createdAt                      DateTime              @default(now())
-  updatedAt                      DateTime              @updatedAt
-  deletedAt                      DateTime?
-  deletedBy                      String?
-  deleteNote                     String?
+  paymentBreakdown                        Json?
+  note                                    String?
+  createdBy                               String
+  creationIdempotencyKey                  String?
+  creationCommandHash                     String?
+  createdAt                               DateTime                @default(now())
+  updatedAt                               DateTime                @updatedAt
+  deletedAt                               DateTime?
+  deletedBy                               String?
+  deleteNote                              String?
 
   // Relations
   shop                Shop                     @relation(fields: [shopId], references: [id])
@@ -962,25 +1043,27 @@ model SupplierPayable {
 // Append-only evidence for every partial, split, or full outgoing supplier
 // payment. SupplierPayable totals are a transactionally maintained projection.
 model SupplierPayablePayment {
-  id                              String        @id @default(cuid())
+  id                              String                  @id @default(cuid())
   shopId                          String
   supplierPayableId               String
-  amount                          Decimal       @db.Decimal(12, 2)
-  paymentInputAmount              Decimal       @db.Decimal(12, 2)
+  amount                          Decimal                 @db.Decimal(12, 2)
+  paymentInputAmount              Decimal                 @db.Decimal(12, 2)
   paymentInputCurrency            CurrencyCode
-  paymentExchangeRate             Decimal?      @db.Decimal(12, 4)
+  paymentExchangeRate             Decimal?                @db.Decimal(12, 4)
   paymentExchangeRateSource       String?
   paymentExchangeRateEffectiveAt  DateTime?
   paymentExchangeRateFetchedAt    DateTime?
-  appliedAmountInContractCurrency Decimal       @db.Decimal(12, 2)
+  appliedAmountInContractCurrency Decimal                 @db.Decimal(12, 2)
   paymentMethod                   PaymentMethod
   paymentBreakdown                Json?
-  paidAt                          DateTime      @default(now())
+  paidAt                          DateTime                @default(now())
   note                            String?
   createdBy                       String
   idempotencyKey                  String
   commandHash                     String
-  createdAt                       DateTime      @default(now())
+  createdAt                       DateTime                @default(now())
+  evidenceVersion                 Int                     @default(1)
+  evidenceStatus                  FinancialEvidenceStatus @default(LEGACY_UNKNOWN)
 
   shop    Shop            @relation(fields: [shopId], references: [id])
   payable SupplierPayable @relation(fields: [supplierPayableId], references: [id])
@@ -1032,6 +1115,9 @@ model Nasiya {
   // rows — see docs/currency-accounting-model.md.
   creationCurrency                   CurrencyCode?
   creationExchangeRate               Decimal?                       @db.Decimal(12, 4)
+  creationExchangeRateSource         String?
+  creationExchangeRateEffectiveAt    DateTime?
+  creationExchangeRateFetchedAt      DateTime?
   // --- Native contract-currency ledger (source of truth for debt math) -------
   // The legacy UZS fields above (totalAmount, finalNasiyaAmount, remainingAmount,
   // monthlyPayment, etc.) remain exactly as before — a compatibility snapshot
@@ -1065,8 +1151,12 @@ model Nasiya {
   accountingReconstructionStatus     AccountingReconstructionStatus @default(PENDING)
   accountingReconstructionReason     String?
   accountingReconstructedAt          DateTime?
+  evidenceVersion                    Int                            @default(1)
+  evidenceStatus                     FinancialEvidenceStatus        @default(LEGACY_UNKNOWN)
   createdAt                          DateTime                       @default(now())
   createdBy                          String
+  creationIdempotencyKey             String?
+  creationCommandHash                String?
   updatedAt                          DateTime                       @updatedAt
   // See Sale.returnedAt. CANCELLED remains the operational terminal status;
   // these fields distinguish a physical return from other cancellations.
@@ -1084,6 +1174,8 @@ model Nasiya {
   // a NasiyaPayment row, so it can't be counted as current cash.
   isImported              Boolean   @default(false)
   importSource            String? // MANUAL | EXCEL
+  importIdempotencyKey    String?
+  importCommandHash       String?
   importedAt              DateTime?
   importedById            String?
   originalSaleDate        DateTime?
@@ -1111,6 +1203,8 @@ model Nasiya {
   // migration because Prisma cannot express the additional relationship
   // without replacing the existing ergonomic relation.
   @@unique([id, shopId, contractCurrency])
+  @@unique([shopId, creationIdempotencyKey])
+  @@unique([shopId, importIdempotencyKey])
   @@index([shopId])
   @@index([status])
   @@index([deviceId])
@@ -1245,13 +1339,13 @@ model NasiyaResolutionEvent {
 // ---------------------------------------------------------------------------
 
 model NasiyaPayment {
-  id                              String         @id @default(cuid())
+  id                              String                  @id @default(cuid())
   nasiyaId                        String
   nasiyaScheduleId                String?
   shopId                          String
-  amount                          Decimal        @db.Decimal(12, 2)
+  amount                          Decimal                 @db.Decimal(12, 2)
   paymentMethod                   PaymentMethod?
-  paidAt                          DateTime       @default(now())
+  paidAt                          DateTime                @default(now())
   note                            String?
   idempotencyKey                  String?
   // What the customer actually entered/paid, preserved for historical display
@@ -1260,9 +1354,9 @@ model NasiyaPayment {
   // for showing "customer paid $200 at rate 12,500" verbatim later, even
   // after the shop's rate or preferredCurrency has since changed. Null for
   // older rows / UZS payments with no conversion involved.
-  paymentInputAmount              Decimal?       @db.Decimal(12, 2)
+  paymentInputAmount              Decimal?                @db.Decimal(12, 2)
   paymentInputCurrency            CurrencyCode?
-  paymentExchangeRate             Decimal?       @db.Decimal(12, 4)
+  paymentExchangeRate             Decimal?                @db.Decimal(12, 4)
   // A concrete provider (`CBU`/`MANUAL`) is retained for new receipts;
   // `RECORDED_FROZEN` means an older row has a rate but no recoverable
   // provider metadata. `UNAVAILABLE_SAME_CURRENCY` records that native debt
@@ -1276,12 +1370,14 @@ model NasiyaPayment {
   // — frozen forever, never recomputed. `amount` above already serves as the
   // UZS-applied snapshot (unchanged role). Null for payments recorded before
   // this field existed. See docs/currency-accounting-model.md.
-  appliedAmountInContractCurrency Decimal?       @db.Decimal(12, 2)
+  appliedAmountInContractCurrency Decimal?                @db.Decimal(12, 2)
   // Split-payment breakdown — see the identical field on SalePayment for the
   // full rationale. Null for a normal single-method payment.
   paymentBreakdown                Json?
   createdBy                       String
-  createdAt                       DateTime       @default(now())
+  createdAt                       DateTime                @default(now())
+  evidenceVersion                 Int                     @default(1)
+  evidenceStatus                  FinancialEvidenceStatus @default(LEGACY_UNKNOWN)
   deletedAt                       DateTime?
   deletedBy                       String?
   deleteNote                      String?

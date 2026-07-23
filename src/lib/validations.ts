@@ -222,11 +222,13 @@ export const addDeviceSchema = z.object({
   supplierPhone: phoneSchema.optional(),
   note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
   imageUrls: z.array(deviceImageKeySchema).optional(),
-  inputCurrency: currencyCodeSchema.optional(),
-  purchaseSettlement: z.enum(['PAID_NOW', 'PAY_LATER']).optional().default('PAID_NOW'),
+  inputCurrency: currencyCodeSchema,
+  purchaseSettlement: z.enum(['PAID_NOW', 'PAY_LATER'], {
+    error: "Xarid to'lov holati tanlanishi shart",
+  }),
   supplierDueDate: z.coerce.date().optional(),
-  supplierReminderEnabled: z.boolean().optional().default(true),
-  earlyReminderEnabled: earlyReminderEnabledSchema,
+  supplierReminderEnabled: z.boolean().optional(),
+  earlyReminderEnabled: z.boolean().optional(),
   earlyReminderDays: earlyReminderDaysSchema,
   supplierInitialPaymentAmount: z.number().min(0, "Boshlang'ich to'lov manfiy bo'lmasligi kerak").optional(),
   supplierPaymentMethod: paymentMethodSchema.optional(),
@@ -240,8 +242,14 @@ export const addDeviceSchema = z.object({
 }).refine((data) => data.purchaseSettlement !== 'PAY_LATER' || data.supplierDueDate !== undefined, {
   message: "Yetkazib beruvchiga to'lov muddati kiritilishi shart",
   path: ['supplierDueDate'],
+}).refine((data) => !data.earlyReminderEnabled || data.supplierReminderEnabled !== false, {
+  message: "Muddat eslatmasi o'chirilganda erta eslatma yoqilmaydi",
+  path: ['earlyReminderEnabled'],
 }).refine((data) => !data.earlyReminderEnabled || data.earlyReminderDays !== undefined, {
   message: "Necha kun oldin ekanligi kiritilishi shart",
+  path: ['earlyReminderDays'],
+}).refine((data) => data.earlyReminderEnabled || data.earlyReminderDays === undefined, {
+  message: "Erta eslatma o'chirilganda kunlar soni yuborilmasligi kerak",
   path: ['earlyReminderDays'],
 }).refine((data) => (data.supplierInitialPaymentAmount ?? 0) <= data.purchasePrice, {
   message: "Boshlang'ich to'lov xarid narxidan oshmasligi kerak",
@@ -249,9 +257,29 @@ export const addDeviceSchema = z.object({
 }).refine((data) => data.purchaseSettlement !== 'PAY_LATER' || (data.supplierInitialPaymentAmount ?? 0) < data.purchasePrice, {
   message: "Keyin to'lashda boshlang'ich to'lov xarid narxidan kam bo'lishi kerak",
   path: ['supplierInitialPaymentAmount'],
-}).refine((data) => (data.supplierInitialPaymentAmount ?? 0) === 0 || data.supplierPaymentMethod !== undefined || data.supplierPaymentBreakdown !== undefined, {
+}).refine((data) => data.purchaseSettlement !== 'PAID_NOW' || data.supplierPaymentMethod !== undefined || data.supplierPaymentBreakdown !== undefined, {
+  message: "Hozir to'langan xarid uchun to'lov usuli kiritilishi shart",
+  path: ['supplierPaymentMethod'],
+}).refine((data) => data.supplierPaymentBreakdown === undefined || data.supplierPaymentMethod === undefined, {
+  message: "Aralash to'lovda alohida umumiy to'lov usuli yuborilmasligi kerak",
+  path: ['supplierPaymentMethod'],
+}).refine((data) => data.purchaseSettlement !== 'PAY_LATER' || (data.supplierInitialPaymentAmount ?? 0) === 0 || data.supplierPaymentMethod !== undefined || data.supplierPaymentBreakdown !== undefined, {
   message: "Pul to'langanda to'lov usuli kiritilishi shart",
   path: ['supplierPaymentMethod'],
+}).refine((data) => data.purchaseSettlement !== 'PAY_LATER' || (data.supplierInitialPaymentAmount ?? 0) > 0 || (data.supplierPaymentMethod === undefined && data.supplierPaymentBreakdown === undefined), {
+  message: "Boshlang'ich to'lov bo'lmasa to'lov usuli yuborilmasligi kerak",
+  path: ['supplierPaymentMethod'],
+}).refine((data) => data.purchaseSettlement !== 'PAID_NOW' || data.supplierInitialPaymentAmount === undefined, {
+  message: "Hozir to'langan xaridda boshlang'ich to'lov alohida yuborilmaydi",
+  path: ['supplierInitialPaymentAmount'],
+}).refine((data) => data.purchaseSettlement !== 'PAID_NOW' || (
+  data.supplierDueDate === undefined &&
+  data.supplierReminderEnabled === undefined &&
+  data.earlyReminderEnabled === undefined &&
+  data.earlyReminderDays === undefined
+), {
+  message: "Hozir to'langan xarid uchun qarz muddati yoki eslatma yuborilmasligi kerak",
+  path: ['supplierDueDate'],
 })
 
 export type AddDeviceInput = z.infer<typeof addDeviceSchema>
@@ -282,7 +310,7 @@ export const createSaleSchema = z
     earlyReminderEnabled: earlyReminderEnabledSchema,
     earlyReminderDays: earlyReminderDaysSchema,
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
-    inputCurrency: currencyCodeSchema.optional(),
+    inputCurrency: currencyCodeSchema,
   })
   .refine((data) => data.customerMode !== 'EXISTING' || Boolean(data.customerId), {
     message: 'Mavjud mijoz tanlanishi shart',
@@ -357,7 +385,7 @@ export const addSalePaymentSchema = z.object({
   note: z.string().trim().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
   reason: z.string().trim().max(1000, "Sabab 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
   idempotencyKey: z.string().min(8).max(120).optional(),
-  inputCurrency: currencyCodeSchema.optional(),
+  inputCurrency: currencyCodeSchema,
 })
 
 export type AddSalePaymentInput = z.infer<typeof addSalePaymentSchema>
@@ -416,7 +444,7 @@ export const createNasiyaSchema = z
     earlyReminderEnabled: earlyReminderEnabledSchema,
     earlyReminderDays: earlyReminderDaysSchema,
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
-    inputCurrency: currencyCodeSchema.optional(),
+    inputCurrency: currencyCodeSchema,
   })
   .refine((data) => data.customerMode !== 'EXISTING' || Boolean(data.customerId), {
     message: 'Mavjud mijoz tanlanishi shart',
@@ -487,7 +515,7 @@ export const importNasiyaSchema = z
     originalSaleDate: z.coerce.date().optional(),
     totalMonths: z.number().int().min(1).max(60).optional(),
     importNote: z.string().trim().max(500).optional(),
-    inputCurrency: currencyCodeSchema.optional(),
+    inputCurrency: currencyCodeSchema,
   })
   .refine((data) => data.remainingDebt <= data.originalTotalAmount, {
     message: 'Qolgan qarz avvalgi nasiya umumiy summasidan oshmasligi kerak',
@@ -524,7 +552,7 @@ export const addNasiyaPaymentSchema = z
     date: z.coerce.date({ error: "To'lov sanasi kiritilishi shart" }),
     // A regular payment can be recorded without an explanatory comment.
     note: z.string().trim().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
-    inputCurrency: currencyCodeSchema.optional(),
+    inputCurrency: currencyCodeSchema,
   })
 
 export type AddNasiyaPaymentInput = z.infer<typeof addNasiyaPaymentSchema>
@@ -539,7 +567,7 @@ export const settleNasiyaSchema = z
     paymentBreakdown: paymentBreakdownSchema,
     date: z.coerce.date({ error: "Yopish sanasi kiritilishi shart" }),
     reason: z.string().trim().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
-    inputCurrency: currencyCodeSchema.optional(),
+    inputCurrency: currencyCodeSchema,
     expectedContractCurrency: currencyCodeSchema,
     expectedRemainingMinorUnits: z.number().int().positive(),
     expectedCashMinorUnits: z.number().int().min(0),
@@ -617,6 +645,9 @@ export const addShopPaymentSchema = z.object({
     .max(120, "Ko'pi bilan 120 oy bo'lishi mumkin"),
   paymentMethod: paymentMethodSchema,
   note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
+  expectedPackageVersionId: z.string().min(1, 'Paket versiyasi kiritilishi shart'),
+  expectedCurrency: currencyCodeSchema,
+  expectedMonthlyPrice: z.number().positive('Kutilgan oylik paket narxi musbat bo‘lishi kerak'),
 })
 
 export type AddShopPaymentInput = z.infer<typeof addShopPaymentSchema>
@@ -705,8 +736,8 @@ export const createOlibSotdimSchema = z
     nasiyaPaymentMethod: paymentMethodSchema.optional(),
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
     inputCurrency: currencyCodeSchema.optional(),
-    purchaseInputCurrency: currencyCodeSchema.optional(),
-    customerInputCurrency: currencyCodeSchema.optional(),
+    purchaseInputCurrency: currencyCodeSchema,
+    customerInputCurrency: currencyCodeSchema,
   })
   .refine((data) => data.customerMode !== 'EXISTING' || Boolean(data.customerId), {
     message: 'Mavjud mijoz tanlanishi shart',
@@ -834,7 +865,7 @@ export const recordSupplierPayablePaymentSchema = z.object({
   paidAt: z.coerce.date().optional(),
   note: z.string().trim().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
   idempotencyKey: z.string().min(8).max(120).optional(),
-  inputCurrency: currencyCodeSchema.optional(),
+  inputCurrency: currencyCodeSchema,
 })
 
 export type RecordSupplierPayablePaymentInput = z.infer<typeof recordSupplierPayablePaymentSchema>

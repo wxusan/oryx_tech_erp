@@ -13,9 +13,18 @@ describe('cron reminders use contract-currency remaining amounts', () => {
   it('due-today, overdue, and early reminders all use the authoritative schedule remaining amount', () => {
     const occurrences = cron.split('amountDue: Number(schedule.contractRemainingAmount)').length - 1
     expect(occurrences).toBe(3)
-    expect(cron.split('contractRemainingAmount: { gt: 0 }').length - 1).toBe(3)
+    expect(cron.split('contractRemainingAmount: { gt: 0 }').length - 1).toBeGreaterThanOrEqual(9)
     const contractCurrencyFields = cron.split('contractCurrency: ').length - 1
     expect(contractCurrencyFields).toBeGreaterThanOrEqual(3)
+  })
+
+  it('fails a cross-currency page closed instead of checkpointing a reminder formatted with an unavailable rate', () => {
+    expect(cron).toContain('usdUzsRateForRun ??= getUsdUzsRate()')
+    expect(cron).not.toContain('getUsdUzsRate().catch(() => null)')
+    expect(cron).toContain('if (shop.preferredCurrency === contractCurrency)')
+    expect(cron).toContain('await reminderCurrency(nasiya.shop, nasiya.contractCurrency)')
+    expect(cron).toContain('await reminderCurrency(sale.shop, sale.contractCurrency)')
+    expect(cron).toContain('await reminderCurrency(payable.shop, payable.contractCurrency)')
   })
 
   it('dedupe keys preserve original trigger days and every query is bounded', () => {

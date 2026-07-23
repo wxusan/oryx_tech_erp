@@ -625,6 +625,7 @@ function AuthorizedNasiyaDetailPage() {
   // Progress is based entirely on the reconciled schedule projection, never
   // on a potentially stale parent cache or a legacy UZS snapshot.
   const { contractTerms, ledger } = nasiya
+  const ledgerQuarantined = ledger.health === 'QUARANTINED'
   const pct = ledger.financed.minorUnits > 0
     ? Math.min(100, Math.round((ledger.fulfilled.minorUnits / ledger.financed.minorUnits) * 100))
     : 0
@@ -636,6 +637,7 @@ function AuthorizedNasiyaDetailPage() {
       : convertMoneyDto(amount, currency.currency, currency.fxQuote)
     return selectedCurrencyAmount ? formatMoneyDto(selectedCurrencyAmount) : '—'
   }
+  const ledgerFmt = (amount: MoneyDto) => ledgerQuarantined ? 'Tekshiruvda' : mfmt(amount)
   const currentFxCaption = nasiya.contractCurrency !== currency.currency && currency.fxQuote?.rate
     ? [
         `Joriy kurs · 1 USD = ${currency.fxQuote.rate} so'm`,
@@ -659,7 +661,6 @@ function AuthorizedNasiyaDetailPage() {
     : ledger.remaining
   const isCompleted = displayStatus === 'COMPLETED'
   const isOperationallyActive = nasiya.resolutionState === 'ACTIVE' && !isReturned
-  const ledgerQuarantined = ledger.health === 'QUARANTINED'
   const resolutionEvents = nasiya.resolutionEvents ?? []
   const operationContext: NasiyaOperationContext = {
     id: nasiya.id,
@@ -766,7 +767,7 @@ function AuthorizedNasiyaDetailPage() {
 
       {ledgerQuarantined && !isReturned && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Nasiya jadvali va hisob dalillari mos emas. To&apos;lov hamda muddatni o&apos;zgartirish tekshiruv tugaguncha yopildi.
+          Nasiya jadvali va hisob dalillari mos emas. Moliyaviy summalar ko&apos;rsatilmaydi; to&apos;lov hamda muddatni o&apos;zgartirish tekshiruv tugaguncha yopildi.
         </div>
       )}
 
@@ -873,17 +874,17 @@ function AuthorizedNasiyaDetailPage() {
                 },
               ]
             : []),
-          { label: "Bo'lib to'lash jami (boshlang'ichsiz)", value: mfmt(ledger.financed) },
-          { label: 'Jami shartnoma qiymati', value: mfmt(contractTotal) },
-          { label: "To'langan", value: mfmt(ledger.paid) },
+          { label: "Bo'lib to'lash jami (boshlang'ichsiz)", value: ledgerFmt(ledger.financed) },
+          { label: 'Jami shartnoma qiymati', value: ledgerFmt(contractTotal) },
+          { label: "To'langan", value: ledgerFmt(ledger.paid) },
           ...(!isReturned && ledger.waived.minorUnits > 0
             ? [{ label: 'Kechilgan kelgusi foyda', value: mfmt(ledger.waived) }]
             : []),
           {
             label: "Qarz qoldig'i",
-            value: mfmt(currentCustomerDebt),
+            value: ledgerFmt(currentCustomerDebt),
           },
-          { label: "Oylik to'lov", value: mfmt(contractMonthlyPayment) },
+          { label: "Oylik to'lov", value: ledgerFmt(contractMonthlyPayment) },
         ].map((c) => (
           <Card key={c.label} className="rounded-lg" size="sm">
             <CardContent>
@@ -896,7 +897,7 @@ function AuthorizedNasiyaDetailPage() {
       {currentFxCaption && <p className="-mt-2 text-xs text-zinc-500">{currentFxCaption}</p>}
 
       {/* Progress */}
-      {nasiya.paymentScore && !isReturned && (
+      {nasiya.paymentScore && !isReturned && !ledgerQuarantined && (
         <>
           <Card className="rounded-lg">
             <CardHeader>
@@ -1273,11 +1274,11 @@ function AuthorizedNasiyaDetailPage() {
                 {[
                   { label: 'Qurilma narxi', value: mfmt(contractTerms.original) },
                   { label: 'Jami shartnoma foizi', value: mfmt(contractTerms.interest) },
-                  { label: "Bo'lib to'lash jami", value: mfmt(ledger.financed) },
-                  { label: 'Jami shartnoma qiymati', value: mfmt(contractTotal) },
-                  { label: "To'langan", value: mfmt(ledger.paid) },
-                  { label: 'Qarz qoldig\'i', value: mfmt(ledger.remaining) },
-                  { label: "Oylik to'lov", value: mfmt(contractMonthlyPayment) },
+                  { label: "Bo'lib to'lash jami", value: ledgerFmt(ledger.financed) },
+                  { label: 'Jami shartnoma qiymati', value: ledgerFmt(contractTotal) },
+                  { label: "To'langan", value: ledgerFmt(ledger.paid) },
+                  { label: 'Qarz qoldig\'i', value: ledgerFmt(ledger.remaining) },
+                  { label: "Oylik to'lov", value: ledgerFmt(contractMonthlyPayment) },
                   { label: 'Valyuta', value: nasiya.contractCurrency },
                 ].map((item) => (
                   <div key={item.label} className="min-w-0">

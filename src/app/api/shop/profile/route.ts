@@ -73,7 +73,13 @@ export async function GET() {
     if (!shop) return notFound("Do'kon topilmadi")
 
     const currency = await getShopCurrencyContext(shop.id)
-    return ok({ ...shop, usdUzsRate: currency.usdUzsRate })
+    return ok({
+      ...shop,
+      usdUzsRate: currency.usdUzsRate,
+      usdUzsRateSource: currency.usdUzsRateSource ?? null,
+      usdUzsRateFetchedAt: currency.usdUzsRateFetchedAt ?? null,
+      fxQuote: currency.fxQuote ?? null,
+    })
   } catch (err) {
     logger.error('[GET /api/shop/profile]', { event: 'api.route_error', error: err })
     return serverError()
@@ -177,7 +183,13 @@ export async function PATCH(req: NextRequest) {
     invalidateShopProfileMutation(shopId)
 
     const currency = await getShopCurrencyContext(shopId)
-    return ok({ ...updated, usdUzsRate: currency.usdUzsRate }, "Do'kon ma'lumotlari yangilandi")
+    return ok({
+      ...updated,
+      usdUzsRate: currency.usdUzsRate,
+      usdUzsRateSource: currency.usdUzsRateSource ?? null,
+      usdUzsRateFetchedAt: currency.usdUzsRateFetchedAt ?? null,
+      fxQuote: currency.fxQuote ?? null,
+    }, "Do'kon ma'lumotlari yangilandi")
   } catch (err) {
     logger.error('[PATCH /api/shop/profile]', { event: 'api.route_error', error: err })
     return serverError()

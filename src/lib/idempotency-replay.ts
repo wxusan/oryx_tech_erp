@@ -23,8 +23,21 @@ export function sameMoney(left: unknown, right: unknown, currency: 'UZS' | 'USD'
   const scale = currency === 'USD' ? 100 : 1
   const leftNumber = Number(left)
   const rightNumber = Number(right)
-  return Number.isFinite(leftNumber) && Number.isFinite(rightNumber)
-    && Math.round(leftNumber * scale) === Math.round(rightNumber * scale)
+  if (!Number.isFinite(leftNumber) || !Number.isFinite(rightNumber)) return false
+  const leftScaled = leftNumber * scale
+  const rightScaled = rightNumber * scale
+  const leftMinorUnits = Math.round(leftScaled)
+  const rightMinorUnits = Math.round(rightScaled)
+  // Idempotency matching must never round an invalid command into equality.
+  // New writes validate this at the money boundary; this check gives the
+  // committed-replay path the same exact minor-unit semantics.
+  if (
+    !Number.isSafeInteger(leftMinorUnits)
+    || !Number.isSafeInteger(rightMinorUnits)
+    || Math.abs(leftScaled - leftMinorUnits) > 1e-8
+    || Math.abs(rightScaled - rightMinorUnits) > 1e-8
+  ) return false
+  return leftMinorUnits === rightMinorUnits
 }
 
 export function sameOptionalText(left: string | null | undefined, right: string | null | undefined) {

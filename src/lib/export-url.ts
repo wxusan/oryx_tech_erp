@@ -1,6 +1,19 @@
 /** Browser-safe URL helper for authenticated, shop-scoped export downloads. */
 
-export type ExportEntity = 'devices' | 'customers' | 'sales' | 'nasiya' | 'olib' | 'returns' | 'logs' | 'report'
+export type ExportEntity =
+  | 'devices'
+  | 'customers'
+  | 'sales'
+  | 'sale-payments'
+  | 'nasiya'
+  | 'nasiya-schedules'
+  | 'nasiya-payments'
+  | 'nasiya-payment-allocations'
+  | 'olib'
+  | 'supplier-payable-payments'
+  | 'returns'
+  | 'logs'
+  | 'report'
 export type ExportFormat = 'csv' | 'xlsx'
 
 export function exportUrl(entity: ExportEntity, format: ExportFormat = 'xlsx'): string {

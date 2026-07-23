@@ -5,7 +5,11 @@ import { requireShopAnyPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { badRequest, conflict, forbidden, notFound, ok, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { markSupplierPayablePaidSchema } from '@/lib/validations'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { recordSupplierPayablePayment, SupplierPayablePaymentError } from '@/lib/server/supplier-payable-payments'
+import {
+  recordSupplierPayablePayment,
+  replayCommittedSupplierPayablePayment,
+  SupplierPayablePaymentError,
+} from '@/lib/server/supplier-payable-payments'
 import { invalidateShopSupplierPayableMutation } from '@/lib/server/cache-tags'
 import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { logger } from '@/lib/logger'
@@ -21,11 +25,31 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const { id } = await context.params
+    const submittedIdempotencyKey = req.headers.get('idempotency-key')
+    // Old deployed clients did not send a key. This endpoint can only close
+    // one payable once, so the payable id is its stable legacy command id.
+    const idempotencyKey = submittedIdempotencyKey === null
+      ? `legacy-full:${id}`
+      : submittedIdempotencyKey.trim()
+    if (idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
+    }
     const body: unknown = await req.json()
     const parsed = markSupplierPayablePaidSchema.safeParse(body)
     if (!parsed.success) return badRequest((parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot")
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
+    const committedReplay = await replayCommittedSupplierPayablePayment({
+      shopId: resolved.shopId,
+      supplierPayableId: id,
+      actorId: session.user.id,
+      idempotencyKey,
+      input: parsed.data,
+    })
+    if (committedReplay) {
+      return ok(committedReplay, "To'lov avval qayd etilgan")
+    }
+
     const rate = await checkRateLimitDistributed(
       rateLimitKey('supplier-payable-payment-legacy', resolved.shopId, session.user.id),
       { windowMs: 60_000, max: 20 },
@@ -36,6 +60,9 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
       select: { contractCurrency: true, contractRemainingAmount: true, ledgerVersion: true },
     })
     if (!payable) return notFound('Qarz yozuvi topilmadi')
+    if (parsed.data.inputCurrency && parsed.data.inputCurrency !== payable.contractCurrency) {
+      return badRequest("To'liq to'lov qarzning shartnoma valyutasida kiritilishi shart")
+    }
     const result = await recordSupplierPayablePayment({
       shopId: resolved.shopId,
       supplierPayableId: id,
@@ -49,8 +76,9 @@ export async function PATCH(req: NextRequest, context: RouteContext) {
         paidAt: parsed.data.paidAt,
         note: parsed.data.note,
       },
-      idempotencyKey: req.headers.get('idempotency-key')?.trim() || `legacy-full:${id}:${payable.ledgerVersion}`,
+      idempotencyKey,
       currency: await getShopCurrencyContext(resolved.shopId),
+      committedReplayChecked: true,
     })
     if (!result.duplicate) invalidateShopSupplierPayableMutation(resolved.shopId)
     after(() => flushQueuedTelegramWork().catch((error) => logger.warn('notification flush failed', {

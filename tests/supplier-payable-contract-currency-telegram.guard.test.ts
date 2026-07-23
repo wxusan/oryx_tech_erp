@@ -73,14 +73,20 @@ describe('supplier payable Telegram messages read the contract-currency amount, 
   })
 })
 
-describe('cron reminders and shared payment ledger read contract amounts/currency, not legacy snapshots', () => {
+describe('cron reminders and shared payment ledger read authoritative remaining contract amounts/currency', () => {
   const cron = read('src/app/api/cron/reminders/route.ts')
   const ledger = read('src/lib/server/supplier-payable-payments.ts')
 
-  it('all 3 cron supplier payable reminder call sites use payable.contractAmount + payable.contractCurrency', () => {
-    const occurrences = cron.split('amount: Number(payable.contractAmount)').length - 1
+  it('all 3 cron supplier payable reminder call sites use unpaid contractRemainingAmount + contractCurrency', () => {
+    const occurrences = cron.split('amount: Number(payable.contractRemainingAmount)').length - 1
     expect(occurrences).toBe(3)
     expect(cron.split('contractCurrency: payable.contractCurrency').length - 1).toBe(3)
+    expect(cron).not.toContain('amount: Number(payable.contractAmount)')
+  })
+
+  it('keeps partially paid supplier obligations in every reminder phase', () => {
+    expect(cron.split("status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] }").length - 1).toBe(3)
+    expect(cron).toContain("status: { in: ['PENDING', 'PARTIAL'] }")
   })
 
   it("the payment service's confirmation uses the applied native amount and payable contract currency", () => {

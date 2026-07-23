@@ -18,7 +18,10 @@ describe('nasiya payment route allocates in native contract currency alongside t
   it('requires a governed rate only when payment and contract currencies differ', () => {
     expect(route).toContain('if (inputCurrency !== contractCurrency)')
     expect(route).toContain('paymentTimeSnapshot = await getUsdUzsRateSnapshot()')
-    expect(route).toContain("USDdan USDga to'lov kurs talab qilmaydi")
+    expect(route).toContain("inputCurrency === 'USD' && contractCurrency === 'USD'")
+    expect(route).toContain("paymentTimeSnapshot = null")
+    expect(route).toContain("'UNAVAILABLE_SAME_CURRENCY'")
+    expect(route).not.toContain('hasNasiyaPaymentFxQuoteColumns')
   })
 
   it('the pure allocateNasiyaPayment (called by this route) tracks a parallel contract-currency remaining amount alongside the legacy one', () => {

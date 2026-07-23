@@ -56,18 +56,39 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       return forbidden("Bu nasiya holati amali uchun ruxsat berilmagan")
     }
     const idempotencyKey = req.headers.get('idempotency-key')?.trim()
-    if (!idempotencyKey) return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
+    }
 
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const { action, reason } = parsed.data
+
+    // A retry of an already-committed resolution must not depend on today's
+    // FX availability or consume another rate-limit slot. Bind the durable
+    // command to its original actor as well as its payload.
+    const committedReplay = await prisma.nasiyaResolutionEvent.findUnique({
+      where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+    })
+    if (committedReplay) {
+      if (
+        committedReplay.nasiyaId !== nasiyaId
+        || committedReplay.eventType !== action
+        || committedReplay.reason !== reason
+        || committedReplay.actorId !== session.user.id
+      ) {
+        return conflict("Idempotency-Key boshqa yoki o'zgartirilgan qarz holati amali uchun ishlatilgan")
+      }
+      return ok({ ...committedReplay, duplicate: true }, 'Bu amal avval bajarilgan')
+    }
+
     const rateLimit = await checkRateLimitDistributed(
       rateLimitKey('nasiya-resolution', shopId, session.user.id),
       { windowMs: 60_000, max: 12 },
     )
     if (!rateLimit.allowed) return tooManyRequests(rateLimit.retryAfterSeconds)
 
-    const { action, reason } = parsed.data
     const currencySnapshot = await prisma.nasiya.findFirst({
       where: { id: nasiyaId, shopId, deletedAt: null },
       select: { contractCurrency: true },
@@ -87,7 +108,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
       })
       if (replay) {
-        if (replay.nasiyaId !== nasiyaId || replay.eventType !== action || replay.reason !== reason) {
+        if (
+          replay.nasiyaId !== nasiyaId
+          || replay.eventType !== action
+          || replay.reason !== reason
+          || replay.actorId !== session.user.id
+        ) {
           throw {
             status: 409,
             message: "Idempotency-Key boshqa yoki o'zgartirilgan qarz holati amali uchun ishlatilgan",

@@ -1,4 +1,5 @@
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest'
+import { createHash } from 'node:crypto'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
 import { getCustomerProfileHistory, getCustomerProfileOverview } from '@/lib/server/customer-profile'
@@ -182,6 +183,16 @@ async function createDeviceRequest(body: Record<string, unknown>, idempotencyKey
     headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
     body: JSON.stringify(body),
   }))
+}
+
+async function updateDeviceRequest(deviceId: string, body: Record<string, unknown>) {
+  const { NextRequest } = await import('next/server')
+  const { PATCH } = await import('@/app/api/devices/[id]/route')
+  return PATCH(new NextRequest(`http://localhost/api/devices/${deviceId}`, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  }), { params: Promise.resolve({ id: deviceId }) })
 }
 
 async function shopStatsRequest() {
@@ -946,6 +957,7 @@ async function salePaymentRequest(input: {
   note?: string
   paidAt?: string
   nextDueDate?: string
+  inputCurrency?: 'UZS' | 'USD'
 }) {
   const { NextRequest } = await import('next/server')
   const { POST } = await import('@/app/api/sales/[id]/payment/route')
@@ -958,7 +970,7 @@ async function salePaymentRequest(input: {
       paidAt: input.paidAt,
       nextDueDate: input.nextDueDate,
       note: input.note ?? 'Sale payment reason',
-      inputCurrency: 'UZS',
+      inputCurrency: input.inputCurrency ?? 'UZS',
     }),
   }), { params: Promise.resolve({ id: input.saleId }) })
 }
@@ -972,6 +984,10 @@ async function shopPaymentRequest(input: {
 }) {
   const { NextRequest } = await import('next/server')
   const { POST } = await import('@/app/api/shops/[id]/payment/route')
+  const { getActiveShopPackage, packageRecurringPrice } = await import('@/lib/server/shop-access')
+  const packageVersion = await getActiveShopPackage(input.shopId, new Date('2099-01-01T00:00:00.000Z'), prisma)
+  if (!packageVersion) throw new Error('Disposable shop package is missing')
+  const monthlyPrice = packageRecurringPrice(packageVersion).recurringPrice
   return POST(new NextRequest(`http://localhost/api/shops/${input.shopId}/payment`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'idempotency-key': input.key },
@@ -981,6 +997,9 @@ async function shopPaymentRequest(input: {
       months: input.months,
       paymentMethod: 'CASH',
       note: input.note ?? 'Subscription payment',
+      expectedPackageVersionId: packageVersion.id,
+      expectedCurrency: packageVersion.currency,
+      expectedMonthlyPrice: monthlyPrice,
     }),
   }), { params: Promise.resolve({ id: input.shopId }) })
 }
@@ -1039,14 +1058,43 @@ async function returnNasiyaRequest(input: {
   return POST(request, { params: Promise.resolve({ id: input.nasiyaId }) })
 }
 
-async function supplierPayablePaymentRequest(payableId: string, note: string) {
+async function supplierPayablePaymentRequest(
+  payableId: string,
+  note: string,
+  idempotencyKey: string | null = `legacy-pay:${payableId}`,
+) {
   const { NextRequest } = await import('next/server')
   const { PATCH } = await import('@/app/api/olib-sotdim/[id]/pay/route')
   return PATCH(new NextRequest(`http://localhost/api/olib-sotdim/${payableId}/pay`, {
     method: 'PATCH',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(idempotencyKey === null ? {} : { 'idempotency-key': idempotencyKey }),
+    },
     body: JSON.stringify({ paymentMethod: 'CASH', paidAt: '2026-07-13T08:00:00.000Z', note }),
   }), { params: Promise.resolve({ id: payableId }) })
+}
+
+async function supplierPayablePartialPaymentRequest(input: {
+  payableId: string
+  amount: number
+  inputCurrency: 'UZS' | 'USD'
+  key: string
+  note?: string
+}) {
+  const { NextRequest } = await import('next/server')
+  const { POST } = await import('@/app/api/supplier-payables/[id]/payments/route')
+  return POST(new NextRequest(`http://localhost/api/supplier-payables/${input.payableId}/payments`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'idempotency-key': input.key },
+    body: JSON.stringify({
+      amount: input.amount,
+      inputCurrency: input.inputCurrency,
+      paymentMethod: 'CASH',
+      paidAt: '2026-07-23T08:00:00.000Z',
+      note: input.note ?? 'Supplier partial payment',
+    }),
+  }), { params: Promise.resolve({ id: input.payableId }) })
 }
 
 async function cashSaleRequest(deviceId: string, phone: string) {
@@ -1054,7 +1102,10 @@ async function cashSaleRequest(deviceId: string, phone: string) {
   const { POST } = await import('@/app/api/devices/[id]/sell/route')
   return POST(new NextRequest(`http://localhost/api/devices/${deviceId}/sell`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'idempotency-key': `cash-sale:${deviceId}`,
+    },
     body: JSON.stringify({
       deviceId,
       customerName: 'Lifecycle customer',
@@ -1092,12 +1143,18 @@ async function payLaterSaleRequest(input: {
   }), { params: Promise.resolve({ id: input.deviceId }) })
 }
 
-async function createNasiyaRequest(deviceId: string, phone: string, shopId: string) {
+async function createNasiyaRequest(
+  deviceId: string,
+  phone: string,
+  shopId: string,
+  idempotencyKey = `nasiya-create:${deviceId}`,
+  overrides: Record<string, unknown> = {},
+) {
   const { NextRequest } = await import('next/server')
   const { POST } = await import('@/app/api/devices/[id]/nasiya/route')
   return POST(new NextRequest(`http://localhost/api/devices/${deviceId}/nasiya`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', 'idempotency-key': idempotencyKey },
     body: JSON.stringify({
       deviceId,
       customerName: 'Lifecycle nasiya customer',
@@ -1110,6 +1167,7 @@ async function createNasiyaRequest(deviceId: string, phone: string, shopId: stri
       startDate: '2026-08-01T00:00:00.000Z',
       paymentMethod: 'CASH',
       inputCurrency: 'UZS',
+      ...overrides,
     }),
   }), { params: Promise.resolve({ id: deviceId }) })
 }
@@ -1123,7 +1181,10 @@ async function createMonthlyAccountingExampleRequest(
   const { POST } = await import('@/app/api/devices/[id]/nasiya/route')
   return POST(new NextRequest(`http://localhost/api/devices/${deviceId}/nasiya`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      'idempotency-key': `nasiya-monthly:${deviceId}`,
+    },
     body: JSON.stringify({
       deviceId,
       customerName: 'Monthly accounting customer',
@@ -1918,6 +1979,8 @@ describe('real-PostgreSQL route evidence', () => {
         kind: 'nasiya-return',
         referenceId: contract.nasiya.id,
         amount: 100,
+        currency: 'UZS',
+        contractCurrency: 'UZS',
         retainedAmount: 150,
         cancelledDebt: 850,
       }),
@@ -1943,17 +2006,41 @@ describe('real-PostgreSQL route evidence', () => {
 
     const { NextRequest } = await import('next/server')
     const { GET: exportEntity } = await import('@/app/api/export/[entity]/route')
-    const [returnsExport, nasiyaExport] = await Promise.all([
+    const [
+      returnsExport,
+      nasiyaExport,
+      schedulesExport,
+      paymentsExport,
+      allocationsExport,
+    ] = await Promise.all([
       exportEntity(new NextRequest('http://localhost/api/export/returns?format=csv'), {
         params: Promise.resolve({ entity: 'returns' }),
       }),
       exportEntity(new NextRequest('http://localhost/api/export/nasiya?format=csv'), {
         params: Promise.resolve({ entity: 'nasiya' }),
       }),
+      exportEntity(new NextRequest('http://localhost/api/export/nasiya-schedules?format=csv'), {
+        params: Promise.resolve({ entity: 'nasiya-schedules' }),
+      }),
+      exportEntity(new NextRequest('http://localhost/api/export/nasiya-payments?format=csv'), {
+        params: Promise.resolve({ entity: 'nasiya-payments' }),
+      }),
+      exportEntity(new NextRequest('http://localhost/api/export/nasiya-payment-allocations?format=csv'), {
+        params: Promise.resolve({ entity: 'nasiya-payment-allocations' }),
+      }),
     ])
     expect(returnsExport.status).toBe(200)
     expect(nasiyaExport.status).toBe(200)
-    const [returnsCsv, nasiyaCsv] = await Promise.all([returnsExport.text(), nasiyaExport.text()])
+    expect(schedulesExport.status).toBe(200)
+    expect(paymentsExport.status).toBe(200)
+    expect(allocationsExport.status).toBe(200)
+    const [returnsCsv, nasiyaCsv, schedulesCsv, paymentsCsv, allocationsCsv] = await Promise.all([
+      returnsExport.text(),
+      nasiyaExport.text(),
+      schedulesExport.text(),
+      paymentsExport.text(),
+      allocationsExport.text(),
+    ])
     expect(returnsCsv).toContain('"returnId","saleId","nasiyaId"')
     expect(returnsCsv).toContain('"contractRefundAmount","contractRetainedAmount","contractCancelledDebt"')
     expect(returnsCsv).toContain('"note","operatorId","createdAt"')
@@ -1961,6 +2048,12 @@ describe('real-PostgreSQL route evidence', () => {
     expect(returnsCsv).toContain(actor.admin.id)
     expect(returnsCsv).toContain('Mijoz qolgan oylarni to‘lay olmasligini tushuntirdi')
     expect(nasiyaCsv).toContain('Qaytarilgan')
+    expect(schedulesCsv).toContain(contract.nasiya.id)
+    expect(schedulesCsv).toContain(contract.openSchedules[0].id)
+    expect(paymentsCsv).toContain(contract.nasiya.id)
+    expect(paymentsCsv).toContain(payments[0].id)
+    expect(allocationsCsv).toContain(contract.nasiya.id)
+    expect(allocationsCsv).toContain('contractPrincipalAmount')
 
     const replay = await returnNasiyaRequest({
       nasiyaId: contract.nasiya.id,
@@ -2342,6 +2435,7 @@ describe('real-PostgreSQL route evidence', () => {
           quoteCurrency: 'UZS',
           rate: 1_000,
           source: 'CBU',
+          effectiveDate: new Date('2026-07-23T00:00:00.000Z'),
           fetchedAt,
         },
       }),
@@ -2476,6 +2570,65 @@ describe('real-PostgreSQL route evidence', () => {
     expect(returned.refundAllocations).toHaveLength(0)
   })
 
+  it('does not mutate a sale return when a legacy receipt has no proven native amount', async () => {
+    const actor = await seedActor('legacy_sale_refund')
+    useShopAdmin(actor)
+    const customer = await prisma.customer.create({
+      data: {
+        shopId: actor.shop.id,
+        name: 'Legacy refund customer',
+        phone: '+998907272727',
+        normalizedPhone: '998907272727',
+      },
+    })
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Legacy refund phone',
+        purchasePrice: 500,
+        imei: 'RETURN-LEGACY-RECEIPT',
+        addedBy: actor.admin.id,
+        status: 'SOLD_CASH',
+      },
+    })
+    const sale = await prisma.sale.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        salePrice: 1_000,
+        amountPaid: 1_000,
+        contractSalePrice: 1_000,
+        contractAmountPaid: 1_000,
+        paymentMethod: 'CASH',
+        createdBy: actor.admin.id,
+      },
+    })
+    await prisma.salePayment.create({
+      data: {
+        shopId: actor.shop.id,
+        saleId: sale.id,
+        amount: 1_000,
+        appliedAmountInContractCurrency: null,
+        paymentMethod: 'CASH',
+        createdBy: actor.admin.id,
+      },
+    })
+
+    const response = await returnDeviceRequest({
+      deviceId: device.id,
+      key: 'legacy-sale-refund-key',
+      refundAmount: 100,
+      refundMethod: 'CASH',
+    })
+    const payload = await response.json()
+
+    expect(response.status).toBe(409)
+    expect(payload.error).toContain('moliyaviy yozuvni tekshiring')
+    expect(await prisma.deviceReturn.count({ where: { saleId: sale.id } })).toBe(0)
+    expect((await prisma.device.findUniqueOrThrow({ where: { id: device.id } })).status).toBe('SOLD_CASH')
+  })
+
   it('serializes a Nasiya return against a concurrent payment so exactly one quote wins', async () => {
     const actor = await seedActor('payment_return_race')
     useShopAdmin(actor)
@@ -2569,6 +2722,7 @@ describe('real-PostgreSQL route evidence', () => {
         quoteCurrency: 'UZS',
         rate: 12_500,
         source: 'CBU',
+        effectiveDate: new Date('2026-07-23T00:00:00.000Z'),
         fetchedAt: new Date(),
       },
     })
@@ -2619,6 +2773,71 @@ describe('real-PostgreSQL route evidence', () => {
     expect(accounting.actualProfitUzs).toBe(0)
   })
 
+  it('durably replays an exact standalone Nasiya command and serializes concurrent same-key retries', async () => {
+    const actor = await seedActor('nasiya_create_replay')
+    useShopAdmin(actor)
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Nasiya replay phone',
+        purchasePrice: 1_000_000,
+        purchaseInputAmount: 1_000_000,
+        purchaseAmountUzsSnapshot: 1_000_000,
+        imei: 'NASIYA-CREATE-REPLAY',
+        addedBy: actor.admin.id,
+      },
+    })
+    const key = 'nasiya-create-concurrent-replay'
+    const phone = '+998901010298'
+
+    const missingKey = await createNasiyaRequest(device.id, phone, actor.shop.id, '')
+    expect(missingKey.status).toBe(400)
+    expect(await prisma.nasiya.count({ where: { shopId: actor.shop.id } })).toBe(0)
+
+    const [left, right] = await Promise.all([
+      createNasiyaRequest(device.id, phone, actor.shop.id, key),
+      createNasiyaRequest(device.id, phone, actor.shop.id, key),
+    ])
+    expect([left.status, right.status].sort((a, b) => a - b)).toEqual([200, 201])
+    const [leftPayload, rightPayload] = await Promise.all([left.json(), right.json()]) as [
+      { data: { id: string } },
+      { data: { id: string } },
+    ]
+    expect(leftPayload.data.id).toBe(rightPayload.data.id)
+
+    const exactReplay = await createNasiyaRequest(device.id, phone, actor.shop.id, key)
+    expect(exactReplay.status).toBe(200)
+    expect((await exactReplay.json() as { data: { id: string } }).data.id).toBe(leftPayload.data.id)
+
+    const changedPayload = await createNasiyaRequest(
+      device.id,
+      phone,
+      actor.shop.id,
+      key,
+      { note: 'Changed after a committed response' },
+    )
+    expect(changedPayload.status).toBe(409)
+
+    const rows = await prisma.nasiya.findMany({
+      where: { shopId: actor.shop.id },
+      include: { schedules: true, payments: true },
+    })
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      id: leftPayload.data.id,
+      deviceId: device.id,
+      createdBy: actor.admin.id,
+      creationIdempotencyKey: key,
+      evidenceVersion: 2,
+      evidenceStatus: 'CAPTURED',
+    })
+    expect(rows[0].creationCommandHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(rows[0].schedules).toHaveLength(2)
+    expect(rows[0].payments).toHaveLength(1)
+    expect(await prisma.customer.count({ where: { shopId: actor.shop.id } })).toBe(1)
+    expect((await prisma.device.findUniqueOrThrow({ where: { id: device.id } })).status).toBe('SOLD_NASIYA')
+  })
+
   it('recognizes the $800/$1,000 Nasiya example only as installments are paid and attributes it to the collector', async () => {
     const actor = await seedActor('monthly_profit')
     useShopAdmin(actor)
@@ -2628,6 +2847,7 @@ describe('real-PostgreSQL route evidence', () => {
         quoteCurrency: 'UZS',
         rate: 12_500,
         source: 'CBU',
+        effectiveDate: new Date('2026-07-23T00:00:00.000Z'),
         fetchedAt: new Date(),
       },
     })
@@ -2810,6 +3030,7 @@ describe('real-PostgreSQL route evidence', () => {
         quoteCurrency: 'UZS',
         rate: 12_500,
         source: 'CBU',
+        effectiveDate: new Date('2026-07-23T00:00:00.000Z'),
         fetchedAt: new Date(),
       },
     })
@@ -3219,6 +3440,292 @@ describe('real-PostgreSQL route evidence', () => {
       data: { reason: 'Attempted rewrite' },
     })).rejects.toThrow()
     await expect(prisma.nasiyaSettlement.delete({ where: { id: settlement.id } })).rejects.toThrow()
+  })
+
+  it('keeps UZS-to-UZS settlement FX evidence null even when a USD quote is stored', async () => {
+    const actor = await seedActor('settlement_uzs_same_currency')
+    useShopAdmin(actor)
+    await prisma.currencyRate.create({
+      data: {
+        baseCurrency: 'USD',
+        quoteCurrency: 'UZS',
+        rate: 12_500,
+        source: 'CBU',
+        effectiveDate: new Date('2026-07-22T00:00:00.000Z'),
+        fetchedAt: new Date(),
+      },
+    })
+    const contract = await seedSettlementNasiya(actor, 'settlement_uzs_same_currency')
+
+    const response = await nasiyaSettlementRequest({
+      nasiyaId: contract.nasiya.id,
+      mode: 'FULL_WITH_PROFIT',
+      expectedRemaining: 600,
+      expectedCash: 600,
+      expectedWaived: 0,
+      key: 'settlement-uzs-same-currency-key',
+      reason: 'Same-currency UZS closure with an unrelated stored USD quote',
+      inputCurrency: 'UZS',
+      expectedContractCurrency: 'UZS',
+    })
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+    const payload = await response.json() as {
+      data: {
+        receipt: {
+          input: { currency: string; minorUnits: number }
+          recordedUzs: { currency: string; minorUnits: number }
+          applied: { currency: string; minorUnits: number }
+          paymentFxQuote: unknown
+        }
+      }
+    }
+    expect(payload.data.receipt).toMatchObject({
+      input: { currency: 'UZS', minorUnits: 600 },
+      recordedUzs: { currency: 'UZS', minorUnits: 600 },
+      applied: { currency: 'UZS', minorUnits: 600 },
+      paymentFxQuote: null,
+    })
+
+    const [payment, settlement, nasiya] = await Promise.all([
+      prisma.nasiyaPayment.findUniqueOrThrow({
+        where: {
+          shopId_idempotencyKey: {
+            shopId: actor.shop.id,
+            idempotencyKey: 'settlement:settlement-uzs-same-currency-key',
+          },
+        },
+      }),
+      prisma.nasiyaSettlement.findUniqueOrThrow({ where: { nasiyaId: contract.nasiya.id } }),
+      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
+    ])
+    expect(Number(payment.amount)).toBe(600)
+    expect(Number(payment.paymentInputAmount)).toBe(600)
+    expect(Number(payment.appliedAmountInContractCurrency)).toBe(600)
+    expect(payment.paymentInputCurrency).toBe('UZS')
+    expect(payment.paymentExchangeRate).toBeNull()
+    expect(payment.paymentExchangeRateSource).toBeNull()
+    expect(payment.paymentExchangeRateEffectiveAt).toBeNull()
+    expect(payment.paymentExchangeRateFetchedAt).toBeNull()
+    expect(settlement.frozenUsdUzsRate).toBeNull()
+    expect(settlement.frozenUsdUzsRateSource).toBeNull()
+    expect(settlement.frozenUsdUzsRateEffectiveAt).toBeNull()
+    expect(settlement.frozenUsdUzsRateFetchedAt).toBeNull()
+    expect(nasiya.status).toBe('COMPLETED')
+    expect(Number(nasiya.contractPaidAmount)).toBe(1_200)
+    expect(Number(nasiya.contractRemainingAmount)).toBe(0)
+  })
+
+  it('settles an exact 500001 UZS debt with its rounded USD 40.00 tender', async () => {
+    const actor = await seedActor('settlement_uzs_rounded_usd')
+    useShopAdmin(actor)
+    await prisma.currencyRate.create({
+      data: {
+        baseCurrency: 'USD',
+        quoteCurrency: 'UZS',
+        rate: 12_500,
+        source: 'CBU',
+        effectiveDate: new Date('2026-07-22T00:00:00.000Z'),
+        fetchedAt: new Date(),
+      },
+    })
+    const customer = await prisma.customer.create({
+      data: {
+        shopId: actor.shop.id,
+        name: 'Rounded USD settlement customer',
+        phone: '+998901250000',
+        normalizedPhone: '998901250000',
+      },
+    })
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Rounded USD settlement phone',
+        purchasePrice: 300_000,
+        purchaseInputAmount: 300_000,
+        purchaseAmountUzsSnapshot: 300_000,
+        imei: 'ROUTE-UZS-ROUNDED-USD-SETTLEMENT',
+        addedBy: actor.admin.id,
+        status: 'SOLD_NASIYA',
+      },
+    })
+    const contract = await prisma.$transaction(async (tx) => {
+      const nasiya = await tx.nasiya.create({
+        data: {
+          shopId: actor.shop.id,
+          deviceId: device.id,
+          customerId: customer.id,
+          totalAmount: 500_001,
+          downPayment: 0,
+          baseRemainingAmount: 500_001,
+          interestPercent: 0,
+          interestAmount: 0,
+          finalNasiyaAmount: 500_001,
+          remainingAmount: 500_001,
+          months: 1,
+          monthlyPayment: 500_001,
+          startDate: new Date('2026-07-01T00:00:00.000Z'),
+          contractCurrency: 'UZS',
+          contractTotalAmount: 500_001,
+          contractDownPayment: 0,
+          contractBaseRemainingAmount: 500_001,
+          contractInterestAmount: 0,
+          contractFinalAmount: 500_001,
+          contractMonthlyPayment: 500_001,
+          contractRemainingAmount: 500_001,
+          contractPaidAmount: 0,
+          contractCostBasisAmount: 300_000,
+          contractMarginAmount: 200_001,
+          contractDownPaymentPrincipalAmount: 0,
+          contractDownPaymentMarginAmount: 0,
+          accountingReconstructionStatus: 'COMPLETE',
+          accountingReconstructedAt: new Date('2026-07-01T00:00:00.000Z'),
+          createdBy: actor.admin.id,
+        },
+      })
+      const schedule = await tx.nasiyaSchedule.create({
+        data: {
+          nasiyaId: nasiya.id,
+          shopId: actor.shop.id,
+          monthNumber: 1,
+          dueDate: new Date('2026-08-01T00:00:00.000Z'),
+          expectedAmount: 500_001,
+          paidAmount: 0,
+          status: 'PENDING',
+          contractCurrency: 'UZS',
+          contractExpectedAmount: 500_001,
+          contractPaidAmount: 0,
+          contractRemainingAmount: 500_001,
+          contractPrincipalAmount: 300_000,
+          contractMarginAmount: 200_001,
+          contractInterestAmount: 0,
+          contractPrincipalPaidAmount: 0,
+          contractMarginPaidAmount: 0,
+          contractInterestPaidAmount: 0,
+        },
+      })
+      return { nasiya, schedule }
+    })
+
+    await expect(prisma.nasiyaPayment.create({
+      data: {
+        nasiyaId: contract.nasiya.id,
+        shopId: actor.shop.id,
+        amount: 500_001,
+        paymentMethod: 'CASH',
+        paidAt: new Date('2026-07-22T08:00:00.000Z'),
+        note: 'Deliberately inconsistent USD evidence',
+        idempotencyKey: 'settlement-uzs-wrong-rounded-usd',
+        createdBy: actor.admin.id,
+        paymentInputAmount: 40.01,
+        paymentInputCurrency: 'USD',
+        appliedAmountInContractCurrency: 500_001,
+        paymentExchangeRate: 12_500,
+        paymentExchangeRateSource: 'CBU',
+        paymentExchangeRateEffectiveAt: new Date('2026-07-22T00:00:00.000Z'),
+        paymentExchangeRateFetchedAt: new Date(),
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
+      },
+    })).rejects.toThrow()
+    expect(await prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(0)
+
+    const command = {
+      nasiyaId: contract.nasiya.id,
+      mode: 'FULL_WITH_PROFIT' as const,
+      expectedRemaining: 500_001,
+      expectedCash: 500_001,
+      expectedWaived: 0,
+      key: 'settlement-uzs-rounded-usd-key',
+      reason: 'Exact UZS debt represented by rounded USD cents',
+      inputCurrency: 'USD' as const,
+      expectedContractCurrency: 'UZS' as const,
+    }
+    const response = await nasiyaSettlementRequest(command)
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+    const payload = await response.json() as {
+      data: {
+        settlement: {
+          cashReceived: { currency: string; minorUnits: number }
+          cashReceivedUzs: { currency: string; minorUnits: number }
+        }
+        receipt: {
+          input: { currency: string; minorUnits: number }
+          recordedUzs: { currency: string; minorUnits: number }
+          applied: { currency: string; minorUnits: number }
+        }
+        ledger: {
+          paid: { currency: string; minorUnits: number }
+          remaining: { currency: string; minorUnits: number }
+          status: string
+        }
+      }
+    }
+    expect(payload.data).toMatchObject({
+      settlement: {
+        cashReceived: { currency: 'UZS', minorUnits: 500_001 },
+        cashReceivedUzs: { currency: 'UZS', minorUnits: 500_001 },
+      },
+      receipt: {
+        input: { currency: 'USD', minorUnits: 4_000 },
+        recordedUzs: { currency: 'UZS', minorUnits: 500_001 },
+        applied: { currency: 'UZS', minorUnits: 500_001 },
+      },
+      ledger: {
+        paid: { currency: 'UZS', minorUnits: 500_001 },
+        remaining: { currency: 'UZS', minorUnits: 0 },
+        status: 'COMPLETED',
+      },
+    })
+
+    const [nasiya, schedule, payment, settlement] = await Promise.all([
+      prisma.nasiya.findUniqueOrThrow({ where: { id: contract.nasiya.id } }),
+      prisma.nasiyaSchedule.findUniqueOrThrow({ where: { id: contract.schedule.id } }),
+      prisma.nasiyaPayment.findFirstOrThrow({
+        where: { nasiyaId: contract.nasiya.id },
+        include: { allocations: true },
+      }),
+      prisma.nasiyaSettlement.findUniqueOrThrow({
+        where: { nasiyaId: contract.nasiya.id },
+        include: { allocations: true },
+      }),
+    ])
+    expect(Number(payment.paymentInputAmount)).toBe(40)
+    expect(Number(payment.paymentInputAmount) * Number(payment.paymentExchangeRate)).toBe(500_000)
+    expect(Number(payment.amount)).toBe(500_001)
+    expect(Number(payment.appliedAmountInContractCurrency)).toBe(500_001)
+    expect(payment.paymentInputCurrency).toBe('USD')
+    expect(payment.evidenceVersion).toBe(2)
+    expect(payment.evidenceStatus).toBe('CAPTURED')
+    expect(payment.allocations.map((allocation) => ({
+      contractAmount: Number(allocation.contractAmount),
+      amountUzs: Number(allocation.amountUzs),
+    }))).toEqual([{ contractAmount: 500_001, amountUzs: 500_001 }])
+    expect(Number(settlement.contractCashReceivedAmount)).toBe(500_001)
+    expect(Number(settlement.cashReceivedAmountUzs)).toBe(500_001)
+    expect(settlement.allocations.map((allocation) => ({
+      contractCash: Number(allocation.contractCashAmount),
+      cashUzs: Number(allocation.cashAmountUzs),
+    }))).toEqual([{ contractCash: 500_001, cashUzs: 500_001 }])
+    expect(nasiya.status).toBe('COMPLETED')
+    expect(Number(nasiya.contractPaidAmount)).toBe(500_001)
+    expect(Number(nasiya.contractRemainingAmount)).toBe(0)
+    expect(schedule.status).toBe('PAID')
+    expect(Number(schedule.contractPaidAmount)).toBe(500_001)
+    expect(Number(schedule.contractRemainingAmount)).toBe(0)
+
+    // Simulate the retry arriving after the only stored quote disappeared.
+    // Thirteen replays also exceed the route's normal 12/minute limiter when
+    // combined with the first write, proving committed replay bypasses both
+    // mutable prerequisites and returns the original immutable receipt.
+    await prisma.$executeRawUnsafe('TRUNCATE TABLE "CurrencyRate"')
+    expect(await prisma.currencyRate.count()).toBe(0)
+    for (let attempt = 0; attempt < 13; attempt += 1) {
+      const replay = await nasiyaSettlementRequest(command)
+      expect(replay.status, JSON.stringify(await replay.clone().json())).toBe(200)
+      expect((await replay.json() as { data: { duplicate: boolean } }).data.duplicate).toBe(true)
+    }
+    expect(await prisma.nasiyaSettlement.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(1)
+    expect(await prisma.nasiyaPayment.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(1)
   })
 
   it('keeps USD compatibility balances at the creation rate while freezing settlement evidence at the current rate', async () => {
@@ -3915,14 +4422,101 @@ describe('real-PostgreSQL route evidence', () => {
     expect(stored.dueDate).toEqual(new Date('2026-09-01T00:00:00.000Z'))
   })
 
+  it('records a USD payment against a USD Sale during a quote outage', async () => {
+    const actor = await seedActor('sale_usd_same_currency_outage')
+    useShopAdmin(actor)
+    const creationRate = 12_500
+    const creationTime = new Date('2026-07-01T00:00:00.000Z')
+    const customer = await prisma.customer.create({
+      data: {
+        shopId: actor.shop.id,
+        name: 'USD Sale outage customer',
+        phone: '+998901212501',
+        normalizedPhone: '998901212501',
+      },
+    })
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'USD Sale outage phone',
+        purchasePrice: 625_000,
+        imei: 'ROUTE-USD-SALE-OUTAGE',
+        addedBy: actor.admin.id,
+        status: 'SOLD_DEBT',
+      },
+    })
+    const sale = await prisma.sale.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        customerId: customer.id,
+        salePrice: 1_250_000,
+        paymentMethod: null,
+        paidFully: false,
+        amountPaid: 0,
+        remainingAmount: 1_250_000,
+        dueDate: new Date('2026-08-15T00:00:00.000Z'),
+        creationCurrency: 'USD',
+        creationExchangeRate: creationRate,
+        creationExchangeRateSource: 'CBU',
+        creationExchangeRateEffectiveAt: creationTime,
+        creationExchangeRateFetchedAt: creationTime,
+        contractCurrency: 'USD',
+        contractExchangeRateAtCreation: creationRate,
+        contractSalePrice: 100,
+        contractAmountPaid: 0,
+        contractRemainingAmount: 100,
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
+        createdBy: actor.admin.id,
+        creationIdempotencyKey: 'sale-usd-outage-parent',
+        creationCommandHash: '1'.repeat(64),
+      },
+    })
+    expect(await prisma.currencyRate.count()).toBe(0)
+
+    const response = await salePaymentRequest({
+      saleId: sale.id,
+      amount: 25,
+      inputCurrency: 'USD',
+      key: 'sale-usd-outage-payment',
+      note: 'Same-currency payment without a current quote',
+    })
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+
+    const [payment, updatedSale] = await Promise.all([
+      prisma.salePayment.findFirstOrThrow({ where: { saleId: sale.id } }),
+      prisma.sale.findUniqueOrThrow({ where: { id: sale.id } }),
+    ])
+    expect(Number(payment.amount)).toBe(312_500)
+    expect(Number(payment.paymentInputAmount)).toBe(25)
+    expect(payment.paymentInputCurrency).toBe('USD')
+    expect(Number(payment.appliedAmountInContractCurrency)).toBe(25)
+    expect(payment.paymentExchangeRate).toBeNull()
+    expect(payment.paymentExchangeRateSource).toBe('UNAVAILABLE_SAME_CURRENCY')
+    expect(payment.paymentExchangeRateEffectiveAt).toBeNull()
+    expect(payment.paymentExchangeRateFetchedAt).toBeNull()
+    expect(payment.evidenceVersion).toBe(2)
+    expect(payment.evidenceStatus).toBe('CAPTURED')
+    expect(Number(updatedSale.contractAmountPaid)).toBe(25)
+    expect(Number(updatedSale.contractRemainingAmount)).toBe(75)
+  })
+
   it('replays only the exact shop subscription payment command', async () => {
     const actor = await seedActor('shop_payment_retry')
     await useSuperAdmin(actor)
     const key = 'shop-payment-payload-key'
-    const command = { shopId: actor.shop.id, amount: 1_000, months: 1, key, note: 'One month paid' }
+    const command = {
+      shopId: actor.shop.id,
+      amount: 1_000,
+      months: 1,
+      key,
+      note: 'One month paid',
+    }
 
     expect((await shopPaymentRequest(command)).status).toBe(200)
     expect((await shopPaymentRequest(command)).status).toBe(200)
+    expect((await shopPaymentRequest({ ...command, amount: 1_001 })).status).toBe(409)
     expect((await shopPaymentRequest({ ...command, months: 2 })).status).toBe(409)
     expect((await shopPaymentRequest({ ...command, note: 'Changed note' })).status).toBe(409)
     expect(await prisma.shopPayment.count({ where: { shopId: actor.shop.id } })).toBe(1)
@@ -3934,6 +4528,51 @@ describe('real-PostgreSQL route evidence', () => {
     expect(receipt.commandHash).toMatch(/^[a-f0-9]{64}$/)
     expect(receipt.servicePeriodStart).not.toBeNull()
     expect(receipt.servicePeriodEnd).not.toBeNull()
+  })
+
+  it.each([
+    { suffix: 'shop_payment_uzs_precision', currency: 'UZS' as const, monthlyPrice: 1_000, invalidAmount: 1_000.4 },
+    { suffix: 'shop_payment_usd_precision', currency: 'USD' as const, monthlyPrice: 10, invalidAmount: 10.001 },
+  ])('rejects unsupported $currency shop-payment precision before writing', async ({
+    suffix,
+    currency,
+    monthlyPrice,
+    invalidAmount,
+  }) => {
+    const actor = await seedActor(suffix)
+    await useSuperAdmin(actor)
+    await prisma.shopPackageVersion.create({
+      data: {
+        shopId: actor.shop.id,
+        effectiveOn: new Date('2027-01-01T00:00:00.000Z'),
+        basePrice: monthlyPrice,
+        currency,
+        discountAmount: 0,
+        pricingNeedsReview: false,
+        note: `${currency} precision package`,
+        createdById: actor.owner.id,
+        features: {
+          create: [
+            'INVENTORY', 'CASH_SALES', 'NASIYA', 'OLIB_SOTDIM', 'CUSTOMER_CRM',
+            'TELEGRAM', 'REMINDERS', 'REPORTS', 'IMPORTS', 'EXPORTS', 'STAFF_ACCESS',
+          ].map((featureCode) => ({ featureCode, enabled: true, recurringPrice: 0 })),
+        },
+      },
+    })
+    const dueBefore = actor.shop.subscriptionDue
+
+    const response = await shopPaymentRequest({
+      shopId: actor.shop.id,
+      amount: invalidAmount,
+      months: 1,
+      key: `shop-payment-${currency.toLowerCase()}-minor-units`,
+    })
+    const payload = await response.json() as { error?: string }
+
+    expect(response.status).toBe(400)
+    expect(payload.error).toMatch(currency === 'USD' ? /2 kasr/ : /butun so'm/)
+    expect(await prisma.shopPayment.count({ where: { shopId: actor.shop.id } })).toBe(0)
+    expect((await prisma.shop.findUniqueOrThrow({ where: { id: actor.shop.id } })).subscriptionDue).toEqual(dueBefore)
   })
 
   it('does not let a shop admin pay another shop Nasiya', async () => {
@@ -4009,9 +4648,74 @@ describe('real-PostgreSQL route evidence', () => {
     expect((await prisma.nasiya.findUniqueOrThrow({ where: { id: foreign.nasiya.id } })).note).toBeNull()
   })
 
+  it('creates one immutable paid-now purchase receipt and safely replays the acquisition key', async () => {
+    const actor = await seedActor('device_paid_now_receipt')
+    useShopAdmin(actor)
+    const body = {
+      model: 'Paid now evidence phone',
+      color: 'Qora',
+      storageAmount: 256,
+      storageUnit: 'GB',
+      conditionCode: 'NEW',
+      purchasePrice: 1_250_000,
+      inputCurrency: 'UZS',
+      imei: '867530920260731',
+      supplierName: 'Receipt supplier',
+      supplierPhone: '+998907771133',
+      purchaseSettlement: 'PAID_NOW',
+      supplierPaymentMethod: 'TRANSFER',
+    }
+    const idempotencyKey = 'device-paid-now-receipt-proof'
+
+    const missingKey = await createDeviceRequest(body, '')
+    expect(missingKey.status).toBe(400)
+    expect(await prisma.device.count({ where: { shopId: actor.shop.id } })).toBe(0)
+    const first = await createDeviceRequest(body, idempotencyKey)
+    expect(first.status).toBe(201)
+    const replay = await createDeviceRequest(body, idempotencyKey)
+    expect(replay.status).toBe(200)
+    const conflict = await createDeviceRequest({ ...body, color: 'Oq' }, idempotencyKey)
+    expect(conflict.status).toBe(409)
+
+    const device = await prisma.device.findFirstOrThrow({
+      where: { shopId: actor.shop.id, imei: body.imei },
+    })
+    const receipt = await prisma.devicePurchaseReceipt.findUniqueOrThrow({
+      where: { deviceId: device.id },
+    })
+    expect(Number(receipt.inputAmount)).toBe(body.purchasePrice)
+    expect(receipt.inputCurrency).toBe('UZS')
+    expect(Number(receipt.nativeAmount)).toBe(body.purchasePrice)
+    expect(receipt.nativeCurrency).toBe('UZS')
+    expect(Number(receipt.amountUzsSnapshot)).toBe(body.purchasePrice)
+    expect(receipt.paymentMethod).toBe('TRANSFER')
+    expect(receipt.paymentBreakdown).toBeNull()
+    expect(receipt.exchangeRate).toBeNull()
+    expect(receipt.exchangeRateSource).toBeNull()
+    expect(receipt.exchangeRateEffectiveAt).toBeNull()
+    expect(receipt.exchangeRateFetchedAt).toBeNull()
+    expect(receipt.actorId).toBe(actor.admin.id)
+    expect(receipt.actorType).toBe('SHOP_ADMIN')
+    expect(receipt.idempotencyKey).toBe(idempotencyKey)
+    expect(receipt.commandHash).toMatch(/^[a-f0-9]{64}$/)
+    expect(receipt.evidenceVersion).toBe(2)
+    expect(receipt.evidenceStatus).toBe('CAPTURED')
+    const edit = await updateDeviceRequest(device.id, {
+      purchasePrice: 1_300_000,
+      inputCurrency: 'UZS',
+    })
+    expect(edit.status).toBe(409)
+    expect(await prisma.device.findUniqueOrThrow({ where: { id: device.id } })).toEqual(device)
+    expect(await prisma.devicePurchaseReceipt.findUniqueOrThrow({ where: { id: receipt.id } })).toEqual(receipt)
+    expect(await prisma.device.count({ where: { shopId: actor.shop.id, imei: body.imei } })).toBe(1)
+    expect(await prisma.devicePurchaseReceipt.count({ where: { shopId: actor.shop.id } })).toBe(1)
+    expect(await prisma.supplierPayable.count({ where: { shopId: actor.shop.id, deviceId: device.id } })).toBe(0)
+  })
+
   it('creates an in-stock normal device with an append-only partial supplier debt split', async () => {
     const actor = await seedActor('device_pay_later')
     useShopAdmin(actor)
+    const idempotencyKey = 'device-pay-later-split-proof'
     const response = await createDeviceRequest({
       model: 'Normal Pay Later phone',
       color: 'Qora',
@@ -4026,12 +4730,11 @@ describe('real-PostgreSQL route evidence', () => {
       purchaseSettlement: 'PAY_LATER',
       supplierDueDate: '2026-09-20',
       supplierInitialPaymentAmount: 300_000,
-      supplierPaymentMethod: 'CASH',
       supplierPaymentBreakdown: [
         { method: 'CASH', amount: 100_000 },
         { method: 'CARD', amount: 200_000 },
       ],
-    }, 'device-pay-later-split-proof')
+    }, idempotencyKey)
     expect(response.status).toBe(201)
     const device = await prisma.device.findFirstOrThrow({ where: { shopId: actor.shop.id, imei: '867530920260722' } })
     expect(device.status).toBe('IN_STOCK')
@@ -4040,13 +4743,177 @@ describe('real-PostgreSQL route evidence', () => {
       include: { payments: true },
     })
     expect(payable).toMatchObject({ origin: 'DEVICE_PURCHASE', status: 'PARTIAL', saleId: null })
+    expect(payable.creationIdempotencyKey).toBe(
+      `device-payable:${createHash('sha256').update(idempotencyKey).digest('hex')}`,
+    )
     expect(Number(payable.contractPaidAmount)).toBe(300_000)
     expect(Number(payable.contractRemainingAmount)).toBe(700_000)
     expect(payable.payments).toHaveLength(1)
+    expect(payable.payments[0].idempotencyKey).toBe(`supplier-initial:${payable.id}`)
+    expect(payable.payments[0].paymentMethod).toBe('OTHER')
     expect(payable.payments[0].paymentBreakdown).toEqual([
       { method: 'CASH', amount: 100000 },
       { method: 'CARD', amount: 200000 },
     ])
+  })
+
+  it('records a USD payment against a USD supplier payable during a quote outage', async () => {
+    const actor = await seedActor('supplier_usd_same_currency_outage')
+    useShopAdmin(actor)
+    const creationRate = 12_500
+    const creationTime = new Date('2026-07-01T00:00:00.000Z')
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'USD supplier outage phone',
+        purchasePrice: 1_250_000,
+        imei: 'ROUTE-USD-SUPPLIER-OUTAGE',
+        addedBy: actor.admin.id,
+        status: 'IN_STOCK',
+      },
+    })
+    const payable = await prisma.supplierPayable.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        origin: 'DEVICE_PURCHASE',
+        supplierName: 'USD outage supplier',
+        supplierPhone: '+998901212502',
+        amount: 1_250_000,
+        contractCurrency: 'USD',
+        contractExchangeRateAtCreation: creationRate,
+        contractExchangeRateSourceAtCreation: 'CBU',
+        contractExchangeRateEffectiveAtCreation: creationTime,
+        contractExchangeRateFetchedAtCreation: creationTime,
+        contractAmount: 100,
+        paidAmount: 0,
+        remainingAmount: 1_250_000,
+        contractPaidAmount: 0,
+        contractRemainingAmount: 100,
+        status: 'PENDING',
+        dueDate: new Date('2026-08-15T00:00:00.000Z'),
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
+        createdBy: actor.admin.id,
+        creationIdempotencyKey: 'supplier-usd-outage-parent',
+        creationCommandHash: '2'.repeat(64),
+      },
+    })
+    expect(await prisma.currencyRate.count()).toBe(0)
+
+    const response = await supplierPayablePartialPaymentRequest({
+      payableId: payable.id,
+      amount: 25,
+      inputCurrency: 'USD',
+      key: 'supplier-usd-outage-payment',
+      note: 'Same-currency supplier payment without a current quote',
+    })
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+
+    const [payment, updatedPayable] = await Promise.all([
+      prisma.supplierPayablePayment.findFirstOrThrow({
+        where: { supplierPayableId: payable.id },
+      }),
+      prisma.supplierPayable.findUniqueOrThrow({ where: { id: payable.id } }),
+    ])
+    expect(Number(payment.amount)).toBe(312_500)
+    expect(Number(payment.paymentInputAmount)).toBe(25)
+    expect(payment.paymentInputCurrency).toBe('USD')
+    expect(Number(payment.appliedAmountInContractCurrency)).toBe(25)
+    expect(payment.paymentExchangeRate).toBeNull()
+    expect(payment.paymentExchangeRateSource).toBe('UNAVAILABLE_SAME_CURRENCY')
+    expect(payment.paymentExchangeRateEffectiveAt).toBeNull()
+    expect(payment.paymentExchangeRateFetchedAt).toBeNull()
+    expect(payment.evidenceVersion).toBe(2)
+    expect(payment.evidenceStatus).toBe('CAPTURED')
+    expect(Number(updatedPayable.contractPaidAmount)).toBe(25)
+    expect(Number(updatedPayable.contractRemainingAmount)).toBe(75)
+    expect(Number(updatedPayable.paidAmount)).toBe(312_500)
+    expect(Number(updatedPayable.remainingAmount)).toBe(937_500)
+  })
+
+  it('rejects purchase fact edits once a supplier payable exists without changing any ledger row', async () => {
+    const actor = await seedActor('device_payable_edit_lock')
+    useShopAdmin(actor)
+    const createResponse = await createDeviceRequest({
+      model: 'Locked payable phone',
+      color: 'Qora',
+      storageAmount: 128,
+      storageUnit: 'GB',
+      conditionCode: 'USED',
+      purchasePrice: 2_000_000,
+      inputCurrency: 'UZS',
+      imei: '867530920260749',
+      supplierName: 'Locked supplier',
+      supplierPhone: '+998907771144',
+      purchaseSettlement: 'PAY_LATER',
+      supplierDueDate: '2026-10-20',
+      supplierInitialPaymentAmount: 500_000,
+      supplierPaymentBreakdown: [
+        { method: 'CASH', amount: 200_000 },
+        { method: 'CARD', amount: 300_000 },
+      ],
+    }, 'device-payable-edit-lock-proof')
+    expect(createResponse.status).toBe(201)
+
+    const deviceBefore = await prisma.device.findFirstOrThrow({
+      where: { shopId: actor.shop.id, imei: '867530920260749' },
+    })
+    const payableBefore = await prisma.supplierPayable.findFirstOrThrow({
+      where: { shopId: actor.shop.id, deviceId: deviceBefore.id },
+    })
+    const paymentsBefore = await prisma.supplierPayablePayment.findMany({
+      where: { shopId: actor.shop.id, supplierPayableId: payableBefore.id },
+      orderBy: { id: 'asc' },
+    })
+
+    const response = await updateDeviceRequest(deviceBefore.id, {
+      purchasePrice: 1_500,
+      inputCurrency: 'USD',
+      supplierPhone: '+998907771155',
+    })
+    expect(response.status).toBe(409)
+
+    const deviceAfter = await prisma.device.findUniqueOrThrow({ where: { id: deviceBefore.id } })
+    const payableAfter = await prisma.supplierPayable.findUniqueOrThrow({ where: { id: payableBefore.id } })
+    const paymentsAfter = await prisma.supplierPayablePayment.findMany({
+      where: { shopId: actor.shop.id, supplierPayableId: payableBefore.id },
+      orderBy: { id: 'asc' },
+    })
+    expect(deviceAfter).toEqual(deviceBefore)
+    expect(payableAfter).toEqual(payableBefore)
+    expect(paymentsAfter).toEqual(paymentsBefore)
+  })
+
+  it('corrects an unlinked legacy purchase without inventing captured acquisition evidence', async () => {
+    const actor = await seedActor('legacy_device_purchase_correction')
+    useShopAdmin(actor)
+    const legacyDevice = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Legacy correction phone',
+        purchasePrice: 900_000,
+        imei: '867530920260750',
+        addedBy: actor.admin.id,
+        evidenceVersion: 1,
+        evidenceStatus: 'LEGACY_UNKNOWN',
+      },
+    })
+
+    const response = await updateDeviceRequest(legacyDevice.id, {
+      purchasePrice: 1_000_000,
+      inputCurrency: 'UZS',
+    })
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+
+    const corrected = await prisma.device.findUniqueOrThrow({ where: { id: legacyDevice.id } })
+    expect(Number(corrected.purchasePrice)).toBe(1_000_000)
+    expect(Number(corrected.purchaseInputAmount)).toBe(1_000_000)
+    expect(Number(corrected.purchaseAmountUzsSnapshot)).toBe(1_000_000)
+    expect(corrected.evidenceVersion).toBe(1)
+    expect(corrected.evidenceStatus).toBe('LEGACY_UNKNOWN')
+    expect(await prisma.devicePurchaseReceipt.count({ where: { deviceId: legacyDevice.id } })).toBe(0)
+    expect(await prisma.supplierPayable.count({ where: { deviceId: legacyDevice.id } })).toBe(0)
   })
 
   it('allows the supplier payable PENDING and OVERDUE transitions to PAID', async () => {
@@ -4089,6 +4956,8 @@ describe('real-PostgreSQL route evidence', () => {
           supplierPhone: '+998908282828',
           amount: 500,
           contractAmount: 500,
+          remainingAmount: 500,
+          contractRemainingAmount: 500,
           status,
           dueDate: new Date('2026-07-01T00:00:00.000Z'),
           createdBy: actor.admin.id,
@@ -4100,6 +4969,87 @@ describe('real-PostgreSQL route evidence', () => {
       expect((await prisma.supplierPayable.findUniqueOrThrow({ where: { id: payable.id } })).status).toBe('PAID')
       expect(await prisma.log.count({ where: { targetType: 'SupplierPayable', targetId: payable.id } })).toBe(1)
     }
+
+    const paymentRows = await prisma.supplierPayablePayment.findMany({
+      where: { shopId: actor.shop.id },
+      orderBy: { createdAt: 'asc' },
+    })
+    const { NextRequest } = await import('next/server')
+    const { GET } = await import('@/app/api/export/[entity]/route')
+    const exportResponse = await GET(
+      new NextRequest('http://localhost/api/export/supplier-payable-payments?format=csv'),
+      { params: Promise.resolve({ entity: 'supplier-payable-payments' }) },
+    )
+    const csv = await exportResponse.text()
+    expect(exportResponse.status).toBe(200)
+    expect(paymentRows).toHaveLength(2)
+    expect(csv).toContain('supplierPayableId')
+    expect(csv).toContain('paymentExchangeRateSource')
+    for (const payment of paymentRows) expect(csv).toContain(payment.id)
+  })
+
+  it('replays the legacy full-pay command after a lost success before mutable balance and rate limits', async () => {
+    const actor = await seedActor('legacy_pay_replay')
+    useShopAdmin(actor)
+    const device = await prisma.device.create({
+      data: {
+        shopId: actor.shop.id,
+        model: 'Legacy replay phone',
+        purchasePrice: 500,
+        purchaseCurrency: 'UZS',
+        purchaseInputAmount: 500,
+        purchaseAmountUzsSnapshot: 500,
+        imei: 'ROUTE-LEGACY-PAY-REPLAY',
+        addedBy: actor.admin.id,
+      },
+    })
+    const payable = await prisma.supplierPayable.create({
+      data: {
+        shopId: actor.shop.id,
+        deviceId: device.id,
+        origin: 'DEVICE_PURCHASE',
+        supplierName: 'Legacy replay supplier',
+        supplierPhone: '+998908787878',
+        amount: 500,
+        contractCurrency: 'UZS',
+        contractAmount: 500,
+        remainingAmount: 500,
+        contractRemainingAmount: 500,
+        status: 'PENDING',
+        dueDate: new Date('2026-08-01T00:00:00.000Z'),
+        createdBy: actor.admin.id,
+      },
+    })
+    const note = 'Stable legacy full payment'
+
+    expect((await supplierPayablePaymentRequest(payable.id, note, 'short')).status).toBe(400)
+    expect((await supplierPayablePaymentRequest(payable.id, note, 'x'.repeat(121))).status).toBe(400)
+    expect(await prisma.supplierPayablePayment.count({
+      where: { shopId: actor.shop.id, supplierPayableId: payable.id },
+    })).toBe(0)
+
+    const first = await supplierPayablePaymentRequest(payable.id, note, null)
+    expect(first.status, JSON.stringify(await first.clone().json())).toBe(200)
+    for (let retry = 0; retry < 22; retry += 1) {
+      const replay = await supplierPayablePaymentRequest(payable.id, note, null)
+      expect(replay.status).toBe(200)
+    }
+    expect((await supplierPayablePaymentRequest(payable.id, 'Changed legacy payload', null)).status).toBe(409)
+
+    const staff = await seedStaff(actor, 'legacy_pay_replay_staff', ['SUPPLIER_PAYMENT_RECORD'])
+    useShopAdmin(staff)
+    expect((await supplierPayablePaymentRequest(payable.id, note, null)).status).toBe(409)
+
+    expect(await prisma.supplierPayablePayment.count({
+      where: { shopId: actor.shop.id, supplierPayableId: payable.id },
+    })).toBe(1)
+    const stored = await prisma.supplierPayablePayment.findFirstOrThrow({
+      where: { shopId: actor.shop.id, supplierPayableId: payable.id },
+    })
+    expect(stored.idempotencyKey).toBe(`legacy-full:${payable.id}`)
+    expect(Number((await prisma.supplierPayable.findUniqueOrThrow({
+      where: { id: payable.id },
+    })).contractRemainingAmount)).toBe(0)
   })
 
   it('never transitions a CANCELLED supplier payable to PAID', async () => {
@@ -4182,6 +5132,46 @@ describe('real-PostgreSQL route evidence', () => {
     expect(csv).toContain('"100","AQSH dollari","12500","1250000","1250000"')
   })
 
+  it('exports audit before/after JSON while retaining staff financial redaction', async () => {
+    const actor = await seedActor('log_export_json')
+    useShopAdmin(actor)
+    await prisma.log.create({
+      data: {
+        shopId: actor.shop.id,
+        actorId: actor.admin.id,
+        actorType: 'SHOP_ADMIN',
+        action: 'UPDATE',
+        targetType: 'Device',
+        targetId: 'log-export-device',
+        oldValue: { safeLabel: 'before', purchasePrice: 1_000 },
+        newValue: { safeLabel: 'after', purchasePrice: 1_500 },
+      },
+    })
+
+    const { NextRequest } = await import('next/server')
+    const { GET } = await import('@/app/api/export/[entity]/route')
+    const ownerResponse = await GET(
+      new NextRequest('http://localhost/api/export/logs?format=csv'),
+      { params: Promise.resolve({ entity: 'logs' }) },
+    )
+    const ownerCsv = await ownerResponse.text()
+    expect(ownerResponse.status).toBe(200)
+    expect(ownerCsv).toContain('oldValueJson')
+    expect(ownerCsv).toContain('newValueJson')
+    expect(ownerCsv).toContain('purchasePrice')
+
+    const staff = await seedStaff(actor, 'log_export_json_staff', ['EXPORT_LOGS'])
+    useShopAdmin(staff)
+    const staffResponse = await GET(
+      new NextRequest('http://localhost/api/export/logs?format=csv'),
+      { params: Promise.resolve({ entity: 'logs' }) },
+    )
+    const staffCsv = await staffResponse.text()
+    expect(staffResponse.status).toBe(200)
+    expect(staffCsv).toContain('safeLabel')
+    expect(staffCsv).not.toContain('purchasePrice')
+  })
+
   it('exports the frozen native Sale ledger alongside clearly labelled UZS snapshots', async () => {
     const actor = await seedActor('sale_export_native')
     useShopAdmin(actor)
@@ -4205,7 +5195,7 @@ describe('real-PostgreSQL route evidence', () => {
         status: 'SOLD_DEBT',
       },
     })
-    await prisma.sale.create({
+    const sale = await prisma.sale.create({
       data: {
         shopId: actor.shop.id,
         deviceId: device.id,
@@ -4224,16 +5214,43 @@ describe('real-PostgreSQL route evidence', () => {
         createdBy: actor.admin.id,
       },
     })
+    const payment = await prisma.salePayment.create({
+      data: {
+        shopId: actor.shop.id,
+        saleId: sale.id,
+        amount: 500_000,
+        paymentInputAmount: 40,
+        paymentInputCurrency: 'USD',
+        paymentExchangeRate: 12_500,
+        paymentExchangeRateSource: 'CBU',
+        paymentExchangeRateEffectiveAt: new Date('2026-07-22T00:00:00.000Z'),
+        paymentExchangeRateFetchedAt: new Date('2026-07-22T08:00:00.000Z'),
+        appliedAmountInContractCurrency: 40,
+        paymentMethod: 'CASH',
+        idempotencyKey: 'sale-export-payment',
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
+        createdBy: actor.admin.id,
+      },
+    })
 
     const { NextRequest } = await import('next/server')
     const { GET } = await import('@/app/api/export/[entity]/route')
-    const response = await GET(
-      new NextRequest('http://localhost/api/export/sales?format=csv'),
-      { params: Promise.resolve({ entity: 'sales' }) },
-    )
-    const csv = await response.text()
+    const [response, paymentsResponse] = await Promise.all([
+      GET(
+        new NextRequest('http://localhost/api/export/sales?format=csv'),
+        { params: Promise.resolve({ entity: 'sales' }) },
+      ),
+      GET(
+        new NextRequest('http://localhost/api/export/sale-payments?format=csv'),
+        { params: Promise.resolve({ entity: 'sale-payments' }) },
+      ),
+    ])
+    const [csv, paymentsCsv] = await Promise.all([response.text(), paymentsResponse.text()])
 
     expect(response.status).toBe(200)
+    expect(paymentsResponse.status).toBe(200)
+    expect(paymentsResponse.headers.get('x-oryx-export-schema-version')).toBeTruthy()
     expect(response.headers.get('content-type')).toContain('text/csv')
     expect(csv).toContain('contractCurrency')
     expect(csv).toContain('contractExchangeRateAtCreation')
@@ -4243,6 +5260,10 @@ describe('real-PostgreSQL route evidence', () => {
     expect(csv).toContain('$100.00')
     expect(csv).toContain('$60.00')
     expect(csv).toContain('1250000')
+    expect(paymentsCsv).toContain('paymentExchangeRateSource')
+    expect(paymentsCsv).toContain(payment.id)
+    expect(paymentsCsv).toContain(sale.id)
+    expect(paymentsCsv).toContain('CBU')
   })
 
   it('exports frozen native Nasiya fields to CSV and produces the XLSX from the same projection', async () => {

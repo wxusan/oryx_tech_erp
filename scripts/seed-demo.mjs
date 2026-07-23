@@ -107,7 +107,12 @@ async function resetExistingDemoData() {
 
   const immutableLedger = await client.query(
     `select (
-       (select count(*) from "DeviceReturn" where "shopId" = any($1))
+       (select count(*) from "DevicePurchaseReceipt" where "shopId" = any($1))
+       + (select count(*) from "ShopPayment" where "shopId" = any($1))
+       + (select count(*) from "SalePayment" where "shopId" = any($1))
+       + (select count(*) from "NasiyaPayment" where "shopId" = any($1))
+       + (select count(*) from "SupplierPayablePayment" where "shopId" = any($1))
+       + (select count(*) from "DeviceReturn" where "shopId" = any($1))
        + (select count(*) from "NasiyaResolutionEvent" where "shopId" = any($1))
        + (select count(*) from "NasiyaPaymentAllocation" where "shopId" = any($1))
        + (select count(*) from "ReturnProfitReversal" where "shopId" = any($1))
@@ -115,7 +120,7 @@ async function resetExistingDemoData() {
     [shopIds],
   )
   if (immutableLedger.rows[0].count > 0) {
-    throw new Error('Demo data has immutable accounting evidence and cannot be reset in place. Recreate the disposable demo database instead.')
+    throw new Error('Demo data has append-only financial evidence and cannot be reset in place. Recreate the disposable demo database instead.')
   }
 
   // The ERP 2.0 owner invariant protects a current owner from deletion, and

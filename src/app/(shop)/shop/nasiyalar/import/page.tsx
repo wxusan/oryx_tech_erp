@@ -21,6 +21,7 @@ import { navigateAfterMutation } from '@/lib/client-events'
 import { isValidPhone } from '@/lib/phone'
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
+import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 
 function fmt(n: number, currency?: ReturnType<typeof useShopCurrency>['currency']) {
   if (currency) return formatMoneyByCurrency(n, currency.currency, currency.usdUzsRate)
@@ -58,6 +59,7 @@ function AuthorizedImportNasiyaPage() {
   const router = useRouter()
   const { can } = useShopAccess()
   const { currency } = useShopCurrency()
+  const importCommand = useLogicalCommandIdempotency()
   const [form, setForm] = useState({
     customerName: '',
     customerPhone: '',
@@ -130,33 +132,41 @@ function AuthorizedImportNasiyaPage() {
     setError('')
     try {
       const [passportPhotoUrl] = await passportSelection.uploadAll()
+      const payload = {
+        customerName: form.customerName.trim(),
+        customerPhone: form.customerPhone.trim(),
+        passportPhotoUrl,
+        deviceModel: form.deviceModel.trim(),
+        imei: form.imei.trim() || undefined,
+        secondaryImei: form.secondaryImei.trim() || undefined,
+        storageAmount: form.storage.trim() ? Number(form.storage) : undefined,
+        storageUnit: form.storage.trim() ? form.storageUnit : undefined,
+        conditionCode: form.conditionCode,
+        color: form.color.trim() || undefined,
+        batteryHealth: form.batteryHealth.trim() ? Number(form.batteryHealth) : undefined,
+        originalTotalAmount: Number(form.originalTotalAmount),
+        alreadyPaidBeforeImport: form.alreadyPaidBeforeImport.trim() ? Number(form.alreadyPaidBeforeImport) : 0,
+        remainingDebt: Number(form.remainingDebt),
+        monthlyPayment: Number(form.monthlyPayment),
+        inputCurrency: currency.currency,
+        nextPaymentDate: form.nextPaymentDate,
+        originalSaleDate: form.originalSaleDate || undefined,
+        importNote: form.importNote.trim() || undefined,
+      }
       const res = await fetch('/api/nasiya/import', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          customerName: form.customerName.trim(),
-          customerPhone: form.customerPhone.trim(),
-          passportPhotoUrl,
-          deviceModel: form.deviceModel.trim(),
-          imei: form.imei.trim() || undefined,
-          secondaryImei: form.secondaryImei.trim() || undefined,
-          storageAmount: form.storage.trim() ? Number(form.storage) : undefined,
-          storageUnit: form.storage.trim() ? form.storageUnit : undefined,
-          conditionCode: form.conditionCode,
-          color: form.color.trim() || undefined,
-          batteryHealth: form.batteryHealth.trim() ? Number(form.batteryHealth) : undefined,
-          originalTotalAmount: Number(form.originalTotalAmount),
-          alreadyPaidBeforeImport: form.alreadyPaidBeforeImport.trim() ? Number(form.alreadyPaidBeforeImport) : 0,
-          remainingDebt: Number(form.remainingDebt),
-          monthlyPayment: Number(form.monthlyPayment),
-          inputCurrency: currency.currency,
-          nextPaymentDate: form.nextPaymentDate,
-          originalSaleDate: form.originalSaleDate || undefined,
-          importNote: form.importNote.trim() || undefined,
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': importCommand.keyFor(payload),
+        },
+        body: JSON.stringify(payload),
       })
       const json = await res.json()
-      if (!res.ok || !json.success) throw new Error(json.error || 'Import qilishda xatolik')
+      if (!res.ok || !json.success) {
+        importCommand.rejected(res.status)
+        throw new Error(json.error || 'Import qilishda xatolik')
+      }
+      importCommand.committed()
       await navigateAfterMutation(router, can('NASIYA_VIEW') ? `/shop/nasiyalar/${json.data.nasiyaId}` : '/shop/import', {
         kind: 'nasiya.imported',
         nasiyaId: json.data.nasiyaId,

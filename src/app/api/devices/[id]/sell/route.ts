@@ -36,8 +36,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const { session } = guarded
 
     const { id: deviceId } = await ctx.params
-    const idempotencyKey = req.headers.get('idempotency-key')?.trim() || null
-    if (idempotencyKey && (idempotencyKey.length < 8 || idempotencyKey.length > 120)) {
+    const idempotencyKey = req.headers.get('idempotency-key')?.trim()
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
       return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
     }
     const body: unknown = await req.json()
@@ -60,6 +60,40 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+
+    const hasNativePayment = paidFully || (amountPaid ?? 0) > 0
+    const commandHash = createHash('sha256').update(JSON.stringify({
+      deviceId,
+      customerMode,
+      customerId: customerId ?? null,
+      customerName: customerName ?? null,
+      customerPhone: customerPhone ?? null,
+      salePrice,
+      inputCurrency: parsed.data.inputCurrency,
+      paymentMethod: hasNativePayment ? paymentMethod : null,
+      paidFully,
+      amountPaid: amountPaid ?? null,
+      dueDate: dueDate?.toISOString() ?? null,
+      reminderEnabled: reminderEnabled ?? false,
+      earlyReminderEnabled: earlyReminderEnabled ?? false,
+      earlyReminderDays: earlyReminderDays ?? null,
+      note: note ?? null,
+    })).digest('hex')
+    // A committed retry must succeed even when the FX provider is currently
+    // unavailable. Resolve it before currency/context work.
+    const committedReplay = await prisma.sale.findUnique({
+      where: { shopId_creationIdempotencyKey: { shopId, creationIdempotencyKey: idempotencyKey } },
+    })
+    if (committedReplay) {
+      if (
+        committedReplay.creationCommandHash !== commandHash
+        || committedReplay.deviceId !== deviceId
+        || committedReplay.createdBy !== session.user.id
+      ) {
+        return conflict("Idempotency-Key boshqa yoki o'zgartirilgan sotuv uchun ishlatilgan")
+      }
+      return created(committedReplay, 'Bu sotuv avval saqlangan')
+    }
 
     // Distributed when Upstash is configured; bounded in-process fallback otherwise.
     const rate = await checkRateLimitDistributed(rateLimitKey('device-sell', shopId, session.user.id), { windowMs: 60_000, max: 20 })
@@ -90,37 +124,20 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const contractRemaining = contractSalePrice - contractPaid
     const nextDeviceStatus = contractRemaining > 0 ? 'SOLD_DEBT' : 'SOLD_CASH'
     if (paid > 0 && !paymentMethod) return badRequest("Pul qabul qilinganda to'lov usuli kiritilishi shart")
-    const commandHash = idempotencyKey
-      ? createHash('sha256').update(JSON.stringify({
-          deviceId,
-          customerMode,
-          customerId: customerId ?? null,
-          customerName: customerName ?? null,
-          customerPhone: customerPhone ?? null,
-          salePrice,
-          inputCurrency: parsed.data.inputCurrency ?? null,
-          paymentMethod: paid > 0 ? paymentMethod : null,
-          paidFully,
-          amountPaid: amountPaid ?? null,
-          dueDate: dueDate?.toISOString() ?? null,
-          reminderEnabled: reminderEnabled ?? false,
-          earlyReminderEnabled: earlyReminderEnabled ?? false,
-          earlyReminderDays: earlyReminderDays ?? null,
-          note: note ?? null,
-        })).digest('hex')
-      : null
-
     const runTransaction = () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
-      if (idempotencyKey) {
-        const replay = await tx.sale.findUnique({
-          where: { shopId_creationIdempotencyKey: { shopId, creationIdempotencyKey: idempotencyKey } },
-        })
-        if (replay) {
-          if (replay.creationCommandHash !== commandHash || replay.deviceId !== deviceId || replay.createdBy !== session.user.id) {
-            throw { status: 409, message: "Idempotency-Key boshqa yoki o'zgartirilgan sotuv uchun ishlatilgan" }
-          }
-          return { sale: replay, duplicate: true }
+      await tx.$executeRaw(Prisma.sql`
+        SELECT pg_advisory_xact_lock(
+          hashtextextended(${`sale-create:${shopId}:${idempotencyKey}`}, 0)
+        )
+      `)
+      const replay = await tx.sale.findUnique({
+        where: { shopId_creationIdempotencyKey: { shopId, creationIdempotencyKey: idempotencyKey } },
+      })
+      if (replay) {
+        if (replay.creationCommandHash !== commandHash || replay.deviceId !== deviceId || replay.createdBy !== session.user.id) {
+          throw { status: 409, message: "Idempotency-Key boshqa yoki o'zgartirilgan sotuv uchun ishlatilgan" }
         }
+        return { sale: replay, duplicate: true }
       }
 
       const device = await tx.device.findFirst({
@@ -191,6 +208,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           // Informational only — see docs/currency-accounting-model.md.
           creationCurrency: salePriceInput.inputCurrency,
           creationExchangeRate: salePriceInput.exchangeRateUsed,
+          creationExchangeRateSource: salePriceInput.exchangeRateSource,
+          creationExchangeRateEffectiveAt: salePriceInput.exchangeRateEffectiveAt,
+          creationExchangeRateFetchedAt: salePriceInput.exchangeRateFetchedAt,
+          evidenceVersion: 2,
+          evidenceStatus: 'CAPTURED',
           // Native contract-currency ledger — source of truth going forward.
           contractCurrency,
           contractExchangeRateAtCreation: salePriceInput.exchangeRateUsed,
@@ -225,6 +247,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             paymentInputAmount: paidFully ? salePrice : amountPaid,
             paymentInputCurrency: salePriceInput.inputCurrency,
             paymentExchangeRate: salePriceInput.exchangeRateUsed,
+            paymentExchangeRateSource: salePriceInput.exchangeRateSource,
+            paymentExchangeRateEffectiveAt: salePriceInput.exchangeRateEffectiveAt,
+            paymentExchangeRateFetchedAt: salePriceInput.exchangeRateFetchedAt,
+            evidenceVersion: 2,
+            evidenceStatus: 'CAPTURED',
             appliedAmountInContractCurrency: contractPaid,
             contractPrincipalAmount: initialComponents!.allocation.principal,
             contractMarginAmount: initialComponents!.allocation.margin,
@@ -303,7 +330,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     try {
       result = await runTransaction()
     } catch (error) {
-      if (idempotencyKey && error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
         const replay = await prisma.sale.findUnique({
           where: { shopId_creationIdempotencyKey: { shopId, creationIdempotencyKey: idempotencyKey } },
         })

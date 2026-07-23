@@ -46,7 +46,11 @@ describe('shop currency initial render', () => {
 
   it('updates the current provider after a preferred-currency settings save', () => {
     const settings = read('src/app/(shop)/shop/settings/settings-shop-section.tsx')
+    const profileRoute = read('src/app/api/shop/profile/route.ts')
 
-    expect(settings).toContain('setCurrency({ currency: json.data.preferredCurrency, usdUzsRate: json.data.usdUzsRate })')
+    expect(settings).toContain('usdUzsRateSource: json.data.usdUzsRateSource')
+    expect(settings).toContain('usdUzsRateFetchedAt: json.data.usdUzsRateFetchedAt')
+    expect(settings).toContain('fxQuote: json.data.fxQuote')
+    expect(profileRoute.split('fxQuote: currency.fxQuote ?? null').length - 1).toBe(2)
   })
 })

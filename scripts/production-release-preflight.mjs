@@ -59,6 +59,7 @@ const RELEASE_MIGRATIONS = [
   '202607220003_nasiya_return_refund',
   '202607230001_return_currency_refund_method',
   '202607230002_contiguous_search_phone_document',
+  '202607230003_usd_uzs_evidence_integrity',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))
@@ -237,7 +238,13 @@ const countChecks = [
               AND trunc("paymentInputAmount") = "paymentInputAmount"
               AND ("paymentExchangeRate" IS NULL OR "paymentExchangeRate" BETWEEN 1000 AND 100000))
             OR ("paymentInputCurrency" = 'USD'
-              AND "paymentExchangeRate" BETWEEN 1000 AND 100000)
+              AND (
+                "paymentExchangeRate" BETWEEN 1000 AND 100000
+                OR (
+                  "paymentExchangeRate" IS NULL
+                  AND "paymentExchangeRateSource" = 'UNAVAILABLE_SAME_CURRENCY'
+                )
+              ))
           )
         )
       )
@@ -804,6 +811,650 @@ const contiguousSearchPhoneDocumentChecks = [
   },
 ]
 
+const usdUzsEvidenceChecks = [
+  {
+    // Defaults intentionally remain v1-compatible while the replacement
+    // artifact is built. Thirty minutes after this migration finished, every
+    // active writer must be explicitly emitting v2. A future release is
+    // blocked if a missed or regressed writer silently falls back to v1.
+    // ShopPayment has no createdAt column, but its only production writer does
+    // not accept or supply paidAt, so the database default is its insertion
+    // clock and is safe for this monitor.
+    name: 'post_cutover_legacy_financial_writes',
+    blocking: true,
+    sql: `
+      WITH cutover AS (
+        SELECT
+          ("finished_at" + INTERVAL '30 minutes') AT TIME ZONE 'UTC' AS cutoff_at
+        FROM "_prisma_migrations"
+        WHERE "migration_name" = '202607230003_usd_uzs_evidence_integrity'
+          AND "finished_at" IS NOT NULL
+          AND "rolled_back_at" IS NULL
+        ORDER BY "finished_at" DESC
+        LIMIT 1
+      )
+      SELECT COALESCE(SUM(issue_count), 0)::integer AS count
+      FROM cutover
+      CROSS JOIN LATERAL (
+        SELECT COUNT(*) AS issue_count
+        FROM "CurrencyRate"
+        WHERE "evidenceVersion" = 1
+          AND "createdAt" >= cutover.cutoff_at
+        UNION ALL
+        SELECT COUNT(*) FROM "ShopPayment"
+        WHERE "evidenceVersion" = 1
+          AND "paidAt" >= cutover.cutoff_at
+        UNION ALL
+        SELECT COUNT(*) FROM "Device"
+        WHERE "evidenceVersion" = 1
+          AND "createdAt" >= cutover.cutoff_at
+        UNION ALL
+        SELECT COUNT(*) FROM "Sale"
+        WHERE "evidenceVersion" = 1
+          AND "createdAt" >= cutover.cutoff_at
+        UNION ALL
+        SELECT COUNT(*) FROM "SalePayment"
+        WHERE "evidenceVersion" = 1
+          AND "createdAt" >= cutover.cutoff_at
+        UNION ALL
+        SELECT COUNT(*) FROM "SupplierPayable"
+        WHERE "evidenceVersion" = 1
+          AND "createdAt" >= cutover.cutoff_at
+        UNION ALL
+        SELECT COUNT(*) FROM "SupplierPayablePayment"
+        WHERE "evidenceVersion" = 1
+          AND "createdAt" >= cutover.cutoff_at
+        UNION ALL
+        SELECT COUNT(*) FROM "Nasiya"
+        WHERE "evidenceVersion" = 1
+          AND "createdAt" >= cutover.cutoff_at
+        UNION ALL
+        SELECT COUNT(*) FROM "NasiyaPayment"
+        WHERE "evidenceVersion" = 1
+          AND "createdAt" >= cutover.cutoff_at
+      ) legacy_writes
+      WHERE (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') >= cutover.cutoff_at
+    `,
+  },
+  {
+    name: 'financial_evidence_status_issues',
+    blocking: true,
+    sql: `
+      SELECT COALESCE(SUM(issue_count), 0)::integer AS count
+      FROM (
+        SELECT COUNT(*) AS issue_count FROM "CurrencyRate"
+        WHERE NOT (
+          ("evidenceVersion" = 1 AND "evidenceStatus" = 'LEGACY_UNKNOWN')
+          OR ("evidenceVersion" = 2 AND "evidenceStatus" = 'CAPTURED')
+        )
+        UNION ALL
+        SELECT COUNT(*) FROM "ShopPayment"
+        WHERE NOT (
+          ("evidenceVersion" = 1 AND "evidenceStatus" = 'LEGACY_UNKNOWN')
+          OR ("evidenceVersion" = 2 AND "evidenceStatus" = 'CAPTURED')
+        )
+        UNION ALL
+        SELECT COUNT(*) FROM "Device"
+        WHERE NOT (
+          ("evidenceVersion" = 1 AND "evidenceStatus" = 'LEGACY_UNKNOWN')
+          OR (
+            "evidenceVersion" = 2
+            AND (
+              (NOT "isImported" AND "evidenceStatus" = 'CAPTURED')
+              OR ("isImported" AND "evidenceStatus" = 'UNRECONSTRUCTABLE')
+            )
+          )
+        )
+        UNION ALL
+        SELECT COUNT(*) FROM "Sale"
+        WHERE NOT (
+          ("evidenceVersion" = 1 AND "evidenceStatus" = 'LEGACY_UNKNOWN')
+          OR ("evidenceVersion" = 2 AND "evidenceStatus" = 'CAPTURED')
+        )
+        UNION ALL
+        SELECT COUNT(*) FROM "SalePayment"
+        WHERE NOT (
+          ("evidenceVersion" = 1 AND "evidenceStatus" = 'LEGACY_UNKNOWN')
+          OR ("evidenceVersion" = 2 AND "evidenceStatus" = 'CAPTURED')
+        )
+        UNION ALL
+        SELECT COUNT(*) FROM "SupplierPayable"
+        WHERE NOT (
+          ("evidenceVersion" = 1 AND "evidenceStatus" = 'LEGACY_UNKNOWN')
+          OR ("evidenceVersion" = 2 AND "evidenceStatus" = 'CAPTURED')
+        )
+        UNION ALL
+        SELECT COUNT(*) FROM "SupplierPayablePayment"
+        WHERE NOT (
+          ("evidenceVersion" = 1 AND "evidenceStatus" = 'LEGACY_UNKNOWN')
+          OR ("evidenceVersion" = 2 AND "evidenceStatus" = 'CAPTURED')
+        )
+        UNION ALL
+        SELECT COUNT(*) FROM "Nasiya"
+        WHERE NOT (
+          ("evidenceVersion" = 1 AND "evidenceStatus" = 'LEGACY_UNKNOWN')
+          OR (
+            "evidenceVersion" = 2
+            AND (
+              (NOT "isImported" AND "evidenceStatus" = 'CAPTURED')
+              OR ("isImported" AND "evidenceStatus" = 'PARTIAL')
+            )
+          )
+        )
+        UNION ALL
+        SELECT COUNT(*) FROM "NasiyaPayment"
+        WHERE NOT (
+          ("evidenceVersion" = 1 AND "evidenceStatus" = 'LEGACY_UNKNOWN')
+          OR ("evidenceVersion" = 2 AND "evidenceStatus" = 'CAPTURED')
+        )
+        UNION ALL
+        SELECT COUNT(*) FROM "DevicePurchaseReceipt"
+        WHERE "evidenceVersion" <> 2 OR "evidenceStatus" <> 'CAPTURED'
+      ) evidence_status_issues
+    `,
+  },
+  {
+    name: 'captured_fx_provenance_issues',
+    blocking: true,
+    sql: `
+      SELECT COALESCE(SUM(issue_count), 0)::integer AS count
+      FROM (
+        SELECT COUNT(*) AS issue_count
+        FROM "CurrencyRate"
+        WHERE "evidenceVersion" = 2
+          AND (
+            "effectiveDate" IS NULL
+            OR "providerReference" IS NULL
+            OR length(btrim("providerReference")) = 0
+            OR ("source" = 'MANUAL' AND ("recordedById" IS NULL OR "recordedByType" IS NULL))
+          )
+        UNION ALL
+        SELECT COUNT(*)
+        FROM "Device"
+        WHERE "evidenceVersion" = 2
+          AND NOT "isImported"
+          AND "purchaseCurrency" = 'USD'
+          AND (
+            "purchaseExchangeRateAtCreation" IS NULL
+            OR "purchaseExchangeRateSource" IS NULL
+            OR "purchaseExchangeRateEffectiveAt" IS NULL
+            OR "purchaseExchangeRateFetchedAt" IS NULL
+          )
+        UNION ALL
+        SELECT COUNT(*)
+        FROM "Sale"
+        WHERE "evidenceVersion" = 2
+          AND "contractCurrency" = 'USD'
+          AND (
+            "creationExchangeRate" IS NULL
+            OR "creationExchangeRateSource" IS NULL
+            OR "creationExchangeRateEffectiveAt" IS NULL
+            OR "creationExchangeRateFetchedAt" IS NULL
+          )
+        UNION ALL
+        SELECT COUNT(*)
+        FROM "Nasiya"
+        WHERE "evidenceVersion" = 2
+          AND "contractCurrency" = 'USD'
+          AND (
+            "creationExchangeRate" IS NULL
+            OR "creationExchangeRateSource" IS NULL
+            OR "creationExchangeRateEffectiveAt" IS NULL
+            OR "creationExchangeRateFetchedAt" IS NULL
+          )
+        UNION ALL
+        SELECT COUNT(*)
+        FROM "SupplierPayable"
+        WHERE "evidenceVersion" = 2
+          AND "contractCurrency" = 'USD'
+          AND (
+            "contractExchangeRateAtCreation" IS NULL
+            OR "contractExchangeRateSourceAtCreation" IS NULL
+            OR "contractExchangeRateEffectiveAtCreation" IS NULL
+            OR "contractExchangeRateFetchedAtCreation" IS NULL
+          )
+        UNION ALL
+        SELECT COUNT(*)
+        FROM "SalePayment" payment
+        JOIN "Sale" sale
+          ON sale.id = payment."saleId" AND sale."shopId" = payment."shopId"
+        WHERE payment."evidenceVersion" = 2
+          AND (
+            payment."paymentInputAmount" IS NULL
+            OR payment."paymentInputCurrency" IS NULL
+            OR payment."appliedAmountInContractCurrency" IS NULL
+            OR (
+              payment."paymentInputCurrency" <> sale."contractCurrency"
+              AND payment."paymentExchangeRate" IS NULL
+            )
+            OR (
+              payment."paymentExchangeRate" IS NOT NULL
+              AND (
+                payment."paymentExchangeRateSource" IS NULL
+                OR payment."paymentExchangeRateEffectiveAt" IS NULL
+                OR payment."paymentExchangeRateFetchedAt" IS NULL
+              )
+            )
+          )
+        UNION ALL
+        SELECT COUNT(*)
+        FROM "NasiyaPayment" payment
+        JOIN "Nasiya" nasiya
+          ON nasiya.id = payment."nasiyaId" AND nasiya."shopId" = payment."shopId"
+        WHERE payment."evidenceVersion" = 2
+          AND (
+            payment."paymentInputAmount" IS NULL
+            OR payment."paymentInputCurrency" IS NULL
+            OR payment."appliedAmountInContractCurrency" IS NULL
+            OR (
+              payment."paymentInputCurrency" <> nasiya."contractCurrency"
+              AND payment."paymentExchangeRate" IS NULL
+            )
+            OR (
+              payment."paymentExchangeRate" IS NOT NULL
+              AND (
+                payment."paymentExchangeRateSource" IS NULL
+                OR payment."paymentExchangeRateEffectiveAt" IS NULL
+                OR payment."paymentExchangeRateFetchedAt" IS NULL
+              )
+            )
+          )
+        UNION ALL
+        SELECT COUNT(*)
+        FROM "SupplierPayablePayment" payment
+        JOIN "SupplierPayable" payable
+          ON payable.id = payment."supplierPayableId" AND payable."shopId" = payment."shopId"
+        WHERE payment."evidenceVersion" = 2
+          AND (
+            payment."paymentInputCurrency" <> payable."contractCurrency"
+              AND payment."paymentExchangeRate" IS NULL
+            OR (
+              payment."paymentExchangeRate" IS NOT NULL
+              AND (
+                payment."paymentExchangeRateSource" IS NULL
+                OR payment."paymentExchangeRateEffectiveAt" IS NULL
+                OR payment."paymentExchangeRateFetchedAt" IS NULL
+              )
+            )
+          )
+      ) captured_fx_issues
+    `,
+  },
+  {
+    name: 'device_purchase_receipt_projection_issues',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "DevicePurchaseReceipt" receipt
+      JOIN "Device" device
+        ON device.id = receipt."deviceId" AND device."shopId" = receipt."shopId"
+      WHERE receipt."nativeCurrency" <> device."purchaseCurrency"
+         OR receipt."nativeAmount" <> device."purchaseInputAmount"
+         OR receipt."amountUzsSnapshot" <> device."purchaseAmountUzsSnapshot"
+         OR receipt."amountUzsSnapshot" <> device."purchasePrice"
+         OR receipt."exchangeRate" IS DISTINCT FROM device."purchaseExchangeRateAtCreation"
+         OR receipt."exchangeRateSource" IS DISTINCT FROM device."purchaseExchangeRateSource"
+         OR receipt."exchangeRateEffectiveAt" IS DISTINCT FROM device."purchaseExchangeRateEffectiveAt"
+         OR receipt."exchangeRateFetchedAt" IS DISTINCT FROM device."purchaseExchangeRateFetchedAt"
+    `,
+  },
+  {
+    name: 'device_acquisition_evidence_link_issues',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "Device" device
+      WHERE device."evidenceVersion" = 2
+        AND NOT device."isImported"
+        AND (
+          (
+            (
+              EXISTS (
+                SELECT 1
+                FROM "DevicePurchaseReceipt" receipt
+                WHERE receipt."deviceId" = device.id
+                  AND receipt."shopId" = device."shopId"
+                  AND receipt."evidenceVersion" = 2
+                  AND receipt."evidenceStatus" = 'CAPTURED'
+              )
+            )::integer
+            +
+            (
+              EXISTS (
+                SELECT 1
+                FROM "SupplierPayable" payable
+                WHERE payable."deviceId" = device.id
+                  AND payable."shopId" = device."shopId"
+                  AND payable."evidenceVersion" = 2
+                  AND payable."evidenceStatus" = 'CAPTURED'
+              )
+            )::integer
+          ) <> 1
+          OR EXISTS (
+            SELECT 1
+            FROM "SupplierPayable" payable
+            WHERE payable."deviceId" = device.id
+              AND payable."shopId" = device."shopId"
+              AND payable."evidenceVersion" = 2
+              AND payable."evidenceStatus" = 'CAPTURED'
+            OFFSET 1
+          )
+          OR (
+            device."isExternalSourced"
+            AND EXISTS (
+              SELECT 1
+              FROM "DevicePurchaseReceipt" receipt
+              WHERE receipt."deviceId" = device.id
+                AND receipt."shopId" = device."shopId"
+                AND receipt."evidenceVersion" = 2
+                AND receipt."evidenceStatus" = 'CAPTURED'
+            )
+          )
+          OR EXISTS (
+            SELECT 1
+            FROM "SupplierPayable" payable
+            WHERE payable."deviceId" = device.id
+              AND payable."shopId" = device."shopId"
+              AND payable."evidenceVersion" = 2
+              AND payable."evidenceStatus" = 'CAPTURED'
+              AND (
+                (
+                  device."isExternalSourced"
+                  AND (
+                    payable.origin <> 'OLIB_SOTDIM'
+                    OR payable."olibSotdimOperationId" IS NULL
+                    OR NOT EXISTS (
+                      SELECT 1
+                      FROM "OlibSotdimOperation" operation
+                      WHERE operation.id = payable."olibSotdimOperationId"
+                        AND operation."shopId" = device."shopId"
+                        AND operation."deviceId" = device.id
+                    )
+                  )
+                )
+                OR (
+                  NOT device."isExternalSourced"
+                  AND (
+                    payable.origin <> 'DEVICE_PURCHASE'
+                    OR payable."olibSotdimOperationId" IS NOT NULL
+                  )
+                )
+              )
+          )
+        )
+    `,
+  },
+  {
+    name: 'nasiya_import_command_evidence_issues',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM "Nasiya"
+      WHERE "evidenceVersion" = 2
+        AND (
+          ("isImported" AND (
+            "importIdempotencyKey" IS NULL
+            OR "importCommandHash" IS NULL
+            OR "importCommandHash" !~ '^[0-9a-f]{64}$'
+            OR "creationIdempotencyKey" IS NOT NULL
+            OR "creationCommandHash" IS NOT NULL
+          ))
+          OR (NOT "isImported" AND (
+            "creationIdempotencyKey" IS NULL
+            OR length(btrim("creationIdempotencyKey")) NOT BETWEEN 8 AND 120
+            OR "creationCommandHash" IS NULL
+            OR "creationCommandHash" !~ '^[0-9a-f]{64}$'
+            OR "importIdempotencyKey" IS NOT NULL
+            OR "importCommandHash" IS NOT NULL
+          ))
+        )
+    `,
+  },
+  {
+    name: 'financial_evidence_index_inventory_issues',
+    blocking: true,
+    sql: `
+      WITH required(
+        table_name,
+        index_name,
+        should_be_unique,
+        key_columns,
+        predicate_sql
+      ) AS (
+        VALUES
+          (
+            'CurrencyRate',
+            'CurrencyRate_source_providerReference_idx',
+            false,
+            ARRAY['source', 'providerReference']::text[],
+            NULL::text
+          ),
+          (
+            'CurrencyRate',
+            'CurrencyRate_manual_providerReference_key',
+            true,
+            ARRAY['providerReference']::text[],
+            '((source = ''MANUAL''::text) AND ("providerReference" IS NOT NULL))'
+          ),
+          (
+            'Nasiya',
+            'Nasiya_shopId_importIdempotencyKey_key',
+            true,
+            ARRAY['shopId', 'importIdempotencyKey']::text[],
+            NULL::text
+          ),
+          (
+            'Nasiya',
+            'Nasiya_shopId_creationIdempotencyKey_key',
+            true,
+            ARRAY['shopId', 'creationIdempotencyKey']::text[],
+            NULL::text
+          ),
+          (
+            'SupplierPayable',
+            'SupplierPayable_deviceId_v2_key',
+            true,
+            ARRAY['deviceId']::text[],
+            '("evidenceVersion" = 2)'
+          )
+      ),
+      actual AS (
+        SELECT
+          table_relation.relname AS table_name,
+          index_relation.relname AS index_name,
+          index_relation.oid AS index_oid,
+          index_row.indisunique AS is_unique,
+          index_row.indisvalid AS is_valid,
+          index_row.indisready AS is_ready,
+          index_row.indislive AS is_live,
+          ARRAY(
+            SELECT attribute.attname::text
+            FROM unnest(index_row.indkey::smallint[]) WITH ORDINALITY
+              AS key_position(attnum, ordinal_position)
+            JOIN pg_attribute attribute
+              ON attribute.attrelid = table_relation.oid
+             AND attribute.attnum = key_position.attnum
+            WHERE key_position.ordinal_position <= index_row.indnkeyatts
+            ORDER BY key_position.ordinal_position
+          ) AS key_columns,
+          pg_get_expr(index_row.indpred, index_row.indrelid) AS predicate_sql
+        FROM pg_index index_row
+        JOIN pg_class index_relation ON index_relation.oid = index_row.indexrelid
+        JOIN pg_class table_relation ON table_relation.oid = index_row.indrelid
+        JOIN pg_namespace namespace_row ON namespace_row.oid = table_relation.relnamespace
+        WHERE namespace_row.nspname = current_schema()
+      )
+      SELECT COUNT(*)::integer AS count
+      FROM required expected
+      LEFT JOIN actual installed
+        ON installed.table_name = expected.table_name
+       AND installed.index_name = expected.index_name
+      WHERE installed.index_oid IS NULL
+         OR installed.is_unique <> expected.should_be_unique
+         OR NOT installed.is_valid
+         OR NOT installed.is_ready
+         OR NOT installed.is_live
+         OR installed.key_columns <> expected.key_columns
+         OR installed.predicate_sql IS DISTINCT FROM expected.predicate_sql
+    `,
+  },
+  {
+    name: 'return_refund_source_native_cap_issues',
+    blocking: true,
+    sql: `
+      SELECT COUNT(*)::integer AS count
+      FROM (
+        SELECT allocation."salePaymentId"
+        FROM "ReturnRefundAllocation" allocation
+        JOIN "SalePayment" payment
+          ON payment.id = allocation."salePaymentId"
+         AND payment."shopId" = allocation."shopId"
+        WHERE allocation."salePaymentId" IS NOT NULL
+        GROUP BY allocation."salePaymentId", payment."appliedAmountInContractCurrency"
+        HAVING payment."appliedAmountInContractCurrency" IS NULL
+          OR SUM(allocation."contractAmount") > payment."appliedAmountInContractCurrency"
+        UNION ALL
+        SELECT allocation."nasiyaPaymentId"
+        FROM "ReturnRefundAllocation" allocation
+        JOIN "NasiyaPayment" payment
+          ON payment.id = allocation."nasiyaPaymentId"
+         AND payment."shopId" = allocation."shopId"
+        WHERE allocation."nasiyaPaymentId" IS NOT NULL
+        GROUP BY allocation."nasiyaPaymentId", payment."appliedAmountInContractCurrency"
+        HAVING payment."appliedAmountInContractCurrency" IS NULL
+          OR SUM(allocation."contractAmount") > payment."appliedAmountInContractCurrency"
+      ) cap_issues
+    `,
+  },
+  {
+    name: 'financial_evidence_constraint_inventory_issues',
+    blocking: true,
+    sql: `
+      WITH required(table_name, constraint_name) AS (
+        VALUES
+          ('CurrencyRate', 'CurrencyRate_evidence_check'),
+          ('Device', 'Device_purchase_evidence_check'),
+          ('Sale', 'Sale_creation_evidence_check'),
+          ('SalePayment', 'SalePayment_evidence_check'),
+          ('ShopPayment', 'ShopPayment_evidence_check'),
+          ('SupplierPayable', 'SupplierPayable_creation_evidence_check'),
+          ('SupplierPayablePayment', 'SupplierPayablePayment_evidence_check'),
+          ('Nasiya', 'Nasiya_creation_evidence_check'),
+          ('Nasiya', 'Nasiya_creation_command_pair_check'),
+          ('Nasiya', 'Nasiya_import_command_pair_check'),
+          ('NasiyaPayment', 'NasiyaPayment_evidence_check'),
+          ('DevicePurchaseReceipt', 'DevicePurchaseReceipt_evidence_check')
+      )
+      SELECT COUNT(*)::integer AS count
+      FROM required expected
+      LEFT JOIN pg_class relation
+        ON relation.relname = expected.table_name
+       AND relation.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+      LEFT JOIN pg_constraint constraint_row
+        ON constraint_row.conrelid = relation.oid
+       AND constraint_row.conname = expected.constraint_name
+      WHERE constraint_row.oid IS NULL OR NOT constraint_row.convalidated
+    `,
+  },
+  {
+    name: 'financial_evidence_trigger_inventory_issues',
+    blocking: true,
+    sql: `
+      WITH required(table_name, trigger_name) AS (
+        VALUES
+          ('CurrencyRate', 'CurrencyRate_evidence_immutable'),
+          ('ShopPayment', 'ShopPayment_evidence_immutable'),
+          ('Device', 'Device_v2_purchase_evidence_immutable'),
+          ('Device', 'Device_acquisition_evidence_complete'),
+          ('Sale', 'Sale_v2_creation_evidence_immutable'),
+          ('SalePayment', 'SalePayment_evidence_immutable'),
+          ('SalePayment', 'SalePayment_v2_components_immutable'),
+          ('SalePayment', 'SalePayment_delete_immutable'),
+          ('SalePayment', 'SalePayment_validate_v2_evidence'),
+          ('Nasiya', 'Nasiya_v2_creation_evidence_immutable'),
+          ('NasiyaPayment', 'NasiyaPayment_evidence_immutable'),
+          ('NasiyaPayment', 'NasiyaPayment_validate_v2_evidence'),
+          ('SupplierPayable', 'SupplierPayable_v2_creation_evidence_immutable'),
+          ('SupplierPayable', 'SupplierPayable_device_acquisition_evidence_complete'),
+          ('SupplierPayablePayment', 'SupplierPayablePayment_immutable_trigger'),
+          ('SupplierPayablePayment', 'SupplierPayablePayment_validate_v2_evidence'),
+          ('DevicePurchaseReceipt', 'DevicePurchaseReceipt_immutable'),
+          ('DevicePurchaseReceipt', 'DevicePurchaseReceipt_validate_evidence')
+      )
+      SELECT COUNT(*)::integer AS count
+      FROM required expected
+      LEFT JOIN pg_class relation
+        ON relation.relname = expected.table_name
+       AND relation.relnamespace = (SELECT oid FROM pg_namespace WHERE nspname = current_schema())
+      LEFT JOIN pg_trigger trigger_row
+        ON trigger_row.tgrelid = relation.oid
+       AND trigger_row.tgname = expected.trigger_name
+       AND NOT trigger_row.tgisinternal
+      WHERE trigger_row.oid IS NULL
+         OR trigger_row.tgenabled <> 'O'
+         OR (
+           expected.trigger_name IN (
+             'Device_acquisition_evidence_complete',
+             'SupplierPayable_device_acquisition_evidence_complete'
+           )
+           AND (
+             NOT trigger_row.tgdeferrable
+             OR NOT trigger_row.tginitdeferred
+           )
+         )
+    `,
+  },
+  {
+    name: 'return_refund_source_cap_trigger_issues',
+    blocking: true,
+    sql: `
+      WITH required(table_name, trigger_name) AS (
+        VALUES
+          ('DeviceReturn', 'DeviceReturn_reconcile_allocations'),
+          ('ReturnRefundAllocation', 'ReturnRefundAllocation_reconcile_return')
+      ),
+      missing_triggers AS (
+        SELECT COUNT(*)::integer AS count
+        FROM required expected
+        LEFT JOIN pg_class relation
+          ON relation.relname = expected.table_name
+         AND relation.relnamespace = (
+           SELECT oid FROM pg_namespace WHERE nspname = current_schema()
+         )
+        LEFT JOIN pg_trigger trigger_row
+          ON trigger_row.tgrelid = relation.oid
+         AND trigger_row.tgname = expected.trigger_name
+         AND NOT trigger_row.tgisinternal
+        WHERE trigger_row.oid IS NULL OR trigger_row.tgenabled <> 'O'
+      )
+      SELECT (
+        (SELECT count FROM missing_triggers)
+        + CASE WHEN strpos(
+            pg_get_functiondef('"validate_return_refund_reconciliation"()'::regprocedure),
+            'refund allocation exceeds source receipt native amount'
+          ) > 0 THEN 0 ELSE 1 END
+      )::integer AS count
+    `,
+  },
+  {
+    name: 'legacy_financial_evidence_rows',
+    blocking: false,
+    sql: `
+      SELECT (
+        (SELECT COUNT(*) FROM "CurrencyRate" WHERE "evidenceVersion" = 1)
+        + (SELECT COUNT(*) FROM "ShopPayment" WHERE "evidenceVersion" = 1)
+        + (SELECT COUNT(*) FROM "Device" WHERE "evidenceVersion" = 1)
+        + (SELECT COUNT(*) FROM "Sale" WHERE "evidenceVersion" = 1)
+        + (SELECT COUNT(*) FROM "SalePayment" WHERE "evidenceVersion" = 1)
+        + (SELECT COUNT(*) FROM "SupplierPayable" WHERE "evidenceVersion" = 1)
+        + (SELECT COUNT(*) FROM "SupplierPayablePayment" WHERE "evidenceVersion" = 1)
+        + (SELECT COUNT(*) FROM "Nasiya" WHERE "evidenceVersion" = 1)
+        + (SELECT COUNT(*) FROM "NasiyaPayment" WHERE "evidenceVersion" = 1)
+      )::integer AS count
+    `,
+  },
+]
+
 function logSummary(summary) {
   // Count-only output is safe to retain in deployment logs. Never add entity
   // identifiers, Telegram IDs, customer data, or connection details here.
@@ -865,6 +1516,9 @@ try {
       : []),
     ...(phase === 'post' && appliedMigrationSet.has('202607230002_contiguous_search_phone_document')
       ? contiguousSearchPhoneDocumentChecks
+      : []),
+    ...(appliedMigrationSet.has('202607230003_usd_uzs_evidence_integrity')
+      ? usdUzsEvidenceChecks
       : []),
   ]
   for (const check of applicableChecks) {

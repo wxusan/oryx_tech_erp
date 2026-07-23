@@ -25,8 +25,8 @@ interface UpcomingPayment {
     device: { model: string }
   }
   dueDate: string | Date
-  expectedAmount: number
-  paidAmount: number
+  expectedAmount: number | null
+  paidAmount: number | null
   contractExpectedAmount: number
   contractPaidAmount: number
   contractRemainingAmount: number
@@ -135,7 +135,9 @@ export default function DashboardClient({ initialStats, financialView }: { initi
       </CardHeader>
       <CardContent>
         <div className="text-2xl font-bold text-red-700">{overdueText}</div>
-        <p className="mt-2 text-xs text-red-700/70">{stats.overdueCount} ta muddatdan o&apos;tgan yozuv · joriy kurs bo&apos;yicha</p>
+        <p className="mt-2 text-xs text-red-700/70">
+          {stats.overdueCount} ta muddatdan o&apos;tgan yozuv · {currency.usdUzsRate ? 'joriy kurs bo‘yicha' : 'asl valyutalarda (kurs mavjud emas)'}
+        </p>
       </CardContent>
     </Card>
   )

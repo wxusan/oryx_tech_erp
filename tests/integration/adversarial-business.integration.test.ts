@@ -36,6 +36,52 @@ async function seedShop(suffix: string) {
   return { owner, shop }
 }
 
+async function createCapturedUzsDeviceWithReceipt(input: {
+  shopId: string
+  actorId: string
+  model: string
+  imei: string
+  amount: number
+  status?: 'IN_STOCK' | 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA'
+}) {
+  return prisma.$transaction(async (tx) => {
+    const device = await tx.device.create({
+      data: {
+        shopId: input.shopId,
+        model: input.model,
+        purchasePrice: input.amount,
+        purchaseCurrency: 'UZS',
+        purchaseInputAmount: input.amount,
+        purchaseAmountUzsSnapshot: input.amount,
+        imei: input.imei,
+        addedBy: input.actorId,
+        status: input.status,
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
+      },
+    })
+    const receipt = await tx.devicePurchaseReceipt.create({
+      data: {
+        shopId: input.shopId,
+        deviceId: device.id,
+        inputAmount: input.amount,
+        inputCurrency: 'UZS',
+        nativeAmount: input.amount,
+        nativeCurrency: 'UZS',
+        amountUzsSnapshot: input.amount,
+        paymentMethod: 'CASH',
+        actorId: input.actorId,
+        actorType: 'SUPER_ADMIN',
+        idempotencyKey: `test-acquisition:${input.imei}`,
+        commandHash: 'd'.repeat(64),
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
+      },
+    })
+    return { device, receipt }
+  })
+}
+
 async function seedSale(
   suffix: string,
   shopId: string,
@@ -439,7 +485,7 @@ describe('adversarial monetary database invariants', () => {
       },
     })).rejects.toThrow('refund allocations do not reconcile')
     await expect(prisma.salePayment.update({ where: { id: payment.id }, data: { amount: 999 } }))
-      .rejects.toThrow('payments for a returned contract are immutable')
+      .rejects.toThrow('SalePayment is append-only financial evidence')
     await expect(prisma.salePayment.create({
       data: {
         shopId: shop.id,
@@ -612,6 +658,403 @@ describe('adversarial lifecycle and history interleavings', () => {
     ).rejects.toThrow('sale with receipts cannot be soft-deleted')
     expect(await prisma.sale.count({ where: { shopId: shop.id, deletedAt: null, createdAt: june } })).toBe(1)
     expect(Number((await prisma.salePayment.aggregate({ _sum: { amount: true }, where: { shopId: shop.id, deletedAt: null, paidAt: june } }))._sum.amount)).toBe(1_000)
+  })
+})
+
+describe('version-2 parent creation evidence immutability', () => {
+  it('rejects coherent parent rewrites while preserving operational and legacy updates', async () => {
+    const { owner, shop } = await seedShop('v2_parent_evidence')
+    const hash = 'a'.repeat(64)
+    const customer = await prisma.customer.create({
+      data: {
+        shopId: shop.id,
+        name: 'Evidence customer',
+        phone: '+998901112233',
+        normalizedPhone: '998901112233',
+      },
+    })
+
+    await expect(prisma.device.create({
+      data: {
+        shopId: shop.id,
+        model: 'Unlinked evidence device',
+        purchasePrice: 600,
+        purchaseCurrency: 'UZS',
+        purchaseInputAmount: 600,
+        purchaseAmountUzsSnapshot: 600,
+        imei: 'V2-EVIDENCE-UNLINKED',
+        addedBy: owner.id,
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
+      },
+    })).rejects.toThrow('captured device requires exactly one acquisition evidence source')
+
+    const legacyDevice = await prisma.device.create({
+      data: {
+        shopId: shop.id,
+        model: 'Legacy evidence device',
+        purchasePrice: 100,
+        imei: 'V1-EVIDENCE-LEGACY',
+        addedBy: owner.id,
+        evidenceVersion: 1,
+        evidenceStatus: 'LEGACY_UNKNOWN',
+      },
+    })
+    const correctedLegacyDevice = await prisma.device.update({
+      where: { id: legacyDevice.id },
+      data: { purchasePrice: 125 },
+    })
+    expect(Number(correctedLegacyDevice.purchasePrice)).toBe(125)
+    expect(correctedLegacyDevice.evidenceVersion).toBe(1)
+    expect(correctedLegacyDevice.evidenceStatus).toBe('LEGACY_UNKNOWN')
+
+    const { device: saleDevice } = await createCapturedUzsDeviceWithReceipt({
+      shopId: shop.id,
+      actorId: owner.id,
+      model: 'Sale evidence device',
+      imei: 'V2-EVIDENCE-SALE',
+      amount: 600,
+      status: 'SOLD_DEBT',
+    })
+    const sale = await prisma.sale.create({
+      data: {
+        shopId: shop.id,
+        deviceId: saleDevice.id,
+        customerId: customer.id,
+        salePrice: 1_000,
+        amountPaid: 0,
+        remainingAmount: 1_000,
+        paidFully: false,
+        creationCurrency: 'UZS',
+        contractCurrency: 'UZS',
+        contractSalePrice: 1_000,
+        contractAmountPaid: 0,
+        contractRemainingAmount: 1_000,
+        createdBy: owner.id,
+        creationIdempotencyKey: 'sale:v2-parent-evidence',
+        creationCommandHash: hash,
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
+      },
+    })
+
+    await expect(
+      prisma.device.update({
+        where: { id: saleDevice.id },
+        data: {
+          purchasePrice: 700,
+          purchaseInputAmount: 700,
+          purchaseAmountUzsSnapshot: 700,
+        },
+      }),
+    ).rejects.toThrow('version-2 device purchase evidence is immutable')
+
+    await expect(
+      prisma.sale.update({
+        where: { id: sale.id },
+        data: {
+          salePrice: 1_100,
+          remainingAmount: 1_100,
+          contractSalePrice: 1_100,
+          contractRemainingAmount: 1_100,
+        },
+      }),
+    ).rejects.toThrow('version-2 sale creation evidence is immutable')
+
+    const { device: nasiyaDevice } = await createCapturedUzsDeviceWithReceipt({
+      shopId: shop.id,
+      actorId: owner.id,
+      model: 'Nasiya evidence device',
+      imei: 'V2-EVIDENCE-NASIYA',
+      amount: 500,
+      status: 'SOLD_NASIYA',
+    })
+    const nasiya = await prisma.$transaction(async (tx) => {
+      const created = await tx.nasiya.create({
+        data: {
+          shopId: shop.id,
+          deviceId: nasiyaDevice.id,
+          customerId: customer.id,
+          totalAmount: 1_000,
+          downPayment: 0,
+          baseRemainingAmount: 1_000,
+          interestPercent: 0,
+          interestAmount: 0,
+          finalNasiyaAmount: 1_000,
+          remainingAmount: 1_000,
+          months: 1,
+          monthlyPayment: 1_000,
+          startDate: new Date('2026-07-01T00:00:00.000Z'),
+          creationCurrency: 'UZS',
+          contractCurrency: 'UZS',
+          contractTotalAmount: 1_000,
+          contractDownPayment: 0,
+          contractBaseRemainingAmount: 1_000,
+          contractInterestAmount: 0,
+          contractFinalAmount: 1_000,
+          contractMonthlyPayment: 1_000,
+          contractRemainingAmount: 1_000,
+          contractPaidAmount: 0,
+          createdBy: owner.id,
+          creationIdempotencyKey: 'v2-nasiya-evidence-create',
+          creationCommandHash: 'a'.repeat(64),
+          evidenceVersion: 2,
+          evidenceStatus: 'CAPTURED',
+        },
+      })
+      await tx.nasiyaSchedule.create({
+        data: {
+          nasiyaId: created.id,
+          shopId: shop.id,
+          monthNumber: 1,
+          dueDate: new Date('2026-08-01T00:00:00.000Z'),
+          expectedAmount: 1_000,
+          contractCurrency: 'UZS',
+          contractExpectedAmount: 1_000,
+          contractRemainingAmount: 1_000,
+        },
+      })
+      return created
+    })
+    await expect(
+      prisma.nasiya.update({
+        where: { id: nasiya.id },
+        data: { startDate: new Date('2026-07-02T00:00:00.000Z') },
+      }),
+    ).rejects.toThrow('version-2 nasiya creation evidence is immutable')
+
+    const payable = await prisma.$transaction(async (tx) => {
+      const device = await tx.device.create({
+        data: {
+          shopId: shop.id,
+          model: 'Payable evidence device',
+          purchasePrice: 600,
+          purchaseCurrency: 'UZS',
+          purchaseInputAmount: 600,
+          purchaseAmountUzsSnapshot: 600,
+          imei: 'V2-EVIDENCE-PAYABLE',
+          addedBy: owner.id,
+          evidenceVersion: 2,
+          evidenceStatus: 'CAPTURED',
+        },
+      })
+      const createdPayable = await tx.supplierPayable.create({
+        data: {
+          shopId: shop.id,
+          deviceId: device.id,
+          origin: 'DEVICE_PURCHASE',
+          supplierName: 'Evidence supplier',
+          supplierPhone: '+998909998877',
+          amount: 600,
+          contractCurrency: 'UZS',
+          contractAmount: 600,
+          paidAmount: 0,
+          remainingAmount: 600,
+          contractPaidAmount: 0,
+          contractRemainingAmount: 600,
+          dueDate: new Date('2026-08-01T00:00:00.000Z'),
+          createdBy: owner.id,
+          creationIdempotencyKey: 'payable:v2-parent-evidence',
+          creationCommandHash: hash,
+          evidenceVersion: 2,
+          evidenceStatus: 'CAPTURED',
+        },
+      })
+      return createdPayable
+    })
+    await expect(
+      prisma.supplierPayable.update({
+        where: { id: payable.id },
+        data: {
+          amount: 650,
+          remainingAmount: 650,
+          contractAmount: 650,
+          contractRemainingAmount: 650,
+        },
+      }),
+    ).rejects.toThrow('version-2 supplier payable creation evidence is immutable')
+
+    await prisma.device.update({
+      where: { id: saleDevice.id },
+      data: { status: 'SOLD_CASH' },
+    })
+    await prisma.sale.update({
+      where: { id: sale.id },
+      data: {
+        creationCurrency: 'UZS',
+        dueDate: new Date('2026-08-15T00:00:00.000Z'),
+        reminderEnabled: true,
+        note: 'Operational update remains allowed',
+      },
+    })
+    await prisma.nasiya.update({
+      where: { id: nasiya.id },
+      data: { status: 'OVERDUE', reminderEnabled: false },
+    })
+    await prisma.supplierPayable.update({
+      where: { id: payable.id },
+      data: { status: 'OVERDUE', reminderEnabled: false },
+    })
+
+    const currentSale = await prisma.sale.findUniqueOrThrow({
+      where: { id: sale.id },
+      select: { salePrice: true, reminderEnabled: true },
+    })
+    expect(Number(currentSale.salePrice)).toBe(1_000)
+    expect(currentSale.reminderEnabled).toBe(true)
+    expect(
+      await prisma.nasiya.findUniqueOrThrow({
+        where: { id: nasiya.id },
+        select: { status: true },
+      }),
+    ).toMatchObject({ status: 'OVERDUE' })
+    const currentPayable = await prisma.supplierPayable.findUniqueOrThrow({
+      where: { id: payable.id },
+      select: { amount: true, status: true },
+    })
+    expect(Number(currentPayable.amount)).toBe(600)
+    expect(currentPayable.status).toBe('OVERDUE')
+  })
+
+  it('allows only legacy SalePayment component reconstruction and blocks every delete', async () => {
+    const { owner, shop } = await seedShop('payment_component_evidence')
+    const { sale } = await seedSale('payment_component_sale', shop.id, owner.id)
+
+    const legacyPayment = await prisma.salePayment.create({
+      data: {
+        shopId: shop.id,
+        saleId: sale.id,
+        amount: 1_000,
+        appliedAmountInContractCurrency: 1_000,
+        paymentMethod: 'CASH',
+        createdBy: owner.id,
+        evidenceVersion: 1,
+        evidenceStatus: 'LEGACY_UNKNOWN',
+      },
+    })
+    const reconstructed = await prisma.salePayment.update({
+      where: { id: legacyPayment.id },
+      data: {
+        contractPrincipalAmount: 600,
+        contractMarginAmount: 400,
+        principalAmountUzs: 600,
+        marginAmountUzs: 400,
+      },
+    })
+    expect(Number(reconstructed.contractPrincipalAmount)).toBe(600)
+    expect(Number(reconstructed.contractMarginAmount)).toBe(400)
+    await expect(
+      prisma.salePayment.update({
+        where: { id: legacyPayment.id },
+        data: { amount: 999 },
+      }),
+    ).rejects.toThrow('SalePayment is append-only financial evidence')
+    await expect(
+      prisma.salePayment.delete({ where: { id: legacyPayment.id } }),
+    ).rejects.toThrow('SalePayment is append-only financial evidence')
+
+    const v2Payment = await prisma.salePayment.create({
+      data: {
+        shopId: shop.id,
+        saleId: sale.id,
+        amount: 1_000,
+        paymentInputAmount: 1_000,
+        paymentInputCurrency: 'UZS',
+        appliedAmountInContractCurrency: 1_000,
+        paymentMethod: 'CASH',
+        createdBy: owner.id,
+        idempotencyKey: 'sale-payment:v2-components',
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
+        contractPrincipalAmount: 600,
+        contractMarginAmount: 400,
+        principalAmountUzs: 600,
+        marginAmountUzs: 400,
+      },
+    })
+    await expect(
+      prisma.salePayment.update({
+        where: { id: v2Payment.id },
+        data: {
+          contractPrincipalAmount: 500,
+          contractMarginAmount: 500,
+          principalAmountUzs: 500,
+          marginAmountUzs: 500,
+        },
+      }),
+    ).rejects.toThrow('version-2 sale payment components are immutable')
+    await expect(
+      prisma.salePayment.delete({ where: { id: v2Payment.id } }),
+    ).rejects.toThrow('SalePayment is append-only financial evidence')
+  })
+
+  it('keeps governed rates, shop receipts, and device purchase receipts fully append-only', async () => {
+    const { owner, shop } = await seedShop('fully_append_only_evidence')
+    const hash = 'b'.repeat(64)
+
+    const rate = await prisma.currencyRate.create({
+      data: {
+        baseCurrency: 'USD',
+        quoteCurrency: 'UZS',
+        rate: 12_500,
+        source: 'CBU',
+        fetchedAt: new Date('2026-07-23T06:00:00.000Z'),
+        effectiveDate: new Date('2026-07-23T00:00:00.000Z'),
+        providerReference: 'append-only-rate-2026-07-23',
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
+      },
+    })
+    await expect(
+      prisma.currencyRate.update({
+        where: { id: rate.id },
+        data: { rate: 12_600 },
+      }),
+    ).rejects.toThrow('CurrencyRate is append-only financial evidence')
+    await expect(
+      prisma.currencyRate.delete({ where: { id: rate.id } }),
+    ).rejects.toThrow('CurrencyRate is append-only financial evidence')
+
+    const shopPayment = await prisma.shopPayment.create({
+      data: {
+        shopId: shop.id,
+        amount: 1_000,
+        months: 1,
+        paymentMethod: 'CASH',
+        currency: 'UZS',
+        amountUzsSnapshot: 1_000,
+        currencyReconstructionStatus: 'COMPLETE',
+        recordedById: owner.id,
+        evidenceVersion: 1,
+        evidenceStatus: 'LEGACY_UNKNOWN',
+      },
+    })
+    await expect(
+      prisma.shopPayment.update({
+        where: { id: shopPayment.id },
+        data: { note: 'Forbidden receipt rewrite' },
+      }),
+    ).rejects.toThrow('ShopPayment is append-only financial evidence')
+    await expect(
+      prisma.shopPayment.delete({ where: { id: shopPayment.id } }),
+    ).rejects.toThrow('ShopPayment is append-only financial evidence')
+
+    const { receipt } = await createCapturedUzsDeviceWithReceipt({
+      shopId: shop.id,
+      actorId: owner.id,
+      model: 'Paid-now evidence device',
+      imei: 'V2-APPEND-ONLY-RECEIPT',
+      amount: 700,
+    })
+    await expect(
+      prisma.devicePurchaseReceipt.update({
+        where: { id: receipt.id },
+        data: { paymentMethod: 'CARD' },
+      }),
+    ).rejects.toThrow('DevicePurchaseReceipt is append-only financial evidence')
+    await expect(
+      prisma.devicePurchaseReceipt.delete({ where: { id: receipt.id } }),
+    ).rejects.toThrow('DevicePurchaseReceipt is append-only financial evidence')
   })
 })
 

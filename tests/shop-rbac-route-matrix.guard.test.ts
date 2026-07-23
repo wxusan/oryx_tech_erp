@@ -109,13 +109,18 @@ describe('shop exact-capability route matrix', () => {
       ['devices', 'EXPORT_DEVICES'],
       ['customers', 'EXPORT_CUSTOMERS'],
       ['sales', 'EXPORT_SALES'],
+      ['sale-payments', 'EXPORT_SALES'],
       ['nasiya', 'EXPORT_NASIYA'],
+      ['nasiya-schedules', 'EXPORT_NASIYA'],
+      ['nasiya-payments', 'EXPORT_NASIYA'],
+      ['nasiya-payment-allocations', 'EXPORT_NASIYA'],
       ['olib', 'EXPORT_OLIB'],
+      ['supplier-payable-payments', 'EXPORT_OLIB'],
       ['returns', 'EXPORT_RETURNS'],
       ['logs', 'EXPORT_LOGS'],
       ['report', 'EXPORT_REPORTS'],
     ] as const) {
-      expect(source).toContain(`${entity}: '${permission}'`)
+      expect(source).toMatch(new RegExp(`['"]?${entity}['"]?: '${permission}'`))
     }
     expect(source).toContain('const guarded = await requireShopPermission(permission)')
     expect(source).not.toMatch(new RegExp("['\"]EXPORT_DATA['\"]"))

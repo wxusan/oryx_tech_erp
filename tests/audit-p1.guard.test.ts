@@ -69,8 +69,10 @@ describe('P1 imported old nasiya duplicate guard', () => {
 
     expect(src).toContain('const duplicateImport = await prisma.nasiya.findFirst')
     expect(src).toContain('isImported: true')
-    expect(src).toContain('remainingAtImport: Math.round(remainingDebtInput.amountUzs)')
-    expect(src).toContain('monthlyPayment: Math.round(monthlyPaymentInput.amountUzs)')
+    expect(src).toContain('contractCurrency, contractRemainingAmount: contractRemainingDebt, contractMonthlyPayment,')
+    expect(src).toContain('resolutionState: \'ACTIVE\'')
+    expect(src).toContain('customer: { is: { shopId, deletedAt: null')
+    expect(src).toContain('device: { is: { shopId, deletedAt: null, model: data.deviceModel')
     expect(src).toContain('Bu mijoz va qurilma uchun shunga o‘xshash avvalgi nasiya')
   })
 })

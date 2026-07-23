@@ -16,6 +16,7 @@ import {
   convertMoneyDto,
   createMoneyDto,
   fxQuoteRate,
+  moneyDtoEquals,
   moneyDtoToAmount,
   type CurrencyCode,
 } from '@/lib/currency'
@@ -148,6 +149,44 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
+    let refundInputMoney
+    try {
+      refundInputMoney = createMoneyDto(parsed.data.inputCurrency, parsed.data.refundAmount)
+    } catch (error) {
+      return badRequest(error instanceof Error ? error.message : "Qaytariladigan summa noto‘g‘ri")
+    }
+
+    // A committed refund remains replayable if the rate provider, stored
+    // quote, or limiter is unavailable later. Match exact native minor units
+    // and the original actor before any external/mutable dependency.
+    const committedReplay = await prisma.deviceReturn.findUnique({
+      where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+    })
+    if (committedReplay) {
+      const storedInput = createMoneyDto(
+        committedReplay.refundInputCurrency ?? committedReplay.contractCurrency,
+        String(committedReplay.refundInputAmount ?? committedReplay.contractRefundAmount),
+      )
+      const samePayload = (
+        committedReplay.nasiyaId === nasiyaId
+        && committedReplay.createdBy === session.user.id
+        && moneyDtoEquals(storedInput, refundInputMoney)
+        && (committedReplay.refundMethod ?? undefined) === parsed.data.refundMethod
+        && committedReplay.note === parsed.data.note
+      )
+      if (!samePayload) {
+        return conflict("Idempotency-Key boshqa qaytarish amali uchun ishlatilgan")
+      }
+      return ok({
+        duplicate: true,
+        nasiyaId,
+        deviceId: committedReplay.deviceId,
+        deviceStatus: 'IN_STOCK' as const,
+        status: 'RETURNED' as const,
+        return: serializeReturn(committedReplay),
+      }, 'Nasiya qaytarishi avval muvaffaqiyatli saqlangan')
+    }
+
     const rate = await checkRateLimitDistributed(
       rateLimitKey('nasiya-return', shopId, session.user.id),
       { windowMs: 60_000, max: 12 },
@@ -172,12 +211,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
       })
       if (replay) {
-        const samePayload = replay.nasiyaId === nasiyaId &&
-          replay.createdBy === session.user.id &&
-          Number(replay.refundInputAmount ?? replay.contractRefundAmount) === parsed.data.refundAmount &&
-          (replay.refundInputCurrency ?? replay.contractCurrency) === parsed.data.inputCurrency &&
-          (replay.refundMethod ?? undefined) === parsed.data.refundMethod &&
-          replay.note === parsed.data.note
+        const storedInput = createMoneyDto(
+          replay.refundInputCurrency ?? replay.contractCurrency,
+          String(replay.refundInputAmount ?? replay.contractRefundAmount),
+        )
+        const samePayload = replay.nasiyaId === nasiyaId
+          && replay.createdBy === session.user.id
+          && moneyDtoEquals(storedInput, refundInputMoney)
+          && (replay.refundMethod ?? undefined) === parsed.data.refundMethod
+          && replay.note === parsed.data.note
         if (!samePayload) {
           throw { status: 409, message: "Idempotency-Key boshqa qaytarish amali uchun ishlatilgan" }
         }
@@ -310,12 +352,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         throw { status: 409, message: "Do‘kon valyutasi o‘zgargan. Sahifani yangilab, summani qayta tekshiring" }
       }
 
-      let refundInputMoney
-      try {
-        refundInputMoney = createMoneyDto(parsed.data.inputCurrency, parsed.data.refundAmount)
-      } catch (error) {
-        throw { status: 400, message: error instanceof Error ? error.message : "Qaytariladigan summa noto‘g‘ri" }
-      }
       const needsFx = refundInputMoney.minorUnits > 0 && (
         parsed.data.inputCurrency === 'USD' || nasiya.contractCurrency === 'USD'
       )
@@ -519,6 +555,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         device: presentDeviceSpecs(device),
         receipts: contractReceiptsAtReturn,
         refund: contractRefundAmount,
+        refundInput: {
+          amount: moneyDtoToAmount(refundInputMoney),
+          currency: parsed.data.inputCurrency,
+        },
+        refundExchangeRate: needsFx ? liveUsdUzsRate : null,
+        refundExchangeRateSource: needsFx ? currentFxQuote?.source : null,
         retained: contractRetainedAmount,
         cancelledDebt: contractCancelledDebt,
         contractCurrency: nasiya.contractCurrency,

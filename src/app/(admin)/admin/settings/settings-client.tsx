@@ -19,6 +19,7 @@ import { MoneyInput } from '@/components/ui/money-input'
 import { Label } from '@/components/ui/label'
 import { Field } from '@/components/ui/field'
 import { actorTypeLabel } from '@/lib/presentation-labels'
+import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 import type { ApiResponse } from '@/types'
 
 interface EnvCheck {
@@ -88,6 +89,7 @@ function formatRate(value: CurrencyRateRecord | null | undefined) {
 }
 
 export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
+  const rateCommand = useLogicalCommandIdempotency()
   const [profile, setProfile] = useState<SuperAdminProfile | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -269,12 +271,23 @@ export function AdminSettingsClient({ checks }: { checks: EnvCheck[] }) {
 
     setRateSaving(true)
     try {
+      const payload = {
+        rate,
+        note: 'Qo‘lda kiritilgan USD/UZS zaxira kursi administrator sozlamalaridan yangilandi',
+      }
       const response = await fetch('/api/admin/currency-rate', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rate, note: 'Qo‘lda kiritilgan USD/UZS zaxira kursi administrator sozlamalaridan yangilandi' }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': rateCommand.keyFor(payload),
+        },
+        body: JSON.stringify(payload),
       })
-      if (!response.ok) throw new Error(await readApiError(response))
+      if (!response.ok) {
+        rateCommand.rejected(response.status)
+        throw new Error(await readApiError(response))
+      }
+      rateCommand.committed()
       const json: ApiResponse<CurrencyRateRecord> = await response.json()
       await commitNavigationMutation({ kind: 'currency.updated' })
       const savedRate = json.data ?? null

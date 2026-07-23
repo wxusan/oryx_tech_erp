@@ -7,6 +7,7 @@ import { formatMoneyByCurrency, formatUserFacingMoney } from '@/lib/currency'
 import { displayImei } from '@/lib/device-display'
 import { prisma } from '@/lib/prisma'
 import { deviceStatusLabel, nasiyaStatusLabel, paymentMethodLabel } from '@/lib/labels'
+import { redactShopStaffLogValue } from '@/lib/log-financial-redaction'
 import { deriveContractNasiyaStatus } from '@/lib/nasiya-contract-status'
 import { getShopCurrencyContext } from '@/lib/server/currency'
 import { deviceConditionLabel, formatDeviceStorage } from '@/lib/device-specs'
@@ -34,11 +35,20 @@ export const runtime = 'nodejs'
 
 const EXPORT_ROW_LIMIT = 5000
 const EXPORT_BATCH_SIZE = 500
+const EXPORT_SCHEMA_VERSION = 'oryx-financial-export-2026-07-23-v1'
+const OWNER_ONLY_LEDGER_EXPORTS = new Set([
+  'sale-payments',
+  'nasiya-schedules',
+  'nasiya-payments',
+  'nasiya-payment-allocations',
+  'supplier-payable-payments',
+])
 
 class ExportTooLargeError extends Error {
   constructor(
     readonly entity: string,
     readonly count: number,
+    readonly countIsLowerBound = false,
   ) {
     super(`Export ${entity} has ${count} rows`)
   }
@@ -48,6 +58,7 @@ function fileHeaders(entity: string, format: ExportFormat, contentType: string) 
   return {
     'Content-Type': contentType,
     'Content-Disposition': `attachment; filename="${entity}.${format}"`,
+    'X-Oryx-Export-Schema-Version': EXPORT_SCHEMA_VERSION,
   }
 }
 
@@ -95,6 +106,21 @@ async function fetchExportRows<T>(
   }
 
   return rows
+}
+
+async function fetchBoundedLedgerRows<T>(
+  entity: string,
+  fetchRows: (take: number) => Promise<T[]>,
+): Promise<T[]> {
+  const rows = await fetchRows(EXPORT_ROW_LIMIT + 1)
+  if (rows.length > EXPORT_ROW_LIMIT) {
+    throw new ExportTooLargeError(entity, EXPORT_ROW_LIMIT + 1, true)
+  }
+  return rows
+}
+
+function jsonExportCell(value: unknown): string {
+  return value == null ? '' : JSON.stringify(value)
 }
 
 async function xlsxResponse(entity: string, data: ExportData) {
@@ -201,9 +227,499 @@ function reportExportData(report: ShopRangeReport): ExportData {
   }
 }
 
-async function exportData(entity: string, shopId: string, role: string): Promise<ExportData | null> {
-  const currency = await getShopCurrencyContext(shopId)
+async function exportData(
+  entity: string,
+  shopId: string,
+  role: string,
+  isShopStaff: boolean,
+): Promise<ExportData | null> {
+  if (entity === 'sale-payments') {
+    const payments = await fetchBoundedLedgerRows(entity, (take) =>
+      prisma.salePayment.findMany({
+        where: { shopId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take,
+        select: {
+          id: true,
+          shopId: true,
+          saleId: true,
+          amount: true,
+          paymentInputAmount: true,
+          paymentInputCurrency: true,
+          paymentExchangeRate: true,
+          paymentExchangeRateSource: true,
+          paymentExchangeRateEffectiveAt: true,
+          paymentExchangeRateFetchedAt: true,
+          appliedAmountInContractCurrency: true,
+          paymentMethod: true,
+          paymentBreakdown: true,
+          paymentDateExplicit: true,
+          requestedNextDueDate: true,
+          contractPrincipalAmount: true,
+          contractMarginAmount: true,
+          principalAmountUzs: true,
+          marginAmountUzs: true,
+          paidAt: true,
+          note: true,
+          idempotencyKey: true,
+          createdBy: true,
+          createdAt: true,
+          evidenceVersion: true,
+          evidenceStatus: true,
+          deletedAt: true,
+          deletedBy: true,
+          deleteNote: true,
+          sale: { select: { contractCurrency: true } },
+        },
+      }),
+    )
+    return {
+      headers: [
+        'schemaVersion',
+        'paymentId',
+        'shopId',
+        'saleId',
+        'contractCurrency',
+        'amountUzsSnapshot',
+        'paymentInputAmount',
+        'paymentInputCurrency',
+        'paymentExchangeRate',
+        'paymentExchangeRateSource',
+        'paymentExchangeRateEffectiveAt',
+        'paymentExchangeRateFetchedAt',
+        'rateProvenanceStatus',
+        'evidenceVersion',
+        'evidenceStatus',
+        'appliedAmountInContractCurrency',
+        'paymentMethod',
+        'paymentBreakdown',
+        'paymentDateExplicit',
+        'requestedNextDueDate',
+        'contractPrincipalAmount',
+        'contractMarginAmount',
+        'principalAmountUzs',
+        'marginAmountUzs',
+        'paidAt',
+        'note',
+        'idempotencyKey',
+        'createdBy',
+        'createdAt',
+        'deletedAt',
+        'deletedBy',
+        'deleteNote',
+      ],
+      rows: payments.map((payment) => [
+        EXPORT_SCHEMA_VERSION,
+        payment.id,
+        payment.shopId,
+        payment.saleId,
+        payment.sale.contractCurrency,
+        payment.amount.toString(),
+        payment.paymentInputAmount?.toString() ?? '',
+        payment.paymentInputCurrency ?? '',
+        payment.paymentExchangeRate?.toString() ?? '',
+        payment.paymentExchangeRateSource ?? '',
+        payment.paymentExchangeRateEffectiveAt,
+        payment.paymentExchangeRateFetchedAt,
+        payment.paymentExchangeRateSource
+          ? 'CAPTURED'
+          : payment.paymentExchangeRate
+            ? 'SOURCE_UNRECORDED'
+            : 'NOT_RECORDED',
+        payment.evidenceVersion,
+        payment.evidenceStatus,
+        payment.appliedAmountInContractCurrency?.toString() ?? '',
+        payment.paymentMethod,
+        jsonExportCell(payment.paymentBreakdown),
+        payment.paymentDateExplicit,
+        payment.requestedNextDueDate,
+        payment.contractPrincipalAmount.toString(),
+        payment.contractMarginAmount.toString(),
+        payment.principalAmountUzs.toString(),
+        payment.marginAmountUzs.toString(),
+        payment.paidAt,
+        payment.note,
+        payment.idempotencyKey,
+        payment.createdBy,
+        payment.createdAt,
+        payment.deletedAt,
+        payment.deletedBy,
+        payment.deleteNote,
+      ]),
+    }
+  }
+
+  if (entity === 'nasiya-schedules') {
+    const schedules = await fetchBoundedLedgerRows(entity, (take) =>
+      prisma.nasiyaSchedule.findMany({
+        where: { shopId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take,
+        select: {
+          id: true,
+          shopId: true,
+          nasiyaId: true,
+          monthNumber: true,
+          dueDate: true,
+          delayedUntil: true,
+          deferredToNext: true,
+          expectedAmount: true,
+          paidAmount: true,
+          contractCurrency: true,
+          contractExpectedAmount: true,
+          contractPaidAmount: true,
+          contractRemainingAmount: true,
+          contractPrincipalAmount: true,
+          contractMarginAmount: true,
+          contractInterestAmount: true,
+          contractPrincipalPaidAmount: true,
+          contractMarginPaidAmount: true,
+          contractInterestPaidAmount: true,
+          interestWaivedAmount: true,
+          contractInterestWaivedAmount: true,
+          status: true,
+          paidAt: true,
+          paymentMethod: true,
+          note: true,
+          createdAt: true,
+          nasiya: {
+            select: {
+              contractExchangeRateAtCreation: true,
+              creationExchangeRateSource: true,
+              creationExchangeRateEffectiveAt: true,
+              creationExchangeRateFetchedAt: true,
+              evidenceVersion: true,
+              evidenceStatus: true,
+            },
+          },
+        },
+      }),
+    )
+    return {
+      headers: [
+        'schemaVersion',
+        'scheduleId',
+        'shopId',
+        'nasiyaId',
+        'monthNumber',
+        'contractCurrency',
+        'contractExchangeRateAtCreation',
+        'contractExchangeRateSourceAtCreation',
+        'contractExchangeRateEffectiveAtCreation',
+        'contractExchangeRateFetchedAtCreation',
+        'contractEvidenceVersion',
+        'contractEvidenceStatus',
+        'expectedAmountUzsSnapshot',
+        'paidAmountUzsSnapshot',
+        'contractExpectedAmount',
+        'contractPaidAmount',
+        'contractRemainingAmount',
+        'contractPrincipalAmount',
+        'contractMarginAmount',
+        'contractInterestAmount',
+        'contractPrincipalPaidAmount',
+        'contractMarginPaidAmount',
+        'contractInterestPaidAmount',
+        'interestWaivedAmountUzs',
+        'contractInterestWaivedAmount',
+        'dueDate',
+        'delayedUntil',
+        'deferredToNext',
+        'status',
+        'paidAt',
+        'paymentMethod',
+        'note',
+        'createdAt',
+      ],
+      rows: schedules.map((schedule) => [
+        EXPORT_SCHEMA_VERSION,
+        schedule.id,
+        schedule.shopId,
+        schedule.nasiyaId,
+        schedule.monthNumber,
+        schedule.contractCurrency,
+        schedule.nasiya.contractExchangeRateAtCreation?.toString() ?? '',
+        schedule.nasiya.creationExchangeRateSource ?? '',
+        schedule.nasiya.creationExchangeRateEffectiveAt,
+        schedule.nasiya.creationExchangeRateFetchedAt,
+        schedule.nasiya.evidenceVersion,
+        schedule.nasiya.evidenceStatus,
+        schedule.expectedAmount.toString(),
+        schedule.paidAmount.toString(),
+        schedule.contractExpectedAmount.toString(),
+        schedule.contractPaidAmount.toString(),
+        schedule.contractRemainingAmount.toString(),
+        schedule.contractPrincipalAmount.toString(),
+        schedule.contractMarginAmount.toString(),
+        schedule.contractInterestAmount.toString(),
+        schedule.contractPrincipalPaidAmount.toString(),
+        schedule.contractMarginPaidAmount.toString(),
+        schedule.contractInterestPaidAmount.toString(),
+        schedule.interestWaivedAmount.toString(),
+        schedule.contractInterestWaivedAmount.toString(),
+        schedule.dueDate,
+        schedule.delayedUntil,
+        schedule.deferredToNext,
+        schedule.status,
+        schedule.paidAt,
+        schedule.paymentMethod,
+        schedule.note,
+        schedule.createdAt,
+      ]),
+    }
+  }
+
+  if (entity === 'nasiya-payments') {
+    const payments = await fetchBoundedLedgerRows(entity, (take) =>
+      prisma.nasiyaPayment.findMany({
+        where: { shopId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take,
+        select: {
+          id: true,
+          shopId: true,
+          nasiyaId: true,
+          nasiyaScheduleId: true,
+          amount: true,
+          paymentInputAmount: true,
+          paymentInputCurrency: true,
+          paymentExchangeRate: true,
+          paymentExchangeRateSource: true,
+          paymentExchangeRateEffectiveAt: true,
+          paymentExchangeRateFetchedAt: true,
+          appliedAmountInContractCurrency: true,
+          paymentMethod: true,
+          paymentBreakdown: true,
+          paidAt: true,
+          note: true,
+          idempotencyKey: true,
+          createdBy: true,
+          createdAt: true,
+          evidenceVersion: true,
+          evidenceStatus: true,
+          deletedAt: true,
+          deletedBy: true,
+          deleteNote: true,
+          nasiya: { select: { contractCurrency: true } },
+        },
+      }),
+    )
+    return {
+      headers: [
+        'schemaVersion',
+        'paymentId',
+        'shopId',
+        'nasiyaId',
+        'nasiyaScheduleId',
+        'contractCurrency',
+        'amountUzsSnapshot',
+        'paymentInputAmount',
+        'paymentInputCurrency',
+        'paymentExchangeRate',
+        'paymentExchangeRateSource',
+        'paymentExchangeRateEffectiveAt',
+        'paymentExchangeRateFetchedAt',
+        'evidenceVersion',
+        'evidenceStatus',
+        'appliedAmountInContractCurrency',
+        'paymentMethod',
+        'paymentBreakdown',
+        'paidAt',
+        'note',
+        'idempotencyKey',
+        'createdBy',
+        'createdAt',
+        'deletedAt',
+        'deletedBy',
+        'deleteNote',
+      ],
+      rows: payments.map((payment) => [
+        EXPORT_SCHEMA_VERSION,
+        payment.id,
+        payment.shopId,
+        payment.nasiyaId,
+        payment.nasiyaScheduleId,
+        payment.nasiya.contractCurrency,
+        payment.amount.toString(),
+        payment.paymentInputAmount?.toString() ?? '',
+        payment.paymentInputCurrency ?? '',
+        payment.paymentExchangeRate?.toString() ?? '',
+        payment.paymentExchangeRateSource ?? '',
+        payment.paymentExchangeRateEffectiveAt,
+        payment.paymentExchangeRateFetchedAt,
+        payment.evidenceVersion,
+        payment.evidenceStatus,
+        payment.appliedAmountInContractCurrency?.toString() ?? '',
+        payment.paymentMethod,
+        jsonExportCell(payment.paymentBreakdown),
+        payment.paidAt,
+        payment.note,
+        payment.idempotencyKey,
+        payment.createdBy,
+        payment.createdAt,
+        payment.deletedAt,
+        payment.deletedBy,
+        payment.deleteNote,
+      ]),
+    }
+  }
+
+  if (entity === 'nasiya-payment-allocations') {
+    const allocations = await fetchBoundedLedgerRows(entity, (take) =>
+      prisma.nasiyaPaymentAllocation.findMany({
+        where: { shopId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take,
+        select: {
+          id: true,
+          shopId: true,
+          nasiyaId: true,
+          nasiyaPaymentId: true,
+          nasiyaScheduleId: true,
+          sequence: true,
+          contractCurrency: true,
+          contractAmount: true,
+          contractPrincipalAmount: true,
+          contractMarginAmount: true,
+          contractInterestAmount: true,
+          amountUzs: true,
+          principalAmountUzs: true,
+          marginAmountUzs: true,
+          interestAmountUzs: true,
+          createdAt: true,
+        },
+      }),
+    )
+    return {
+      headers: [
+        'schemaVersion',
+        'allocationId',
+        'shopId',
+        'nasiyaId',
+        'nasiyaPaymentId',
+        'nasiyaScheduleId',
+        'sequence',
+        'contractCurrency',
+        'contractAmount',
+        'contractPrincipalAmount',
+        'contractMarginAmount',
+        'contractInterestAmount',
+        'amountUzs',
+        'principalAmountUzs',
+        'marginAmountUzs',
+        'interestAmountUzs',
+        'createdAt',
+      ],
+      rows: allocations.map((allocation) => [
+        EXPORT_SCHEMA_VERSION,
+        allocation.id,
+        allocation.shopId,
+        allocation.nasiyaId,
+        allocation.nasiyaPaymentId,
+        allocation.nasiyaScheduleId,
+        allocation.sequence,
+        allocation.contractCurrency,
+        allocation.contractAmount.toString(),
+        allocation.contractPrincipalAmount.toString(),
+        allocation.contractMarginAmount.toString(),
+        allocation.contractInterestAmount.toString(),
+        allocation.amountUzs.toString(),
+        allocation.principalAmountUzs.toString(),
+        allocation.marginAmountUzs.toString(),
+        allocation.interestAmountUzs.toString(),
+        allocation.createdAt,
+      ]),
+    }
+  }
+
+  if (entity === 'supplier-payable-payments') {
+    const payments = await fetchBoundedLedgerRows(entity, (take) =>
+      prisma.supplierPayablePayment.findMany({
+        where: { shopId },
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        take,
+        select: {
+          id: true,
+          shopId: true,
+          supplierPayableId: true,
+          amount: true,
+          paymentInputAmount: true,
+          paymentInputCurrency: true,
+          paymentExchangeRate: true,
+          paymentExchangeRateSource: true,
+          paymentExchangeRateEffectiveAt: true,
+          paymentExchangeRateFetchedAt: true,
+          appliedAmountInContractCurrency: true,
+          paymentMethod: true,
+          paymentBreakdown: true,
+          paidAt: true,
+          note: true,
+          createdBy: true,
+          idempotencyKey: true,
+          commandHash: true,
+          createdAt: true,
+          evidenceVersion: true,
+          evidenceStatus: true,
+          payable: { select: { contractCurrency: true } },
+        },
+      }),
+    )
+    return {
+      headers: [
+        'schemaVersion',
+        'paymentId',
+        'shopId',
+        'supplierPayableId',
+        'contractCurrency',
+        'amountUzsSnapshot',
+        'paymentInputAmount',
+        'paymentInputCurrency',
+        'paymentExchangeRate',
+        'paymentExchangeRateSource',
+        'paymentExchangeRateEffectiveAt',
+        'paymentExchangeRateFetchedAt',
+        'evidenceVersion',
+        'evidenceStatus',
+        'appliedAmountInContractCurrency',
+        'paymentMethod',
+        'paymentBreakdown',
+        'paidAt',
+        'note',
+        'createdBy',
+        'idempotencyKey',
+        'commandHash',
+        'createdAt',
+      ],
+      rows: payments.map((payment) => [
+        EXPORT_SCHEMA_VERSION,
+        payment.id,
+        payment.shopId,
+        payment.supplierPayableId,
+        payment.payable.contractCurrency,
+        payment.amount.toString(),
+        payment.paymentInputAmount.toString(),
+        payment.paymentInputCurrency,
+        payment.paymentExchangeRate?.toString() ?? '',
+        payment.paymentExchangeRateSource ?? '',
+        payment.paymentExchangeRateEffectiveAt,
+        payment.paymentExchangeRateFetchedAt,
+        payment.evidenceVersion,
+        payment.evidenceStatus,
+        payment.appliedAmountInContractCurrency.toString(),
+        payment.paymentMethod,
+        jsonExportCell(payment.paymentBreakdown),
+        payment.paidAt,
+        payment.note,
+        payment.createdBy,
+        payment.idempotencyKey,
+        payment.commandHash,
+        payment.createdAt,
+      ]),
+    }
+  }
+
   if (entity === 'devices') {
+    const currency = await getShopCurrencyContext(shopId)
     const where = { shopId, deletedAt: null }
     const total = await assertExportSize(entity, prisma.device.count({ where }))
     const devices = await fetchExportRows(total, (skip, take) =>
@@ -299,6 +815,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
   }
 
   if (entity === 'sales') {
+    const currency = await getShopCurrencyContext(shopId)
     const where = { shopId, deletedAt: null }
     const total = await assertExportSize(entity, prisma.sale.count({ where }))
     const sales = await fetchExportRows(total, (skip, take) =>
@@ -379,6 +896,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
   }
 
   if (entity === 'nasiya') {
+    const currency = await getShopCurrencyContext(shopId)
     const where = { shopId, deletedAt: null }
     const total = await assertExportSize(entity, prisma.nasiya.count({ where }))
     const nasiyalar = await fetchExportRows(total, (skip, take) =>
@@ -647,8 +1165,18 @@ async function exportData(entity: string, shopId: string, role: string): Promise
           supplierNote: true,
           contractCurrency: true,
           contractExchangeRateAtCreation: true,
+          contractExchangeRateSourceAtCreation: true,
+          contractExchangeRateEffectiveAtCreation: true,
+          contractExchangeRateFetchedAtCreation: true,
           contractAmount: true,
           amount: true,
+          paidAmount: true,
+          remainingAmount: true,
+          contractPaidAmount: true,
+          contractRemainingAmount: true,
+          ledgerVersion: true,
+          evidenceVersion: true,
+          evidenceStatus: true,
           status: true,
           dueDate: true,
           paidAt: true,
@@ -686,8 +1214,18 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'customerPhone',
         'payableCurrency',
         'payableExchangeRateAtCreation',
+        'payableExchangeRateSourceAtCreation',
+        'payableExchangeRateEffectiveAtCreation',
+        'payableExchangeRateFetchedAtCreation',
         'payableAmount',
         'payableAmountUzsSnapshot',
+        'payablePaidAmount',
+        'payableRemainingAmount',
+        'payablePaidAmountUzsSnapshot',
+        'payableRemainingAmountUzsSnapshot',
+        'ledgerVersion',
+        'evidenceVersion',
+        'evidenceStatus',
         'saleCurrency',
         'salePrice',
         'status',
@@ -719,8 +1257,18 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         customer?.phone ?? '',
         currencyLabel(item.contractCurrency),
         item.contractExchangeRateAtCreation?.toString() ?? '',
+        item.contractExchangeRateSourceAtCreation ?? '',
+        item.contractExchangeRateEffectiveAtCreation,
+        item.contractExchangeRateFetchedAtCreation,
         item.contractAmount.toString(),
         item.amount.toString(),
+        item.contractPaidAmount.toString(),
+        item.contractRemainingAmount.toString(),
+        item.paidAmount.toString(),
+        item.remainingAmount.toString(),
+        item.ledgerVersion,
+        item.evidenceVersion,
+        item.evidenceStatus,
         outcome ? currencyLabel(outcome.currency) : '',
         outcome?.amount.toString() ?? '',
         supplierPayableStatusLabel(item.status),
@@ -876,22 +1424,30 @@ async function exportData(entity: string, shopId: string, role: string): Promise
           action: true,
           targetType: true,
           targetId: true,
+          oldValue: true,
+          newValue: true,
           note: true,
           createdAt: true,
         },
       }),
     )
     return {
-      headers: ['actorId', 'actorType', 'action', 'targetType', 'targetId', 'note', 'createdAt'],
-      rows: logs.map((log) => [
-        log.actorId,
-        actorTypeLabel(log.actorType),
-        logActionLabel(log.action, log.targetType),
-        logTargetLabel(log.targetType),
-        log.targetId,
-        log.note,
-        log.createdAt,
-      ]),
+      headers: ['actorId', 'actorType', 'action', 'targetType', 'targetId', 'oldValueJson', 'newValueJson', 'note', 'createdAt'],
+      rows: logs.map((log) => {
+        const oldValue = isShopStaff ? redactShopStaffLogValue(log.oldValue) : log.oldValue
+        const newValue = isShopStaff ? redactShopStaffLogValue(log.newValue) : log.newValue
+        return [
+          log.actorId,
+          actorTypeLabel(log.actorType),
+          logActionLabel(log.action, log.targetType),
+          logTargetLabel(log.targetType),
+          log.targetId,
+          jsonExportCell(oldValue),
+          jsonExportCell(newValue),
+          log.note,
+          log.createdAt,
+        ]
+      }),
     }
   }
 
@@ -905,8 +1461,13 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       devices: 'EXPORT_DEVICES',
       customers: 'EXPORT_CUSTOMERS',
       sales: 'EXPORT_SALES',
+      'sale-payments': 'EXPORT_SALES',
       nasiya: 'EXPORT_NASIYA',
+      'nasiya-schedules': 'EXPORT_NASIYA',
+      'nasiya-payments': 'EXPORT_NASIYA',
+      'nasiya-payment-allocations': 'EXPORT_NASIYA',
       olib: 'EXPORT_OLIB',
+      'supplier-payable-payments': 'EXPORT_OLIB',
       returns: 'EXPORT_RETURNS',
       logs: 'EXPORT_LOGS',
       report: 'EXPORT_REPORTS',
@@ -923,6 +1484,10 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, req.nextUrl.searchParams.get('shopId'))
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const isShopStaff = guarded.principal?.memberKind === 'SHOP_STAFF'
+    if (isShopStaff && OWNER_ONLY_LEDGER_EXPORTS.has(entity)) {
+      return new Response("Moliyaviy daftar eksporti faqat do'kon egasi uchun", { status: 403 })
+    }
 
     if (entity === 'report') {
       const params = req.nextUrl.searchParams
@@ -965,7 +1530,12 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       return exportResponse(`report-${range.startMonth}-${range.endMonth}`, format, reportExportData(report))
     }
 
-    const data = await exportData(entity, shopId, session.user.role)
+    const data = await exportData(
+      entity,
+      shopId,
+      session.user.role,
+      isShopStaff,
+    )
     if (!data) return new Response('Eksport turi topilmadi', { status: 404 })
 
     return exportResponse(entity, format, data)
@@ -974,7 +1544,9 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       return Response.json(
         {
           success: false,
-          error: `Eksport hajmi juda katta: ${err.count} ta qator. Iltimos, ma'lumotni ${EXPORT_ROW_LIMIT} qatordan kamroq qiling.`,
+          error: err.countIsLowerBound
+            ? `Eksport hajmi juda katta: kamida ${err.count} ta qator. Iltimos, ma'lumotni ${EXPORT_ROW_LIMIT} qatordan kamroq qiling.`
+            : `Eksport hajmi juda katta: ${err.count} ta qator. Iltimos, ma'lumotni ${EXPORT_ROW_LIMIT} qatordan kamroq qiling.`,
         },
         { status: 413 },
       )

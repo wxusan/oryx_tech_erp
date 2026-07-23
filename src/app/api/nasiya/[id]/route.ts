@@ -26,7 +26,7 @@ import { principalHasPermission } from '@/lib/server/shop-access'
 import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
 import { createFxQuoteDto, createMoneyDto, moneyDtoToAmount } from '@/lib/currency'
 import { reconcileNasiyaLedger } from '@/lib/nasiya-ledger'
-import { hasNasiyaPaymentFxQuoteColumns } from '@/lib/server/nasiya-payment-schema'
+import { hasNasiyaPaymentFxQuoteColumnsForRead } from '@/lib/server/nasiya-payment-schema'
 import { calculateNasiyaSettlement } from '@/lib/nasiya-settlement'
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
 import {
@@ -177,7 +177,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     // keeps older local/prod databases readable during the review-only repair
     // phase; after a deployment the process restarts and detects the column.
     const paymentFxQuoteColumnsAvailable = includePaymentDetails
-      ? await hasNasiyaPaymentFxQuoteColumns()
+      ? await hasNasiyaPaymentFxQuoteColumnsForRead()
       : false
 
     const nasiya = await prisma.nasiya.findFirst({
@@ -608,6 +608,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         dueDate: schedule.dueDate.toISOString(),
         delayedUntil: schedule.delayedUntil?.toISOString() ?? null,
         status: schedule.status,
+        moneyAvailable: Boolean(reconciled),
         paidAt: schedule.paidAt?.toISOString() ?? null,
         expected: reconciled?.expected ?? fallback.expected,
         paid: reconciled?.paid ?? fallback.paid,

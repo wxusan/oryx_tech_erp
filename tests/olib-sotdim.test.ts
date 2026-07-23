@@ -12,11 +12,13 @@ function baseInput(overrides: Partial<Record<string, unknown>> = {}) {
     supplierName: 'Ali aka',
     supplierPhone: '+998901234567',
     purchasePrice: 6_500_000,
+    purchaseInputCurrency: 'UZS',
     supplierPaidNow: true,
     supplierPaymentMethod: 'CASH',
     customerName: 'Vali Valiyev',
     customerPhone: '+998907654321',
     salePrice: 7_500_000,
+    customerInputCurrency: 'UZS',
     paymentMethod: 'CASH',
     paidFully: true,
     ...overrides,
@@ -199,8 +201,9 @@ describe('markSupplierPayablePaidSchema', () => {
 
 describe('recordSupplierPayablePaymentSchema', () => {
   it('accepts partial/full payment commands and rejects non-positive money', () => {
-    expect(recordSupplierPayablePaymentSchema.safeParse({ amount: 250_000, paymentMethod: 'CASH' }).success).toBe(true)
-    expect(recordSupplierPayablePaymentSchema.safeParse({ amount: 0, paymentMethod: 'CASH' }).success).toBe(false)
-    expect(recordSupplierPayablePaymentSchema.safeParse({ amount: -1, paymentMethod: 'CASH' }).success).toBe(false)
+    const command = { paymentMethod: 'CASH', inputCurrency: 'UZS' }
+    expect(recordSupplierPayablePaymentSchema.safeParse({ ...command, amount: 250_000 }).success).toBe(true)
+    expect(recordSupplierPayablePaymentSchema.safeParse({ ...command, amount: 0 }).success).toBe(false)
+    expect(recordSupplierPayablePaymentSchema.safeParse({ ...command, amount: -1 }).success).toBe(false)
   })
 })

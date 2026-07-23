@@ -303,6 +303,29 @@ function serializedSettlement(settlement: StoredSettlement, duplicate: boolean) 
   }
 }
 
+function recordSettlementPerformance(input: {
+  startedAt: number
+  timings: Record<string, number>
+  shopId: string
+  status: 'confirmed' | 'idempotent_replay'
+}) {
+  const durationMs = performance.now() - input.startedAt
+  for (const [phase, duration] of Object.entries(input.timings)) {
+    recordRequestTiming(`settlement-${phase}`, duration)
+  }
+  if (process.env.PERFORMANCE_TIMING_LOGS === 'true' || durationMs >= 800) {
+    logger.info('Nasiya settlement performance timing', {
+      event: 'performance.nasiya_settlement',
+      shopId: input.shopId,
+      durationMs: Math.round(durationMs),
+      phasesMs: Object.fromEntries(
+        Object.entries(input.timings).map(([phase, value]) => [phase, Math.round(value)]),
+      ),
+      status: input.status,
+    })
+  }
+}
+
 function quoteMatchesExpected(
   quote: ReturnType<typeof calculateNasiyaSettlement>,
   expected: {
@@ -378,14 +401,68 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       return forbidden("Nasiya foydasidan kechish uchun alohida ruxsat kerak")
     }
     const idempotencyKey = req.headers.get('idempotency-key')?.trim()
-    if (!idempotencyKey || idempotencyKey.length > 200) {
-      return badRequest('Yaroqli Idempotency-Key sarlavhasi kiritilishi shart')
+    const paymentIdempotencyKey = idempotencyKey ? `settlement:${idempotencyKey}` : null
+    if (
+      !idempotencyKey
+      || idempotencyKey.length < 8
+      || idempotencyKey.length > 120
+      || !paymentIdempotencyKey
+      || paymentIdempotencyKey.length > 120
+    ) {
+      return badRequest("Idempotency-Key sarlavhasi saqlanadigan shaklda 8–120 belgidan iborat bo'lishi shart")
     }
 
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
     measuredShopId = shopId
+
+    const inputCurrency = parsed.data.inputCurrency as CurrencyCode
+    const effectivePaymentMethod = parsed.data.paymentBreakdown
+      ? representativePaymentMethod(parsed.data.paymentBreakdown)
+      : parsed.data.paymentMethod
+    const commandHash = createHash('sha256').update(JSON.stringify({
+      shopId,
+      nasiyaId,
+      actorId: session.user.id,
+      mode: parsed.data.mode,
+      date: parsed.data.date.toISOString(),
+      reason: parsed.data.reason ?? null,
+      inputCurrency,
+      paymentMethod: effectivePaymentMethod ?? null,
+      paymentBreakdown: canonicalPaymentBreakdown(parsed.data.paymentBreakdown, inputCurrency),
+      expectedContractCurrency: parsed.data.expectedContractCurrency,
+      expectedRemainingMinorUnits: parsed.data.expectedRemainingMinorUnits,
+      expectedCashMinorUnits: parsed.data.expectedCashMinorUnits,
+      expectedWaivedMinorUnits: parsed.data.expectedWaivedMinorUnits,
+    })).digest('hex')
+
+    // A committed command is authoritative even if its HTTP response was
+    // lost. Resolve it before rate limiting or any current FX/context lookup,
+    // because neither later traffic nor a quote outage may invalidate history.
+    const replayStartedAt = performance.now()
+    const committedReplay = await prisma.nasiyaSettlement.findUnique({
+      where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+      include: storedSettlementInclude,
+    })
+    timings.committedReplayLookup = performance.now() - replayStartedAt
+    if (committedReplay) {
+      if (
+        committedReplay.nasiyaId !== nasiyaId
+        || committedReplay.actorId !== session.user.id
+        || committedReplay.commandHash !== commandHash
+      ) {
+        return conflict("Idempotency-Key boshqa yoki o'zgartirilgan nasiya yopish amali uchun ishlatilgan")
+      }
+      const result = serializedSettlement(committedReplay, true)
+      recordSettlementPerformance({
+        startedAt,
+        timings,
+        shopId,
+        status: 'idempotent_replay',
+      })
+      return ok(result, 'Nasiya avval yopilgan')
+    }
 
     const rateStartedAt = performance.now()
     const rate = await checkRateLimitDistributed(
@@ -406,11 +483,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     timings.initialDatabaseReads = performance.now() - initialStartedAt
     if (!contractLookup) return notFound('Nasiya topilmadi')
 
-    const inputCurrency = (parsed.data.inputCurrency ?? currencyContext.currency) as CurrencyCode
     const currentFxQuote = currencyContext.fxQuote ?? null
     if (inputCurrency !== contractLookup.contractCurrency && fxQuoteRate(currentFxQuote) == null) {
       return badRequest("Turli valyutadagi yopish uchun joriy USD kursi mavjud emas")
     }
+    const usdParticipates = inputCurrency === 'USD' || contractLookup.contractCurrency === 'USD'
     const creationFallbackQuote = contractLookup.contractExchangeRateAtCreation == null
       ? null
       : createFxQuoteDto({
@@ -418,31 +495,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           source: 'CONTRACT_CREATION_FALLBACK',
           freshness: 'FALLBACK',
         })
-    const reportingFxQuote: FxQuoteDto | null = contractLookup.contractCurrency === 'USD'
-      ? (fxQuoteRate(currentFxQuote) != null ? currentFxQuote : creationFallbackQuote)
-      : currentFxQuote
+    const reportingFxQuote: FxQuoteDto | null = !usdParticipates
+      ? null
+      : contractLookup.contractCurrency === 'USD'
+        ? (fxQuoteRate(currentFxQuote) != null ? currentFxQuote : creationFallbackQuote)
+        : currentFxQuote
     if (contractLookup.contractCurrency === 'USD' && fxQuoteRate(reportingFxQuote) == null) {
       return badRequest("USD nasiya uchun muzlatilgan UZS kursi mavjud emas")
     }
-
-    const effectivePaymentMethod = parsed.data.paymentBreakdown
-      ? representativePaymentMethod(parsed.data.paymentBreakdown)
-      : parsed.data.paymentMethod
-    const commandHash = createHash('sha256').update(JSON.stringify({
-      shopId,
-      nasiyaId,
-      actorId: session.user.id,
-      mode: parsed.data.mode,
-      date: parsed.data.date.toISOString(),
-      reason: parsed.data.reason ?? null,
-      inputCurrency,
-      paymentMethod: effectivePaymentMethod ?? null,
-      paymentBreakdown: canonicalPaymentBreakdown(parsed.data.paymentBreakdown, inputCurrency),
-      expectedContractCurrency: parsed.data.expectedContractCurrency,
-      expectedRemainingMinorUnits: parsed.data.expectedRemainingMinorUnits,
-      expectedCashMinorUnits: parsed.data.expectedCashMinorUnits,
-      expectedWaivedMinorUnits: parsed.data.expectedWaivedMinorUnits,
-    })).digest('hex')
 
     const run = () => prisma.$transaction(async (tx) => {
       const replay = await tx.nasiyaSettlement.findUnique({
@@ -496,8 +556,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         }
       }
 
-      const inputMoney = convertMoneyDto(quote.cashToReceive, inputCurrency, currentFxQuote)
-      const cashUzsMoney = convertMoneyDto(quote.cashToReceive, 'UZS', reportingFxQuote)
+      // The quoted contract-native amount is the settlement authority. The
+      // tender and UZS reporting values are representations of that immutable
+      // amount, not values to round-trip back into a different debt. This is
+      // important for UZS debt paid in USD: 500001 UZS at 12500 is USD 40.00,
+      // but the settled debt must remain exactly 500001 UZS.
+      const contractCashMoney = quote.cashToReceive
+      const contractCashAmount = settlementMoneyAmount(contractCashMoney)
+      const inputMoney = convertMoneyDto(contractCashMoney, inputCurrency, currentFxQuote)
+      const cashUzsMoney = nasiya.contractCurrency === 'UZS'
+        ? contractCashMoney
+        : convertMoneyDto(contractCashMoney, 'UZS', reportingFxQuote)
       const waiverUzsMoney = convertMoneyDto(quote.interestToWaive, 'UZS', reportingFxQuote)
       // The immutable settlement receipt freezes event-time UZS. The old
       // parent/schedule UZS fields are a different compatibility ledger that
@@ -516,7 +585,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const cashUzs = moneyDtoToAmount(cashUzsMoney)
       const waiverUzs = moneyDtoToAmount(waiverUzsMoney)
       const legacyWaiverUzs = moneyDtoToAmount(legacyWaiverUzsMoney)
-      if (quote.cashToReceive.minorUnits > 0 && !effectivePaymentMethod) {
+      // A market quote that happens to exist is not evidence for a UZS->UZS
+      // payment. Persist payment-time FX only when USD actually participates;
+      // otherwise the v2 receipt must keep the whole rate/provenance tuple null.
+      const paymentFxQuote = usdParticipates ? currentFxQuote : null
+      const paymentFxRate = fxQuoteRate(paymentFxQuote)
+      if (contractCashMoney.minorUnits > 0 && !effectivePaymentMethod) {
         throw { status: 400, message: "To'lov usuli tanlanishi shart" }
       }
       if (parsed.data.paymentBreakdown) {
@@ -602,7 +676,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       let paymentId: string | null = null
       const paymentAllocationRows: Prisma.NasiyaPaymentAllocationCreateManyInput[] = []
-      if (quote.cashToReceive.minorUnits > 0) {
+      if (contractCashMoney.minorUnits > 0) {
         const payment = await tx.nasiyaPayment.create({
           data: {
             nasiyaId,
@@ -613,19 +687,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             paymentBreakdown: parsed.data.paymentBreakdown ?? undefined,
             paidAt: parsed.data.date,
             note: parsed.data.reason,
-            idempotencyKey: `settlement:${idempotencyKey}`,
+            idempotencyKey: paymentIdempotencyKey,
             createdBy: session.user.id,
             paymentInputAmount: inputAmount,
             paymentInputCurrency: inputCurrency,
-            appliedAmountInContractCurrency: settlementMoneyAmount(quote.cashToReceive),
-            paymentExchangeRate: fxQuoteRate(currentFxQuote),
-            paymentExchangeRateSource: fxQuoteRate(currentFxQuote) != null
-              ? currentFxQuote?.source
+            appliedAmountInContractCurrency: contractCashAmount,
+            paymentExchangeRate: paymentFxRate,
+            evidenceVersion: 2,
+            evidenceStatus: 'CAPTURED',
+            paymentExchangeRateSource: paymentFxRate != null
+              ? paymentFxQuote?.source
               : inputCurrency === 'USD' && nasiya.contractCurrency === 'USD'
                 ? 'UNAVAILABLE_SAME_CURRENCY'
                 : null,
-            paymentExchangeRateEffectiveAt: currentFxQuote?.effectiveAt ? new Date(currentFxQuote.effectiveAt) : null,
-            paymentExchangeRateFetchedAt: currentFxQuote?.fetchedAt ? new Date(currentFxQuote.fetchedAt) : null,
+            paymentExchangeRateEffectiveAt: paymentFxRate != null && paymentFxQuote?.effectiveAt
+              ? new Date(paymentFxQuote.effectiveAt)
+              : null,
+            paymentExchangeRateFetchedAt: paymentFxRate != null && paymentFxQuote?.fetchedAt
+              ? new Date(paymentFxQuote.fetchedAt)
+              : null,
           },
         })
         paymentId = payment.id
@@ -665,7 +745,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         }
       }
 
-      const paidAfter = addMoneyDto(currentLedger.paid, quote.cashToReceive)
+      const paidAfter = addMoneyDto(currentLedger.paid, contractCashMoney)
       const waivedAfter = addMoneyDto(currentLedger.waived, quote.interestToWaive)
       const updatedSchedules = await tx.nasiyaSchedule.findMany({
         where: { nasiyaId, shopId },
@@ -722,7 +802,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           mode: parsed.data.mode,
           contractCurrency: nasiya.contractCurrency,
           contractRemainingBefore: settlementMoneyAmount(quote.remainingBefore),
-          contractCashReceivedAmount: settlementMoneyAmount(quote.cashToReceive),
+          contractCashReceivedAmount: contractCashAmount,
           contractInterestWaivedAmount: settlementMoneyAmount(quote.interestToWaive),
           contractRemainingAfter: 0,
           cashReceivedAmountUzs: cashUzs,
@@ -888,17 +968,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       error,
     })))
 
-    const durationMs = performance.now() - startedAt
-    for (const [phase, duration] of Object.entries(timings)) recordRequestTiming(`settlement-${phase}`, duration)
-    if (process.env.PERFORMANCE_TIMING_LOGS === 'true' || durationMs >= 800) {
-      logger.info('Nasiya settlement performance timing', {
-        event: 'performance.nasiya_settlement',
-        shopId: measuredShopId,
-        durationMs: Math.round(durationMs),
-        phasesMs: Object.fromEntries(Object.entries(timings).map(([phase, value]) => [phase, Math.round(value)])),
-        status: result.duplicate ? 'idempotent_replay' : 'confirmed',
-      })
-    }
+    recordSettlementPerformance({
+      startedAt,
+      timings,
+      shopId,
+      status: result.duplicate ? 'idempotent_replay' : 'confirmed',
+    })
     return ok(result, result.duplicate ? 'Nasiya avval yopilgan' : 'Nasiya muvaffaqiyatli yopildi')
   } catch (error: unknown) {
     if (typeof error === 'object' && error !== null && 'status' in error) {

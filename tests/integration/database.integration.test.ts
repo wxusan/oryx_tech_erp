@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from 'vitest'
 import { readdirSync } from 'node:fs'
 import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
+import { Client } from 'pg'
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL or DATABASE_URL is required')
@@ -170,5 +171,239 @@ describe('disposable PostgreSQL migration foundation', () => {
     expect(indexes.every(({ indexdef }) => /WHERE \({1,2}"deletedAt" IS NULL/.test(indexdef))).toBe(true)
     expect(indexes.find(({ tablename }) => tablename === 'DeviceImei')?.indexdef)
       .toContain('"normalizedValue" IS NOT NULL')
+  })
+
+  it('installs and validates the USD/UZS evidence constraints and append-only guards', async () => {
+    const constraints = await prisma.$queryRaw<
+      Array<{ conname: string; convalidated: boolean }>
+    >`
+      SELECT conname, convalidated
+      FROM pg_constraint
+      WHERE conname IN (
+        'CurrencyRate_evidence_check',
+        'Device_purchase_evidence_check',
+        'DevicePurchaseReceipt_evidence_check',
+        'Sale_creation_evidence_check',
+        'Nasiya_creation_evidence_check',
+        'SupplierPayable_creation_evidence_check',
+        'ShopPayment_evidence_check',
+        'SalePayment_evidence_check',
+        'NasiyaPayment_evidence_check',
+        'SupplierPayablePayment_evidence_check',
+        'Nasiya_import_command_pair_check'
+      )
+      ORDER BY conname
+    `
+    expect(constraints).toHaveLength(11)
+    expect(constraints.every((row) => row.convalidated)).toBe(true)
+
+    const triggers = await prisma.$queryRaw<
+      Array<{ tgname: string; tgdeferrable: boolean; tginitdeferred: boolean }>
+    >`
+      SELECT tgname, tgdeferrable, tginitdeferred
+      FROM pg_trigger
+      WHERE NOT tgisinternal
+        AND tgname IN (
+          'CurrencyRate_evidence_immutable',
+          'ShopPayment_evidence_immutable',
+          'Device_v2_purchase_evidence_immutable',
+          'Device_acquisition_evidence_complete',
+          'Sale_v2_creation_evidence_immutable',
+          'SalePayment_evidence_immutable',
+          'SalePayment_v2_components_immutable',
+          'SalePayment_delete_immutable',
+          'SalePayment_validate_v2_evidence',
+          'Nasiya_v2_creation_evidence_immutable',
+          'NasiyaPayment_evidence_immutable',
+          'NasiyaPayment_validate_v2_evidence',
+          'SupplierPayable_v2_creation_evidence_immutable',
+          'SupplierPayable_device_acquisition_evidence_complete',
+          'SupplierPayablePayment_immutable_trigger',
+          'SupplierPayablePayment_validate_v2_evidence',
+          'DevicePurchaseReceipt_immutable',
+          'DevicePurchaseReceipt_validate_evidence'
+        )
+      ORDER BY tgname
+    `
+    expect(triggers).toHaveLength(18)
+    expect(
+      triggers
+        .filter(({ tgname }) => tgname.endsWith('_acquisition_evidence_complete'))
+        .every(({ tgdeferrable, tginitdeferred }) => tgdeferrable && tginitdeferred),
+    ).toBe(true)
+
+    const functionBody = await prisma.$queryRaw<Array<{ definition: string }>>`
+      SELECT pg_get_functiondef(
+        '"validate_return_refund_reconciliation"()'::regprocedure
+      ) AS definition
+    `
+    expect(functionBody[0]?.definition).toContain(
+      'refund allocation exceeds source receipt native amount',
+    )
+  })
+
+  it('installs valid rate-observation and Nasiya command identity indexes', async () => {
+    const indexes = await prisma.$queryRaw<
+      Array<{
+        indexname: string
+        is_unique: boolean
+        is_valid: boolean
+        is_ready: boolean
+        predicate_sql: string | null
+      }>
+    >`
+      SELECT
+        index_relation.relname AS indexname,
+        index_row.indisunique AS is_unique,
+        index_row.indisvalid AS is_valid,
+        index_row.indisready AS is_ready,
+        pg_get_expr(index_row.indpred, index_row.indrelid) AS predicate_sql
+      FROM pg_index index_row
+      JOIN pg_class index_relation ON index_relation.oid = index_row.indexrelid
+      JOIN pg_namespace namespace_row ON namespace_row.oid = index_relation.relnamespace
+      WHERE namespace_row.nspname = 'public'
+        AND index_relation.relname IN (
+          'CurrencyRate_source_providerReference_idx',
+          'CurrencyRate_manual_providerReference_key',
+          'Nasiya_shopId_importIdempotencyKey_key',
+          'Nasiya_shopId_creationIdempotencyKey_key',
+          'SupplierPayable_deviceId_v2_key'
+        )
+      ORDER BY index_relation.relname
+    `
+
+    expect(indexes).toEqual([
+      {
+        indexname: 'CurrencyRate_manual_providerReference_key',
+        is_unique: true,
+        is_valid: true,
+        is_ready: true,
+        predicate_sql:
+          `((source = 'MANUAL'::text) AND ("providerReference" IS NOT NULL))`,
+      },
+      {
+        indexname: 'CurrencyRate_source_providerReference_idx',
+        is_unique: false,
+        is_valid: true,
+        is_ready: true,
+        predicate_sql: null,
+      },
+      {
+        indexname: 'Nasiya_shopId_creationIdempotencyKey_key',
+        is_unique: true,
+        is_valid: true,
+        is_ready: true,
+        predicate_sql: null,
+      },
+      {
+        indexname: 'Nasiya_shopId_importIdempotencyKey_key',
+        is_unique: true,
+        is_valid: true,
+        is_ready: true,
+        predicate_sql: null,
+      },
+      {
+        indexname: 'SupplierPayable_deviceId_v2_key',
+        is_unique: true,
+        is_valid: true,
+        is_ready: true,
+        predicate_sql: '("evidenceVersion" = 2)',
+      },
+    ])
+  })
+
+  it('allows repeated CBU observations but rejects duplicate MANUAL command identities', async () => {
+    const client = new Client({ connectionString: databaseUrl })
+    await client.connect()
+
+    try {
+      await client.query('BEGIN')
+      const insertRate = `
+        INSERT INTO "CurrencyRate" (
+          id,
+          "baseCurrency",
+          "quoteCurrency",
+          rate,
+          source,
+          "fetchedAt",
+          "effectiveDate",
+          "providerReference",
+          "recordedById",
+          "recordedByType",
+          "evidenceVersion",
+          "evidenceStatus"
+        )
+        VALUES ($1, 'USD', 'UZS', $2, $3, $4, $5, $6, $7, $8, 2, 'CAPTURED')
+      `
+
+      await client.query(insertRate, [
+        'rate-cbu-repeat-a',
+        12_500,
+        'CBU',
+        new Date('2026-07-23T06:00:00.000Z'),
+        new Date('2026-07-23T00:00:00.000Z'),
+        'cbu-observation-shared-reference',
+        null,
+        null,
+      ])
+      await client.query(insertRate, [
+        'rate-cbu-repeat-b',
+        12_510,
+        'CBU',
+        new Date('2026-07-23T06:05:00.000Z'),
+        new Date('2026-07-23T00:00:00.000Z'),
+        'cbu-observation-shared-reference',
+        null,
+        null,
+      ])
+
+      const repeatedCbu = await client.query<{ count: string }>(
+        `
+          SELECT COUNT(*)::text AS count
+          FROM "CurrencyRate"
+          WHERE source = 'CBU'
+            AND "providerReference" = 'cbu-observation-shared-reference'
+            AND "evidenceVersion" = 2
+        `,
+      )
+      expect(repeatedCbu.rows[0]?.count).toBe('2')
+
+      await client.query(insertRate, [
+        'rate-manual-command-a',
+        12_520,
+        'MANUAL',
+        new Date('2026-07-23T06:10:00.000Z'),
+        new Date('2026-07-23T00:00:00.000Z'),
+        'manual-command-shared-reference',
+        'release-test-actor',
+        'SUPER_ADMIN',
+      ])
+
+      let duplicateManualError: unknown
+      try {
+        await client.query(insertRate, [
+          'rate-manual-command-b',
+          12_530,
+          'MANUAL',
+          new Date('2026-07-23T06:15:00.000Z'),
+          new Date('2026-07-23T00:00:00.000Z'),
+          'manual-command-shared-reference',
+          'release-test-actor',
+          'SUPER_ADMIN',
+        ])
+      } catch (error) {
+        duplicateManualError = error
+      }
+
+      const postgresError = duplicateManualError as {
+        code?: string
+        constraint?: string
+      }
+      expect(postgresError.code).toBe('23505')
+      expect(postgresError.constraint).toBe('CurrencyRate_manual_providerReference_key')
+    } finally {
+      await client.query('ROLLBACK').catch(() => undefined)
+      await client.end()
+    }
   })
 })

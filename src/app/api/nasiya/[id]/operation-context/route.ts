@@ -131,6 +131,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
           dueDate: schedule.dueDate.toISOString(),
           delayedUntil: schedule.delayedUntil?.toISOString() ?? null,
           status: schedule.status,
+          moneyAvailable: Boolean(reconciled),
           expected: reconciled?.expected ?? createMoneyDto(nasiya.contractCurrency, 0),
           paid: reconciled?.paid ?? createMoneyDto(nasiya.contractCurrency, 0),
           waived: reconciled?.waived ?? createMoneyDto(nasiya.contractCurrency, 0),

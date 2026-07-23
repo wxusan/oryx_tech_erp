@@ -34,12 +34,10 @@ export const getShopCurrencyContext = cache(async function getShopCurrencyContex
   // The preferred currency controls presentation, not which contract
   // currencies may appear. A UZS-preferred shop can still have USD-native
   // debt, so every context carries the best governed USD/UZS rate available.
-  try {
-    const snapshot = await getUsdUzsRateSnapshot()
-    return currencyContextFromSnapshot(currency, snapshot)
-  } catch {
-    return unavailableCurrencyContext(currency)
-  }
+  const snapshot = await getStoredUsdUzsRateSnapshot()
+  return snapshot
+    ? currencyContextFromSnapshot(currency, snapshot)
+    : unavailableCurrencyContext(currency)
 })
 
 export const getSuperAdminCurrencyContext = cache(async function getSuperAdminCurrencyContext(superAdminId: string): Promise<CurrencyContext> {
@@ -48,12 +46,10 @@ export const getSuperAdminCurrencyContext = cache(async function getSuperAdminCu
     select: { preferredCurrency: true },
   })
   const currency = (admin?.preferredCurrency ?? 'UZS') as CurrencyCode
-  try {
-    const snapshot = await getUsdUzsRateSnapshot()
-    return currencyContextFromSnapshot(currency, snapshot)
-  } catch {
-    return unavailableCurrencyContext(currency)
-  }
+  const snapshot = await getStoredUsdUzsRateSnapshot()
+  return snapshot
+    ? currencyContextFromSnapshot(currency, snapshot)
+    : unavailableCurrencyContext(currency)
 })
 
 export async function getUsdUzsRate(): Promise<number> {
@@ -66,6 +62,44 @@ export interface UsdUzsRateSnapshot {
   effectiveAt: Date | null
   fetchedAt: Date
   freshness: Exclude<FxQuoteFreshness, 'UNAVAILABLE'>
+}
+
+/**
+ * Read-only presentation path: return a governed stored quote immediately and
+ * refresh after the response. It never waits on the CBU network. Financial
+ * mutations that actually require conversion must use getUsdUzsRateSnapshot.
+ */
+export async function getStoredUsdUzsRateSnapshot(): Promise<UsdUzsRateSnapshot | null> {
+  const latestCbu = await latestStoredUsdRate('CBU')
+  const cbuAgeMs = latestCbu ? Date.now() - latestCbu.fetchedAt.getTime() : Number.POSITIVE_INFINITY
+  if (latestCbu && isOperationalUsdUzsRate(latestCbu.rate) && cbuAgeMs <= RATE_TTL_MS) {
+    return {
+      rate: Number(latestCbu.rate),
+      source: latestCbu.source,
+      effectiveAt: latestCbu.effectiveDate,
+      fetchedAt: latestCbu.fetchedAt,
+      freshness: 'FRESH',
+    }
+  }
+
+  const fallback = latestCbu && isOperationalUsdUzsRate(latestCbu.rate) && cbuAgeMs <= MAX_FALLBACK_RATE_AGE_MS
+    ? latestCbu
+    : await latestStoredUsdRate()
+  scheduleUsdUzsRateRefresh()
+  if (
+    !fallback
+    || !isOperationalUsdUzsRate(fallback.rate)
+    || Date.now() - fallback.fetchedAt.getTime() > MAX_FALLBACK_RATE_AGE_MS
+  ) {
+    return null
+  }
+  return {
+    rate: Number(fallback.rate),
+    source: fallback.source,
+    effectiveAt: fallback.effectiveDate,
+    fetchedAt: fallback.fetchedAt,
+    freshness: 'FALLBACK',
+  }
 }
 
 export async function getUsdUzsRateSnapshot(): Promise<UsdUzsRateSnapshot> {
@@ -143,6 +177,9 @@ export async function refreshUsdUzsRate(): Promise<number> {
   const item = json.find((row) => row.Ccy === 'USD') ?? json[0]
   const rate = Number(String(item?.Rate ?? '').replace(',', '.'))
   if (!isOperationalUsdUzsRate(rate)) throw new Error('CBU USD rate response is outside the approved range')
+  const effectiveDate = parseCbuDate(item?.Date)
+  if (!effectiveDate) throw new Error('CBU USD rate response has no valid effective date')
+  const providerReference = `CBU:USD:${effectiveDate.toISOString().slice(0, 10)}:${rate.toFixed(4)}`
 
   await prisma.currencyRate.create({
     data: {
@@ -151,7 +188,12 @@ export async function refreshUsdUzsRate(): Promise<number> {
       rate,
       source: 'CBU',
       fetchedAt: new Date(),
-      effectiveDate: parseCbuDate(item?.Date),
+      effectiveDate,
+      providerReference,
+      recordedById: null,
+      recordedByType: null,
+      evidenceVersion: 2,
+      evidenceStatus: 'CAPTURED',
     },
   })
 
@@ -180,12 +222,28 @@ function scheduleUsdUzsRateRefresh() {
 
 export function isOperationalUsdUzsRate(value: unknown): boolean {
   const rate = Number(value)
-  return Number.isFinite(rate) && rate >= MIN_USD_UZS_RATE && rate <= MAX_USD_UZS_RATE
+  if (!Number.isFinite(rate) || rate < MIN_USD_UZS_RATE || rate > MAX_USD_UZS_RATE) return false
+  const scaled = rate * 10_000
+  return Number.isSafeInteger(Math.round(scaled))
+    && Math.abs(scaled - Math.round(scaled)) <= 1e-6
 }
 
 async function latestStoredUsdRate(source?: 'CBU' | 'MANUAL') {
   return prisma.currencyRate.findFirst({
-    where: { baseCurrency: 'USD', quoteCurrency: 'UZS', ...(source ? { source } : {}) },
+    // A stored row is eligible for a new financial mutation only when its
+    // provider is governed and its effective instant is known. Legacy rows
+    // without that minimum provenance remain readable audit history, but must
+    // never be copied into a new v2 receipt and rejected later by the DB.
+    where: {
+      baseCurrency: 'USD',
+      quoteCurrency: 'UZS',
+      source: source ?? { in: ['CBU', 'MANUAL'] },
+      effectiveDate: { not: null },
+      // Filter eligibility in SQL. Otherwise one newer invalid legacy row can
+      // mask an older usable quote and make a financial write fail during a
+      // temporary CBU outage.
+      rate: { gte: MIN_USD_UZS_RATE, lte: MAX_USD_UZS_RATE },
+    },
     orderBy: { fetchedAt: 'desc' },
     select: { rate: true, source: true, effectiveDate: true, fetchedAt: true },
   })

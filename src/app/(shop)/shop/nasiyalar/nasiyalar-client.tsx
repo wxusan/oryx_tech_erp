@@ -377,6 +377,7 @@ export default function NasiyalarClient({
               a third column only where there is enough room for the details. */}
           <div className="hidden sm:grid grid-cols-1 gap-3 xl:grid-cols-2 2xl:grid-cols-3">
             {nasiyalar.map((n) => {
+              const ledgerQuarantined = n.ledger.health === 'QUARANTINED'
               const pct = n.ledger.financed.minorUnits > 0
                 ? Math.round((n.ledger.paid.minorUnits / n.ledger.financed.minorUnits) * 100)
                 : 0
@@ -396,7 +397,6 @@ export default function NasiyalarClient({
               const collectionDateLabel = collectionWorkItem
                 ? `${collectionCohortLabels[collectionWorkItem.cohort]}: ${uzDate(collectionWorkItem.effectiveDue)}`
                 : n.nextPaymentDate ? `Keyingi to'lov: ${uzDate(n.nextPaymentDate)}` : null
-              const ledgerQuarantined = n.ledger.health === 'QUARANTINED'
               const canPay = !ledgerQuarantined && canReceivePayment && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.ledger.remaining.minorUnits > 0
               const canDefer = !ledgerQuarantined && canDeferNasiya && n.resolutionState === 'ACTIVE' && (n.displayStatus === 'ACTIVE' || n.displayStatus === 'OVERDUE') && n.ledger.remaining.minorUnits > 0
               return (
@@ -435,24 +435,34 @@ export default function NasiyalarClient({
                       </div>
                       <div className="shrink-0 text-right">
                         <div className={`text-base font-bold ${collectionWorkItem?.cohort === 'OVERDUE' ? 'text-red-700' : collectionWorkItem?.cohort === 'DUE_TODAY' ? 'text-emerald-700' : collectionWorkItem ? 'text-blue-700' : 'text-zinc-900'}`}>
-                          {mfmt(collectionWorkItem?.outstanding ?? n.ledger.remaining)}
+                          {ledgerQuarantined ? 'Summa tekshiruvda' : mfmt(collectionWorkItem?.outstanding ?? n.ledger.remaining)}
                         </div>
-                        <div className="mt-0.5 text-xs text-zinc-400">{collectionWorkItem ? 'qabul qilinadi' : 'qolgan'}</div>
+                        <div className="mt-0.5 text-xs text-zinc-400">
+                          {ledgerQuarantined ? 'hisob dalillari mos emas' : collectionWorkItem ? 'qabul qilinadi' : 'qolgan'}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="mt-4 flex items-center gap-2">
-                      <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100">
-                        <div className="h-full rounded-full bg-zinc-900" style={{ width: `${pct}%` }} />
+                    {ledgerQuarantined ? (
+                      <div role="status" className="mt-4 rounded border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                        Tekshiruv tugaguncha to‘langan, jami va qolgan summalar ko‘rsatilmaydi.
                       </div>
-                      <span className="text-xs text-zinc-500">{pct}%</span>
-                    </div>
-                    <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-zinc-500">
-                      <span>To&apos;langan: <span className="font-medium text-zinc-700">{mfmt(n.ledger.paid)}</span></span>
-                      <span className="text-right">Jami: <span className="font-medium text-zinc-700">{mfmt(n.ledger.financed)}</span></span>
-                      {collectionWorkItem && <span>Shartnoma qoldig&apos;i: <span className="font-medium text-zinc-700">{mfmt(n.ledger.remaining)}</span></span>}
-                      {n.contractInterest.minorUnits > 0 && <span className="text-right">Foiz: <span className="font-medium text-zinc-700">{mfmt(n.contractInterest)}</span></span>}
-                    </div>
+                    ) : (
+                      <>
+                        <div className="mt-4 flex items-center gap-2">
+                          <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-zinc-100">
+                            <div className="h-full rounded-full bg-zinc-900" style={{ width: `${pct}%` }} />
+                          </div>
+                          <span className="text-xs text-zinc-500">{pct}%</span>
+                        </div>
+                        <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-zinc-500">
+                          <span>To&apos;langan: <span className="font-medium text-zinc-700">{mfmt(n.ledger.paid)}</span></span>
+                          <span className="text-right">Jami: <span className="font-medium text-zinc-700">{mfmt(n.ledger.financed)}</span></span>
+                          {collectionWorkItem && <span>Shartnoma qoldig&apos;i: <span className="font-medium text-zinc-700">{mfmt(n.ledger.remaining)}</span></span>}
+                          {n.contractInterest.minorUnits > 0 && <span className="text-right">Foiz: <span className="font-medium text-zinc-700">{mfmt(n.contractInterest)}</span></span>}
+                        </div>
+                      </>
+                    )}
 
                     {(canPay || canDefer) && (
                       <div className="mt-auto grid grid-cols-2 gap-2 pt-4">
@@ -540,10 +550,16 @@ export default function NasiyalarClient({
                   <div className="pointer-events-none relative z-10 flex items-center justify-between text-xs text-zinc-500">
                     <span>{collectionDateLabel}</span>
                     <span className={`font-bold text-sm ${collectionWorkItem?.cohort === 'OVERDUE' ? 'text-red-700' : collectionWorkItem?.cohort === 'DUE_TODAY' ? 'text-emerald-700' : 'text-zinc-900'}`}>
-                      {mfmt(collectionWorkItem?.outstanding ?? n.ledger.remaining)} {collectionWorkItem ? collectionCohortLabels[collectionWorkItem.cohort] : 'qolgan'}
+                      {ledgerQuarantined
+                        ? 'Summa tekshiruvda'
+                        : `${mfmt(collectionWorkItem?.outstanding ?? n.ledger.remaining)} ${collectionWorkItem ? collectionCohortLabels[collectionWorkItem.cohort] : 'qolgan'}`}
                     </span>
                   </div>
-                  {collectionWorkItem && (
+                  {ledgerQuarantined ? (
+                    <div role="status" className="pointer-events-none relative z-10 rounded border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+                      Moliyaviy summalar tekshiruv tugaguncha ko‘rsatilmaydi.
+                    </div>
+                  ) : collectionWorkItem && (
                     <div className="pointer-events-none relative z-10 text-right text-xs text-zinc-500">
                       Shartnoma qoldig'i: {mfmt(n.ledger.remaining)}
                     </div>

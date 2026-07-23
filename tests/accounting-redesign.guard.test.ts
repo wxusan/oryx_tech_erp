@@ -22,7 +22,7 @@ describe('complete accounting redesign release guard', () => {
 
     const olibRoute = read('src/app/api/olib-sotdim/route.ts')
     const olibUi = read('src/app/(shop)/shop/olib-sotdim/new/page.tsx')
-    expect(olibRoute).toContain('creationIdempotencyKey: idempotencyKey')
+    expect(olibRoute).toContain('creationIdempotencyKey: saleCreationIdempotencyKey')
     expect(olibRoute).toContain('creationCommandHash: commandHash')
     expect(olibUi).toContain("'Idempotency-Key': saleCommand.keyFor(payload)")
   })

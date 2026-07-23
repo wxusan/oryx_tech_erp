@@ -13,13 +13,13 @@
  */
 
 import { NextRequest, after } from 'next/server'
-import { randomBytes } from 'crypto'
+import { createHash, randomBytes } from 'crypto'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireShopPermissionAndFeature } from '@/lib/api-auth'
 import { importNasiyaSchema } from '@/lib/validations'
 import { generateImportSchedule } from '@/lib/nasiya-utils'
-import { created, badRequest, conflict, forbidden, serverError, tooManyRequests } from '@/lib/api-helpers'
+import { created, ok, badRequest, conflict, forbidden, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { nasiyaImportedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
@@ -34,6 +34,13 @@ import type { ZodError } from 'zod'
 import { formatDeviceStorage, normalizeImei } from '@/lib/device-specs'
 import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
+
+type ImportResult = {
+  nasiyaId: string
+  deviceId: string
+  scheduleCount: number
+  duplicate: boolean
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -50,8 +57,6 @@ export async function POST(req: NextRequest) {
     const rate = await checkRateLimitDistributed(rateLimitKey('nasiya-import', shopId, session.user.id), { windowMs: 60_000, max: 10 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
-    const currency = await getShopCurrencyContext(shopId)
-
     const body: unknown = await req.json()
     const parsed = importNasiyaSchema.safeParse(body)
     if (!parsed.success) {
@@ -59,6 +64,36 @@ export async function POST(req: NextRequest) {
       return badRequest(firstError)
     }
     const data = parsed.data
+    const idempotencyKey = req.headers.get('idempotency-key')?.trim()
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
+    }
+    // Hash only canonical, validated native input. A replay can therefore be
+    // resolved before any FX/provider lookup and cannot change meaning when a
+    // later USD/UZS quote differs.
+    const commandHash = createHash('sha256')
+      .update(JSON.stringify({ shopId, actorId: session.user.id, command: data }))
+      .digest('hex')
+    const replay = await prisma.nasiya.findUnique({
+      where: { shopId_importIdempotencyKey: { shopId, importIdempotencyKey: idempotencyKey } },
+      select: {
+        id: true,
+        deviceId: true,
+        importedById: true,
+        importCommandHash: true,
+        months: true,
+      },
+    })
+    if (replay) {
+      if (replay.importedById !== session.user.id || replay.importCommandHash !== commandHash) {
+        return conflict("Idempotency-Key boshqa yoki o'zgartirilgan nasiya importi uchun ishlatilgan")
+      }
+      return ok(
+        { nasiyaId: replay.id, deviceId: replay.deviceId, scheduleCount: replay.months, duplicate: true },
+        'Avvalgi nasiya allaqachon import qilingan',
+      )
+    }
+
     const storage = formatDeviceStorage(data) || null
 
     const passportPhotoKey = data.passportPhotoUrl
@@ -80,8 +115,13 @@ export async function POST(req: NextRequest) {
     let alreadyPaidInput: MoneyInputResult
     let remainingDebtInput: MoneyInputResult
     let monthlyPaymentInput: MoneyInputResult
+    let currency: Awaited<ReturnType<typeof getShopCurrencyContext>>
     try {
-      const convertMoney = await createMoneyInputConverter(data.inputCurrency)
+      const [currencyContext, convertMoney] = await Promise.all([
+        getShopCurrencyContext(shopId),
+        createMoneyInputConverter(data.inputCurrency),
+      ])
+      currency = currencyContext
       originalTotalInput = convertMoney(data.originalTotalAmount)
       alreadyPaidInput = convertMoney(data.alreadyPaidBeforeImport)
       remainingDebtInput = convertMoney(data.remainingDebt)
@@ -89,13 +129,6 @@ export async function POST(req: NextRequest) {
     } catch (err) {
       return badRequest(err instanceof Error ? err.message : 'Valyuta kursi mavjud emas')
     }
-    if (remainingDebtInput.amountUzs > originalTotalInput.amountUzs) {
-      return badRequest('Qolgan qarz avvalgi nasiya umumiy summasidan oshmasligi kerak')
-    }
-    if (alreadyPaidInput.amountUzs + remainingDebtInput.amountUzs !== originalTotalInput.amountUzs) {
-      return badRequest('Avvalgi nasiya jami to‘langan summa va qolgan qarz yig‘indisiga teng bo‘lishi kerak')
-    }
-
     // Native contract-currency ledger — computed from the RAW inputs (not
     // UZS-converted), in whatever currency the import file/form specifies.
     // Old (already-imported) rows stay UZS via the migration backfill; only
@@ -106,6 +139,15 @@ export async function POST(req: NextRequest) {
     const contractDownPayment = roundContractMoney(data.alreadyPaidBeforeImport, contractCurrency)
     const contractRemainingDebt = roundContractMoney(data.remainingDebt, contractCurrency)
     const contractMonthlyPayment = roundContractMoney(data.monthlyPayment, contractCurrency)
+    if (contractRemainingDebt > contractTotalAmount) {
+      return badRequest('Qolgan qarz avvalgi nasiya umumiy summasidan oshmasligi kerak')
+    }
+    if (
+      roundContractMoney(contractDownPayment + contractRemainingDebt, contractCurrency)
+      !== contractTotalAmount
+    ) {
+      return badRequest('Avvalgi nasiya jami to‘langan summa va qolgan qarz yig‘indisiga teng bo‘lishi kerak')
+    }
 
     // Build the future-only schedule up-front so we can reject bad money before
     // touching the DB, and reuse the exact rows inside the transaction.
@@ -152,8 +194,9 @@ export async function POST(req: NextRequest) {
         // Archived imports no longer represent an active receivable, so they
         // must not block importing a current replacement contract.
         resolutionState: 'ACTIVE',
-        remainingAtImport: Math.round(remainingDebtInput.amountUzs),
-        monthlyPayment: Math.round(monthlyPaymentInput.amountUzs),
+        contractCurrency,
+        contractRemainingAmount: contractRemainingDebt,
+        contractMonthlyPayment,
         ...(data.originalSaleDate ? { originalSaleDate: data.originalSaleDate } : {}),
         customer: {
           is: {
@@ -178,7 +221,34 @@ export async function POST(req: NextRequest) {
 
     const storedImei = enteredImei || `IMPORT-${randomBytes(4).toString('hex').toUpperCase()}`
 
-    const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+    let result: ImportResult
+    try {
+      result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      const existingReplay = await tx.nasiya.findUnique({
+        where: { shopId_importIdempotencyKey: { shopId, importIdempotencyKey: idempotencyKey } },
+        select: {
+          id: true,
+          deviceId: true,
+          importedById: true,
+          importCommandHash: true,
+          months: true,
+        },
+      })
+      if (existingReplay) {
+        if (existingReplay.importedById !== session.user.id || existingReplay.importCommandHash !== commandHash) {
+          throw {
+            status: 409,
+            message: "Idempotency-Key boshqa yoki o'zgartirilgan nasiya importi uchun ishlatilgan",
+          }
+        }
+        return {
+          nasiyaId: existingReplay.id,
+          deviceId: existingReplay.deviceId,
+          scheduleCount: existingReplay.months,
+          duplicate: true,
+        }
+      }
+
       const existingCustomer = await tx.customer.findFirst({
         where: {
           shopId,
@@ -220,6 +290,15 @@ export async function POST(req: NextRequest) {
           condition: data.conditionCode === 'NEW' ? 'Yangi' : 'B/U',
           batteryHealth: data.batteryHealth ?? null,
           purchasePrice: 0,
+          purchaseCurrency: 'UZS',
+          purchaseInputAmount: 0,
+          purchaseExchangeRateAtCreation: null,
+          purchaseExchangeRateSource: null,
+          purchaseExchangeRateEffectiveAt: null,
+          purchaseExchangeRateFetchedAt: null,
+          purchaseAmountUzsSnapshot: 0,
+          evidenceVersion: 2,
+          evidenceStatus: 'UNRECONSTRUCTABLE',
           imei: storedImei,
           status: 'SOLD_NASIYA',
           isImported: true,
@@ -251,11 +330,20 @@ export async function POST(req: NextRequest) {
           startDate: data.nextPaymentDate,
           note: data.importNote,
           createdBy: session.user.id,
+          creationCurrency: originalTotalInput.inputCurrency,
+          creationExchangeRate: originalTotalInput.exchangeRateUsed,
+          creationExchangeRateSource: originalTotalInput.exchangeRateSource,
+          creationExchangeRateEffectiveAt: originalTotalInput.exchangeRateEffectiveAt,
+          creationExchangeRateFetchedAt: originalTotalInput.exchangeRateFetchedAt,
+          evidenceVersion: 2,
+          evidenceStatus: 'PARTIAL',
           // Import bookkeeping
           isImported: true,
           importSource: 'MANUAL',
           importedAt: new Date(),
           importedById: session.user.id,
+          importIdempotencyKey: idempotencyKey,
+          importCommandHash: commandHash,
           originalSaleDate: data.originalSaleDate ?? null,
           originalTotalAmount: originalTotalInput.amountUzs,
           alreadyPaidBeforeImport: alreadyPaidInput.amountUzs,
@@ -366,19 +454,55 @@ export async function POST(req: NextRequest) {
       ]
       if (notificationRows.length > 0) await tx.notification.createMany({ data: notificationRows })
 
-      return { nasiyaId: nasiya.id, deviceId: device.id, scheduleCount: schedule.length }
-    })
+      return { nasiyaId: nasiya.id, deviceId: device.id, scheduleCount: schedule.length, duplicate: false }
+      }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
+    } catch (transactionError) {
+      if (transactionError instanceof Prisma.PrismaClientKnownRequestError && transactionError.code === 'P2002') {
+        const committedReplay = await prisma.nasiya.findUnique({
+          where: { shopId_importIdempotencyKey: { shopId, importIdempotencyKey: idempotencyKey } },
+          select: {
+            id: true,
+            deviceId: true,
+            importedById: true,
+            importCommandHash: true,
+            months: true,
+          },
+        })
+        if (committedReplay) {
+          if (committedReplay.importedById !== session.user.id || committedReplay.importCommandHash !== commandHash) {
+            return conflict("Idempotency-Key boshqa yoki o'zgartirilgan nasiya importi uchun ishlatilgan")
+          }
+          result = {
+            nasiyaId: committedReplay.id,
+            deviceId: committedReplay.deviceId,
+            scheduleCount: committedReplay.months,
+            duplicate: true,
+          }
+        } else {
+          throw transactionError
+        }
+      } else {
+        throw transactionError
+      }
+    }
 
-    invalidateShopNasiyaMutation(shopId)
+    if (!result.duplicate) {
+      invalidateShopNasiyaMutation(shopId)
 
-    after(() =>
-      flushQueuedTelegramWork().catch((e) =>
-        logger.warn('notification flush failed', { event: 'notification.flush_failed', route: '/api/nasiya/import', error: e }),
-      ),
-    )
+      after(() =>
+        flushQueuedTelegramWork().catch((e) =>
+          logger.warn('notification flush failed', { event: 'notification.flush_failed', route: '/api/nasiya/import', error: e }),
+        ),
+      )
+    }
 
-    return created(result, 'Avvalgi nasiya muvaffaqiyatli import qilindi')
+    return result.duplicate
+      ? ok(result, 'Avvalgi nasiya allaqachon import qilingan')
+      : created(result, 'Avvalgi nasiya muvaffaqiyatli import qilindi')
   } catch (err) {
+    if (typeof err === 'object' && err !== null && 'status' in err && (err as { status?: number }).status === 409) {
+      return conflict((err as { message?: string }).message ?? 'Nasiya importi allaqachon mavjud')
+    }
     if (err instanceof Prisma.PrismaClientKnownRequestError && err.code === 'P2002') {
       return conflict('Bu IMEI raqami allaqachon mavjud')
     }

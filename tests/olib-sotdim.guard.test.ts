@@ -90,10 +90,15 @@ describe('mark supplier payable as paid stops reminders', () => {
     expect(ledger).toContain("Bu qarz yopilgan yoki bekor qilingan")
   })
 
-  it('cron reminder queries only ever select PENDING/OVERDUE, so a PAID payable is naturally excluded', () => {
-    expect(cron).toContain("status: 'PENDING'")
-    expect(cron).toContain("status: { in: ['PENDING', 'OVERDUE'] }")
-    expect(cron).not.toContain("status: 'PAID'")
+  it('cron reminder queries include every open balance state and naturally exclude PAID payables', () => {
+    const openStatusPredicate = "status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] }"
+    for (const phase of ['SUPPLIER_DUE', 'SUPPLIER_OVERDUE', 'SUPPLIER_EARLY']) {
+      const start = cron.indexOf(`'${phase}'`)
+      const query = cron.slice(start, cron.indexOf('orderBy:', start))
+      expect(query).toContain(openStatusPredicate)
+      expect(query).toContain('contractRemainingAmount: { gt: 0 }')
+      expect(query).not.toContain("'PAID'")
+    }
   })
 })
 
@@ -167,10 +172,13 @@ describe('money/currency: MoneyInput used, server converts and stores UZS', () =
     expect(form).not.toMatch(/type="number"[^>]*salePrice/)
   })
 
-  it('submits inputCurrency and converts every amount through one operation-scoped rate', () => {
+  it('submits both explicit currencies and reuses each operation-scoped converter', () => {
     expect(form).toContain('purchaseInputCurrency,')
     expect(form).toContain('customerInputCurrency,')
-    expect(route).toContain('createMoneyInputConverter(d.purchaseInputCurrency ?? d.inputCurrency)')
+    expect(form).toContain("'Idempotency-Key': saleCommand.keyFor(payload)")
+    expect(route).toContain('createMoneyInputConverter(d.purchaseInputCurrency)')
+    expect(route).toContain('d.customerInputCurrency === d.purchaseInputCurrency')
+    expect(route).toContain('await createMoneyInputConverter(d.customerInputCurrency)')
     expect(route).toContain('purchaseInput = convertPurchase(d.purchasePrice)')
     expect(route).toContain('saleInput = convertCustomer(d.salePrice!)')
   })

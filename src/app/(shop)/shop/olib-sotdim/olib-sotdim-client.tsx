@@ -44,6 +44,7 @@ import {
   searchEvidenceFor,
   type SearchEvidenceCarrier,
 } from '@/components/highlighted-text'
+import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 
 type PayableStatus = SupplierPayableStatus
 
@@ -126,6 +127,7 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
   const [payNote, setPayNote] = useState('')
   const [payError, setPayError] = useState('')
   const [paySubmitting, setPaySubmitting] = useState(false)
+  const payCommand = useLogicalCommandIdempotency()
 
   useEffect(() => {
     if (search.trim() === committedSearch) return
@@ -195,17 +197,25 @@ export default function OlibSotdimClient({ initialSearch, initialPage }: { initi
     setPaySubmitting(true)
     setPayError('')
     try {
+      const payload = {
+        paymentMethod: payMethod,
+        paidAt: payDate || undefined,
+        note: payNote.trim() || undefined,
+      }
       const res = await fetch(`/api/olib-sotdim/${payFor.id}/pay`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          paymentMethod: payMethod,
-          paidAt: payDate || undefined,
-          note: payNote.trim() || undefined,
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': payCommand.keyFor({ supplierPayableId: payFor.id, payload }),
+        },
+        body: JSON.stringify(payload),
       })
       const json = await res.json()
-      if (!res.ok || !json.success) throw new Error(json.error || "To'lovni saqlashda xatolik")
+      if (!res.ok || !json.success) {
+        payCommand.rejected(res.status)
+        throw new Error(json.error || "To'lovni saqlashda xatolik")
+      }
+      payCommand.committed()
       await commitNavigationMutation({
         kind: 'olibSotdim.paymentRecorded',
         deviceId: payFor.device.id,

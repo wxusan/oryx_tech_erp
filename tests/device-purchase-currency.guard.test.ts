@@ -42,7 +42,11 @@ describe('Device creation/edit/olib-sotdim routes populate the purchase-currency
     expect(route).toContain('purchaseCurrency: purchaseInput.inputCurrency,')
     expect(route).toContain('purchaseInputAmount: purchasePrice,')
     expect(route).toContain('purchaseExchangeRateAtCreation: purchaseInput.exchangeRateUsed,')
+    expect(route).toContain('purchaseExchangeRateSource: purchaseInput.exchangeRateSource,')
+    expect(route).toContain('purchaseExchangeRateEffectiveAt: purchaseInput.exchangeRateEffectiveAt,')
+    expect(route).toContain('purchaseExchangeRateFetchedAt: purchaseInput.exchangeRateFetchedAt,')
     expect(route).toContain('purchaseAmountUzsSnapshot: purchaseInput.amountUzs,')
+    expect(route).toContain("evidenceStatus: 'CAPTURED',")
   })
 
   it('PATCH /api/devices/[id] dual-writes the purchase-currency fields whenever purchasePrice is edited', () => {
@@ -50,6 +54,7 @@ describe('Device creation/edit/olib-sotdim routes populate the purchase-currency
     expect(route).toContain('const rawPurchasePriceInput = updateData.purchasePrice')
     expect(route).toContain('purchaseCurrency: purchaseMeta.inputCurrency,')
     expect(route).toContain('purchaseInputAmount: rawPurchasePriceInput,')
+    expect(route).toContain('purchaseExchangeRateSource: purchaseMeta.exchangeRateSource,')
     expect(route).toContain('purchaseAmountUzsSnapshot: purchaseMeta.amountUzs,')
   })
 

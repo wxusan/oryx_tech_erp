@@ -11,6 +11,7 @@ export interface NasiyaScheduleRow {
   dueDate: string
   delayedUntil: string | null
   status: 'PENDING' | 'PARTIAL' | 'PAID' | 'SETTLED' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
+  moneyAvailable?: boolean
   expected: MoneyDto
   paid: MoneyDto
   waived?: MoneyDto
@@ -48,6 +49,7 @@ function RowBadge({ status }: { status: RowStatus }) {
 }
 
 function rowStatus(row: NasiyaScheduleRow): RowStatus {
+  if (row.moneyAvailable === false) return row.status
   if (row.status === 'CANCELLED') return 'CANCELLED'
   if (row.status === 'SETTLED' || (row.waived?.minorUnits ?? 0) > 0) return 'SETTLED'
   if (row.remaining.minorUnits === 0) return 'PAID'
@@ -107,7 +109,7 @@ export function NasiyaHistorySections({
               const status = rowStatus(row)
               return <tr key={row.id} className="border-b border-zinc-100 last:border-0 hover:bg-zinc-50">
                 <td className="px-4 py-3 text-zinc-500">{row.monthNumber}</td><td className="px-4 py-3 text-zinc-700">{uzDate(row.dueDate)}</td>
-                <td className="px-4 py-3 font-medium text-zinc-900">{formatMoney(row.expected)}</td><td className="px-4 py-3 text-zinc-700">{formatMoney(row.paid)}</td><td className="px-4 py-3 text-zinc-700">{row.waived && row.waived.minorUnits > 0 ? formatMoney(row.waived) : '—'}</td>
+                <td className="px-4 py-3 font-medium text-zinc-900">{row.moneyAvailable === false ? 'Tekshiruvda' : formatMoney(row.expected)}</td><td className="px-4 py-3 text-zinc-700">{row.moneyAvailable === false ? 'Tekshiruvda' : formatMoney(row.paid)}</td><td className="px-4 py-3 text-zinc-700">{row.moneyAvailable === false ? 'Tekshiruvda' : row.waived && row.waived.minorUnits > 0 ? formatMoney(row.waived) : '—'}</td>
                 <td className="px-4 py-3"><RowBadge status={status} /></td>
               </tr>
             })}</tbody>

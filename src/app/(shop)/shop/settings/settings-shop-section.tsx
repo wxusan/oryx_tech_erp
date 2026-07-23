@@ -97,7 +97,13 @@ export function SettingsShopSection({
         kind: currencyChanged ? 'shop.currencyUpdated' : 'shop.profileUpdated',
       })
       onShopChange(json.data)
-      setCurrency({ currency: json.data.preferredCurrency, usdUzsRate: json.data.usdUzsRate })
+      setCurrency({
+        currency: json.data.preferredCurrency,
+        usdUzsRate: json.data.usdUzsRate,
+        usdUzsRateSource: json.data.usdUzsRateSource,
+        usdUzsRateFetchedAt: json.data.usdUzsRateFetchedAt,
+        fxQuote: json.data.fxQuote,
+      })
       setForm({
         name: json.data.name,
         ownerName: json.data.ownerName,

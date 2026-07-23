@@ -8,7 +8,11 @@ import { moneyMinorUnitsFromAmount, moneyDtoToAmount } from '@/lib/currency'
 import { convertPaymentToContractCurrency } from '@/lib/nasiya-contract'
 import { canonicalPaymentBreakdown } from '@/lib/idempotency-replay'
 import { representativePaymentMethod } from '@/lib/payment-breakdown'
-import { moneyInputToUzs, moneyInputMeta, type MoneyInputResult } from '@/lib/server/money-input'
+import {
+  moneyInputMeta,
+  moneyInputToUzsForContract,
+  type MoneyInputResult,
+} from '@/lib/server/money-input'
 import { getUsdUzsRateSnapshot } from '@/lib/server/currency'
 import { getLiveShopPrincipalForMutation, principalHasPermission } from '@/lib/server/shop-access'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
@@ -26,6 +30,14 @@ export class SupplierPayablePaymentError extends Error {
   ) {
     super(message)
   }
+}
+
+export function supplierPayableCreationIdempotencyKey(
+  origin: 'OLIB_SOTDIM' | 'DEVICE_PURCHASE',
+  rawScope: string,
+) {
+  const domain = origin === 'OLIB_SOTDIM' ? 'olib-payable' : 'device-payable'
+  return `${domain}:${createHash('sha256').update(rawScope).digest('hex')}`
 }
 
 /** Create a liability and optional initial payment inside a caller-owned
@@ -61,6 +73,10 @@ export async function createSupplierPayableCore(input: {
   idempotencyScope: string
 }) {
   const { tx } = input
+  const creationIdempotencyKey = supplierPayableCreationIdempotencyKey(
+    input.origin,
+    input.idempotencyScope,
+  )
   const payable = await tx.supplierPayable.create({
     data: {
       shopId: input.shopId,
@@ -76,6 +92,11 @@ export async function createSupplierPayableCore(input: {
       amount: input.purchaseInput.amountUzs,
       contractCurrency: input.purchaseInput.inputCurrency,
       contractExchangeRateAtCreation: input.purchaseInput.exchangeRateUsed,
+      contractExchangeRateSourceAtCreation: input.purchaseInput.exchangeRateSource,
+      contractExchangeRateEffectiveAtCreation: input.purchaseInput.exchangeRateEffectiveAt,
+      contractExchangeRateFetchedAtCreation: input.purchaseInput.exchangeRateFetchedAt,
+      evidenceVersion: 2,
+      evidenceStatus: 'CAPTURED',
       contractAmount: input.contractAmount,
       paidAmount: 0,
       remainingAmount: input.purchaseInput.amountUzs,
@@ -87,7 +108,7 @@ export async function createSupplierPayableCore(input: {
       earlyReminderEnabled: input.earlyReminderEnabled ?? false,
       earlyReminderDays: input.earlyReminderEnabled ? input.earlyReminderDays : null,
       createdBy: input.actorId,
-      creationIdempotencyKey: input.idempotencyScope,
+      creationIdempotencyKey,
       creationCommandHash: input.commandHash,
     },
   })
@@ -117,13 +138,15 @@ export async function createSupplierPayableCore(input: {
       paymentExchangeRateSource: initial.converted.exchangeRateSource,
       paymentExchangeRateEffectiveAt: initial.converted.exchangeRateEffectiveAt,
       paymentExchangeRateFetchedAt: initial.converted.exchangeRateFetchedAt,
+      evidenceVersion: 2,
+      evidenceStatus: 'CAPTURED',
       appliedAmountInContractCurrency: canonicalInitialContractAmount,
       paymentMethod: effectiveMethod,
       paymentBreakdown: initial.paymentBreakdown ?? undefined,
       paidAt: initial.paidAt,
       note: initial.note,
       createdBy: input.actorId,
-      idempotencyKey: `${input.idempotencyScope}:supplier-initial`,
+      idempotencyKey: `supplier-initial:${payable.id}`,
       commandHash: input.commandHash,
     },
   })
@@ -154,6 +177,8 @@ type RecordPaymentCommand = {
   input: RecordSupplierPayablePaymentInput
   idempotencyKey: string
   currency: CurrencyContext
+  /** The HTTP caller already ran replayCommittedSupplierPayablePayment. */
+  committedReplayChecked?: boolean
 }
 
 const paymentSelect = {
@@ -219,13 +244,134 @@ function payableDto(payable: {
   }
 }
 
+type SupplierPayablePaymentHashInput = {
+  amount: number
+  inputCurrency: 'UZS' | 'USD'
+  paymentMethod: RecordSupplierPayablePaymentInput['paymentMethod']
+  paymentBreakdown?: RecordSupplierPayablePaymentInput['paymentBreakdown']
+  paidAt?: Date
+  note?: string
+}
+
+function supplierPayablePaymentCommandHash(
+  supplierPayableId: string,
+  input: SupplierPayablePaymentHashInput,
+) {
+  const effectivePaymentMethod = input.paymentBreakdown
+    ? representativePaymentMethod(input.paymentBreakdown)
+    : input.paymentMethod
+  return createHash('sha256').update(JSON.stringify({
+    supplierPayableId,
+    amount: input.amount,
+    inputCurrency: input.inputCurrency,
+    paymentMethod: effectivePaymentMethod,
+    paymentBreakdown: canonicalPaymentBreakdown(input.paymentBreakdown, input.inputCurrency),
+    paidAt: input.paidAt?.toISOString() ?? null,
+    note: input.note ?? null,
+  })).digest('hex')
+}
+
+type SupplierPayableReplayInput = {
+  amount?: number
+  inputCurrency?: 'UZS' | 'USD'
+  paymentMethod: RecordSupplierPayablePaymentInput['paymentMethod']
+  paymentBreakdown?: RecordSupplierPayablePaymentInput['paymentBreakdown']
+  paidAt?: Date
+  note?: string
+}
+
+/**
+ * Resolve a lost-success retry using immutable receipt evidence only.
+ *
+ * The compatibility full-payment caller did not submit an amount. For that
+ * endpoint only, the committed receipt supplies the original native amount
+ * and currency before the command hash is checked. New commands still require
+ * both fields in recordSupplierPayablePayment.
+ */
+export async function replayCommittedSupplierPayablePayment(command: {
+  shopId: string
+  supplierPayableId: string
+  actorId: string
+  idempotencyKey: string
+  input: SupplierPayableReplayInput
+}) {
+  // Resolve a committed retry before consulting a mutable/external FX quote.
+  // The command hash contains only the validated native command, so a later
+  // quote change or provider outage cannot make a successful payment unreplayable.
+  const committedReplay = await prisma.supplierPayablePayment.findUnique({
+    where: {
+      shopId_idempotencyKey: {
+        shopId: command.shopId,
+        idempotencyKey: command.idempotencyKey,
+      },
+    },
+    select: { ...paymentSelect, commandHash: true, createdBy: true },
+  })
+  if (!committedReplay) return null
+
+  const inputCurrency = command.input.inputCurrency ?? committedReplay.paymentInputCurrency
+  const amount = command.input.amount ?? Number(committedReplay.paymentInputAmount)
+  const commandHash = supplierPayablePaymentCommandHash(command.supplierPayableId, {
+    ...command.input,
+    amount,
+    inputCurrency,
+  })
+  if (
+    committedReplay.commandHash !== commandHash
+    || committedReplay.createdBy !== command.actorId
+    || committedReplay.supplierPayableId !== command.supplierPayableId
+  ) {
+    throw new SupplierPayablePaymentError(409, "Idempotency-Key boshqa yoki o'zgartirilgan to'lov uchun ishlatilgan")
+  }
+  const current = await prisma.supplierPayable.findFirstOrThrow({
+    where: { id: command.supplierPayableId, shopId: command.shopId },
+    select: {
+      id: true, status: true, contractCurrency: true, contractAmount: true,
+      contractPaidAmount: true, contractRemainingAmount: true, paidAmount: true,
+      remainingAmount: true, dueDate: true, paidAt: true, lastPaymentAt: true,
+      ledgerVersion: true,
+    },
+  })
+  return { payment: paymentDto(committedReplay), payable: payableDto(current), duplicate: true as const }
+}
+
 export async function recordSupplierPayablePayment(command: RecordPaymentCommand) {
-  const amountInput = await moneyInputToUzs(command.input.amount, command.input.inputCurrency)
+  const effectivePaymentMethod = command.input.paymentBreakdown
+    ? representativePaymentMethod(command.input.paymentBreakdown)
+    : command.input.paymentMethod
+  const commandHash = supplierPayablePaymentCommandHash(
+    command.supplierPayableId,
+    command.input,
+  )
+  if (!command.committedReplayChecked) {
+    const committedReplay = await replayCommittedSupplierPayablePayment(command)
+    if (committedReplay) return committedReplay
+  }
+
   const contractLookup = await prisma.supplierPayable.findFirst({
     where: { id: command.supplierPayableId, shopId: command.shopId, deletedAt: null },
-    select: { contractCurrency: true },
+    select: {
+      contractCurrency: true,
+      contractExchangeRateAtCreation: true,
+    },
   })
   if (!contractLookup) throw new SupplierPayablePaymentError(404, 'Qarz yozuvi topilmadi')
+
+  let amountInput: MoneyInputResult
+  try {
+    amountInput = await moneyInputToUzsForContract({
+      amount: command.input.amount,
+      inputCurrency: command.input.inputCurrency,
+      contractCurrency: contractLookup.contractCurrency,
+      contractExchangeRateAtCreation: contractLookup.contractExchangeRateAtCreation,
+      currencyContext: command.currency,
+    })
+  } catch (error) {
+    throw new SupplierPayablePaymentError(
+      400,
+      error instanceof Error ? error.message : 'Valyuta kursi mavjud emas',
+    )
+  }
 
   let rate = amountInput.exchangeRateUsed
   let rateSource = amountInput.exchangeRateSource
@@ -244,18 +390,6 @@ export async function recordSupplierPayablePayment(command: RecordPaymentCommand
     contractLookup.contractCurrency,
     rate,
   )
-  const effectivePaymentMethod = command.input.paymentBreakdown
-    ? representativePaymentMethod(command.input.paymentBreakdown)
-    : command.input.paymentMethod
-  const commandHash = createHash('sha256').update(JSON.stringify({
-    supplierPayableId: command.supplierPayableId,
-    amount: command.input.amount,
-    inputCurrency: amountInput.inputCurrency,
-    paymentMethod: effectivePaymentMethod,
-    paymentBreakdown: canonicalPaymentBreakdown(command.input.paymentBreakdown, amountInput.inputCurrency),
-    paidAt: command.input.paidAt?.toISOString() ?? null,
-    note: command.input.note ?? null,
-  })).digest('hex')
 
   const run = () => prisma.$transaction(async (tx) => {
     if (command.actorType === 'SHOP_ADMIN') {
@@ -335,6 +469,8 @@ export async function recordSupplierPayablePayment(command: RecordPaymentCommand
         paymentExchangeRateSource: rateSource,
         paymentExchangeRateEffectiveAt: rateEffectiveAt,
         paymentExchangeRateFetchedAt: rateFetchedAt,
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
         appliedAmountInContractCurrency: appliedContractAmount,
         paymentMethod: effectivePaymentMethod,
         paymentBreakdown: command.input.paymentBreakdown ?? undefined,

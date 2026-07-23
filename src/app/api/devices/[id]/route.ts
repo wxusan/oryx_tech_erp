@@ -52,8 +52,6 @@ const updateDeviceSchema = z.object({
   conditionCode: z.enum(['NEW', 'USED']).optional(),
   batteryHealth: z.number().int().min(0).max(100).optional(),
   purchasePrice: z.number().positive("Kelish narxi 0 dan katta bo'lishi kerak").optional(),
-  // Display/input currency of purchasePrice. UZS by default (back-compatible);
-  // USD is converted to UZS server-side — UZS remains the stored value.
   inputCurrency: z.enum(['UZS', 'USD']).optional(),
   imei: z.string().trim().refine((value) => normalizeImei(value) !== null, 'IMEI 15 ta raqamdan iborat bo\'lishi kerak').optional(),
   secondaryImei: z.string().trim().refine((value) => !value || normalizeImei(value) !== null, 'Qo‘shimcha IMEI 15 ta raqamdan iborat bo‘lishi kerak').optional(),
@@ -64,6 +62,12 @@ const updateDeviceSchema = z.object({
 }).refine((data) => (data.storageAmount === undefined) === (data.storageUnit === undefined), {
   message: 'Xotira hajmi va birligi birga kiritilishi kerak',
   path: ['storageUnit'],
+}).refine((data) => data.purchasePrice === undefined || data.inputCurrency !== undefined, {
+  message: "Kelish narxi o'zgartirilganda valyuta aniq yuborilishi shart",
+  path: ['inputCurrency'],
+}).refine((data) => data.inputCurrency === undefined || data.purchasePrice !== undefined, {
+  message: "Valyuta kelish narxisiz alohida o'zgartirilmaydi",
+  path: ['inputCurrency'],
 })
 
 const deleteDeviceSchema = z.object({
@@ -408,7 +412,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         shop: { status: 'ACTIVE', deletedAt: null },
         ...(session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}),
       },
-      include: { imeis: { where: { deletedAt: null } } },
+      include: {
+        imeis: { where: { deletedAt: null } },
+        sales: { select: { id: true }, take: 1 },
+        nasiya: { select: { id: true }, take: 1 },
+        supplierPayables: { select: { id: true }, take: 1 },
+        purchaseReceipt: { select: { id: true } },
+      },
     })
 
     if (!existing) return notFound("Qurilma topilmadi")
@@ -447,17 +457,26 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
       (updateData as typeof updateData & { storage?: string }).storage = formatDeviceStorage(updateData)
     }
     if (updateData.conditionCode) (updateData as typeof updateData & { condition?: string }).condition = updateData.conditionCode === 'NEW' ? 'Yangi' : 'B/U'
-    const [saleCount, nasiyaCount] = await prisma.$transaction([
-      prisma.sale.count({ where: { deviceId, deletedAt: null } }),
-      prisma.nasiya.count({ where: { deviceId, deletedAt: null } }),
-    ])
+    const supplierSourceChanged =
+      updateData.supplierPhone !== undefined &&
+      (updateData.supplierPhone.trim() || null) !== (existing.supplierPhone?.trim() || null)
+    const purchaseFactsChanged =
+      updateData.purchasePrice !== undefined ||
+      inputCurrency !== undefined ||
+      supplierSourceChanged
     const isFinanciallyLinked =
-      ['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(existing.status) || saleCount > 0 || nasiyaCount > 0
+      existing.evidenceVersion === 2 ||
+      ['SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA'].includes(existing.status) ||
+      existing.sales.length > 0 ||
+      existing.nasiya.length > 0 ||
+      existing.supplierPayables.length > 0 ||
+      existing.purchaseReceipt !== null
 
-    // Money is locked once a device is sold / nasiya'd — the purchase price feeds
-    // profit reporting and must not be silently rewritten after the fact.
-    if (isFinanciallyLinked && updateData.purchasePrice !== undefined) {
-      return badRequest("Sotilgan yoki nasiya qurilmaning kelish narxini o'zgartirib bo'lmaydi")
+    // Once any financial evidence exists, acquisition facts become immutable.
+    // Corrections must be modeled as append-only adjustments rather than
+    // rewriting the Device while its payable/receipt retains the old facts.
+    if (isFinanciallyLinked && purchaseFactsChanged) {
+      return conflict("Moliyaviy tarixi mavjud qurilmaning xarid narxi, valyutasi yoki yetkazib beruvchi manbasini o'zgartirib bo'lmaydi")
     }
 
     // Convert the entered purchase price to the UZS base. UZS passes through;
@@ -465,6 +484,7 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
     let purchaseMeta: Awaited<ReturnType<typeof moneyInputToUzs>> | null = null
     const rawPurchasePriceInput = updateData.purchasePrice
     if (updateData.purchasePrice !== undefined) {
+      if (!inputCurrency) return badRequest("Kelish narxi o'zgartirilganda valyuta aniq yuborilishi shart")
       try {
         purchaseMeta = await moneyInputToUzs(updateData.purchasePrice, inputCurrency)
         updateData.purchasePrice = purchaseMeta.amountUzs
@@ -493,11 +513,13 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
           id: deviceId,
           shopId: existing.shopId,
           deletedAt: null,
-          ...(purchaseMeta
+          ...(purchaseFactsChanged
             ? {
                 status: 'IN_STOCK' as const,
-                sales: { none: { deletedAt: null } },
-                nasiya: { none: { deletedAt: null } },
+                sales: { none: {} },
+                nasiya: { none: {} },
+                supplierPayables: { none: {} },
+                purchaseReceipt: { is: null },
               }
             : {}),
         },
@@ -510,6 +532,9 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
                 purchaseCurrency: purchaseMeta.inputCurrency,
                 purchaseInputAmount: rawPurchasePriceInput,
                 purchaseExchangeRateAtCreation: purchaseMeta.exchangeRateUsed,
+                purchaseExchangeRateSource: purchaseMeta.exchangeRateSource,
+                purchaseExchangeRateEffectiveAt: purchaseMeta.exchangeRateEffectiveAt,
+                purchaseExchangeRateFetchedAt: purchaseMeta.exchangeRateFetchedAt,
                 purchaseAmountUzsSnapshot: purchaseMeta.amountUzs,
               }
             : {}),
@@ -517,7 +542,10 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
         },
       })
       if (guardedUpdate.count !== 1) {
-        throw { status: 409, message: "Qurilma sotilgan paytda kelish narxini o'zgartirib bo'lmaydi" }
+        throw {
+          status: 409,
+          message: "Moliyaviy tarix yaratilgan paytda qurilmaning xarid ma'lumotlarini o'zgartirib bo'lmaydi",
+        }
       }
       const updatedDevice = await tx.device.findFirstOrThrow({ where: { id: deviceId, shopId: existing.shopId } })
 
@@ -544,6 +572,17 @@ export async function PATCH(req: NextRequest, ctx: RouteContext) {
             storage: existing.storage,
             batteryHealth: existing.batteryHealth,
             purchasePrice: Number(existing.purchasePrice),
+            purchaseCurrency: existing.purchaseCurrency,
+            purchaseInputAmount: Number(existing.purchaseInputAmount),
+            purchaseExchangeRateAtCreation: existing.purchaseExchangeRateAtCreation == null
+              ? null
+              : Number(existing.purchaseExchangeRateAtCreation),
+            purchaseExchangeRateSource: existing.purchaseExchangeRateSource,
+            purchaseExchangeRateEffectiveAt: existing.purchaseExchangeRateEffectiveAt?.toISOString() ?? null,
+            purchaseExchangeRateFetchedAt: existing.purchaseExchangeRateFetchedAt?.toISOString() ?? null,
+            purchaseAmountUzsSnapshot: Number(existing.purchaseAmountUzsSnapshot),
+            evidenceVersion: existing.evidenceVersion,
+            evidenceStatus: existing.evidenceStatus,
             imei: existing.imei,
             imageCount: existing.imageUrls.length,
             supplierPhone: existing.supplierPhone,
