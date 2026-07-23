@@ -990,7 +990,6 @@ describe('version-2 parent creation evidence immutability', () => {
 
   it('keeps governed rates, shop receipts, and device purchase receipts fully append-only', async () => {
     const { owner, shop } = await seedShop('fully_append_only_evidence')
-    const hash = 'b'.repeat(64)
 
     const rate = await prisma.currencyRate.create({
       data: {

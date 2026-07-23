@@ -113,7 +113,9 @@ describe('nasiya creation form: explicit existing-customer trust preview', () =>
 
   it('uses the shared combobox instead of silently matching a typed phone', () => {
     expect(source).toContain('<CustomerCombobox')
-    expect(source).toContain("customerMode: customerMode === 'EXISTING' ? 'EXISTING' : 'NEW'")
+    expect(source).toMatch(
+      /customerMode:\s*customerMode === 'EXISTING'\s*\?\s*'EXISTING'(?: as const)?\s*:\s*'NEW'(?: as const)?/,
+    )
     expect(source).toContain('customerId: selectedCustomer?.id')
     expect(source).not.toContain('/api/customers/by-phone?phone=')
   })
