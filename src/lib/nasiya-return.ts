@@ -1,17 +1,17 @@
 import {
+  convertMoneyDtoAtMost,
   createMoneyDto,
+  subtractMoneyDto,
   type CurrencyCode,
+  type FxQuoteDto,
   type MoneyDto,
 } from '@/lib/currency'
 import { roundContractMoney } from '@/lib/nasiya-contract'
 import {
   resolveAppliedContractAmount,
-  returnRefundCapacityByMethod,
   type ReturnReceiptSource,
 } from '@/lib/return-accounting'
 import type { PaymentMethod } from '@/lib/domain-types'
-
-const PAYMENT_METHODS: readonly PaymentMethod[] = ['CASH', 'CARD', 'TRANSFER', 'OTHER']
 
 export type NasiyaReturnScheduleStatus =
   | 'PENDING'
@@ -36,12 +36,7 @@ export function nasiyaScheduleStatusAfterReturn(
   return OPEN_RETURN_SCHEDULE_STATUSES.has(status) ? 'CANCELLED' : status
 }
 
-export interface NasiyaReturnMethodCapacityDto {
-  method: PaymentMethod
-  available: MoneyDto
-}
-
-export interface NasiyaReturnQuoteDto {
+export interface NasiyaReturnContractQuote {
   eligible: boolean
   ineligibilityReason: string | null
   contractCurrency: CurrencyCode
@@ -50,8 +45,28 @@ export interface NasiyaReturnQuoteDto {
   defaultRetained: MoneyDto
   maxRefund: MoneyDto
   cancelledDebt: MoneyDto
-  methodCapacities: NasiyaReturnMethodCapacityDto[]
-  defaultRefundMethod: PaymentMethod | null
+  receiptEvidenceVerified: boolean
+}
+
+/**
+ * Browser-facing quote. Every editable/visible amount uses exactly the
+ * shop-selected display currency, while the two contract-native expectations
+ * remain hidden concurrency guards for the mutation.
+ */
+export interface NasiyaReturnQuoteDto {
+  eligible: boolean
+  ineligibilityReason: string | null
+  contractCurrency: CurrencyCode
+  displayCurrency: CurrencyCode
+  fxQuote: FxQuoteDto | null
+  requiresFxForRefund: boolean
+  receipts: MoneyDto
+  defaultRefund: MoneyDto
+  defaultRetained: MoneyDto
+  maxRefund: MoneyDto
+  cancelledDebt: MoneyDto
+  contractReceipts: MoneyDto
+  contractCancelledDebt: MoneyDto
   receiptEvidenceVerified: boolean
 }
 
@@ -60,11 +75,10 @@ export interface NasiyaReturnRecordDto {
   returnedAt: string
   contractCurrency: CurrencyCode
   receipts: MoneyDto
+  refundInput: MoneyDto
   refund: MoneyDto
   retained: MoneyDto
   cancelledDebt: MoneyDto
-  refundUzs: MoneyDto
-  retainedUzs: MoneyDto
   refundMethod: PaymentMethod | null
   reason: string
   actorId: string
@@ -87,26 +101,6 @@ export function nasiyaReturnLedgerHasBlockingReasons(reasons: readonly string[])
   ))
 }
 
-function preferredMethod(
-  sources: ReturnReceiptSource[],
-  capacities: Record<PaymentMethod, number>,
-  defaultRefund: number,
-): PaymentMethod | null {
-  if (defaultRefund <= 0) return null
-  const oldest = sources.slice().sort((left, right) => left.paidAt.getTime() - right.paidAt.getTime())[0]
-  const firstBreakdownMethod = Array.isArray(oldest?.paymentBreakdown)
-    ? (oldest.paymentBreakdown.find((part): part is { method: PaymentMethod } => (
-        Boolean(part) && typeof part === 'object' && PAYMENT_METHODS.includes((part as { method?: PaymentMethod }).method as PaymentMethod)
-      ))?.method ?? null)
-    : null
-  const oldestMethod = oldest?.paymentMethod ?? firstBreakdownMethod
-  if (oldestMethod && capacities[oldestMethod] >= defaultRefund) return oldestMethod
-  return PAYMENT_METHODS.find((method) => capacities[method] >= defaultRefund)
-    ?? PAYMENT_METHODS.reduce<PaymentMethod | null>((best, method) => (
-      best === null || capacities[method] > capacities[best] ? method : best
-    ), null)
-}
-
 /**
  * Build the return modal's server-owned quote from immutable receipt rows.
  * Unverifiable historic evidence is surfaced as an explicit block; it is
@@ -121,9 +115,9 @@ export function calculateNasiyaReturnQuote(input: {
   resolutionState: 'ACTIVE' | 'ARCHIVED' | 'WRITTEN_OFF'
   deviceStatus: string
   sources: ReturnReceiptSource[]
-}): NasiyaReturnQuoteDto {
+}): NasiyaReturnContractQuote {
   const zero = createMoneyDto(input.contractCurrency, 0)
-  const blocked = (reason: string): NasiyaReturnQuoteDto => ({
+  const blocked = (reason: string): NasiyaReturnContractQuote => ({
     eligible: false,
     ineligibilityReason: reason,
     contractCurrency: input.contractCurrency,
@@ -132,8 +126,6 @@ export function calculateNasiyaReturnQuote(input: {
     defaultRetained: zero,
     maxRefund: zero,
     cancelledDebt: createMoneyDto(input.contractCurrency, input.cancelledDebt),
-    methodCapacities: PAYMENT_METHODS.map((method) => ({ method, available: zero })),
-    defaultRefundMethod: null,
     receiptEvidenceVerified: false,
   })
 
@@ -161,11 +153,6 @@ export function calculateNasiyaReturnQuote(input: {
       return blocked("Boshlang‘ich to‘lovni tasdiqlovchi tushum yozuvi yetarli emas. Qaytarishdan oldin moliyaviy yozuvlarni tekshiring.")
     }
     const defaultRefund = Math.min(downPayment, receipts)
-    const capacities = returnRefundCapacityByMethod({
-      sources: input.sources,
-      contractCurrency: input.contractCurrency,
-      frozenUsdUzsRate: input.contractExchangeRateAtCreation,
-    })
     return {
       eligible: true,
       ineligibilityReason: null,
@@ -175,16 +162,52 @@ export function calculateNasiyaReturnQuote(input: {
       defaultRetained: createMoneyDto(input.contractCurrency, receipts - defaultRefund),
       maxRefund: createMoneyDto(input.contractCurrency, receipts),
       cancelledDebt: createMoneyDto(input.contractCurrency, input.cancelledDebt),
-      methodCapacities: PAYMENT_METHODS.map((method) => ({
-        method,
-        available: createMoneyDto(input.contractCurrency, capacities[method]),
-      })),
-      defaultRefundMethod: preferredMethod(input.sources, capacities, defaultRefund),
       receiptEvidenceVerified: true,
     }
   } catch (error) {
     return blocked(error instanceof Error
       ? error.message
       : "To‘lov dalillarini tasdiqlab bo‘lmadi")
+  }
+}
+
+/**
+ * Convert a verified native quote into one shop-currency quote. Limits use
+ * floor-safe conversion so the displayed maximum can be submitted without a
+ * one-minor-unit round-trip overflow.
+ */
+export function presentNasiyaReturnQuote(
+  quote: NasiyaReturnContractQuote,
+  displayCurrency: CurrencyCode,
+  fxQuote: FxQuoteDto | null | undefined,
+): NasiyaReturnQuoteDto {
+  const zero = createMoneyDto(displayCurrency, 0)
+  const receipts = convertMoneyDtoAtMost(quote.receipts, displayCurrency, fxQuote)
+  const defaultRefund = convertMoneyDtoAtMost(quote.defaultRefund, displayCurrency, fxQuote)
+  const cancelledDebt = convertMoneyDtoAtMost(quote.cancelledDebt, displayCurrency, fxQuote)
+  const conversionUnavailable = !receipts || !defaultRefund || !cancelledDebt
+  const visibleReceipts = receipts ?? zero
+  const visibleDefaultRefund = defaultRefund ?? zero
+  const visibleCancelledDebt = cancelledDebt ?? zero
+
+  return {
+    eligible: quote.eligible && !conversionUnavailable,
+    ineligibilityReason: quote.ineligibilityReason ?? (
+      conversionUnavailable
+        ? "Do‘kon valyutasida hisoblash uchun USD/UZS kursi mavjud emas"
+        : null
+    ),
+    contractCurrency: quote.contractCurrency,
+    displayCurrency,
+    fxQuote: fxQuote ?? null,
+    requiresFxForRefund: quote.contractCurrency === 'USD' || displayCurrency === 'USD',
+    receipts: visibleReceipts,
+    defaultRefund: visibleDefaultRefund,
+    defaultRetained: subtractMoneyDto(visibleReceipts, visibleDefaultRefund),
+    maxRefund: visibleReceipts,
+    cancelledDebt: visibleCancelledDebt,
+    contractReceipts: quote.receipts,
+    contractCancelledDebt: quote.cancelledDebt,
+    receiptEvidenceVerified: quote.receiptEvidenceVerified,
   }
 }

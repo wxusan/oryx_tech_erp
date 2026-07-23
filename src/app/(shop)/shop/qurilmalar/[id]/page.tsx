@@ -663,7 +663,8 @@ function AuthorizedQurilmaDetailPage() {
 
   async function handleReturnDevice() {
     const refundAmount = Number(returnRefundAmount || 0)
-  const returnCurrency = device?.sales?.[0]?.contractCurrency ?? currency.currency
+    const returnCurrency = currency.currency
+    const returnContractCurrency = device?.sales?.[0]?.contractCurrency ?? returnCurrency
     if (returnNote.trim().length < 5) {
       setReturnError("Qaytarish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
       requestAnimationFrame(() => document.getElementById('return-note')?.focus())
@@ -679,6 +680,14 @@ function AuthorizedQurilmaDetailPage() {
       requestAnimationFrame(() => document.getElementById('return-refund-method')?.focus())
       return
     }
+    if (
+      refundAmount > 0 &&
+      (returnCurrency === 'USD' || returnContractCurrency === 'USD') &&
+      !currency.fxQuote?.rateMinorUnits
+    ) {
+      setReturnError('USD/UZS kursi mavjud emas. Qaytarish summasini hozir saqlab bo‘lmaydi')
+      return
+    }
     if (returning) return
     setReturning(true)
     setReturnError('')
@@ -688,6 +697,7 @@ function AuthorizedQurilmaDetailPage() {
         refundAmount,
         inputCurrency: returnCurrency,
         refundMethod: refundAmount > 0 ? returnRefundMethod : undefined,
+        expectedFxRateMinorUnits: currency.fxQuote?.rateMinorUnits ?? null,
       }
       const res = await fetch(`/api/devices/${id}/return`, {
         method: 'POST',
@@ -816,7 +826,7 @@ function AuthorizedQurilmaDetailPage() {
       ? formatDisplayMoneyFromContract(amount, latestSale.contractCurrency, currency.currency, currency.usdUzsRate)
       : fmt(amount, currency)
   const latestNasiya = device.nasiya?.[0]
-  const returnContractCurrency = latestSale?.contractCurrency ?? latestNasiya?.contractCurrency ?? currency.currency
+  const returnInputCurrency = currency.currency
   // Money TEXT for this nasiya must convert from its own contract currency
   // via today's rate — never reconvert the legacy UZS snapshot (frozen at
   // creation rate), which would stay stuck showing so'm for a USD-native
@@ -1313,7 +1323,8 @@ function AuthorizedQurilmaDetailPage() {
                     ? formatUserFacingMoney({
                         amount: latestReturn.refundInputAmount,
                         amountCurrency: latestReturn.refundInputCurrency,
-                        displayCurrency: latestReturn.refundInputCurrency,
+                        displayCurrency: currency.currency,
+                        rate: currency.usdUzsRate,
                       })
                     : fmt(latestReturn.refundAmount, currency)}
                 </span>
@@ -1321,7 +1332,7 @@ function AuthorizedQurilmaDetailPage() {
             )}
             {latestReturn.refundMethod && (
               <div className="flex gap-4 text-sm">
-                <span className="text-zinc-500 w-32">To&apos;lov usuli</span>
+                <span className="text-zinc-500 w-32">Qaytarish usuli</span>
                 <span className="text-zinc-900 font-medium">{paymentMethodLabel(latestReturn.refundMethod)}</span>
               </div>
             )}
@@ -1331,7 +1342,8 @@ function AuthorizedQurilmaDetailPage() {
                 {formatUserFacingMoney({
                   amount: latestReturn.contractReceiptsAtReturn,
                   amountCurrency: latestReturn.contractCurrency,
-                  displayCurrency: latestReturn.contractCurrency,
+                  displayCurrency: currency.currency,
+                  rate: currency.usdUzsRate,
                 })}
               </span>
             </div>
@@ -1341,7 +1353,8 @@ function AuthorizedQurilmaDetailPage() {
                 {formatUserFacingMoney({
                   amount: latestReturn.contractRetainedAmount,
                   amountCurrency: latestReturn.contractCurrency,
-                  displayCurrency: latestReturn.contractCurrency,
+                  displayCurrency: currency.currency,
+                  rate: currency.usdUzsRate,
                 })}
               </span>
             </div>
@@ -1351,7 +1364,8 @@ function AuthorizedQurilmaDetailPage() {
                 {formatUserFacingMoney({
                   amount: latestReturn.contractCancelledDebt,
                   amountCurrency: latestReturn.contractCurrency,
-                  displayCurrency: latestReturn.contractCurrency,
+                  displayCurrency: currency.currency,
+                  rate: currency.usdUzsRate,
                 })}
               </span>
             </div>
@@ -1832,11 +1846,11 @@ function AuthorizedQurilmaDetailPage() {
             </Field>
             <div>
               <label htmlFor="return-refund-amount" className="text-xs font-medium text-zinc-700 block mb-1.5">
-                Qaytarilgan summa ({currencyLabel(returnContractCurrency)})
+                Qaytarilgan summa ({currencyLabel(returnInputCurrency)})
               </label>
               <MoneyInput
                 id="return-refund-amount"
-                currency={returnContractCurrency}
+                currency={returnInputCurrency}
                 value={returnRefundAmount}
                 onChange={setReturnRefundAmount}
                 placeholder="0"

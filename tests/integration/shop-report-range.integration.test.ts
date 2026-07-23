@@ -273,6 +273,102 @@ describe('dynamic shop range report', () => {
     },
   )
 
+  it('attributes a return to the exact refund input currency instead of the old contract currency', async () => {
+    const { owner, shop, customer, device } = await seedBase()
+    const sold = await device(600, 'SOLD_CASH')
+    const sale = await prisma.sale.create({
+      data: {
+        shopId: shop.id,
+        deviceId: sold.id,
+        customerId: customer.id,
+        salePrice: 1_000,
+        amountPaid: 1_000,
+        remainingAmount: 0,
+        contractCurrency: 'UZS',
+        contractSalePrice: 1_000,
+        contractAmountPaid: 1_000,
+        contractRemainingAmount: 0,
+        paymentMethod: 'CARD',
+        paidFully: true,
+        returnedAt: new Date('2026-07-10T08:00:00.000Z'),
+        returnedBy: owner.id,
+        createdAt: new Date('2026-07-01T08:00:00.000Z'),
+        createdBy: owner.id,
+      },
+    })
+    const payment = await prisma.salePayment.create({
+      data: {
+        shopId: shop.id,
+        saleId: sale.id,
+        amount: 1_000,
+        paymentInputAmount: 1_000,
+        paymentInputCurrency: 'UZS',
+        appliedAmountInContractCurrency: 1_000,
+        paymentMethod: 'CARD',
+        paidAt: new Date('2026-07-01T08:00:00.000Z'),
+        createdBy: owner.id,
+      },
+    })
+
+    await prisma.$transaction(async (tx) => {
+      const returned = await tx.deviceReturn.create({
+        data: {
+          shopId: shop.id,
+          deviceId: sold.id,
+          saleId: sale.id,
+          idempotencyKey: 'range-refund-input-currency',
+          ledgerVersion: 2,
+          refundAmount: 100,
+          refundInputAmount: 0.1,
+          refundInputCurrency: 'USD',
+          refundExchangeRateAtCreation: 1_000,
+          refundExchangeRateSource: 'CBU',
+          refundExchangeRateFetchedAt: new Date('2026-07-10T08:00:00.000Z'),
+          refundMethod: 'CASH',
+          contractCurrency: 'UZS',
+          contractAmount: 1_000,
+          contractReceiptsAtReturn: 1_000,
+          contractRefundAmount: 100,
+          contractRetainedAmount: 900,
+          contractCancelledDebt: 0,
+          revenueReversalAmountUzs: 1_000,
+          inventoryCostRecoveryUzs: 600,
+          retainedValueAmountUzs: 900,
+          note: 'USD shop refund evidence',
+          createdAt: new Date('2026-07-10T08:00:00.000Z'),
+          createdBy: owner.id,
+        },
+      })
+      await tx.returnRefundAllocation.create({
+        data: {
+          shopId: shop.id,
+          deviceReturnId: returned.id,
+          salePaymentId: payment.id,
+          sourcePaymentMethod: 'CARD',
+          refundMethod: 'CASH',
+          contractCurrency: 'UZS',
+          contractAmount: 100,
+          amountUzs: 100,
+        },
+      })
+      await tx.returnProfitReversal.create({
+        data: {
+          shopId: shop.id,
+          deviceReturnId: returned.id,
+          saleId: sale.id,
+          recognizedMarginAmountUzs: 0,
+          recognizedInterestAmountUzs: 0,
+        },
+      })
+    })
+
+    const range = resolveReportRange({ preset: 'single', month: '2026-07', defaultEndMonth: '2026-07' })
+    const report = await getShopRangeReport({ shopId: shop.id, range, adminId: null })
+
+    expect(report.months[0].refunds).toEqual({ uzs: 0, usd: 0.1 })
+    expect(report.totals.refunds).toEqual({ uzs: 0, usd: 0.1 })
+  })
+
   it('zero-fills explicit ranges, preserves currencies and excludes imports/write-offs from active expected totals', async () => {
     const { owner, shop, customer, device } = await seedBase()
     const otherActor = 'other-admin'

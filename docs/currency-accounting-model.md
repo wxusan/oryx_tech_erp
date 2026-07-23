@@ -942,3 +942,38 @@ payment validation, notifications, and cache invalidation. The remaining
 limitation is test infrastructure: unit and source-guard coverage prove the
 contract math and route wiring, but a disposable Postgres API/concurrency test
 is still a P1 follow-up.
+
+## 28. Return/refund currency is shop-authoritative
+
+Sale and Nasiya return forms accept and show exactly the shop's current
+`preferredCurrency`. A historic UZS contract in a USD shop is therefore quoted
+and entered in USD; a historic USD contract in a UZS shop is quoted and entered
+in UZS. The server rejects a stale form if the shop currency or governed FX
+quote changed before confirmation.
+
+One immutable `DeviceReturn` preserves all accounting layers:
+
+- `refundInputAmount` + `refundInputCurrency`: exactly what the operator
+  confirmed in the selected shop currency;
+- `refundExchangeRateAtCreation` plus source/effective/fetched metadata: the
+  governed quote used by that command whenever USD participates;
+- `contractRefundAmount`: the exact amount applied against the original
+  contract's native receipt cap;
+- `refundAmount`: the frozen UZS reporting/cash snapshot.
+
+These values are converted through fixed integer minor units. Editable
+cross-currency maxima are rounded downward when necessary, so submitting the
+displayed maximum cannot round-trip to one cent or one so'm above verified
+receipts. Return detail, range reports, customer history/analytics, and exports
+read `refundInputAmount`/`refundInputCurrency` first; they never reclassify a
+new USD refund as UZS merely because the old contract was UZS.
+
+The original receipt method and the chosen refund method are separate facts.
+A card receipt may be refunded in cash; legacy receipt rows with no reliable
+method remain usable when their amount is verified. The allocation still
+references the immutable source payment row.
+
+Finally, `retainedValueAmountUzs` is signed. If `$60` was received at
+`12,000 UZS/USD` and refunded later as `780,000 so'm` at `13,000`, the return
+stores a `-60,000 so'm` net-retained FX loss. Reporting includes that loss
+instead of rejecting the refund or silently clamping it to zero.

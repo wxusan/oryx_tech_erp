@@ -13,17 +13,17 @@ function read(rel: string): string {
  * UZS snapshot (frozen at the CREATION rate) through TODAY's rate — that
  * double-conversion silently drifts from the true contract value as the
  * rate moves between creation and any later viewing. These guard tests
- * confirm every such figure now reads from the contract-currency ledger and
- * exposes exact native contract money as the primary value and a clearly
- * labelled current-rate approximation only when a governed quote exists.
+ * confirm every such figure reads from the contract-currency ledger before
+ * being converted once into the shop-selected display currency.
  */
 describe('nasiya detail page: no double-conversion drift for USD contracts', () => {
   const page = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
 
   it('formats MoneyDto values from the reconciled native ledger, never legacy UZS snapshots', () => {
     expect(page).toContain('const mfmt = (amount: MoneyDto) => {')
-    expect(page).toContain('const primary = formatMoneyDto(amount)')
+    expect(page).toContain('const selectedCurrencyAmount = amount.currency === currency.currency')
     expect(page).toContain('convertMoneyDto(amount, currency.currency, currency.fxQuote)')
+    expect(page).toContain("return selectedCurrencyAmount ? formatMoneyDto(selectedCurrencyAmount) : '—'")
   })
 
   it('every summary card reads a contract term or reconciled ledger MoneyDto', () => {

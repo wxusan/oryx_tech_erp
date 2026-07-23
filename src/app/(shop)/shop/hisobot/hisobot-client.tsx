@@ -121,6 +121,38 @@ export default function HisobotClient({
   const expected = stats.expectedThisMonth
   const overdue = stats.overdueMoney
   const refunds = stats.returnRefundsThisMonth
+  const nativeRefunds = rangeReport?.totals.refunds
+  const nativeCollected = rangeReport?.totals.cashCollected
+  const nativeNetCash = nativeRefunds && nativeCollected
+    ? {
+        uzs: nativeCollected.uzs - nativeRefunds.uzs,
+        usd: nativeCollected.usd - nativeRefunds.usd,
+      }
+    : null
+  const collectedText = nativeCollected
+    ? formatPartitionedMoney({
+        amountUzs: nativeCollected.uzs,
+        amountUsd: nativeCollected.usd,
+        displayCurrency: currency.currency,
+        rate: currency.usdUzsRate,
+      })
+    : fmt(collected, currency)
+  const refundsText = nativeRefunds
+    ? formatPartitionedMoney({
+        amountUzs: nativeRefunds.uzs,
+        amountUsd: nativeRefunds.usd,
+        displayCurrency: currency.currency,
+        rate: currency.usdUzsRate,
+      })
+    : fmt(refunds, currency)
+  const netCashText = nativeNetCash
+    ? formatPartitionedMoney({
+        amountUzs: nativeNetCash.uzs,
+        amountUsd: nativeNetCash.usd,
+        displayCurrency: currency.currency,
+        rate: currency.usdUzsRate,
+      })
+    : fmt(netCash, currency)
   const reversedRevenue = stats.returnRevenueReversalsThisMonth ?? 0
   const recoveredInventoryCost = stats.returnInventoryCostRecoveriesThisMonth ?? 0
   const retainedReturnValue = stats.returnRetainedValueThisMonth ?? 0
@@ -293,7 +325,7 @@ export default function HisobotClient({
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-900">{fmt(collected, currency)}</div>
+            <div className="text-2xl font-bold text-zinc-900">{collectedText}</div>
             <p className="mt-3 text-xs text-zinc-500">
               Shu oy haqiqatda qabul qilingan barcha to'lovlar; ochiq majburiyatlar bilan foizga aylantirilmaydi.
             </p>
@@ -308,7 +340,7 @@ export default function HisobotClient({
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-emerald-900">{fmt(netCash, currency)}</div>
+            <div className="text-2xl font-bold text-emerald-900">{netCashText}</div>
             <p className="mt-3 text-xs text-emerald-800/70">Bu oy tushgan pul minus mijozga haqiqatda qaytarilgan pul</p>
           </CardContent>
         </Card>
@@ -430,7 +462,7 @@ export default function HisobotClient({
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-900">{fmt(refunds, currency)}</div>
+            <div className="text-2xl font-bold text-zinc-900">{refundsText}</div>
             <p className="mt-3 text-xs text-zinc-500">Bu oy {stats.returnsThisMonth} ta qaytarish bo&apos;yicha haqiqatda mijozga berilgan pul</p>
           </CardContent>
         </Card>
@@ -465,7 +497,7 @@ export default function HisobotClient({
           <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-zinc-900">Qaytarishlar qanday hisoblanganini ko&apos;rish</summary>
           <div className="grid gap-3 border-t border-zinc-100 px-5 py-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
             {[
-              ['Mijozga qaytarilgan pul', fmt(refunds, currency)],
+              ['Mijozga qaytarilgan pul', refundsText],
               ['Oldin tan olingan foydadan bekor qilindi', fmt(reversedRevenue, currency)],
               ['Omborga qaytgan tannarx', fmt(recoveredInventoryCost, currency)],
               ['Do‘konda saqlab qolingan qiymat', fmt(retainedReturnValue, currency)],

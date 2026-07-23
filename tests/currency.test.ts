@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  convertMoneyDto,
+  convertMoneyDtoAtMost,
   convertUsdToUzs,
   convertUzsToUsd,
+  createFxQuoteDto,
+  createMoneyDto,
   formatMoneyByCurrency,
   formatUserFacingMoney,
   formatMoneyWithBase,
@@ -71,6 +75,20 @@ describe('currency helpers', () => {
       exchangeRateUsed: 12_650.1234,
     })
     expect(() => normalizeMoneyInput(1, 'USD', 12_650.12345)).toThrow('4 kasr')
+  })
+
+  it('makes editable cross-currency maxima safe to submit after round-trip conversion', () => {
+    const quote = createFxQuoteDto({ rate: 12_500, source: 'CBU' })
+    const nativeMaximum = createMoneyDto('UZS', 188)
+
+    expect(convertMoneyDto(nativeMaximum, 'USD', quote)).toEqual({
+      currency: 'USD',
+      minorUnits: 2,
+    })
+    expect(convertMoneyDtoAtMost(nativeMaximum, 'USD', quote)).toEqual({
+      currency: 'USD',
+      minorUnits: 1,
+    })
   })
 
   it("keeps whole-so'm UZS input unchanged and rejects fractional UZS", () => {

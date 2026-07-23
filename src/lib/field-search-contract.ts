@@ -378,10 +378,10 @@ export const FORM_SURFACE_CONTRACT = [
     id: 'device.delete', source: 'src/app/(shop)/shop/qurilmalar/[id]/page.tsx', endpoint: 'DELETE /api/devices/[id]', schemaSource: 'src/app/api/devices/[id]/route.ts#deleteDeviceSchema', fields: [always('device.delete', 'deleteNote')],
   },
   {
-    id: 'device.return', source: 'src/app/(shop)/shop/qurilmalar/[id]/page.tsx', endpoint: 'POST /api/devices/[id]/return', schemaSource: 'src/app/api/devices/[id]/return/route.ts#returnDeviceSchema', fields: [always('device.return', 'note'), optional('device.return', 'refundAmount', 'MONEY'), conditional('device.return', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER')],
+    id: 'device.return', source: 'src/app/(shop)/shop/qurilmalar/[id]/page.tsx', endpoint: 'POST /api/devices/[id]/return', schemaSource: 'src/app/api/devices/[id]/return/route.ts#returnDeviceSchema', fields: [always('device.return', 'note'), optional('device.return', 'refundAmount', 'MONEY'), conditional('device.return', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER'), always('device.return', 'inputCurrency', 'STATUS_FILTER'), always('device.return', 'expectedFxRateMinorUnits', 'MONEY')],
   },
   {
-    id: 'device.return.queue', source: 'src/app/(shop)/shop/qaytarish/return-work-queue.tsx', endpoint: 'POST /api/devices/[id]/return', schemaSource: 'src/app/api/devices/[id]/return/route.ts#returnDeviceSchema', fields: [always('device.return.queue', 'note'), optional('device.return.queue', 'refundAmount', 'MONEY'), conditional('device.return.queue', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER')],
+    id: 'device.return.queue', source: 'src/app/(shop)/shop/qaytarish/return-work-queue.tsx', endpoint: 'POST /api/devices/[id]/return', schemaSource: 'src/app/api/devices/[id]/return/route.ts#returnDeviceSchema', fields: [always('device.return.queue', 'note'), optional('device.return.queue', 'refundAmount', 'MONEY'), conditional('device.return.queue', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER'), always('device.return.queue', 'inputCurrency', 'STATUS_FILTER'), always('device.return.queue', 'expectedFxRateMinorUnits', 'MONEY')],
   },
   {
     id: 'device.restock', source: 'src/app/(shop)/shop/qurilmalar/[id]/page.tsx', endpoint: 'POST /api/devices/[id]/restock', schemaSource: 'src/app/api/devices/[id]/restock/route.ts#restockDeviceSchema', fields: [always('device.restock', 'note')],
@@ -445,8 +445,9 @@ export const FORM_SURFACE_CONTRACT = [
       always('nasiya.return', 'refundAmount', 'MONEY'),
       conditional('nasiya.return', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER'),
       always('nasiya.return', 'inputCurrency', 'STATUS_FILTER'),
-      always('nasiya.return', 'expectedReceiptsMinorUnits', 'MONEY'),
-      always('nasiya.return', 'expectedRemainingMinorUnits', 'MONEY'),
+      always('nasiya.return', 'expectedContractReceiptsMinorUnits', 'MONEY'),
+      always('nasiya.return', 'expectedContractRemainingMinorUnits', 'MONEY'),
+      always('nasiya.return', 'expectedFxRateMinorUnits', 'MONEY'),
     ],
   },
   {

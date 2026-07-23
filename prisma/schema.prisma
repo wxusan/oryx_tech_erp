@@ -1403,43 +1403,48 @@ model NasiyaSettlementAllocation {
 // ---------------------------------------------------------------------------
 
 model DeviceReturn {
-  id                           String         @id @default(cuid())
-  shopId                       String
-  deviceId                     String
-  saleId                       String?
-  nasiyaId                     String?
+  id                            String         @id @default(cuid())
+  shopId                        String
+  deviceId                      String
+  saleId                        String?
+  nasiyaId                      String?
   // One key identifies one physical-sale cycle. Replaying a lost HTTP
   // response returns the same immutable event instead of duplicating it.
-  idempotencyKey               String
+  idempotencyKey                String
   // Version 1 is reserved for historic/compatibility-window rows created by
   // the pre-ledger application. Every new writer must explicitly store 2.
-  ledgerVersion                Int
-  refundAmount                 Decimal        @default(0) @db.Decimal(12, 2)
+  ledgerVersion                 Int
+  refundAmount                  Decimal        @default(0) @db.Decimal(12, 2)
   // Frozen native refund entry. `refundAmount` remains the UZS accounting
   // snapshot for compatibility; these fields preserve exactly what the user
   // entered so historic USD refunds never use a later exchange rate.
-  refundInputAmount            Decimal?       @db.Decimal(12, 2)
-  refundInputCurrency          CurrencyCode?
-  refundExchangeRateAtCreation Decimal?       @db.Decimal(12, 4)
-  refundMethod                 PaymentMethod?
+  refundInputAmount             Decimal?       @db.Decimal(12, 2)
+  refundInputCurrency           CurrencyCode?
+  refundExchangeRateAtCreation  Decimal?       @db.Decimal(12, 4)
+  refundExchangeRateSource      String?
+  refundExchangeRateEffectiveAt DateTime?
+  refundExchangeRateFetchedAt   DateTime?
+  refundMethod                  PaymentMethod?
   // Contract-native disposition snapshot. These amounts never use a later
   // exchange rate and make refunds, retained value, and cancelled debt
   // independently auditable.
-  contractCurrency             CurrencyCode   @default(UZS)
-  contractAmount               Decimal        @default(0) @db.Decimal(12, 2)
-  contractReceiptsAtReturn     Decimal        @default(0) @db.Decimal(12, 2)
-  contractRefundAmount         Decimal        @default(0) @db.Decimal(12, 2)
-  contractRetainedAmount       Decimal        @default(0) @db.Decimal(12, 2)
-  contractCancelledDebt        Decimal        @default(0) @db.Decimal(12, 2)
+  contractCurrency              CurrencyCode   @default(UZS)
+  contractAmount                Decimal        @default(0) @db.Decimal(12, 2)
+  contractReceiptsAtReturn      Decimal        @default(0) @db.Decimal(12, 2)
+  contractRefundAmount          Decimal        @default(0) @db.Decimal(12, 2)
+  contractRetainedAmount        Decimal        @default(0) @db.Decimal(12, 2)
+  contractCancelledDebt         Decimal        @default(0) @db.Decimal(12, 2)
   // Return-period accounting entries in the UZS reporting ledger. The
   // original-period Sale/Nasiya is preserved unchanged.
-  revenueReversalAmountUzs     Decimal        @default(0) @db.Decimal(12, 2)
-  interestReversalAmountUzs    Decimal        @default(0) @db.Decimal(12, 2)
-  inventoryCostRecoveryUzs     Decimal        @default(0) @db.Decimal(12, 2)
-  retainedValueAmountUzs       Decimal        @default(0) @db.Decimal(12, 2)
-  note                         String
-  createdBy                    String
-  createdAt                    DateTime       @default(now())
+  revenueReversalAmountUzs      Decimal        @default(0) @db.Decimal(12, 2)
+  interestReversalAmountUzs     Decimal        @default(0) @db.Decimal(12, 2)
+  inventoryCostRecoveryUzs      Decimal        @default(0) @db.Decimal(12, 2)
+  // Signed UZS net retained cash. It may be negative when a later-rate
+  // cross-currency refund creates a real FX loss.
+  retainedValueAmountUzs        Decimal        @default(0) @db.Decimal(12, 2)
+  note                          String
+  createdBy                     String
+  createdAt                     DateTime       @default(now())
 
   // Relations
   shop              Shop                     @relation(fields: [shopId], references: [id])
@@ -1485,17 +1490,18 @@ model ReturnProfitReversal {
 // one payment parent is required by a PostgreSQL CHECK constraint in the
 // migration because Prisma cannot express that XOR relationship.
 model ReturnRefundAllocation {
-  id                  String        @id @default(cuid())
+  id                  String         @id @default(cuid())
   shopId              String
   deviceReturnId      String
   salePaymentId       String?
   nasiyaPaymentId     String?
-  sourcePaymentMethod PaymentMethod
+  // Historic receipt method is optional and independent from refundMethod.
+  sourcePaymentMethod PaymentMethod?
   refundMethod        PaymentMethod
   contractCurrency    CurrencyCode
-  contractAmount      Decimal       @db.Decimal(12, 2)
-  amountUzs           Decimal       @db.Decimal(12, 2)
-  createdAt           DateTime      @default(now())
+  contractAmount      Decimal        @db.Decimal(12, 2)
+  amountUzs           Decimal        @db.Decimal(12, 2)
+  createdAt           DateTime       @default(now())
 
   deviceReturn  DeviceReturn   @relation(fields: [deviceReturnId], references: [id])
   salePayment   SalePayment?   @relation(fields: [salePaymentId], references: [id])

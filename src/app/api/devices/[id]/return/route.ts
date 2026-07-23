@@ -9,8 +9,14 @@ import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { logger } from '@/lib/logger'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { deviceReturnedMessage } from '@/lib/telegram-templates'
-import { getShopCurrencyContext, getUsdUzsRate } from '@/lib/server/currency'
-import { normalizeMoneyInput, convertUzsToUsd, type CurrencyCode } from '@/lib/currency'
+import { getShopCurrencyContext } from '@/lib/server/currency'
+import {
+  convertMoneyDto,
+  createMoneyDto,
+  fxQuoteRate,
+  moneyDtoToAmount,
+  type CurrencyCode,
+} from '@/lib/currency'
 import { roundContractMoney } from '@/lib/nasiya-contract'
 import {
   allocateReturnRefund,
@@ -27,7 +33,8 @@ const returnDeviceSchema = z.object({
   refundAmount: z.number().finite().min(0, "Qaytarilgan summa manfiy bo'lmasligi kerak").optional().default(0),
   refundMethod: z.enum(['CASH', 'TRANSFER', 'CARD', 'OTHER']).optional(),
   shopId: z.string().optional(),
-  inputCurrency: z.enum(['UZS', 'USD']).optional(),
+  inputCurrency: z.enum(['UZS', 'USD']),
+  expectedFxRateMinorUnits: z.number().int().positive().nullable(),
 }).refine((data) => data.refundAmount <= 0 || data.refundMethod !== undefined, {
   message: "Pul qaytarilgan bo'lsa, qaytarish usuli tanlanishi shart",
   path: ['refundMethod'],
@@ -84,14 +91,14 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
-    // One rate snapshot is reused for settlement conversion and display. A
-    // pure UZS return can still proceed if no USD rate exists.
-    const [displayCurrency, liveUsdUzsRate] = await Promise.all([
-      getShopCurrencyContext(shopId),
-      parsed.data.refundAmount > 0 ? getUsdUzsRate().catch(() => null) : Promise.resolve(null),
-    ])
+    // One governed snapshot is reused for validation, conversion, persistence,
+    // and notification display.
+    const displayCurrency = await getShopCurrencyContext(shopId)
+    const currentFxQuote = displayCurrency.fxQuote ?? null
+    const liveUsdUzsRate = fxQuoteRate(currentFxQuote)
 
     const runTransaction = () => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Shop" WHERE "id" = ${shopId} FOR UPDATE`)
       const replay = await tx.deviceReturn.findUnique({
         where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
       })
@@ -100,7 +107,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         const samePayload = (
           replay.deviceId === deviceId &&
           Number(replay.refundInputAmount ?? replay.refundAmount) === parsed.data.refundAmount &&
-          (replay.refundInputCurrency ?? 'UZS') === (parsed.data.inputCurrency ?? replay.contractCurrency) &&
+          (replay.refundInputCurrency ?? replay.contractCurrency) === parsed.data.inputCurrency &&
           (replay.refundMethod ?? undefined) === parsed.data.refundMethod &&
           replay.note === parsed.data.note
         )
@@ -116,7 +123,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
         include: {
-          shop: { select: { name: true } },
+          shop: { select: { name: true, preferredCurrency: true } },
           imeis: { where: { deletedAt: null } },
           sales: {
             where: { deletedAt: null, returnedAt: null },
@@ -148,22 +155,41 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       const contractCurrency: CurrencyCode = sale.contractCurrency
       const frozenRate = Number(sale.contractExchangeRateAtCreation ?? 0) || null
-      const settlementCurrency = parsed.data.inputCurrency ?? contractCurrency
-      if (parsed.data.refundAmount > 0 && (settlementCurrency === 'USD' || contractCurrency === 'USD') && !liveUsdUzsRate) {
-        throw { status: 400, message: 'USD kursi mavjud emas. Qaytarish summasini hozir hisoblab bo\'lmaydi.' }
+      const settlementCurrency = parsed.data.inputCurrency
+      if (settlementCurrency !== device.shop.preferredCurrency) {
+        throw { status: 409, message: "Do‘kon valyutasi o‘zgargan. Sahifani yangilab, summani qayta tekshiring" }
       }
 
-      let refundAmountUzs = 0
-      let contractRefundAmount = 0
-      if (parsed.data.refundAmount > 0) {
-        const normalized = normalizeMoneyInput(parsed.data.refundAmount, settlementCurrency, liveUsdUzsRate)
-        refundAmountUzs = normalized.amountUzs
-        contractRefundAmount = settlementCurrency === contractCurrency
-          ? roundContractMoney(parsed.data.refundAmount, contractCurrency)
-          : contractCurrency === 'UZS'
-            ? roundContractMoney(refundAmountUzs, 'UZS')
-            : roundContractMoney(convertUzsToUsd(refundAmountUzs, liveUsdUzsRate!), 'USD')
+      let refundInputMoney
+      try {
+        refundInputMoney = createMoneyDto(settlementCurrency, parsed.data.refundAmount)
+      } catch (error) {
+        throw { status: 400, message: error instanceof Error ? error.message : "Qaytariladigan summa noto‘g‘ri" }
       }
+      const needsFx = refundInputMoney.minorUnits > 0 && (
+        settlementCurrency === 'USD' || contractCurrency === 'USD'
+      )
+      if (needsFx && (!currentFxQuote?.rateMinorUnits || !liveUsdUzsRate)) {
+        throw { status: 400, message: 'USD kursi mavjud emas. Qaytarish summasini hozir hisoblab bo\'lmaydi.' }
+      }
+      if (needsFx && parsed.data.expectedFxRateMinorUnits !== currentFxQuote?.rateMinorUnits) {
+        throw { status: 409, message: "USD/UZS kursi o‘zgargan. Yangilangan summani ko‘rib, qayta tasdiqlang" }
+      }
+
+      const contractRefundMoney = refundInputMoney.minorUnits === 0
+        ? createMoneyDto(contractCurrency, 0)
+        : convertMoneyDto(refundInputMoney, contractCurrency, currentFxQuote)
+      const refundUzsMoney = refundInputMoney.minorUnits === 0
+        ? createMoneyDto('UZS', 0)
+        : convertMoneyDto(refundInputMoney, 'UZS', currentFxQuote)
+      if (!contractRefundMoney || !refundUzsMoney) {
+        throw { status: 400, message: "USD/UZS kursi mavjud emas. Qaytarish summasini hisoblab bo‘lmadi" }
+      }
+      if (refundInputMoney.minorUnits > 0 && contractRefundMoney.minorUnits === 0) {
+        throw { status: 400, message: "Qaytariladigan summa shartnoma valyutasining eng kichik birligidan kam" }
+      }
+      const contractRefundAmount = moneyDtoToAmount(contractRefundMoney)
+      const refundAmountUzs = moneyDtoToAmount(refundUzsMoney)
 
       const sources = sale.payments.map((payment) => paymentSource('SALE', payment))
       const contractReceiptsAtReturn = roundContractMoney(
@@ -217,10 +243,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           idempotencyKey,
           ledgerVersion: 2,
           refundAmount: refundAmountUzs,
-          refundInputAmount: parsed.data.refundAmount,
+          refundInputAmount: moneyDtoToAmount(refundInputMoney),
           refundInputCurrency: settlementCurrency,
-          refundExchangeRateAtCreation: settlementCurrency === 'USD' || contractCurrency === 'USD' ? liveUsdUzsRate : null,
-          refundMethod: refundAmountUzs > 0 ? parsed.data.refundMethod : undefined,
+          refundExchangeRateAtCreation: needsFx ? liveUsdUzsRate : null,
+          refundExchangeRateSource: needsFx ? currentFxQuote?.source : null,
+          refundExchangeRateEffectiveAt: needsFx && currentFxQuote?.effectiveAt
+            ? new Date(currentFxQuote.effectiveAt)
+            : null,
+          refundExchangeRateFetchedAt: needsFx && currentFxQuote?.fetchedAt
+            ? new Date(currentFxQuote.fetchedAt)
+            : null,
+          refundMethod: refundInputMoney.minorUnits > 0 ? parsed.data.refundMethod : undefined,
           contractCurrency,
           contractAmount: Number(sale.contractSalePrice),
           contractReceiptsAtReturn,
@@ -232,7 +265,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           // Future contractual interest was never profit and is not touched.
           interestReversalAmountUzs: recognizedInterestAmountUzs,
           inventoryCostRecoveryUzs: Number(device.purchasePrice),
-          retainedValueAmountUzs: Math.max(0, receiptsUzs - refundAmountUzs),
+          // Signed so a real FX loss is not silently clamped out of reports.
+          retainedValueAmountUzs: receiptsUzs - refundAmountUzs,
           note: parsed.data.note,
           createdBy: session.user.id,
         },
@@ -268,8 +302,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             status: 'IN_STOCK',
             returnId: returnRecord.id,
             refundAmountUzs,
-            refundInputAmount: parsed.data.refundAmount,
+            refundInputAmount: moneyDtoToAmount(refundInputMoney),
             refundInputCurrency: settlementCurrency,
+            refundExchangeRateAtCreation: needsFx ? liveUsdUzsRate : null,
+            refundExchangeRateSource: needsFx ? currentFxQuote?.source : null,
             contractCurrency,
             contractReceiptsAtReturn,
             contractRefundAmount,
@@ -296,7 +332,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           refundMethod: parsed.data.refundMethod,
           note: parsed.data.note,
           adminName: session.user.name,
-          currency: displayCurrency,
+          currency: { ...displayCurrency, currency: device.shop.preferredCurrency },
           }),
           scheduledAt: now,
           relatedId: returnRecord.id,

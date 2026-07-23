@@ -57,6 +57,7 @@ const RELEASE_MIGRATIONS = [
   '202607220001_custom_shop_staff_roles',
   '202607220002_nasiya_early_settlement',
   '202607220003_nasiya_return_refund',
+  '202607230001_return_currency_refund_method',
 ]
 
 const phaseArgument = process.argv.find((argument) => argument.startsWith('--phase='))
@@ -685,6 +686,67 @@ const nasiyaReturnChecks = [
   },
 ]
 
+const returnCurrencyMethodChecks = [
+  {
+    name: 'return_currency_method_schema_issues',
+    blocking: true,
+    sql: `
+      SELECT (
+        CASE WHEN EXISTS (
+          SELECT 1
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'ReturnRefundAllocation'
+            AND column_name = 'sourcePaymentMethod'
+            AND is_nullable = 'YES'
+        ) THEN 0 ELSE 1 END
+        +
+        CASE WHEN NOT EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conrelid = '"ReturnRefundAllocation"'::regclass
+            AND conname = 'ReturnRefundAllocation_same_method_check'
+        ) THEN 0 ELSE 1 END
+        +
+        CASE WHEN (
+          SELECT COUNT(*)
+          FROM information_schema.columns
+          WHERE table_schema = current_schema()
+            AND table_name = 'DeviceReturn'
+            AND column_name IN (
+              'refundExchangeRateSource',
+              'refundExchangeRateEffectiveAt',
+              'refundExchangeRateFetchedAt'
+            )
+        ) = 3 THEN 0 ELSE 1 END
+        +
+        CASE WHEN EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conrelid = '"DeviceReturn"'::regclass
+            AND conname = 'DeviceReturn_refund_input_snapshot_check'
+            AND strpos(pg_get_constraintdef(oid), '"refundExchangeRateAtCreation" IS NOT NULL') > 0
+            AND strpos(pg_get_constraintdef(oid), '"refundExchangeRateSource" IS NOT NULL') > 0
+            AND strpos(pg_get_constraintdef(oid), '"refundExchangeRateFetchedAt" IS NOT NULL') > 0
+        ) THEN 0 ELSE 1 END
+        +
+        CASE WHEN EXISTS (
+          SELECT 1
+          FROM pg_constraint
+          WHERE conrelid = '"DeviceReturn"'::regclass
+            AND conname = 'DeviceReturn_nonnegative_disposition_check'
+            AND pg_get_constraintdef(oid) NOT LIKE '%retainedValueAmountUzs%>= 0%'
+        ) THEN 0 ELSE 1 END
+        +
+        CASE WHEN pg_get_functiondef(
+          '"validate_return_refund_reconciliation"()'::regprocedure
+        ) NOT LIKE '%refund allocation exceeds original receipt%'
+        THEN 0 ELSE 1 END
+      )::integer AS count
+    `,
+  },
+]
+
 const nasiyaPaymentRateSourceChecks = [
   {
     name: 'nasiya_payment_fx_snapshot_issues',
@@ -783,6 +845,9 @@ try {
       : []),
     ...(phase === 'post' && appliedMigrationSet.has('202607220003_nasiya_return_refund')
       ? nasiyaReturnChecks
+      : []),
+    ...(phase === 'post' && appliedMigrationSet.has('202607230001_return_currency_refund_method')
+      ? returnCurrencyMethodChecks
       : []),
   ]
   for (const check of applicableChecks) {

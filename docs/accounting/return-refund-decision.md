@@ -3,9 +3,10 @@
 Status: **implemented; production release remains gated by the guarded workflow**.
 
 This file records the policy implemented by migration
-`202607130001_immutable_return_ledger` and
-`src/app/api/devices/[id]/return/route.ts`. It replaces the earlier design-only
-version of this document. It does not authorize rewriting historic records.
+`202607130001_immutable_return_ledger`, refined by
+`202607230001_return_currency_refund_method`, and both Sale and Nasiya return
+routes. It replaces the earlier design-only version of this document. It does
+not authorize rewriting historic records.
 
 ## Implemented policy
 
@@ -14,17 +15,24 @@ version of this document. It does not authorize rewriting historic records.
    schedules become `CANCELLED`. Payment rows are not deleted or rewritten.
 2. Every completed return creates one immutable `DeviceReturn` for the
    shop-scoped idempotency key.
-3. `refundAmount` is the value actually returned to the customer. Both its
-   submitted currency/value and its UZS accounting snapshot are frozen.
+3. The shop's current `preferredCurrency` is the only accepted refund input
+   currency and the only currency shown in the return form. The exact entered
+   value/currency, governed FX rate, rate source/effective/fetched timestamps,
+   contract-native refund, and UZS accounting snapshot are frozen separately.
 4. The return freezes contract-native receipts, refund, retained value, and
    cancelled debt. It also freezes UZS revenue reversal, inventory-cost
-   recovery, and retained-value snapshots. `ReturnProfitReversal` separately
+   recovery, and signed net-retained snapshot. A negative
+   `retainedValueAmountUzs` is valid when a later-rate refund creates a real FX
+   loss; it must reach profit reporting rather than being clamped to zero.
+   `ReturnProfitReversal` separately
    freezes only the margin and interest actually recognized from payment
    allocations before the return; future agreement interest is not reversed.
-5. A non-zero refund cannot exceed receipts and must be allocated to immutable
-   original Sale/Nasiya payment rows using the same payment method. Split
-   payments are allocated by their stored breakdown. There is no unrestricted
-   cross-method override.
+5. A non-zero contract-native refund cannot exceed verified receipts and must
+   be allocated to immutable original Sale/Nasiya payment rows. The original
+   receipt method and the chosen refund method are independent audit facts:
+   card receipt → cash refund is valid. Split receipt methods are preserved
+   when known; a legacy unknown source method is stored as `NULL` and does not
+   block a refund whose amount evidence is otherwise verified.
 6. Partial and zero refunds are allowed. A reason of 5–1,000 characters is
    always required, and retained value is explicit rather than being mistaken
    for a refund.
@@ -53,6 +61,9 @@ and, for the cash portion:
 Separately, cancelled unpaid debt remains a disposition field; it is never
 invented as a receipt or refund. For a non-zero refund, the sum of immutable
 refund allocations must equal the recorded contract refund and UZS refund.
+The contract-native retained amount remains non-negative. The UZS net-retained
+snapshot may be negative because historical receipt UZS and return-time refund
+UZS use different frozen rates; that signed difference is the FX gain/loss.
 `Sof tushum` subtracts only money actually refunded during the reporting
 period. A completely unpaid Pay Later return therefore cancels expected debt
 without inventing a refund or a recognized-profit reversal.
@@ -60,12 +71,11 @@ without inventing a refund or a recognized-profit reversal.
 ## Proven behavior
 
 - Pure allocation tests cover frozen USD values, newest-first allocation,
-  split-payment allocation, and rejection of an unsupported refund method.
+  split-payment evidence, cross-method refunds, and unknown legacy methods.
 - PostgreSQL route tests cover a Sale return, a Nasiya return, a zero-refund
-  return, method rejection, legacy `RETURNED` restock control, and a Nasiya
+  return, USD-shop/UZS-contract and UZS-shop/USD-contract flows, stale quote
+  rejection, signed FX loss, legacy `RETURNED` restock control, and a Nasiya
   payment racing a return.
-- The disposable-database suite applied all 36 migrations and passed 73/73
-  integration tests on 2026-07-13.
 
 ## Deliberate limits and separate approvals
 
@@ -77,8 +87,8 @@ without inventing a refund or a recognized-profit reversal.
   the immutable row must not be changed in place.
 - The profit-reversal ledger is aggregate per return. Receipt-level principal,
   margin, and interest evidence remains in `NasiyaPaymentAllocation`; a refund
-  is still allocated to original payment methods, not reclassified as a new
-  principal/interest payment.
+  remains linked to original payment rows but is not forced to reuse their
+  payment methods or reclassified as a new principal/interest payment.
 - Production behavior is not claimed until the exact commit passes CI, preview
   browser verification, the guarded Vercel migration sequence, and post-release
   smoke checks.
