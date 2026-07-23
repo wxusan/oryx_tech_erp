@@ -297,7 +297,7 @@ describe('migration-managed active-only uniqueness', () => {
         contractSalePrice: 200,
         contractAmountPaid: 200,
         contractRemainingAmount: 0,
-        paymentMethod: 'CASH',
+        paymentMethod: 'CARD',
         createdBy: first.owner.id,
       },
     })).rejects.toMatchObject({ code: 'P2003' })
@@ -324,7 +324,7 @@ describe('migration-managed active-only uniqueness', () => {
         contractSalePrice: 500,
         contractAmountPaid: 500,
         contractRemainingAmount: 0,
-        paymentMethod: 'CASH',
+        paymentMethod: 'CARD',
         createdBy: owner.id,
       },
     })
@@ -333,7 +333,7 @@ describe('migration-managed active-only uniqueness', () => {
         shopId: shop.id,
         saleId: sale.id,
         amount: 6_250_000,
-        paymentMethod: 'CASH',
+        paymentMethod: 'CARD',
         paymentInputAmount: 500,
         paymentInputCurrency: 'USD',
         paymentExchangeRate: 12_500,
@@ -341,29 +341,52 @@ describe('migration-managed active-only uniqueness', () => {
         createdBy: owner.id,
       },
     })
+    const exactReturnSnapshot = {
+      shopId: shop.id,
+      deviceId: device.id,
+      saleId: sale.id,
+      ledgerVersion: 2,
+      refundAmount: 6_250_000,
+      refundInputAmount: 500,
+      refundInputCurrency: 'USD' as const,
+      refundExchangeRateAtCreation: 12_500,
+      refundExchangeRateSource: 'CBU',
+      refundExchangeRateFetchedAt: new Date('2026-07-23T08:00:00.000Z'),
+      refundMethod: 'CASH' as const,
+      contractCurrency: 'USD' as const,
+      contractAmount: 500,
+      contractReceiptsAtReturn: 500,
+      contractRefundAmount: 500,
+      contractRetainedAmount: 0,
+      contractCancelledDebt: 0,
+      revenueReversalAmountUzs: 6_250_000,
+      inventoryCostRecoveryUzs: 100,
+      note: 'Integration refund',
+      createdBy: owner.id,
+    }
+
+    await expect(prisma.deviceReturn.create({
+      data: {
+        ...exactReturnSnapshot,
+        idempotencyKey: 'integration-refund-missing-provenance',
+        refundExchangeRateSource: null,
+        refundExchangeRateFetchedAt: null,
+      },
+    })).rejects.toThrow(/DeviceReturn_refund_input_snapshot_check/)
+
+    await expect(prisma.deviceReturn.create({
+      data: {
+        ...exactReturnSnapshot,
+        idempotencyKey: 'integration-refund-mismatched-conversion',
+        refundAmount: 6_250_001,
+      },
+    })).rejects.toThrow(/DeviceReturn_refund_input_snapshot_check/)
+
     const returned = await prisma.$transaction(async (tx) => {
       const returnRow = await tx.deviceReturn.create({
         data: {
-          shopId: shop.id,
-          deviceId: device.id,
-          saleId: sale.id,
+          ...exactReturnSnapshot,
           idempotencyKey: 'integration-refund-snapshot',
-          ledgerVersion: 2,
-          refundAmount: 6_250_000,
-          refundInputAmount: 500,
-          refundInputCurrency: 'USD',
-          refundExchangeRateAtCreation: 12_500,
-          refundMethod: 'CASH',
-          contractCurrency: 'USD',
-          contractAmount: 500,
-          contractReceiptsAtReturn: 500,
-          contractRefundAmount: 500,
-          contractRetainedAmount: 0,
-          contractCancelledDebt: 0,
-          revenueReversalAmountUzs: 6_250_000,
-          inventoryCostRecoveryUzs: 100,
-          note: 'Integration refund',
-          createdBy: owner.id,
         },
       })
       await tx.returnRefundAllocation.create({
@@ -371,7 +394,7 @@ describe('migration-managed active-only uniqueness', () => {
           shopId: shop.id,
           deviceReturnId: returnRow.id,
           salePaymentId: payment.id,
-          sourcePaymentMethod: 'CASH',
+          sourcePaymentMethod: 'CARD',
           refundMethod: 'CASH',
           contractCurrency: 'USD',
           contractAmount: 500,
@@ -385,6 +408,7 @@ describe('migration-managed active-only uniqueness', () => {
     })
     expect(Number(returned.refundInputAmount)).toBe(500)
     expect(Number(returned.refundExchangeRateAtCreation)).toBe(12_500)
+    expect(returned.refundExchangeRateSource).toBe('CBU')
     expect(Number(returned.refundAmount)).toBe(6_250_000)
   })
 })

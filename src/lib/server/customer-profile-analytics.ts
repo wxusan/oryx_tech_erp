@@ -168,10 +168,12 @@ export async function getCustomerProfileAnalytics(input: {
     ), refunds AS (
       SELECT r."createdAt" AS occurred_at,
              CASE
+               WHEN r."refundInputCurrency" IS NOT NULL THEN r."refundInputCurrency"
                WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0 THEN 'USD'::"CurrencyCode"
                ELSE 'UZS'::"CurrencyCode"
              END AS currency,
              CASE
+               WHEN r."refundInputAmount" IS NOT NULL THEN r."refundInputAmount"
                WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
                WHEN r."contractRefundAmount" > 0 THEN r."contractRefundAmount"
                ELSE r."refundAmount"

@@ -135,13 +135,13 @@ describe('customer CRM database privacy and set-based metrics', () => {
         appliedAmountInContractCurrency: 600, idempotencyKey: 'crm-returned-payment', createdBy: owner.id,
       },
     })
-    // Compatibility row proves the profile mirrors report fallback semantics:
-    // old returns may have refundAmount but no native contractRefundAmount.
+    // Compatibility row proves customer reporting prefers the exact refund
+    // input currency even when an old row has no native contract refund.
     await prisma.deviceReturn.create({
       data: {
         shopId: shop.id, deviceId: returnedDevice.id, saleId: returnedSale.id,
         idempotencyKey: 'crm-return', ledgerVersion: 1, refundAmount: 200,
-        refundInputAmount: 200, refundInputCurrency: 'UZS', refundMethod: 'CASH',
+        refundInputAmount: 0.2, refundInputCurrency: 'USD', refundExchangeRateAtCreation: 1_000, refundMethod: 'CASH',
         contractCurrency: 'UZS', contractAmount: 1000, contractReceiptsAtReturn: 0,
         contractRefundAmount: 0, contractRetainedAmount: 0, contractCancelledDebt: 0,
         revenueReversalAmountUzs: 1000, inventoryCostRecoveryUzs: 500,
@@ -246,7 +246,7 @@ describe('customer CRM database privacy and set-based metrics', () => {
     expect(overview?.metrics.legacyUsdPaymentCount).toBe(0)
     expect(overview?.metrics.dueThisMonth).toEqual({ UZS: 400, USD: 280 })
     expect(overview?.metrics.overdue).toEqual({ UZS: 0, USD: 280 })
-    expect(overview?.metrics.refunds).toEqual({ UZS: 200, USD: 0 })
+    expect(overview?.metrics.refunds).toEqual({ UZS: 0, USD: 0.2 })
     expect(overview?.metrics.writeOffs).toEqual({ UZS: 500, USD: 0 })
     expect(overview?.counts).toMatchObject({ devices: 4, sales: 2, activeNasiya: 1, writtenOffNasiya: 1, returns: 1 })
 
@@ -269,7 +269,7 @@ describe('customer CRM database privacy and set-based metrics', () => {
     expect(analytics?.counts).toMatchObject({ devices: 4, sales: 2, nasiyas: 2, activeNasiyas: 1, returns: 1 })
     expect(analytics?.activity.at(-1)).toMatchObject({
       contracts: { UZS: 2500, USD: 430 },
-      refunds: { UZS: 200, USD: 0 },
+      refunds: { UZS: 0, USD: 0.2 },
       writeOffs: { UZS: 500, USD: 0 },
     })
     expect(analytics?.obligations.UZS.today).toBe(overview?.metrics.dueThisMonth.UZS)

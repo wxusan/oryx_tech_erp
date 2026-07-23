@@ -106,11 +106,20 @@ export default function ReturnWorkQueue() {
       setSubmitError('Pul qaytarilsa, qaytarish usulini tanlang')
       return
     }
+    if (
+      amount > 0 &&
+      (currency.currency === 'USD' || selected.contractCurrency === 'USD') &&
+      !currency.fxQuote?.rateMinorUnits
+    ) {
+      setSubmitError('USD/UZS kursi mavjud emas. Qaytarish summasini hozir saqlab bo‘lmaydi')
+      return
+    }
     const payload = {
       note: note.trim(),
       refundAmount: amount,
       refundMethod: amount > 0 ? refundMethod : undefined,
       inputCurrency: currency.currency,
+      expectedFxRateMinorUnits: currency.fxQuote?.rateMinorUnits ?? null,
     }
     setSubmitting(true)
     setSubmitError('')

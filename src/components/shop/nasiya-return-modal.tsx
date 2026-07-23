@@ -20,6 +20,8 @@ import { paymentMethodLabel } from '@/lib/presentation-labels'
 import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 import { commitNavigationMutation } from '@/lib/client-events'
 
+const REFUND_METHODS: readonly PaymentMethod[] = ['CASH', 'CARD', 'TRANSFER', 'OTHER']
+
 function inputValue(money: MoneyDto) {
   const amount = moneyDtoToAmount(money)
   return money.currency === 'USD' ? amount.toFixed(2) : String(amount)
@@ -59,11 +61,7 @@ export function NasiyaReturnModal({
     if (!open) return
     const frame = window.requestAnimationFrame(() => {
       setRefundAmount(inputValue(quote.defaultRefund))
-      setRefundMethod(
-        quote.defaultRefundMethod
-          ?? quote.methodCapacities.find(({ available }) => available.minorUnits > 0)?.method
-          ?? null,
-      )
+      setRefundMethod(null)
       setReason('')
       setError('')
     })
@@ -73,17 +71,23 @@ export function NasiyaReturnModal({
   const parsedRefund = (() => {
     if (!refundAmount.trim()) return null
     try {
-      return createMoneyDto(quote.contractCurrency, refundAmount)
+      return createMoneyDto(quote.displayCurrency, refundAmount)
     } catch {
       return null
     }
   })()
   const refundWithinReceipts = Boolean(parsedRefund && parsedRefund.minorUnits <= quote.maxRefund.minorUnits)
-  const selectedCapacity = quote.methodCapacities.find(({ method }) => method === refundMethod)?.available ?? null
-  const methodCanCoverRefund = Boolean(
+  const methodSelected = Boolean(
     parsedRefund && (
       parsedRefund.minorUnits === 0 ||
-      (refundMethod && selectedCapacity && parsedRefund.minorUnits <= selectedCapacity.minorUnits)
+      refundMethod
+    ),
+  )
+  const fxReady = Boolean(
+    parsedRefund && (
+      parsedRefund.minorUnits === 0 ||
+      !quote.requiresFxForRefund ||
+      quote.fxQuote?.rateMinorUnits
     ),
   )
   const retained = parsedRefund && refundWithinReceipts
@@ -91,7 +95,8 @@ export function NasiyaReturnModal({
     : null
   const canSubmit = quote.eligible &&
     refundWithinReceipts &&
-    methodCanCoverRefund &&
+    methodSelected &&
+    fxReady &&
     reason.trim().length >= 5
 
   async function submit() {
@@ -101,9 +106,10 @@ export function NasiyaReturnModal({
       note: reason.trim(),
       refundAmount: moneyDtoToAmount(parsedRefund),
       refundMethod: parsedRefund.minorUnits > 0 ? refundMethod ?? undefined : undefined,
-      inputCurrency: quote.contractCurrency,
-      expectedReceiptsMinorUnits: quote.receipts.minorUnits,
-      expectedRemainingMinorUnits: quote.cancelledDebt.minorUnits,
+      inputCurrency: quote.displayCurrency,
+      expectedContractReceiptsMinorUnits: quote.contractReceipts.minorUnits,
+      expectedContractRemainingMinorUnits: quote.contractCancelledDebt.minorUnits,
+      expectedFxRateMinorUnits: quote.fxQuote?.rateMinorUnits ?? null,
     }
     setPending(true)
     setError('')
@@ -146,8 +152,8 @@ export function NasiyaReturnModal({
     ? `Ko‘pi bilan ${formatMoneyDto(quote.maxRefund)} qaytarish mumkin.`
     : refundAmount.trim() && !parsedRefund
       ? 'Summa noto‘g‘ri kiritilgan.'
-      : parsedRefund && parsedRefund.minorUnits > 0 && !methodCanCoverRefund
-        ? `Tanlangan usul bo‘yicha ko‘pi bilan ${selectedCapacity ? formatMoneyDto(selectedCapacity) : formatMoneyDto(createMoneyDto(quote.contractCurrency, 0))} qaytarish mumkin.`
+      : parsedRefund && parsedRefund.minorUnits > 0 && !fxReady
+        ? 'USD/UZS kursi mavjud emas. Pul qaytarish summasini hozir saqlab bo‘lmaydi.'
         : null
 
   return (
@@ -189,7 +195,7 @@ export function NasiyaReturnModal({
             Mijozga qaytariladigan summa
             <MoneyInput
               id="nasiya-return-refund"
-              currency={quote.contractCurrency}
+              currency={quote.displayCurrency}
               value={refundAmount}
               onChange={(value) => { setRefundAmount(value); setError('') }}
               aria-invalid={Boolean(amountError)}
@@ -218,9 +224,9 @@ export function NasiyaReturnModal({
                   <SelectValue placeholder="Usulni tanlang" />
                 </SelectTrigger>
                 <SelectContent>
-                  {quote.methodCapacities.map(({ method, available }) => (
-                    <SelectItem key={method} value={method} disabled={available.minorUnits === 0}>
-                      {paymentMethodLabel(method)} · {formatMoneyDto(available)} gacha
+                  {REFUND_METHODS.map((method) => (
+                    <SelectItem key={method} value={method}>
+                      {paymentMethodLabel(method)}
                     </SelectItem>
                   ))}
                 </SelectContent>

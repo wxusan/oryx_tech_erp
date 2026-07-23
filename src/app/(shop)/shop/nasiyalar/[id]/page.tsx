@@ -631,15 +631,14 @@ function AuthorizedNasiyaDetailPage() {
   const contractMonthlyPayment = nasiya.schedules?.[0]?.expected ?? contractTerms.monthly
   const contractTotal = addMoneyDto(contractTerms.downPayment, contractTerms.financed)
   const mfmt = (amount: MoneyDto) => {
-    const primary = formatMoneyDto(amount)
-    const currentApproximation = amount.currency === currency.currency
-      ? null
+    const selectedCurrencyAmount = amount.currency === currency.currency
+      ? amount
       : convertMoneyDto(amount, currency.currency, currency.fxQuote)
-    return currentApproximation ? `${primary} · ≈ ${formatMoneyDto(currentApproximation)}` : primary
+    return selectedCurrencyAmount ? formatMoneyDto(selectedCurrencyAmount) : '—'
   }
   const currentFxCaption = nasiya.contractCurrency !== currency.currency && currency.fxQuote?.rate
     ? [
-        `Joriy kurs bo'yicha ≈ · 1 USD = ${currency.fxQuote.rate} so'm`,
+        `Joriy kurs · 1 USD = ${currency.fxQuote.rate} so'm`,
         exchangeRateSourceLabel(currency.fxQuote.source),
         currency.fxQuote.effectiveAt || currency.fxQuote.fetchedAt
           ? uzDate(currency.fxQuote.effectiveAt ?? currency.fxQuote.fetchedAt)
@@ -797,7 +796,7 @@ function AuthorizedNasiyaDetailPage() {
           {nasiya.returnRecord ? (
             <dl className="mt-3 grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
               <div><dt className="text-xs text-violet-700">Jami olingan</dt><dd className="mt-0.5 font-semibold text-violet-950">{mfmt(nasiya.returnRecord.receipts)}</dd></div>
-              <div><dt className="text-xs text-violet-700">Qaytarilgan</dt><dd className="mt-0.5 font-semibold text-violet-950">{mfmt(nasiya.returnRecord.refund)}</dd></div>
+              <div><dt className="text-xs text-violet-700">Qaytarilgan</dt><dd className="mt-0.5 font-semibold text-violet-950">{mfmt(nasiya.returnRecord.refundInput)}</dd></div>
               <div><dt className="text-xs text-violet-700">Do‘konda qolgan</dt><dd className="mt-0.5 font-semibold text-violet-950">{mfmt(nasiya.returnRecord.retained)}</dd></div>
               <div><dt className="text-xs text-violet-700">Bekor qilingan qarz</dt><dd className="mt-0.5 font-semibold text-violet-950">{mfmt(nasiya.returnRecord.cancelledDebt)}</dd></div>
               <div className="col-span-2 sm:col-span-4">

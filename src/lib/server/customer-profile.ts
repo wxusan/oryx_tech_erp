@@ -148,10 +148,12 @@ export async function getCustomerProfileOverview(input: {
           AND n."resolutionState" = 'ACTIVE'
       ), refunds AS (
         SELECT CASE
+                 WHEN r."refundInputCurrency" IS NOT NULL THEN r."refundInputCurrency"
                  WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0 THEN 'USD'::"CurrencyCode"
                  ELSE 'UZS'::"CurrencyCode"
                END AS currency,
                CASE
+                 WHEN r."refundInputAmount" IS NOT NULL THEN r."refundInputAmount"
                  WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
                  WHEN r."contractRefundAmount" > 0 THEN r."contractRefundAmount"
                  ELSE r."refundAmount"
@@ -381,8 +383,11 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
                CASE WHEN r."nasiyaId" IS NOT NULL THEN 'nasiya-return'::text ELSE 'return'::text END AS kind,
                coalesce(r."nasiyaId", d."id") AS reference_id,
                d."model" AS title, r."note" AS subtitle,
-               CASE WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0 THEN 'USD'::"CurrencyCode" ELSE 'UZS'::"CurrencyCode" END AS currency,
-               CASE WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
+               CASE WHEN r."refundInputCurrency" IS NOT NULL THEN r."refundInputCurrency"
+                    WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0 THEN 'USD'::"CurrencyCode"
+                    ELSE 'UZS'::"CurrencyCode" END AS currency,
+               CASE WHEN r."refundInputAmount" IS NOT NULL THEN r."refundInputAmount"
+                    WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
                     WHEN r."contractRefundAmount" > 0 THEN r."contractRefundAmount" ELSE r."refundAmount" END AS amount,
                'RETURNED'::text AS status,
                r."contractRetainedAmount" AS retained_amount,

@@ -29,7 +29,11 @@ import { reconcileNasiyaLedger } from '@/lib/nasiya-ledger'
 import { hasNasiyaPaymentFxQuoteColumns } from '@/lib/server/nasiya-payment-schema'
 import { calculateNasiyaSettlement } from '@/lib/nasiya-settlement'
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
-import { calculateNasiyaReturnQuote, nasiyaReturnLedgerHasBlockingReasons } from '@/lib/nasiya-return'
+import {
+  calculateNasiyaReturnQuote,
+  nasiyaReturnLedgerHasBlockingReasons,
+  presentNasiyaReturnQuote,
+} from '@/lib/nasiya-return'
 import type { ReturnReceiptSource } from '@/lib/return-accounting'
 
 type RouteContext = { params: Promise<{ id: string }> }
@@ -306,6 +310,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
             createdAt: true,
             contractCurrency: true,
             contractReceiptsAtReturn: true,
+            refundInputAmount: true,
+            refundInputCurrency: true,
             contractRefundAmount: true,
             contractRetainedAmount: true,
             contractCancelledDebt: true,
@@ -435,17 +441,22 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
           returnedAt: nasiya.returns[0].createdAt.toISOString(),
           contractCurrency: nasiya.returns[0].contractCurrency,
           receipts: createMoneyDto(nasiya.returns[0].contractCurrency, nasiya.returns[0].contractReceiptsAtReturn.toString()),
+          refundInput: createMoneyDto(
+            nasiya.returns[0].refundInputCurrency ?? nasiya.returns[0].contractCurrency,
+            (nasiya.returns[0].refundInputAmount ?? nasiya.returns[0].contractRefundAmount).toString(),
+          ),
           refund: createMoneyDto(nasiya.returns[0].contractCurrency, nasiya.returns[0].contractRefundAmount.toString()),
           retained: createMoneyDto(nasiya.returns[0].contractCurrency, nasiya.returns[0].contractRetainedAmount.toString()),
           cancelledDebt: createMoneyDto(nasiya.returns[0].contractCurrency, nasiya.returns[0].contractCancelledDebt.toString()),
-          refundUzs: createMoneyDto('UZS', nasiya.returns[0].refundAmount.toString()),
-          retainedUzs: createMoneyDto('UZS', nasiya.returns[0].retainedValueAmountUzs.toString()),
           refundMethod: nasiya.returns[0].refundMethod,
           reason: nasiya.returns[0].note,
           actorId: nasiya.returns[0].createdBy,
         }
       : null
-    const rawReturnQuote = canReturnNasiya && !returned
+    const returnCurrencyContext = canReturnNasiya && !returned
+      ? await getShopCurrencyContext(nasiya.shopId)
+      : null
+    const contractReturnQuote = canReturnNasiya && !returned
       ? calculateNasiyaReturnQuote({
             contractCurrency: nasiya.contractCurrency,
             contractDownPayment: Number(nasiya.contractDownPayment),
@@ -456,6 +467,13 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
             deviceStatus: nasiya.device.status,
             sources: (nasiya.payments ?? []).map(mapReturnReceiptSource),
           })
+      : null
+    const rawReturnQuote = contractReturnQuote && returnCurrencyContext
+      ? presentNasiyaReturnQuote(
+          contractReturnQuote,
+          returnCurrencyContext.currency,
+          returnCurrencyContext.fxQuote,
+        )
       : null
     const returnQuote = rawReturnQuote && (paymentHistoryTruncated || nasiyaReturnLedgerHasBlockingReasons(ledger.reasons))
       ? {

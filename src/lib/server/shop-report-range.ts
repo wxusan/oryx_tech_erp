@@ -415,12 +415,22 @@ export async function getShopRangeReport(input: {
       SELECT
         to_char(r."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
         coalesce(sum(CASE
-          WHEN r."contractCurrency" = 'UZS' THEN
+          WHEN coalesce(
+            r."refundInputCurrency",
+            CASE WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0
+              THEN 'USD'::"CurrencyCode" ELSE 'UZS'::"CurrencyCode" END
+          ) = 'UZS' THEN coalesce(
+            r."refundInputAmount",
             CASE WHEN r."contractRefundAmount" > 0 THEN r."contractRefundAmount" ELSE r."refundAmount" END
+          )
           ELSE 0
         END), 0)::numeric AS refunds_uzs,
         coalesce(sum(CASE
-          WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
+          WHEN coalesce(
+            r."refundInputCurrency",
+            CASE WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0
+              THEN 'USD'::"CurrencyCode" ELSE 'UZS'::"CurrencyCode" END
+          ) = 'USD' THEN coalesce(r."refundInputAmount", r."contractRefundAmount")
           ELSE 0
         END), 0)::numeric AS refunds_usd,
         coalesce(sum(CASE WHEN pr.id IS NOT NULL THEN

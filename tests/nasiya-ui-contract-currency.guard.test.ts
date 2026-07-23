@@ -25,13 +25,15 @@ describe('GET /api/nasiya/[id] returns the contract-currency ledger for the UI',
   })
 })
 
-describe('nasiya detail page keeps contract currency primary and labels any current-rate approximation', () => {
+describe('nasiya detail page derives from contract money but renders one selected shop currency', () => {
   const page = read('src/app/(shop)/shop/nasiyalar/[id]/page.tsx')
 
-  it('keeps native MoneyDto values primary and only adds a clearly approximate secondary amount', () => {
-    expect(page).toContain('const primary = formatMoneyDto(amount)')
+  it('converts native MoneyDto values exactly once and never appends a second currency', () => {
+    expect(page).toContain('const selectedCurrencyAmount = amount.currency === currency.currency')
     expect(page).toContain('convertMoneyDto(amount, currency.currency, currency.fxQuote)')
-    expect(page).toContain('Joriy kurs bo\'yicha ≈')
+    expect(page).toContain('Joriy kurs · 1 USD =')
+    expect(page).not.toContain('const primary = formatMoneyDto(amount)')
+    expect(page).not.toContain(' · ≈ ')
   })
 
   it('payment history preserves the recorded input and native applied amounts', () => {

@@ -3,7 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NasiyaReturnModal } from '@/components/shop/nasiya-return-modal'
-import { createMoneyDto } from '@/lib/currency'
+import { createFxQuoteDto, createMoneyDto } from '@/lib/currency'
 import type { NasiyaReturnQuoteDto } from '@/lib/nasiya-return'
 
 vi.mock('@/lib/client-events', () => ({ commitNavigationMutation: vi.fn(async () => undefined) }))
@@ -17,18 +17,20 @@ const quote: NasiyaReturnQuoteDto = {
   eligible: true,
   ineligibilityReason: null,
   contractCurrency: 'UZS',
+  displayCurrency: 'UZS',
+  fxQuote: createFxQuoteDto({
+    rate: 12_500,
+    source: 'CBU',
+    fetchedAt: '2026-07-23T08:00:00.000Z',
+  }),
+  requiresFxForRefund: false,
   receipts: createMoneyDto('UZS', 250),
   defaultRefund: createMoneyDto('UZS', 100),
   defaultRetained: createMoneyDto('UZS', 150),
   maxRefund: createMoneyDto('UZS', 250),
   cancelledDebt: createMoneyDto('UZS', 850),
-  methodCapacities: [
-    { method: 'CASH', available: createMoneyDto('UZS', 250) },
-    { method: 'CARD', available: createMoneyDto('UZS', 0) },
-    { method: 'TRANSFER', available: createMoneyDto('UZS', 0) },
-    { method: 'OTHER', available: createMoneyDto('UZS', 0) },
-  ],
-  defaultRefundMethod: 'CASH',
+  contractReceipts: createMoneyDto('UZS', 250),
+  contractCancelledDebt: createMoneyDto('UZS', 850),
   receiptEvidenceVerified: true,
 }
 
@@ -81,6 +83,8 @@ describe('Nasiya return modal', () => {
     fireEvent.change(screen.getByLabelText(/Qaytarish sababi/), {
       target: { value: 'Mijoz bilan kelishilgan qaytarish' },
     })
+    fireEvent.click(screen.getByRole('combobox', { name: 'Qaytarish usuli' }))
+    fireEvent.click(await screen.findByRole('option', { name: 'Naqd pul' }))
     const confirm = screen.getByRole('button', { name: /Qaytarishni tasdiqlash/ })
     expect(confirm.hasAttribute('disabled')).toBe(false)
 
@@ -95,8 +99,9 @@ describe('Nasiya return modal', () => {
       refundAmount: 100,
       refundMethod: 'CASH',
       inputCurrency: 'UZS',
-      expectedReceiptsMinorUnits: 250,
-      expectedRemainingMinorUnits: 850,
+      expectedContractReceiptsMinorUnits: 250,
+      expectedContractRemainingMinorUnits: 850,
+      expectedFxRateMinorUnits: 125_000_000,
       note: 'Mijoz bilan kelishilgan qaytarish',
     })
   })

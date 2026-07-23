@@ -12,7 +12,13 @@ import {
   principalHasPermission,
 } from '@/lib/server/shop-access'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { createMoneyDto, moneyDtoToAmount, normalizeMoneyInput, type CurrencyCode } from '@/lib/currency'
+import {
+  convertMoneyDto,
+  createMoneyDto,
+  fxQuoteRate,
+  moneyDtoToAmount,
+  type CurrencyCode,
+} from '@/lib/currency'
 import { roundContractMoney } from '@/lib/nasiya-contract'
 import { reconcileNasiyaLedger } from '@/lib/nasiya-ledger'
 import {
@@ -53,8 +59,9 @@ const returnNasiyaSchema = z.object({
   refundAmount: z.number().finite().min(0, "Qaytariladigan summa manfiy bo‘lmasligi kerak"),
   refundMethod: z.enum(['CASH', 'TRANSFER', 'CARD', 'OTHER']).optional(),
   inputCurrency: z.enum(['UZS', 'USD']),
-  expectedReceiptsMinorUnits: z.number().int().nonnegative(),
-  expectedRemainingMinorUnits: z.number().int().nonnegative(),
+  expectedContractReceiptsMinorUnits: z.number().int().nonnegative(),
+  expectedContractRemainingMinorUnits: z.number().int().nonnegative(),
+  expectedFxRateMinorUnits: z.number().int().positive().nullable(),
 }).refine((data) => data.refundAmount === 0 || data.refundMethod !== undefined, {
   message: "Pul qaytarilsa, qaytarish usuli tanlanishi shart",
   path: ['refundMethod'],
@@ -92,11 +99,11 @@ function serializeReturn(record: {
   createdAt: Date
   contractCurrency: CurrencyCode
   contractReceiptsAtReturn: Prisma.Decimal
+  refundInputAmount: Prisma.Decimal | null
+  refundInputCurrency: CurrencyCode | null
   contractRefundAmount: Prisma.Decimal
   contractRetainedAmount: Prisma.Decimal
   contractCancelledDebt: Prisma.Decimal
-  refundAmount: Prisma.Decimal
-  retainedValueAmountUzs: Prisma.Decimal
   refundMethod: 'CASH' | 'TRANSFER' | 'CARD' | 'OTHER' | null
   note: string
   createdBy: string
@@ -106,11 +113,13 @@ function serializeReturn(record: {
     returnedAt: record.createdAt.toISOString(),
     contractCurrency: record.contractCurrency,
     receipts: createMoneyDto(record.contractCurrency, record.contractReceiptsAtReturn.toString()),
+    refundInput: createMoneyDto(
+      record.refundInputCurrency ?? record.contractCurrency,
+      (record.refundInputAmount ?? record.contractRefundAmount).toString(),
+    ),
     refund: createMoneyDto(record.contractCurrency, record.contractRefundAmount.toString()),
     retained: createMoneyDto(record.contractCurrency, record.contractRetainedAmount.toString()),
     cancelledDebt: createMoneyDto(record.contractCurrency, record.contractCancelledDebt.toString()),
-    refundUzs: createMoneyDto('UZS', record.refundAmount.toString()),
-    retainedUzs: createMoneyDto('UZS', record.retainedValueAmountUzs.toString()),
     refundMethod: record.refundMethod,
     reason: record.note,
     actorId: record.createdBy,
@@ -146,7 +155,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currencyContext = await getShopCurrencyContext(shopId)
-    const liveUsdUzsRate = currencyContext.usdUzsRate
+    const currentFxQuote = currencyContext.fxQuote ?? null
+    const liveUsdUzsRate = fxQuoteRate(currentFxQuote)
 
     const run = () => prisma.$transaction(async (tx) => {
       await tx.$queryRaw(Prisma.sql`SELECT "id" FROM "Shop" WHERE "id" = ${shopId} FOR UPDATE`)
@@ -197,7 +207,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         where: { id: nasiya.deviceId, shopId, deletedAt: null },
         include: { imeis: { where: { deletedAt: null } } },
       })
-      const shop = await tx.shop.findUnique({ where: { id: shopId }, select: { name: true } })
+      const shop = await tx.shop.findUnique({
+        where: { id: shopId },
+        select: { name: true, preferredCurrency: true },
+      })
       const customer = await tx.customer.findFirst({
         where: { id: nasiya.customerId, shopId, deletedAt: null },
         select: { name: true, phone: true },
@@ -288,43 +301,53 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         throw { status: 409, message: quote.ineligibilityReason ?? "Bu nasiyani qaytarib bo‘lmaydi" }
       }
       if (
-        quote.receipts.minorUnits !== parsed.data.expectedReceiptsMinorUnits ||
-        quote.cancelledDebt.minorUnits !== parsed.data.expectedRemainingMinorUnits
+        quote.receipts.minorUnits !== parsed.data.expectedContractReceiptsMinorUnits ||
+        quote.cancelledDebt.minorUnits !== parsed.data.expectedContractRemainingMinorUnits
       ) {
         throw { status: 409, message: "To‘lov yoki qarz summasi o‘zgargan. Yangilangan hisobni ko‘rib, qayta tasdiqlang" }
       }
-      if (parsed.data.inputCurrency !== nasiya.contractCurrency) {
-        throw { status: 400, message: "Qaytariladigan summa nasiya shartnomasi valyutasida kiritilishi kerak" }
+      if (parsed.data.inputCurrency !== shop.preferredCurrency) {
+        throw { status: 409, message: "Do‘kon valyutasi o‘zgargan. Sahifani yangilab, summani qayta tekshiring" }
       }
 
-      let refundMoney
+      let refundInputMoney
       try {
-        refundMoney = createMoneyDto(nasiya.contractCurrency, parsed.data.refundAmount)
+        refundInputMoney = createMoneyDto(parsed.data.inputCurrency, parsed.data.refundAmount)
       } catch (error) {
         throw { status: 400, message: error instanceof Error ? error.message : "Qaytariladigan summa noto‘g‘ri" }
       }
-      if (refundMoney.minorUnits > quote.maxRefund.minorUnits) {
-        throw { status: 400, message: "Qaytariladigan summa mijozdan amalda olingan summadan oshmasligi kerak" }
-      }
-      const contractRefundAmount = moneyDtoToAmount(refundMoney)
-      if (contractRefundAmount > 0 && !parsed.data.refundMethod) {
-        throw { status: 400, message: "Qaytarish usuli tanlanishi shart" }
-      }
-      const methodCapacity = quote.methodCapacities.find(({ method }) => method === parsed.data.refundMethod)?.available
-      if (contractRefundAmount > 0 && (!methodCapacity || refundMoney.minorUnits > methodCapacity.minorUnits)) {
-        throw { status: 400, message: "Tanlangan qaytarish usuli bo‘yicha tasdiqlangan tushum yetarli emas" }
-      }
-      if (contractRefundAmount > 0 && nasiya.contractCurrency === 'USD' && !liveUsdUzsRate) {
+      const needsFx = refundInputMoney.minorUnits > 0 && (
+        parsed.data.inputCurrency === 'USD' || nasiya.contractCurrency === 'USD'
+      )
+      if (needsFx && (!currentFxQuote?.rateMinorUnits || !liveUsdUzsRate)) {
         throw { status: 400, message: "USD qaytarish uchun joriy USD/UZS kursi mavjud emas" }
       }
-
-      const refundAmountUzs = contractRefundAmount > 0
-        ? normalizeMoneyInput(contractRefundAmount, nasiya.contractCurrency, liveUsdUzsRate).amountUzs
-        : 0
-      const receiptsUzs = sources.reduce((sum, source) => sum + source.amountUzs, 0)
-      if (refundAmountUzs > receiptsUzs) {
-        throw { status: 400, message: "Joriy kurs bo‘yicha qaytariladigan UZS qiymati tasdiqlangan tushumdan oshadi" }
+      if (needsFx && parsed.data.expectedFxRateMinorUnits !== currentFxQuote?.rateMinorUnits) {
+        throw { status: 409, message: "USD/UZS kursi o‘zgargan. Yangilangan summani ko‘rib, qayta tasdiqlang" }
       }
+
+      const contractRefundMoney = refundInputMoney.minorUnits === 0
+        ? createMoneyDto(nasiya.contractCurrency, 0)
+        : convertMoneyDto(refundInputMoney, nasiya.contractCurrency, currentFxQuote)
+      const refundUzsMoney = refundInputMoney.minorUnits === 0
+        ? createMoneyDto('UZS', 0)
+        : convertMoneyDto(refundInputMoney, 'UZS', currentFxQuote)
+      if (!contractRefundMoney || !refundUzsMoney) {
+        throw { status: 400, message: "USD/UZS kursi mavjud emas. Qaytarish summasini hisoblab bo‘lmadi" }
+      }
+      if (refundInputMoney.minorUnits > 0 && contractRefundMoney.minorUnits === 0) {
+        throw { status: 400, message: "Qaytariladigan summa shartnoma valyutasining eng kichik birligidan kam" }
+      }
+      if (contractRefundMoney.minorUnits > quote.maxRefund.minorUnits) {
+        throw { status: 400, message: "Qaytariladigan summa mijozdan amalda olingan summadan oshmasligi kerak" }
+      }
+      const contractRefundAmount = moneyDtoToAmount(contractRefundMoney)
+      const refundAmountUzs = moneyDtoToAmount(refundUzsMoney)
+      if (refundInputMoney.minorUnits > 0 && !parsed.data.refundMethod) {
+        throw { status: 400, message: "Qaytarish usuli tanlanishi shart" }
+      }
+
+      const receiptsUzs = sources.reduce((sum, source) => sum + source.amountUzs, 0)
       const allocations = contractRefundAmount > 0
         ? allocateReturnRefund({
             sources,
@@ -335,15 +358,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             refundAmountUzs,
           })
         : []
-      const sourceUzs = new Map(sources.map((source) => [source.id, source.amountUzs]))
-      const allocatedUzs = new Map<string, number>()
-      for (const allocation of allocations) {
-        const paymentId = allocation.nasiyaPaymentId!
-        allocatedUzs.set(paymentId, (allocatedUzs.get(paymentId) ?? 0) + allocation.amountUzs)
-      }
-      if ([...allocatedUzs].some(([paymentId, amount]) => amount > (sourceUzs.get(paymentId) ?? 0))) {
-        throw { status: 400, message: "Joriy USD kursi bo‘yicha refund asl tushum yozuviga sig‘maydi; summani kamaytiring" }
-      }
 
       const recognized = await tx.nasiyaPaymentAllocation.aggregate({
         where: { nasiyaId, shopId },
@@ -398,10 +412,17 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           idempotencyKey,
           ledgerVersion: 2,
           refundAmount: refundAmountUzs,
-          refundInputAmount: contractRefundAmount,
-          refundInputCurrency: nasiya.contractCurrency,
-          refundExchangeRateAtCreation: nasiya.contractCurrency === 'USD' ? liveUsdUzsRate : null,
-          refundMethod: refundAmountUzs > 0 ? parsed.data.refundMethod : undefined,
+          refundInputAmount: moneyDtoToAmount(refundInputMoney),
+          refundInputCurrency: parsed.data.inputCurrency,
+          refundExchangeRateAtCreation: needsFx ? liveUsdUzsRate : null,
+          refundExchangeRateSource: needsFx ? currentFxQuote?.source : null,
+          refundExchangeRateEffectiveAt: needsFx && currentFxQuote?.effectiveAt
+            ? new Date(currentFxQuote.effectiveAt)
+            : null,
+          refundExchangeRateFetchedAt: needsFx && currentFxQuote?.fetchedAt
+            ? new Date(currentFxQuote.fetchedAt)
+            : null,
+          refundMethod: refundInputMoney.minorUnits > 0 ? parsed.data.refundMethod : undefined,
           contractCurrency: nasiya.contractCurrency,
           contractAmount: Number(nasiya.contractDownPayment) + Number(nasiya.contractFinalAmount),
           contractReceiptsAtReturn,
@@ -411,6 +432,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           revenueReversalAmountUzs: Number(nasiya.totalAmount),
           interestReversalAmountUzs: Number(recognized._sum.interestAmountUzs ?? 0),
           inventoryCostRecoveryUzs: Number(device.purchasePrice),
+          // Signed on purpose: a later-rate refund can exceed the historical
+          // UZS receipt snapshot and that FX loss must reach reporting.
           retainedValueAmountUzs: receiptsUzs - refundAmountUzs,
           note: parsed.data.note,
           createdBy: session.user.id,
@@ -474,6 +497,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             contractRetainedAmount,
             contractCancelledDebt,
             refundAmountUzs,
+            refundInputAmount: moneyDtoToAmount(refundInputMoney),
+            refundInputCurrency: parsed.data.inputCurrency,
+            refundExchangeRateAtCreation: needsFx ? liveUsdUzsRate : null,
+            refundExchangeRateSource: needsFx ? currentFxQuote?.source : null,
             refundMethod: parsed.data.refundMethod ?? null,
             allocationCount: allocations.length,
           },
@@ -498,7 +525,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         refundMethod: parsed.data.refundMethod,
         reason: parsed.data.note,
         adminName: session.user.name,
-        currency: currencyContext,
+        currency: { ...currencyContext, currency: shop.preferredCurrency },
       })
       const notificationRows = [
         ...telegramNotificationRows(recipients, {

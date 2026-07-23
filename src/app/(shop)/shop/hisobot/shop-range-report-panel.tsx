@@ -81,7 +81,7 @@ export default function ShopRangeReportPanel({
     {
       label: 'Qaytarilgan pul',
       value: partitionText(totals.refunds, currency),
-      note: `${totals.returnCount} ta qaytarish; asl shartnoma valyutasida`,
+      note: `${totals.returnCount} ta qaytarish; qaytarish paytida tanlangan valyutada`,
       icon: RotateCcw,
       color: 'text-purple-600',
     },

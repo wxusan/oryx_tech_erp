@@ -3,7 +3,9 @@ import {
   calculateNasiyaReturnQuote,
   nasiyaReturnLedgerHasBlockingReasons,
   nasiyaScheduleStatusAfterReturn,
+  presentNasiyaReturnQuote,
 } from '@/lib/nasiya-return'
+import { createFxQuoteDto } from '@/lib/currency'
 import type { ReturnReceiptSource } from '@/lib/return-accounting'
 
 function receipt(overrides: Partial<ReturnReceiptSource> & Pick<ReturnReceiptSource, 'id'>): ReturnReceiptSource {
@@ -56,14 +58,12 @@ describe('Nasiya physical-return quote', () => {
     expect(result).toMatchObject({
       eligible: true,
       receiptEvidenceVerified: true,
-      defaultRefundMethod: 'CASH',
       receipts: { currency: 'UZS', minorUnits: 250 },
       defaultRefund: { currency: 'UZS', minorUnits: 100 },
       defaultRetained: { currency: 'UZS', minorUnits: 150 },
       maxRefund: { currency: 'UZS', minorUnits: 250 },
       cancelledDebt: { currency: 'UZS', minorUnits: 750 },
     })
-    expect(result.methodCapacities.find(({ method }) => method === 'CASH')?.available.minorUnits).toBe(250)
   })
 
   it('supports zero down payment and a zero-refund default without inventing a refund method', () => {
@@ -76,27 +76,56 @@ describe('Nasiya physical-return quote', () => {
     expect(result.defaultRefund.minorUnits).toBe(0)
     expect(result.defaultRetained.minorUnits).toBe(80)
     expect(result.maxRefund.minorUnits).toBe(80)
-    expect(result.defaultRefundMethod).toBeNull()
   })
 
-  it('uses split-receipt evidence to expose only the amount available per original method', () => {
+  it('does not require an original receipt method to verify the received amount', () => {
     const result = quote({
       contractDownPayment: 120,
       sources: [receipt({
-        id: 'split-down-payment',
+        id: 'legacy-down-payment',
         amountUzs: 200,
         appliedContractAmount: 200,
         paymentMethod: null,
-        paymentBreakdown: [
-          { method: 'CASH', amount: 120 },
-          { method: 'CARD', amount: 80 },
-        ],
+        paymentBreakdown: null,
       })],
     })
 
-    expect(result.defaultRefundMethod).toBe('CASH')
-    expect(result.methodCapacities.find(({ method }) => method === 'CASH')?.available.minorUnits).toBe(120)
-    expect(result.methodCapacities.find(({ method }) => method === 'CARD')?.available.minorUnits).toBe(80)
+    expect(result.eligible).toBe(true)
+    expect(result.receipts.minorUnits).toBe(200)
+    expect(result.defaultRefund.minorUnits).toBe(120)
+  })
+
+  it('presents every visible amount in the shop currency with native guards retained', () => {
+    const native = quote({
+      contractDownPayment: 1_250_001,
+      cancelledDebt: 2_500_000,
+      sources: [
+        receipt({
+          id: 'large-down-payment',
+          amountUzs: 1_250_001,
+          appliedContractAmount: 1_250_001,
+        }),
+      ],
+    })
+    const fxQuote = createFxQuoteDto({
+      rate: 12_500,
+      source: 'CBU',
+      fetchedAt: '2026-07-23T08:00:00.000Z',
+    })
+    const displayed = presentNasiyaReturnQuote(native, 'USD', fxQuote)
+
+    expect(displayed.eligible).toBe(true)
+    expect([
+      displayed.receipts,
+      displayed.defaultRefund,
+      displayed.defaultRetained,
+      displayed.maxRefund,
+      displayed.cancelledDebt,
+    ].every((money) => money.currency === 'USD')).toBe(true)
+    expect(displayed.maxRefund.minorUnits).toBe(10_000)
+    expect(displayed.contractReceipts).toEqual({ currency: 'UZS', minorUnits: 1_250_001 })
+    expect(displayed.contractCancelledDebt).toEqual({ currency: 'UZS', minorUnits: 2_500_000 })
+    expect(displayed.fxQuote?.rateMinorUnits).toBe(125_000_000)
   })
 
   it('blocks unverified historic accounting instead of inventing receipt or refund figures', () => {

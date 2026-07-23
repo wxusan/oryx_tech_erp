@@ -12,12 +12,16 @@ Use a staging database with disposable shop/customer data.
 8. Return a cash sale with refund equal to collected money. Confirm it succeeds.
 9. Try refund greater than collected money. Confirm it is rejected with the Uzbek cap error.
 10. Return an imported old nasiya with no post-import payments. Confirm any positive refund is rejected.
-11. Double-submit a shop subscription payment with the same idempotency key. Confirm one `ShopPayment` row and one due-date extension.
-12. Double-submit a nasiya carry-over with the same idempotency key. Confirm the date changes once, no `NasiyaPayment` row is created, and one deferral ledger row exists.
-13. Import an old nasiya with blank IMEI. Repeat with the same customer phone, model, remaining debt, monthly payment, and original sale date. Confirm the duplicate is blocked.
-14. Create a nasiya with uneven division. Confirm the preview schedule sum equals the created schedule sum and the last month absorbs the remainder.
-15. Upload a valid JPG/PNG/WEBP device image. Confirm it displays through `/api/uploads/device`.
-16. Try to create a device with an external `https://...` image URL. Confirm the API rejects it.
-17. Try uploading SVG/HTML content renamed as `.png`. Confirm upload is rejected.
-18. Attempt cross-shop device/image access as a Shop Admin. Confirm it is forbidden.
-19. Review dashboard and reports. Confirm gross cash, net cash, refunds, expected payments, accrual profit, and nasiya interest are clearly labeled.
+11. In a USD shop, open a return for a UZS-native Sale and Nasiya. Confirm every amount and the editable refund show only USD, then complete a cash refund for an original card receipt.
+12. In a UZS shop, open a return for a USD-native contract. Confirm every amount and the editable refund show only UZS.
+13. Change the shop currency or governed USD/UZS quote after opening the return modal. Confirm submission is rejected as stale and no device/contract/return row changes.
+14. Refund a full USD-native receipt in UZS after the rate increased. Confirm the return succeeds, the exact UZS input and frozen rate provenance are exported, and the FX loss reduces actual profit.
+15. Double-submit a shop subscription payment with the same idempotency key. Confirm one `ShopPayment` row and one due-date extension.
+16. Double-submit a nasiya carry-over with the same idempotency key. Confirm the date changes once, no `NasiyaPayment` row is created, and one deferral ledger row exists.
+17. Import an old nasiya with blank IMEI. Repeat with the same customer phone, model, remaining debt, monthly payment, and original sale date. Confirm the duplicate is blocked.
+18. Create a nasiya with uneven division. Confirm the preview schedule sum equals the created schedule sum and the last month absorbs the remainder.
+19. Upload a valid JPG/PNG/WEBP device image. Confirm it displays through `/api/uploads/device`.
+20. Try to create a device with an external `https://...` image URL. Confirm the API rejects it.
+21. Try uploading SVG/HTML content renamed as `.png`. Confirm upload is rejected.
+22. Attempt cross-shop device/image access as a Shop Admin. Confirm it is forbidden.
+23. Review dashboard and reports. Confirm gross cash, net cash, refunds, expected payments, accrual profit, and nasiya interest are clearly labeled.

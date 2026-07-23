@@ -980,6 +980,8 @@ async function returnDeviceRequest(input: {
   refundAmount: number
   refundMethod?: 'CASH' | 'TRANSFER' | 'CARD' | 'OTHER'
   note?: string
+  inputCurrency?: 'UZS' | 'USD'
+  expectedFxRateMinorUnits?: number | null
 }) {
   const { NextRequest } = await import('next/server')
   const { POST } = await import('@/app/api/devices/[id]/return/route')
@@ -989,7 +991,8 @@ async function returnDeviceRequest(input: {
     body: JSON.stringify({
       refundAmount: input.refundAmount,
       refundMethod: input.refundMethod,
-      inputCurrency: 'UZS',
+      inputCurrency: input.inputCurrency ?? 'UZS',
+      expectedFxRateMinorUnits: input.expectedFxRateMinorUnits ?? null,
       note: input.note ?? 'Qurilma qaytarildi',
     }),
   })
@@ -1005,6 +1008,7 @@ async function returnNasiyaRequest(input: {
   refundMethod?: 'CASH' | 'TRANSFER' | 'CARD' | 'OTHER'
   note?: string
   inputCurrency?: 'UZS' | 'USD'
+  expectedFxRateMinorUnits?: number | null
 }) {
   const { NextRequest } = await import('next/server')
   const { POST } = await import('@/app/api/nasiya/[id]/return/route')
@@ -1015,8 +1019,9 @@ async function returnNasiyaRequest(input: {
       refundAmount: input.refundAmount,
       refundMethod: input.refundMethod,
       inputCurrency: input.inputCurrency ?? 'UZS',
-      expectedReceiptsMinorUnits: input.expectedReceipts,
-      expectedRemainingMinorUnits: input.expectedRemaining,
+      expectedContractReceiptsMinorUnits: input.expectedReceipts,
+      expectedContractRemainingMinorUnits: input.expectedRemaining,
+      expectedFxRateMinorUnits: input.expectedFxRateMinorUnits ?? null,
       note: input.note ?? 'Mijozning holati sababli Nasiya qaytarildi',
     }),
   })
@@ -1998,7 +2003,112 @@ describe('real-PostgreSQL route evidence', () => {
     expect(zeroReturn.refundAllocations).toHaveLength(0)
   })
 
-  it('freezes a USD Nasiya refund at the current governed rate while preserving native contract values', async () => {
+  it('quotes and records a legacy UZS Nasiya entirely in a USD shop currency', async () => {
+    const actor = await seedActor('nasiya_return_usd_shop')
+    useShopAdmin(actor)
+    const fetchedAt = new Date()
+    await Promise.all([
+      prisma.shop.update({
+        where: { id: actor.shop.id },
+        data: { preferredCurrency: 'USD' },
+      }),
+      prisma.currencyRate.create({
+        data: {
+          baseCurrency: 'USD',
+          quoteCurrency: 'UZS',
+          rate: 1_000,
+          source: 'CBU',
+          effectiveDate: new Date('2026-07-23T00:00:00.000Z'),
+          fetchedAt,
+        },
+      }),
+    ])
+    const contract = await seedReturnableNasiya(actor, 'nasiya_return_usd_shop')
+
+    const detailResponse = await nasiyaDetailRequest(contract.nasiya.id)
+    expect(detailResponse.status).toBe(200)
+    const detail = await detailResponse.json() as {
+      data: {
+        returnQuote: {
+          displayCurrency: string
+          receipts: { currency: string; minorUnits: number }
+          defaultRefund: { currency: string; minorUnits: number }
+          defaultRetained: { currency: string; minorUnits: number }
+          maxRefund: { currency: string; minorUnits: number }
+          cancelledDebt: { currency: string; minorUnits: number }
+          contractReceipts: { currency: string; minorUnits: number }
+          contractCancelledDebt: { currency: string; minorUnits: number }
+        }
+      }
+    }
+    expect(detail.data.returnQuote).toMatchObject({
+      displayCurrency: 'USD',
+      receipts: { currency: 'USD', minorUnits: 25 },
+      defaultRefund: { currency: 'USD', minorUnits: 10 },
+      defaultRetained: { currency: 'USD', minorUnits: 15 },
+      maxRefund: { currency: 'USD', minorUnits: 25 },
+      cancelledDebt: { currency: 'USD', minorUnits: 85 },
+      contractReceipts: { currency: 'UZS', minorUnits: 250 },
+      contractCancelledDebt: { currency: 'UZS', minorUnits: 850 },
+    })
+
+    const wrongCurrency = await returnNasiyaRequest({
+      nasiyaId: contract.nasiya.id,
+      key: 'nasiya-return-wrong-shop-currency',
+      refundAmount: 100,
+      refundMethod: 'CARD',
+      inputCurrency: 'UZS',
+      expectedReceipts: 250,
+      expectedRemaining: 850,
+    })
+    expect(wrongCurrency.status).toBe(409)
+
+    const staleRate = await returnNasiyaRequest({
+      nasiyaId: contract.nasiya.id,
+      key: 'nasiya-return-stale-fx-quote',
+      refundAmount: 0.1,
+      refundMethod: 'CARD',
+      inputCurrency: 'USD',
+      expectedFxRateMinorUnits: 9_999_999,
+      expectedReceipts: 250,
+      expectedRemaining: 850,
+    })
+    expect(staleRate.status).toBe(409)
+    expect(await prisma.deviceReturn.count({ where: { nasiyaId: contract.nasiya.id } })).toBe(0)
+
+    const response = await returnNasiyaRequest({
+      nasiyaId: contract.nasiya.id,
+      key: 'nasiya-return-usd-shop-currency',
+      refundAmount: 0.1,
+      refundMethod: 'CARD',
+      inputCurrency: 'USD',
+      expectedFxRateMinorUnits: 10_000_000,
+      expectedReceipts: 250,
+      expectedRemaining: 850,
+    })
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+
+    const returned = await prisma.deviceReturn.findFirstOrThrow({
+      where: { nasiyaId: contract.nasiya.id },
+      include: { refundAllocations: true },
+    })
+    expect(returned.refundInputCurrency).toBe('USD')
+    expect(Number(returned.refundInputAmount)).toBe(0.1)
+    expect(Number(returned.refundExchangeRateAtCreation)).toBe(1_000)
+    expect(returned.refundExchangeRateSource).toBe('CBU')
+    expect(returned.refundExchangeRateFetchedAt?.toISOString()).toBe(fetchedAt.toISOString())
+    expect(returned.contractCurrency).toBe('UZS')
+    expect(Number(returned.contractRefundAmount)).toBe(100)
+    expect(Number(returned.refundAmount)).toBe(100)
+    expect(returned.refundAllocations).toEqual([
+      expect.objectContaining({
+        sourcePaymentMethod: 'CASH',
+        refundMethod: 'CARD',
+      }),
+    ])
+  })
+
+  it('uses a UZS shop refund for a USD contract and preserves the resulting FX loss', async () => {
     const actor = await seedActor('nasiya_return_usd')
     useShopAdmin(actor)
     await prisma.currencyRate.create({
@@ -2012,13 +2122,36 @@ describe('real-PostgreSQL route evidence', () => {
       },
     })
     const contract = await seedUsdSettlementNasiya(actor, 'nasiya_return_usd')
+    const detailResponse = await nasiyaDetailRequest(contract.nasiya.id)
+    expect(detailResponse.status).toBe(200)
+    const detail = await detailResponse.json() as {
+      data: {
+        returnQuote: {
+          displayCurrency: string
+          receipts: { currency: string; minorUnits: number }
+          defaultRefund: { currency: string; minorUnits: number }
+          maxRefund: { currency: string; minorUnits: number }
+          cancelledDebt: { currency: string; minorUnits: number }
+          contractReceipts: { currency: string; minorUnits: number }
+        }
+      }
+    }
+    expect(detail.data.returnQuote).toMatchObject({
+      displayCurrency: 'UZS',
+      receipts: { currency: 'UZS', minorUnits: 780_000 },
+      defaultRefund: { currency: 'UZS', minorUnits: 0 },
+      maxRefund: { currency: 'UZS', minorUnits: 780_000 },
+      cancelledDebt: { currency: 'UZS', minorUnits: 780_000 },
+      contractReceipts: { currency: 'USD', minorUnits: 6_000 },
+    })
 
     const response = await returnNasiyaRequest({
       nasiyaId: contract.nasiya.id,
       key: 'nasiya-return-usd-current-fx',
-      refundAmount: 20,
-      refundMethod: 'CARD',
-      inputCurrency: 'USD',
+      refundAmount: 780_000,
+      refundMethod: 'CASH',
+      inputCurrency: 'UZS',
+      expectedFxRateMinorUnits: 130_000_000,
       expectedReceipts: 6_000,
       expectedRemaining: 6_000,
     })
@@ -2030,15 +2163,32 @@ describe('real-PostgreSQL route evidence', () => {
     })
     expect(returned.contractCurrency).toBe('USD')
     expect(Number(returned.contractReceiptsAtReturn)).toBe(60)
-    expect(Number(returned.contractRefundAmount)).toBe(20)
-    expect(Number(returned.contractRetainedAmount)).toBe(40)
+    expect(Number(returned.refundInputAmount)).toBe(780_000)
+    expect(returned.refundInputCurrency).toBe('UZS')
+    expect(Number(returned.contractRefundAmount)).toBe(60)
+    expect(Number(returned.contractRetainedAmount)).toBe(0)
     expect(Number(returned.contractCancelledDebt)).toBe(60)
     expect(Number(returned.refundExchangeRateAtCreation)).toBe(13_000)
-    expect(Number(returned.refundAmount)).toBe(260_000)
-    expect(Number(returned.retainedValueAmountUzs)).toBe(460_000)
+    expect(returned.refundExchangeRateSource).toBe('CBU')
+    expect(returned.refundExchangeRateEffectiveAt?.toISOString()).toBe('2026-07-22T00:00:00.000Z')
+    expect(returned.refundExchangeRateFetchedAt).not.toBeNull()
+    expect(Number(returned.refundAmount)).toBe(780_000)
+    expect(Number(returned.retainedValueAmountUzs)).toBe(-60_000)
     expect(returned.refundAllocations).toHaveLength(1)
-    expect(Number(returned.refundAllocations[0].contractAmount)).toBe(20)
-    expect(Number(returned.refundAllocations[0].amountUzs)).toBe(260_000)
+    expect(returned.refundAllocations[0]).toMatchObject({
+      sourcePaymentMethod: 'CARD',
+      refundMethod: 'CASH',
+    })
+    expect(Number(returned.refundAllocations[0].contractAmount)).toBe(60)
+    expect(Number(returned.refundAllocations[0].amountUzs)).toBe(780_000)
+
+    const accounting = await getShopMonthlyAccountingAggregate({
+      shopId: actor.shop.id,
+      monthStart: new Date('2026-06-30T19:00:00.000Z'),
+      monthEnd: new Date('2026-07-31T19:00:00.000Z'),
+      adminId: null,
+    })
+    expect(accounting.actualProfitUzs).toBe(-60_000)
   })
 
   it('returns an already early-settled Nasiya without rewriting its completed settlement history', async () => {
@@ -2117,9 +2267,25 @@ describe('real-PostgreSQL route evidence', () => {
     expect((await prisma.device.findUniqueOrThrow({ where: { id: contract.device.id } })).status).toBe('SOLD_NASIYA')
   })
 
-  it('rejects a refund method that cannot be reconciled to original receipts', async () => {
+  it('records the original receipt method separately and allows a different refund method', async () => {
     const actor = await seedActor('return_method')
     useShopAdmin(actor)
+    const fetchedAt = new Date()
+    await Promise.all([
+      prisma.shop.update({
+        where: { id: actor.shop.id },
+        data: { preferredCurrency: 'USD' },
+      }),
+      prisma.currencyRate.create({
+        data: {
+          baseCurrency: 'USD',
+          quoteCurrency: 'UZS',
+          rate: 1_000,
+          source: 'CBU',
+          fetchedAt,
+        },
+      }),
+    ])
     const customer = await prisma.customer.create({
       data: { shopId: actor.shop.id, name: 'Method customer', phone: '+998907654321', normalizedPhone: '998907654321' },
     })
@@ -2143,15 +2309,44 @@ describe('real-PostgreSQL route evidence', () => {
       data: { shopId: actor.shop.id, saleId: sale.id, amount: 1_000, appliedAmountInContractCurrency: 1_000, paymentMethod: 'CARD', createdBy: actor.admin.id },
     })
 
+    const staleRate = await returnDeviceRequest({
+      deviceId: device.id,
+      key: 'return-method-stale-fx-key',
+      refundAmount: 0.1,
+      refundMethod: 'CASH',
+      inputCurrency: 'USD',
+      expectedFxRateMinorUnits: 9_999_999,
+    })
+    expect(staleRate.status).toBe(409)
+    expect(await prisma.deviceReturn.count({ where: { saleId: sale.id } })).toBe(0)
+
     const response = await returnDeviceRequest({
       deviceId: device.id,
       key: 'return-method-mismatch-key',
-      refundAmount: 100,
+      refundAmount: 0.1,
       refundMethod: 'CASH',
+      inputCurrency: 'USD',
+      expectedFxRateMinorUnits: 10_000_000,
     })
-    expect(response.status).toBe(400)
-    expect((await prisma.device.findUniqueOrThrow({ where: { id: device.id } })).status).toBe('SOLD_CASH')
-    expect(await prisma.deviceReturn.count()).toBe(0)
+    expect(response.status, JSON.stringify(await response.clone().json())).toBe(200)
+    expect((await prisma.device.findUniqueOrThrow({ where: { id: device.id } })).status).toBe('IN_STOCK')
+    const returned = await prisma.deviceReturn.findFirstOrThrow({
+      where: { saleId: sale.id },
+      include: { refundAllocations: true },
+    })
+    expect(returned.refundInputCurrency).toBe('USD')
+    expect(Number(returned.refundInputAmount)).toBe(0.1)
+    expect(Number(returned.refundAmount)).toBe(100)
+    expect(Number(returned.contractRefundAmount)).toBe(100)
+    expect(returned.refundExchangeRateSource).toBe('CBU')
+    expect(returned.refundExchangeRateFetchedAt?.toISOString()).toBe(fetchedAt.toISOString())
+    expect(returned.refundMethod).toBe('CASH')
+    expect(returned.refundAllocations).toEqual([
+      expect.objectContaining({
+        sourcePaymentMethod: 'CARD',
+        refundMethod: 'CASH',
+      }),
+    ])
   })
 
   it('records a zero-refund return without inventing a refund method or allocation', async () => {
