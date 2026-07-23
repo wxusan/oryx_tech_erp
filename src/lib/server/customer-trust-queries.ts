@@ -35,7 +35,9 @@ export async function getCustomerTrustFactorsForList(input: {
     SELECT
       c."id" AS customer_id,
       count(DISTINCT n."id")::integer AS total_nasiya_count,
-      count(DISTINCT n."id") FILTER (WHERE n."status" = 'COMPLETED')::integer AS completed_nasiya_count,
+      count(DISTINCT n."id") FILTER (
+        WHERE n."status" = 'COMPLETED'
+      )::integer AS completed_nasiya_count,
       count(DISTINCT n."id") FILTER (
         WHERE n."status" IN ('ACTIVE', 'OVERDUE') AND n."resolutionState" = 'ACTIVE'
       )::integer AS active_nasiya_count,
@@ -71,10 +73,10 @@ export async function getCustomerTrustFactorsForList(input: {
           AND coalesce(s."delayedUntil", s."dueDate") < ${todayStart}
           AND (
             (n."contractCurrency" = 'USD'
-              AND s."contractExpectedAmount" - s."contractPaidAmount" >= 0.01)
+              AND s."contractRemainingAmount" >= 0.01)
             OR
             (n."contractCurrency" = 'UZS'
-              AND s."contractExpectedAmount" - s."contractPaidAmount" >= 1)
+              AND s."contractRemainingAmount" >= 1)
           )
       )::integer AS current_overdue_schedule_count
     FROM "Customer" c
@@ -82,6 +84,7 @@ export async function getCustomerTrustFactorsForList(input: {
       ON n."customerId" = c."id"
       AND n."shopId" = c."shopId"
       AND n."deletedAt" IS NULL
+      AND n."returnedAt" IS NULL
     LEFT JOIN "NasiyaSchedule" s
       ON s."nasiyaId" = n."id"
       AND s."shopId" = n."shopId"

@@ -62,14 +62,14 @@ SELECT n.id AS nasiya_id,
        n."shopId",
        n."contractCurrency",
        n."contractRemainingAmount" AS parent_remaining,
-       COALESCE(SUM(GREATEST(s."contractExpectedAmount" - s."contractPaidAmount", 0)), 0) AS schedule_remaining
+       COALESCE(SUM(s."contractRemainingAmount"), 0) AS schedule_remaining
 FROM "Nasiya" n
 LEFT JOIN "NasiyaSchedule" s ON s."nasiyaId" = n.id
 WHERE n."deletedAt" IS NULL
   AND n.status = 'COMPLETED'::"NasiyaStatus"
 GROUP BY n.id, n."shopId", n."contractCurrency", n."contractRemainingAmount"
 HAVING n."contractRemainingAmount" > 0
-    OR COALESCE(SUM(GREATEST(s."contractExpectedAmount" - s."contractPaidAmount", 0)), 0) > 0
+    OR COALESCE(SUM(s."contractRemainingAmount"), 0) > 0
 ORDER BY n."shopId", n.id;
 
 \echo '== nasiya parent balance versus schedule balance =='
@@ -77,21 +77,46 @@ SELECT n.id AS nasiya_id,
        n."shopId",
        n."contractCurrency",
        n."contractRemainingAmount" AS parent_remaining,
-       COALESCE(SUM(GREATEST(s."contractExpectedAmount" - s."contractPaidAmount", 0)), 0) AS schedule_remaining,
+       COALESCE(SUM(s."contractRemainingAmount"), 0) AS schedule_remaining,
        n."contractRemainingAmount" -
-         COALESCE(SUM(GREATEST(s."contractExpectedAmount" - s."contractPaidAmount", 0)), 0) AS difference
+         COALESCE(SUM(s."contractRemainingAmount"), 0) AS difference
 FROM "Nasiya" n
 LEFT JOIN "NasiyaSchedule" s ON s."nasiyaId" = n.id
 WHERE n."deletedAt" IS NULL AND n.status <> 'CANCELLED'::"NasiyaStatus"
 GROUP BY n.id, n."shopId", n."contractCurrency", n."contractRemainingAmount"
 HAVING ABS(
   n."contractRemainingAmount" -
-  COALESCE(SUM(GREATEST(s."contractExpectedAmount" - s."contractPaidAmount", 0)), 0)
+  COALESCE(SUM(s."contractRemainingAmount"), 0)
 ) >= CASE WHEN n."contractCurrency" = 'USD'::"CurrencyCode" THEN 0.01 ELSE 500 END
 ORDER BY ABS(
   n."contractRemainingAmount" -
-  COALESCE(SUM(GREATEST(s."contractExpectedAmount" - s."contractPaidAmount", 0)), 0)
+  COALESCE(SUM(s."contractRemainingAmount"), 0)
 ) DESC;
+
+\echo '== nasiya settlement projection and allocation mismatches =='
+SELECT st.id AS settlement_id, st."shopId", st."nasiyaId", st.mode,
+       st."contractRemainingBefore", st."contractCashReceivedAmount",
+       st."contractInterestWaivedAmount", st."contractRemainingAfter"
+FROM "NasiyaSettlement" st
+JOIN "Nasiya" n ON n.id = st."nasiyaId" AND n."shopId" = st."shopId"
+LEFT JOIN "NasiyaSettlementAllocation" a
+  ON a."nasiyaSettlementId" = st.id AND a."shopId" = st."shopId"
+GROUP BY st.id, st."shopId", st."nasiyaId", st.mode, st."contractRemainingBefore",
+  st."contractCashReceivedAmount", st."contractInterestWaivedAmount", st."contractRemainingAfter",
+  st."cashReceivedAmountUzs", st."interestWaivedAmountUzs",
+  n.status, n."contractRemainingAmount", n."contractInterestWaivedAmount"
+HAVING COUNT(a.id) = 0
+   OR st."contractRemainingBefore" <> st."contractCashReceivedAmount" + st."contractInterestWaivedAmount" + st."contractRemainingAfter"
+   OR st."contractRemainingAfter" <> 0
+   OR n.status <> 'COMPLETED'::"NasiyaStatus"
+   OR n."contractRemainingAmount" <> 0
+   OR n."contractInterestWaivedAmount" <> st."contractInterestWaivedAmount"
+   OR COALESCE(SUM(a."contractRemainingBefore"), 0) <> st."contractRemainingBefore"
+   OR COALESCE(SUM(a."contractCashAmount"), 0) <> st."contractCashReceivedAmount"
+   OR COALESCE(SUM(a."contractInterestWaivedAmount"), 0) <> st."contractInterestWaivedAmount"
+   OR COALESCE(SUM(a."cashAmountUzs"), 0) <> st."cashReceivedAmountUzs"
+   OR COALESCE(SUM(a."interestWaivedAmountUzs"), 0) <> st."interestWaivedAmountUzs"
+ORDER BY st."shopId", st.id;
 
 \echo '== cross-shop relationship mismatches =='
 WITH mismatches AS (

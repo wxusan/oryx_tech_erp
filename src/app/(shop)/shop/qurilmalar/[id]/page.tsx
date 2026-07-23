@@ -1,9 +1,9 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import Image from 'next/image'
 import Link from 'next/link'
-import { useParams, useRouter } from 'next/navigation'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { Button, buttonVariants } from '@/components/ui/button'
 import { AsyncButton } from '@/components/ui/async-button'
 import { Input } from '@/components/ui/input'
@@ -19,7 +19,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, Di
 import { paymentMethodLabel } from '@/lib/labels'
 import { uzDate, uzDateTime } from '@/lib/dates'
 import { displayImei, deviceStatusLabel } from '@/lib/device-display'
-import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency, formatUserFacingMoney } from '@/lib/currency'
+import { convertUzsToUsd, currencyLabel, formatMoneyByCurrency, formatMoneyDto, formatUserFacingMoney, type MoneyDto } from '@/lib/currency'
 import {
   formatDisplayMoneyFromContract,
   computeSaleContractMargin,
@@ -44,6 +44,9 @@ import { DeviceActionHistory, type DeviceActionLog as DeviceLog } from '@/compon
 import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
+import { ImageViewer, useImageViewer } from '@/components/ui/image-viewer'
+import { ImageViewerTrigger } from '@/components/ui/image-viewer-trigger'
+import { SupplierPayablePaymentDialog } from '@/components/shop/supplier-payable-payment-dialog'
 
 interface Supplier {
   name: string
@@ -138,6 +141,21 @@ interface DeviceReturnInfo {
   createdAt: string
 }
 
+interface SupplierPayableInfo {
+  id: string
+  origin: 'OLIB_SOTDIM' | 'DEVICE_PURCHASE'
+  supplier: { name: string; phone: string }
+  originalAmount: MoneyDto
+  paidAmount: MoneyDto
+  remainingAmount: MoneyDto
+  dueDate: string
+  status: 'PENDING' | 'PARTIAL' | 'OVERDUE' | 'PAID' | 'CANCELLED'
+  lastPaymentAt: string | null
+  reminderEnabled: boolean
+  createdAt: string
+  payments: Array<{ id: string; amount: MoneyDto; method: string; paidAt: string }>
+}
+
 interface Device {
   id: string
   model: string
@@ -165,6 +183,7 @@ interface Device {
   sales?: Sale[]
   nasiya?: Nasiya[]
   returns?: DeviceReturnInfo[]
+  supplierPayables?: SupplierPayableInfo[]
 }
 
 function fmt(n: number, currency: ReturnType<typeof useShopCurrency>['currency']) {
@@ -186,6 +205,9 @@ export default function QurilmaDetailPage() {
     'SALE_REMINDER_MANAGE',
     'SALE_RETURN_REFUND',
     'OLIB_CREATE',
+    'SUPPLIER_PAYABLE_VIEW',
+    'SUPPLIER_PAYMENT_RECORD',
+    'SUPPLIER_PAYMENT_MARK_PAID',
   ].some((permission) => can(permission as Parameters<typeof can>[0]))
   if (!canOpen) return <ShopAccessDenied />
   return <AuthorizedQurilmaDetailPage />
@@ -206,13 +228,20 @@ function AuthorizedQurilmaDetailPage() {
   const canReceiveNasiyaPayment = can('NASIYA_PAYMENT_RECEIVE')
   const canReturnSale = can('SALE_RETURN_REFUND')
   const canViewLogs = can('LOG_VIEW')
+  const canViewSupplierPayables = can('SUPPLIER_PAYABLE_VIEW')
+  const canPaySupplierPayable = can('SUPPLIER_PAYMENT_RECORD') || can('SUPPLIER_PAYMENT_MARK_PAID')
+  const hasSalePurpose = can('SALE_VIEW') || canCreateCashSale || canEditCashSale || canReceiveSalePayment || canManageSaleReminder || canReturnSale
   const detailPurpose = canViewInventory
     ? null
     : (can('DEVICE_CREATE') || canEditDevice || canDeleteDevice || canRestockDevice)
       ? 'device'
-      : 'sale'
+      : hasSalePurpose
+        ? 'sale'
+        : 'payable'
   const backHref = canViewInventory || detailPurpose === 'device'
     ? '/shop/qurilmalar'
+    : detailPurpose === 'payable'
+      ? '/shop/qarzlar?tab=outgoing'
     : canReturnSale
       ? '/shop/qurilmalar'
     : (can('SALE_VIEW') || canEditCashSale || canManageSaleReminder)
@@ -222,6 +251,8 @@ function AuthorizedQurilmaDetailPage() {
         : '/shop/yangi-operatsiya'
   const backLabel = backHref === '/shop/sotuvlar'
     ? 'Sotuvlarga qaytish'
+    : backHref.startsWith('/shop/qarzlar')
+      ? 'Qarzlarga qaytish'
     : backHref === '/shop/tolovlar'
       ? "To'lovlarga qaytish"
       : backHref === '/shop/yangi-operatsiya'
@@ -230,6 +261,8 @@ function AuthorizedQurilmaDetailPage() {
   const salePaymentCommand = useLogicalCommandIdempotency()
   const returnCommand = useLogicalCommandIdempotency()
   const params = useParams()
+  const searchParams = useSearchParams()
+  const salePaymentAutoOpened = useRef(false)
   const router = useRouter()
   const queryClient = useQueryClient()
   const queryScope = useAuthenticatedQueryScope()
@@ -237,6 +270,8 @@ function AuthorizedQurilmaDetailPage() {
   const { currency } = useShopCurrency()
 
   const [device, setDevice] = useState<Device | null>(null)
+  const imageViewer = useImageViewer()
+  const [supplierPaymentOpen, setSupplierPaymentOpen] = useState(false)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [logs, setLogs] = useState<DeviceLog[]>([])
@@ -324,6 +359,38 @@ function AuthorizedQurilmaDetailPage() {
   useEffect(() => {
     fetchDevice()
   }, [fetchDevice])
+
+  useEffect(() => {
+    const sale = device?.sales?.[0]
+    if (
+      salePaymentAutoOpened.current || searchParams.get('action') !== 'sale-payment' ||
+      !canReceiveSalePayment || !sale || sale.paidFully || Number(sale.contractRemainingAmount) <= 0
+    ) return
+    const suggestedAmount = sale.contractCurrency !== currency.currency && !currency.usdUzsRate
+      ? String(sale.remainingAmount)
+      : (() => {
+        const suggestion = convertPaymentToContractCurrency(
+        sale.contractRemainingAmount,
+        sale.contractCurrency,
+        currency.currency,
+        currency.usdUzsRate,
+      )
+        return currency.currency === 'USD' ? suggestion.toFixed(2) : String(Math.round(suggestion))
+      })()
+    const frame = window.requestAnimationFrame(() => {
+      salePaymentAutoOpened.current = true
+      setSalePayMethod('')
+      setSalePayNote('')
+      setSaleSplitPayment(false)
+      setSaleSplitMethod2('')
+      setSaleSplitAmount1Input('')
+      setSaleSplitAmount2Input('')
+      setSaleSplitAmount2Touched(false)
+      setSalePayAmount(suggestedAmount)
+      setSalePaymentOpen(true)
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [canReceiveSalePayment, currency.currency, currency.usdUzsRate, device, searchParams])
 
   // Device lifecycle history (created -> sold -> returned -> restocked ...).
   useEffect(() => {
@@ -596,7 +663,8 @@ function AuthorizedQurilmaDetailPage() {
 
   async function handleReturnDevice() {
     const refundAmount = Number(returnRefundAmount || 0)
-  const returnCurrency = device?.sales?.[0]?.contractCurrency ?? currency.currency
+    const returnCurrency = currency.currency
+    const returnContractCurrency = device?.sales?.[0]?.contractCurrency ?? returnCurrency
     if (returnNote.trim().length < 5) {
       setReturnError("Qaytarish sababi kamida 5 ta belgidan iborat bo'lishi kerak")
       requestAnimationFrame(() => document.getElementById('return-note')?.focus())
@@ -612,6 +680,14 @@ function AuthorizedQurilmaDetailPage() {
       requestAnimationFrame(() => document.getElementById('return-refund-method')?.focus())
       return
     }
+    if (
+      refundAmount > 0 &&
+      (returnCurrency === 'USD' || returnContractCurrency === 'USD') &&
+      !currency.fxQuote?.rateMinorUnits
+    ) {
+      setReturnError('USD/UZS kursi mavjud emas. Qaytarish summasini hozir saqlab bo‘lmaydi')
+      return
+    }
     if (returning) return
     setReturning(true)
     setReturnError('')
@@ -621,6 +697,7 @@ function AuthorizedQurilmaDetailPage() {
         refundAmount,
         inputCurrency: returnCurrency,
         refundMethod: refundAmount > 0 ? returnRefundMethod : undefined,
+        expectedFxRateMinorUnits: currency.fxQuote?.rateMinorUnits ?? null,
       }
       const res = await fetch(`/api/devices/${id}/return`, {
         method: 'POST',
@@ -749,7 +826,7 @@ function AuthorizedQurilmaDetailPage() {
       ? formatDisplayMoneyFromContract(amount, latestSale.contractCurrency, currency.currency, currency.usdUzsRate)
       : fmt(amount, currency)
   const latestNasiya = device.nasiya?.[0]
-  const returnContractCurrency = latestSale?.contractCurrency ?? latestNasiya?.contractCurrency ?? currency.currency
+  const returnInputCurrency = currency.currency
   // Money TEXT for this nasiya must convert from its own contract currency
   // via today's rate — never reconvert the legacy UZS snapshot (frozen at
   // creation rate), which would stay stuck showing so'm for a USD-native
@@ -776,6 +853,7 @@ function AuthorizedQurilmaDetailPage() {
       )
     : null
   const latestReturn = device.returns?.[0]
+  const latestSupplierPayable = device.supplierPayables?.[0]
   const nasiyaPct =
     latestNasiya && latestNasiya.contractFinalAmount > 0
       ? Math.round(((latestNasiya.contractFinalAmount - latestNasiya.contractRemainingAmount) / latestNasiya.contractFinalAmount) * 100)
@@ -852,33 +930,49 @@ function AuthorizedQurilmaDetailPage() {
       </div>
 
       {device.imageUrls.length > 0 && (
-        <div className="border border-zinc-200 rounded overflow-hidden">
-          <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
-            <span className="text-sm font-semibold text-zinc-900">Qurilma rasmlari</span>
-          </div>
-          <div className="p-4">
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-              {device.imageUrls.map((imageUrl, index) => (
-                <a
-                  key={`${imageUrl}-${index}`}
-                  href={getDeviceImageSrc(imageUrl)}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="relative block aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50 hover:opacity-90"
-                >
-                  <Image
-                    src={getDeviceImageSrc(imageUrl)}
-                    alt={`${device.model} rasmi ${index + 1}`}
-                    fill
-                    sizes="(max-width: 640px) 50vw, 220px"
-                    unoptimized
-                    className="object-cover"
-                  />
-                </a>
-              ))}
+        <>
+          <div className="border border-zinc-200 rounded overflow-hidden">
+            <div className="px-4 py-3 bg-zinc-50 border-b border-zinc-200">
+              <span className="text-sm font-semibold text-zinc-900">Qurilma rasmlari</span>
+            </div>
+            <div className="p-4">
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                {device.imageUrls.map((imageUrl, index) => (
+                  <div
+                    key={`${imageUrl}-${index}`}
+                    className="relative aspect-square overflow-hidden rounded border border-zinc-200 bg-zinc-50"
+                  >
+                    <Image
+                      src={getDeviceImageSrc(imageUrl)}
+                      alt={`${device.model} rasmi ${index + 1}`}
+                      fill
+                      sizes="(max-width: 640px) 50vw, 220px"
+                      unoptimized
+                      className="object-cover"
+                    />
+                    <ImageViewerTrigger
+                      label={`${device.model} ${index + 1}-rasmini kattalashtirish`}
+                      onClick={(trigger) => imageViewer.openAt(index, trigger)}
+                    />
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
+          <ImageViewer
+            images={device.imageUrls.map((imageUrl, index) => ({
+              id: `${imageUrl}-${index}`,
+              src: getDeviceImageSrc(imageUrl),
+              alt: `${device.model} rasmi ${index + 1}`,
+            }))}
+            open={imageViewer.open}
+            activeIndex={imageViewer.activeIndex}
+            onOpenChange={imageViewer.onOpenChange}
+            onActiveIndexChange={imageViewer.onActiveIndexChange}
+            finalFocusRef={imageViewer.finalFocusRef}
+            title={`${device.model} rasmlari`}
+          />
+        </>
       )}
 
       {/* Device info card */}
@@ -901,6 +995,41 @@ function AuthorizedQurilmaDetailPage() {
           ))}
         </div>
       </div>
+
+      {canViewSupplierPayables && latestSupplierPayable && (
+        <div className="overflow-hidden rounded border border-amber-200 bg-amber-50/30">
+          <div className="flex items-center justify-between gap-3 border-b border-amber-200 bg-amber-50 px-4 py-3">
+            <span className="text-sm font-semibold text-amber-950">Yetkazib beruvchiga qarz</span>
+            <span className="rounded-full bg-white px-2 py-1 text-xs font-medium text-amber-800">
+              {latestSupplierPayable.status === 'PAID' ? 'To‘langan' : latestSupplierPayable.status === 'PARTIAL' ? 'Qisman to‘langan' : latestSupplierPayable.status === 'OVERDUE' ? 'Muddati o‘tgan' : 'Kutilmoqda'}
+            </span>
+          </div>
+          <div className="space-y-4 p-4">
+            <div>
+              <div className="font-medium text-zinc-900">{latestSupplierPayable.supplier.name}</div>
+              <div className="text-xs text-zinc-500">{formatUzPhoneDisplay(latestSupplierPayable.supplier.phone)} · {latestSupplierPayable.origin === 'DEVICE_PURCHASE' ? 'Qurilma xaridi' : 'Olib-sotdim'}</div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 rounded-lg bg-white p-3 text-xs">
+              <div><span className="block text-zinc-500">Jami</span><strong>{formatMoneyDto(latestSupplierPayable.originalAmount)}</strong></div>
+              <div><span className="block text-zinc-500">To‘langan</span><strong className="text-emerald-700">{formatMoneyDto(latestSupplierPayable.paidAmount)}</strong></div>
+              <div><span className="block text-zinc-500">Qolgan</span><strong className="text-red-700">{formatMoneyDto(latestSupplierPayable.remainingAmount)}</strong></div>
+            </div>
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <span className="text-zinc-600">Muddat: <strong>{uzDate(latestSupplierPayable.dueDate)}</strong></span>
+              {latestSupplierPayable.lastPaymentAt && <span className="text-xs text-zinc-500">Oxirgi to‘lov: {uzDateTime(latestSupplierPayable.lastPaymentAt)}</span>}
+            </div>
+            {latestSupplierPayable.payments.length > 0 && <details className="text-xs text-zinc-600">
+              <summary className="cursor-pointer font-medium">Oxirgi to‘lovlar</summary>
+              <div className="mt-2 space-y-1 border-l border-amber-200 pl-3">
+                {latestSupplierPayable.payments.map((payment) => <div key={payment.id} className="flex justify-between gap-3"><span>{uzDateTime(payment.paidAt)} · {paymentMethodLabel(payment.method)}</span><strong>{formatMoneyDto(payment.amount)}</strong></div>)}
+              </div>
+            </details>}
+            {canPaySupplierPayable && latestSupplierPayable.remainingAmount.minorUnits > 0 && (
+              <Button onClick={() => setSupplierPaymentOpen(true)}>To‘lov qilish</Button>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Inconsistent-data fallback: device is marked sold but the sale
           relation itself is missing (should not happen, but must never
@@ -1194,7 +1323,8 @@ function AuthorizedQurilmaDetailPage() {
                     ? formatUserFacingMoney({
                         amount: latestReturn.refundInputAmount,
                         amountCurrency: latestReturn.refundInputCurrency,
-                        displayCurrency: latestReturn.refundInputCurrency,
+                        displayCurrency: currency.currency,
+                        rate: currency.usdUzsRate,
                       })
                     : fmt(latestReturn.refundAmount, currency)}
                 </span>
@@ -1202,7 +1332,7 @@ function AuthorizedQurilmaDetailPage() {
             )}
             {latestReturn.refundMethod && (
               <div className="flex gap-4 text-sm">
-                <span className="text-zinc-500 w-32">To&apos;lov usuli</span>
+                <span className="text-zinc-500 w-32">Qaytarish usuli</span>
                 <span className="text-zinc-900 font-medium">{paymentMethodLabel(latestReturn.refundMethod)}</span>
               </div>
             )}
@@ -1212,7 +1342,8 @@ function AuthorizedQurilmaDetailPage() {
                 {formatUserFacingMoney({
                   amount: latestReturn.contractReceiptsAtReturn,
                   amountCurrency: latestReturn.contractCurrency,
-                  displayCurrency: latestReturn.contractCurrency,
+                  displayCurrency: currency.currency,
+                  rate: currency.usdUzsRate,
                 })}
               </span>
             </div>
@@ -1222,7 +1353,8 @@ function AuthorizedQurilmaDetailPage() {
                 {formatUserFacingMoney({
                   amount: latestReturn.contractRetainedAmount,
                   amountCurrency: latestReturn.contractCurrency,
-                  displayCurrency: latestReturn.contractCurrency,
+                  displayCurrency: currency.currency,
+                  rate: currency.usdUzsRate,
                 })}
               </span>
             </div>
@@ -1232,7 +1364,8 @@ function AuthorizedQurilmaDetailPage() {
                 {formatUserFacingMoney({
                   amount: latestReturn.contractCancelledDebt,
                   amountCurrency: latestReturn.contractCurrency,
-                  displayCurrency: latestReturn.contractCurrency,
+                  displayCurrency: currency.currency,
+                  rate: currency.usdUzsRate,
                 })}
               </span>
             </div>
@@ -1713,11 +1846,11 @@ function AuthorizedQurilmaDetailPage() {
             </Field>
             <div>
               <label htmlFor="return-refund-amount" className="text-xs font-medium text-zinc-700 block mb-1.5">
-                Qaytarilgan summa ({currencyLabel(returnContractCurrency)})
+                Qaytarilgan summa ({currencyLabel(returnInputCurrency)})
               </label>
               <MoneyInput
                 id="return-refund-amount"
-                currency={returnContractCurrency}
+                currency={returnInputCurrency}
                 value={returnRefundAmount}
                 onChange={setReturnRefundAmount}
                 placeholder="0"
@@ -1799,6 +1932,12 @@ function AuthorizedQurilmaDetailPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+      <SupplierPayablePaymentDialog
+        target={latestSupplierPayable ? { id: latestSupplierPayable.id, deviceId: device.id, remainingAmount: latestSupplierPayable.remainingAmount } : null}
+        open={supplierPaymentOpen}
+        onOpenChange={setSupplierPaymentOpen}
+        onPaid={() => fetchDevice()}
+      />
     </div>
   )
 }

@@ -141,6 +141,32 @@ describe('multiple fully-completed, all-on-time nasiyas -> VERY_HIGH', () => {
   })
 })
 
+describe('profit-waived settlement metadata does not affect trust statistics', () => {
+  it('uses only completion status and actual payment timing', () => {
+    const rating = computeCustomerTrustRating([{
+      status: 'COMPLETED',
+      contractCurrency: 'UZS',
+      schedules: [
+        paidOnTime(new Date('2026-05-01'), new Date('2026-05-01')),
+        {
+          status: 'SETTLED',
+          dueDate: new Date('2026-06-01'),
+          delayedUntil: null,
+          expectedAmount: 100_000,
+          paidAmount: 80_000,
+          interestWaivedAmount: 20_000,
+          paidAt: new Date('2026-05-15'),
+        },
+      ],
+    }], now)
+
+    expect(rating.factors.completedNasiyaCount).toBe(1)
+    expect(rating.factors).not.toHaveProperty('settledWithWaiverCount')
+    expect(rating.factors.paidInstallmentCount).toBe(1)
+    expect(rating.reasons.join(' ')).not.toContain('kechilib')
+  })
+})
+
 describe('one completed nasiya with a couple of late payments -> a mid tier, not VERY_HIGH', () => {
   it('late history keeps it out of VERY_HIGH', () => {
     const nasiyas: CustomerNasiyaInput[] = [
@@ -203,6 +229,32 @@ describe('cancelled nasiya history is a negative signal', () => {
     // The cancelled deal's schedule is excluded from paid-installment counting.
     expect(rating.factors.paidInstallmentCount).toBe(3)
     expect(rating.tier).not.toBe('VERY_HIGH')
+  })
+})
+
+describe('a physically returned Nasiya is neutral trust history', () => {
+  it('removes the entire deal, including paid and cancelled schedule signals, from the rating', () => {
+    const rating = computeCustomerTrustRating([{
+      status: 'CANCELLED',
+      returnedAt: new Date('2026-07-08T10:00:00.000Z'),
+      contractCurrency: 'UZS',
+      schedules: [
+        paidLate(new Date('2026-05-01'), 30),
+        overdueUnpaid(new Date('2026-06-01')),
+      ],
+    }], now)
+
+    expect(rating.tier).toBe('NEW')
+    expect(rating.factors).toMatchObject({
+      totalNasiyaCount: 0,
+      completedNasiyaCount: 0,
+      activeNasiyaCount: 0,
+      cancelledNasiyaCount: 0,
+      paidInstallmentCount: 0,
+      lateInstallmentCount: 0,
+      currentOverdueScheduleCount: 0,
+      hasCurrentOverdue: false,
+    })
   })
 })
 

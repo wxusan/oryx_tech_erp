@@ -37,7 +37,7 @@ describe('early reminder validation (days must be 1-60, required only when enabl
 
   it('requires earlyReminderDays only when earlyReminderEnabled is true', () => {
     const occurrences = validations.split('!data.earlyReminderEnabled || data.earlyReminderDays !== undefined').length - 1
-    expect(occurrences).toBe(3) // nasiya, sale, and olib-sotdim (supplier side)
+    expect(occurrences).toBe(4) // device purchase, nasiya, sale, and olib-sotdim supplier side
   })
 })
 

@@ -140,42 +140,69 @@ export async function getLiveShopPrincipalForMutation(
 ): Promise<ShopPrincipal | null> {
   const now = input.now ?? new Date()
   const subscriptionCutoff = new Date(now.getTime() - 3 * 24 * 60 * 60 * 1000)
-  const [shop, member, packageVersion] = await Promise.all([
-    reader.shop.findFirst({
-      where: {
-        id: input.shopId,
-        status: 'ACTIVE',
-        deletedAt: null,
-        subscriptionDue: { gte: subscriptionCutoff },
-      },
-      select: { ownerAdminId: true, authorizationVersion: true },
-    }),
-    reader.shopAdmin.findFirst({
-      where: {
-        id: input.actorId,
-        shopId: input.shopId,
-        isActive: true,
-        deletedAt: null,
-      },
-      select: {
-        legacyFullAccess: true,
-        permissionVersion: true,
-        permissions: { select: { permissionCode: true } },
-      },
-    }),
-    getActiveShopPackage(input.shopId, now, reader),
-  ])
-  if (!shop || !member || !packageVersion) return null
-  return buildShopPrincipal({
+  const businessDay = businessDate(tashkentTodayInputValue(now))
+  const rows = await reader.$queryRaw<Array<{
+    ownerAdminId: string | null
+    authorizationVersion: number
+    legacyFullAccess: boolean
+    permissionVersion: number
+    packageVersionId: string
+    permissionCodes: string[]
+    enabledFeatureCodes: string[]
+  }>>(Prisma.sql`
+    SELECT
+      shop."ownerAdminId" AS "ownerAdminId",
+      shop."authorizationVersion" AS "authorizationVersion",
+      member."legacyFullAccess" AS "legacyFullAccess",
+      member."permissionVersion" AS "permissionVersion",
+      package."id" AS "packageVersionId",
+      ARRAY(
+        SELECT permission."permissionCode"
+        FROM "ShopMemberPermission" permission
+        WHERE permission."shopId" = shop."id"
+          AND permission."shopAdminId" = member."id"
+        ORDER BY permission."permissionCode"
+      ) AS "permissionCodes",
+      ARRAY(
+        SELECT package_feature."featureCode"
+        FROM "ShopPackageFeature" package_feature
+        WHERE package_feature."packageVersionId" = package."id"
+          AND package_feature."enabled" = TRUE
+        ORDER BY package_feature."featureCode"
+      ) AS "enabledFeatureCodes"
+    FROM "Shop" shop
+    JOIN "ShopAdmin" member
+      ON member."id" = ${input.actorId}
+      AND member."shopId" = shop."id"
+      AND member."isActive" = TRUE
+      AND member."deletedAt" IS NULL
+    JOIN LATERAL (
+      SELECT package_version."id"
+      FROM "ShopPackageVersion" package_version
+      WHERE package_version."shopId" = shop."id"
+        AND package_version."effectiveOn" <= ${businessDay}
+      ORDER BY package_version."effectiveOn" DESC, package_version."createdAt" DESC
+      LIMIT 1
+    ) package ON TRUE
+    WHERE shop."id" = ${input.shopId}
+      AND shop."status" = 'ACTIVE'
+      AND shop."deletedAt" IS NULL
+      AND shop."subscriptionDue" >= ${subscriptionCutoff}
+    LIMIT 1
+  `)
+  const row = rows[0]
+  if (!row) return null
+  return {
     actorId: input.actorId,
     shopId: input.shopId,
-    ownerAdminId: shop.ownerAdminId,
-    legacyFullAccess: member.legacyFullAccess,
-    authorizationVersion: shop.authorizationVersion,
-    permissionVersion: member.permissionVersion,
-    permissionCodes: member.permissions.map((item) => item.permissionCode),
-    packageVersion,
-  })
+    memberKind: shopMemberKind({ memberId: input.actorId, ownerAdminId: row.ownerAdminId }),
+    legacyFullAccess: row.legacyFullAccess,
+    authorizationVersion: row.authorizationVersion,
+    permissionVersion: row.permissionVersion,
+    enabledFeatures: new Set(row.enabledFeatureCodes.filter(isShopFeatureCode)) as ReadonlySet<ShopFeatureCode>,
+    grantedPermissions: expandShopPermissionCodes(row.permissionCodes),
+    packageVersionId: row.packageVersionId,
+  }
 }
 
 /** One set-based query for cron/domain jobs that need the currently active package entitlement. */

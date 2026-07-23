@@ -11,7 +11,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { createSaleSchema } from '@/lib/validations'
 import { created, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
-import { processPendingNotifications } from '@/lib/notification-service'
+import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { deviceSoldMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { rateLimitKey } from '@/lib/rate-limit'
@@ -25,6 +25,7 @@ import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
 import { allocateCumulativePaymentComponents, buildSaleComponentPlan, splitUzsReportingAmount } from '@/lib/payment-profit-allocation'
 import { createHash } from 'node:crypto'
+import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -124,7 +125,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
-        include: { shop: { select: { name: true, ownerAdminId: true } }, imeis: { where: { deletedAt: null } } },
+        include: { shop: { select: { name: true } }, imeis: { where: { deletedAt: null } } },
       })
 
       if (!device) throw { status: 404, message: "Qurilma topilmadi" }
@@ -235,45 +236,41 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         })
       }
 
-      const shopAdmins = await tx.shopAdmin.findMany({
-        // This template includes profit; only the shop owner may receive it.
-        where: {
-          shopId,
-          id: device.shop.ownerAdminId ?? '__no-shop-owner__',
-          deletedAt: null,
-          isActive: true,
-          telegramId: { not: '' },
-          telegramVerifiedAt: { not: null },
-        },
+      // This template includes profit; only the shop owner may receive it.
+      const recipients = await resolveTelegramRecipients(tx, {
+        shopId,
+        audience: TELEGRAM_AUDIENCES.OWNER_ONLY,
       })
-      for (const admin of shopAdmins) {
-        await tx.notification.create({
-          data: {
-            shopId,
-            type: 'SALE',
-            message: deviceSoldMessage({
-              shopName: device.shop.name,
-              device: presentDeviceSpecs(device),
-              customerName: customer.name,
-              customerPhone: customer.phone,
-              salePrice: contractSalePrice,
-              paidAmount: contractPaid,
-              remaining: contractRemaining,
-              contractCurrency,
-              paymentMethod,
-              adminName: session.user.name,
-              currency,
-              // Item 14 — sale margin, shown when computable (never guessed).
-              profit: contractMarginAmount,
-            }),
-            telegramId: admin.telegramId!,
-            recipientShopAdminId: admin.id,
-            scheduledAt: new Date(),
-            relatedId: sale.id,
-            relatedType: 'Sale',
-          },
-        })
-      }
+      const scheduledAt = new Date()
+      const notificationRows = [
+        ...telegramNotificationRows(recipients, {
+          type: 'SALE',
+          message: deviceSoldMessage({
+          shopName: device.shop.name,
+          device: presentDeviceSpecs(device),
+          customerName: customer.name,
+          customerPhone: customer.phone,
+          salePrice: contractSalePrice,
+          paidAmount: contractPaid,
+          remaining: contractRemaining,
+          contractCurrency,
+          paymentMethod,
+          adminName: session.user.name,
+          currency,
+          // Item 14 — sale margin, shown when computable (never guessed).
+          profit: contractMarginAmount,
+          }),
+          scheduledAt,
+          relatedId: sale.id,
+          relatedType: 'Sale',
+        }),
+        ...telegramUnavailableMarkerRows(recipients, {
+          type: 'SALE',
+          dedupeScope: sale.id,
+          cancelledAt: scheduledAt,
+        }),
+      ]
+      if (notificationRows.length > 0) await tx.notification.createMany({ data: notificationRows })
 
       await tx.log.create({
         data: {
@@ -325,7 +322,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // Flush freshly-queued notifications after the response (non-blocking).
     // The rows are already committed, so cron is the backstop if this misses.
     if (!result.duplicate) {
-      after(() => processPendingNotifications().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
+      after(() => flushQueuedTelegramWork().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
     }
 
     return created(result.sale, result.duplicate ? 'Bu sotuv avval saqlangan' : "Qurilma muvaffaqiyatli sotildi")

@@ -26,6 +26,14 @@ function allMigrationCatalogCodes() {
   return new Set(codes)
 }
 
+function allMigrationSource() {
+  const root = resolve(process.cwd(), 'prisma/migrations')
+  return readdirSync(root, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => readFileSync(resolve(root, entry.name, 'migration.sql'), 'utf8'))
+    .join('\n')
+}
+
 describe('Staff Permissions V2 migration source guard', () => {
   it('keeps every historical SQL catalog permission classified as active or retired', () => {
     const definedAcrossMigrations = allMigrationCatalogCodes()
@@ -37,9 +45,14 @@ describe('Staff Permissions V2 migration source guard', () => {
   })
 
   it('contains every documented legacy mapping and no retired target', () => {
+    const migrations = allMigrationSource()
     for (const oldCode of RETIRED_SHOP_PERMISSION_CODES) {
       for (const newCode of LEGACY_PERMISSION_EXPANSIONS[oldCode]) {
-        expect(migration).toContain(`('${oldCode}', '${newCode}')`)
+        if (newCode === 'SUPPLIER_PAYMENT_RECORD') {
+          expect(migrations).toContain("WHEN 'SUPPLIER_PAYMENT_MARK_PAID' THEN 'SUPPLIER_PAYMENT_RECORD'")
+        } else {
+          expect(migrations).toContain(`('${oldCode}', '${newCode}')`)
+        }
         expect(RETIRED_SHOP_PERMISSION_CODES).not.toContain(newCode)
       }
     }
@@ -93,23 +106,31 @@ describe('Staff Permissions V2 live-boundary source guard', () => {
     const updateRoute = readFileSync(resolve(process.cwd(), 'src/app/api/shop/staff/[id]/route.ts'), 'utf8')
     const access = readFileSync(resolve(process.cwd(), 'src/lib/server/shop-access.ts'), 'utf8')
     expect(access).toContain('export async function getLiveShopPrincipalForMutation(')
-    expect(access).toContain("subscriptionDue: { gte: subscriptionCutoff }")
+    expect(access).toContain('shop."subscriptionDue" >= ${subscriptionCutoff}')
+    expect(access).toContain('member."isActive" = TRUE')
+    expect(access).toContain('package_version."effectiveOn" <= ${businessDay}')
     expect(createRoute).toContain("principalHasPermission(livePrincipal, 'STAFF_CREATE')")
     expect(updateRoute).toContain('for (const [included, permission] of requiredPermissions)')
     expect(updateRoute).toContain("principalHasPermission(livePrincipal, 'STAFF_DELETE')")
     expect(updateRoute).toContain("throw Object.assign(new Error('AUTHORIZATION_CHANGED')")
   })
 
-  it('keeps presets as package-filtered form helpers and never runtime roles', () => {
-    const staffUi = readFileSync(resolve(process.cwd(), 'src/components/shop/staff-management.tsx'), 'utf8')
-    expect(staffUi).toContain('const staffPermissionPresets:')
+  it('stores reusable shop roles while keeping effective authorization materialized', () => {
+    const presets = readFileSync(resolve(process.cwd(), 'src/lib/staff-role-presets.ts'), 'utf8')
+    const schema = readFileSync(resolve(process.cwd(), 'prisma/schema.prisma'), 'utf8')
+    const auth = readFileSync(resolve(process.cwd(), 'src/lib/api-auth.ts'), 'utf8')
+    const page = readFileSync(resolve(process.cwd(), 'src/app/(shop)/shop/xodimlar/page.tsx'), 'utf8')
+    expect(presets).toContain('SHOP_STAFF_ROLE_PRESETS')
     for (const label of ['Kassir', 'Omborchi', 'Nasiya undiruvchi', 'Nazoratchi', 'Hisobchi']) {
-      expect(staffUi).toContain(`label: '${label}'`)
+      expect(presets).toContain(`name: '${label}'`)
     }
-    expect(staffUi).toContain('permissionRequiredFeatures(permission.code).every')
-    expect(staffUi).toContain('window.confirm(`${sensitiveAdditions.length} ta muhim ruxsatni yoqishni tasdiqlaysizmi?`)')
-    const accessControl = readFileSync(resolve(process.cwd(), 'src/lib/access-control.ts'), 'utf8')
-    expect(accessControl).not.toContain('staffPermissionPresets')
+    expect(schema).toContain('model ShopStaffRole {')
+    expect(schema).toContain('model ShopStaffRolePermission {')
+    expect(schema).toContain('staffRoleId')
+    expect(auth).not.toContain('staffRole:')
+    expect(auth).not.toContain('ShopStaffRole')
+    expect(page).toContain('Promise.all([')
+    expect(page).toContain('getShopStaffRoles(')
   })
 
   it('prevents the signed-in owner credentials from autofilling the new-staff form', () => {
@@ -166,7 +187,7 @@ describe('Staff Permissions V2 live-boundary source guard', () => {
       expect(sync).not.toMatch(new RegExp(`['"]${retired}['"]`))
       expect(navigation).not.toMatch(new RegExp(`['"]${retired}['"]`))
     }
-    expect(sync).toContain("allow(['SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE', 'SUPPLIER_PAYMENT_MARK_PAID'], ['payments'])")
+    expect(sync).toContain("allow(['SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID'], ['payments'])")
     expect(sync).toContain("allow(['LOG_VIEW'], ['logs'])")
   })
 })

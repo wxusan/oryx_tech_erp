@@ -29,8 +29,8 @@ interface ReturnCandidate {
   color: string | null
   storage: string | null
   imei: string
-  status: 'SOLD_CASH' | 'SOLD_DEBT' | 'SOLD_NASIYA'
-  contractType: 'SALE' | 'NASIYA'
+  status: 'SOLD_CASH' | 'SOLD_DEBT'
+  contractType: 'SALE'
   contractId: string | null
   contractCurrency: 'UZS' | 'USD'
   customer: { name: string; phone: string } | null
@@ -106,11 +106,20 @@ export default function ReturnWorkQueue() {
       setSubmitError('Pul qaytarilsa, qaytarish usulini tanlang')
       return
     }
+    if (
+      amount > 0 &&
+      (currency.currency === 'USD' || selected.contractCurrency === 'USD') &&
+      !currency.fxQuote?.rateMinorUnits
+    ) {
+      setSubmitError('USD/UZS kursi mavjud emas. Qaytarish summasini hozir saqlab bo‘lmaydi')
+      return
+    }
     const payload = {
       note: note.trim(),
       refundAmount: amount,
       refundMethod: amount > 0 ? refundMethod : undefined,
       inputCurrency: currency.currency,
+      expectedFxRateMinorUnits: currency.fxQuote?.rateMinorUnits ?? null,
     }
     setSubmitting(true)
     setSubmitError('')
@@ -144,8 +153,8 @@ export default function ReturnWorkQueue() {
   return (
     <div className="mx-auto max-w-5xl space-y-5 p-4 sm:p-6">
       <div>
-        <h1 className="text-xl font-bold text-zinc-900">Qaytarish va bekor qilish</h1>
-        <p className="mt-1 text-sm text-zinc-500">Sotuv yoki nasiyani tanlang</p>
+        <h1 className="text-xl font-bold text-zinc-900">Sotuvni qaytarish</h1>
+        <p className="mt-1 text-sm text-zinc-500">Qaytariladigan sotuvni tanlang</p>
       </div>
 
       <div className="max-w-xl">
@@ -174,8 +183,8 @@ export default function ReturnWorkQueue() {
                   {item.customer?.name ?? 'Mijoz'}{item.customer?.phone ? ` · ${formatUzPhoneDisplay(item.customer.phone)}` : ''}
                 </div>
               </div>
-              <Button type="button" variant={item.contractType === 'NASIYA' ? 'destructive' : 'outline'} onClick={() => open(item)}>
-                <Undo2 className="size-4" /> {item.contractType === 'NASIYA' ? 'Nasiyani bekor qilish' : 'Sotuvni qaytarish'}
+              <Button type="button" variant="outline" onClick={() => open(item)}>
+                <Undo2 className="size-4" /> Sotuvni qaytarish
               </Button>
             </div>
           ))}
@@ -186,7 +195,7 @@ export default function ReturnWorkQueue() {
       <Dialog open={selected !== null} onOpenChange={(openState) => { if (!openState && !submitting) setSelected(null) }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>{selected?.contractType === 'NASIYA' ? 'Nasiyani bekor qilish' : 'Sotuvni qaytarish'}</DialogTitle>
+            <DialogTitle>Sotuvni qaytarish</DialogTitle>
             <DialogDescription>{selected?.model} · server amalda olingan puldan ortiq refundni qabul qilmaydi.</DialogDescription>
           </DialogHeader>
           {submitError && <div className="border border-red-200 bg-red-50 p-3 text-sm text-red-700">{submitError}</div>}

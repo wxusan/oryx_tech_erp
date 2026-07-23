@@ -78,6 +78,25 @@ describe('shared image selection lifecycle and accessibility', () => {
     expect(screen.getByRole('button', { name: 'a.jpg rasmini keyinga surish' })).toBeTruthy()
     expect(screen.getByRole('button', { name: 'b.jpg rasmini keyinga surish' }).hasAttribute('disabled')).toBe(true)
   })
+
+  it('opens local blob previews in their current order and omits invalid placeholders', async () => {
+    const user = userEvent.setup()
+    render(<Harness />)
+    await user.upload(screen.getByLabelText('Rasm tanlash'), [
+      new File(['a'], 'a.jpg', { type: 'image/jpeg', lastModified: 10 }),
+      new File(['b'], 'b.png', { type: 'image/png', lastModified: 11 }),
+      new File(['x'], 'bad.gif', { type: 'image/gif', lastModified: 12 }),
+    ])
+
+    expect(screen.getAllByRole('button', { name: /rasmini kattalashtirish/ })).toHaveLength(2)
+    expect(screen.queryByRole('button', { name: 'bad.gif rasmini kattalashtirish' })).toBeNull()
+
+    await user.click(screen.getByRole('button', { name: 'b.png rasmini oldinga surish' }))
+    await user.click(screen.getByRole('button', { name: 'b.png rasmini kattalashtirish' }))
+    expect(screen.getByRole('img', { name: /1-rasm, b\.png/ })).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Oldingi rasm' })).toBeNull()
+    expect(screen.getByRole('button', { name: 'Keyingi rasm' })).toBeTruthy()
+  })
 })
 
 class FakeUploadTarget {
@@ -189,5 +208,31 @@ describe('image-input source inventory', () => {
     for (const relative of requiredConsumers) {
       expect(await readFile(join(root, relative), 'utf8')).toContain('ImageSelectionField')
     }
+  })
+
+  it('keeps every rendered device or passport photo wired to the shared viewer', async () => {
+    const { readFile } = await import('node:fs/promises')
+    const { join } = await import('node:path')
+    const root = join(process.cwd(), 'src')
+    const directPhotoSurfaces = [
+      'app/(shop)/shop/qurilmalar/[id]/page.tsx',
+      'app/(shop)/shop/qarzlar/qarzlar-client.tsx',
+      'app/(shop)/shop/nasiyalar/[id]/page.tsx',
+      'app/(shop)/shop/nasiyalar/new/page.tsx',
+      'components/shop/customer-passport-panel.tsx',
+      'components/ui/image-selection-field.tsx',
+    ]
+
+    for (const relative of directPhotoSurfaces) {
+      const source = await readFile(join(root, relative), 'utf8')
+      expect(source, relative).toContain('ImageViewerTrigger')
+      expect(source, relative).toContain('ImageViewer')
+    }
+
+    const deviceDetail = await readFile(
+      join(root, 'app/(shop)/shop/qurilmalar/[id]/page.tsx'),
+      'utf8',
+    )
+    expect(deviceDetail).not.toMatch(/target=["']_blank["'][\s\S]{0,500}getDeviceImageSrc/)
   })
 })

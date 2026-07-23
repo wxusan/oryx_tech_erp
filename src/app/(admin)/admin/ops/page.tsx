@@ -26,6 +26,7 @@ import {
   reminderPhaseLabel,
   shopFeatureLabel,
   shopPermissionLabel,
+  telegramAudienceLabel,
 } from '@/lib/presentation-labels'
 
 interface OpsEvent {
@@ -51,6 +52,17 @@ interface FailedNotification {
   createdAt: string
 }
 
+interface RecipientWarning {
+  id: string
+  shopId: string
+  shopName: string
+  notificationType: string
+  audience: string
+  reason: string
+  occurrences: number
+  lastOccurredAt: string
+}
+
 interface OpsPayload {
   windowDays: number
   alertWindow: {
@@ -67,6 +79,7 @@ interface OpsPayload {
   }
   events: OpsEvent[]
   recentFailedNotifications: FailedNotification[]
+  recipientWarnings: RecipientWarning[]
   lastCron: { event: string; message: string; metadata: unknown; createdAt: string } | null
   lastCronFailure: { event: string; message: string; metadata: unknown; createdAt: string } | null
   generatedAt: string
@@ -304,6 +317,25 @@ export default function AdminOpsPage() {
               </TableWrap>
             ) : (
               <Empty>Yuborilmagan bildirishnoma yo&apos;q</Empty>
+            )}
+          </Section>
+
+          <Section title="Telegram qabul qiluvchi ogohlantirishlari">
+            {data.recipientWarnings.length ? (
+              <TableWrap head={['Do‘kon', 'Xabarnoma', 'Qabul qiluvchilar', 'Sabab', 'Takrorlanish', 'Oxirgi holat']}>
+                {data.recipientWarnings.map((warning) => (
+                  <tr key={warning.id} className="border-b border-zinc-100 last:border-0">
+                    <td className="px-4 py-2.5 font-medium text-zinc-700">{warning.shopName}</td>
+                    <td className="px-4 py-2.5 text-zinc-600">{notificationTypeLabel(warning.notificationType)}</td>
+                    <td className="px-4 py-2.5 text-zinc-600">{telegramAudienceLabel(warning.audience)}</td>
+                    <td className="px-4 py-2.5 text-zinc-600">{notificationCancellationLabel(warning.reason)}</td>
+                    <td className="px-4 py-2.5 text-zinc-500">{warning.occurrences}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap text-zinc-400">{uzDateTime(warning.lastOccurredAt)}</td>
+                  </tr>
+                ))}
+              </TableWrap>
+            ) : (
+              <Empty>Telegram qabul qiluvchilari bo‘yicha ogohlantirish yo&apos;q</Empty>
             )}
           </Section>
 

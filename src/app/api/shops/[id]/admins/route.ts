@@ -25,6 +25,12 @@ import {
   isPrismaUniqueConstraintOnField,
   SHOP_LOGIN_TAKEN_MESSAGE,
 } from '@/lib/shop-login-conflict'
+import {
+  processDueTelegramDisableTransitions,
+  purgeTelegramIdentityInTransaction,
+  TELEGRAM_PURGE_REASON,
+  telegramPreassignmentAllowed,
+} from '@/lib/server/telegram-lifecycle'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -117,6 +123,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
 
     const telegramId = normalizeTelegramId(parsed.data.telegramId)
+    if (telegramId) {
+      await processDueTelegramDisableTransitions({ shopId: id, limit: 100 })
+      if (!(await telegramPreassignmentAllowed(prisma, id))) {
+        return badRequest("Telegram funksiyasi do'kon uchun yoqilmagan")
+      }
+    }
     if (telegramId && (await isTelegramIdTaken(telegramId))) {
       return conflict(`Bu Telegram ID allaqachon tizimda bor: ${telegramId}`)
     }
@@ -133,7 +145,10 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         throw Object.assign(new Error('OWNER_ALREADY_RESOLVED'), { code: 'OWNER_ALREADY_RESOLVED' })
       }
       if (telegramId) {
-        await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`telegram:${telegramId}`}))`)
+        if (!(await telegramPreassignmentAllowed(tx, id))) {
+          throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
+        }
+        await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${telegramId}, 0))`)
         const [superAdminOwner, shopAdminOwner] = await Promise.all([
           tx.superAdmin.findFirst({ where: { telegramId, deletedAt: null }, select: { id: true } }),
           tx.shopAdmin.findFirst({ where: { telegramId, deletedAt: null }, select: { id: true } }),
@@ -150,6 +165,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           login: parsed.data.login,
           telegramId,
           telegramVerifiedAt: null,
+          telegramNotificationsEnabled: Boolean(telegramId),
           passwordHash,
         },
       })
@@ -198,6 +214,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
     if (isPrismaUniqueConstraintOnField(err, 'login')) {
       return conflict(SHOP_LOGIN_TAKEN_MESSAGE)
+    }
+    if (err && typeof err === 'object' && 'code' in err && err.code === 'TELEGRAM_DISABLED') {
+      return badRequest("Telegram funksiyasi do'kon uchun yoqilmagan")
     }
     if (err instanceof Error && err.message === 'SERIALIZABLE_TRANSACTION_FAILED') return serverError('Amalni yakunlab bo‘lmadi. Iltimos, qayta urinib ko‘ring.')
     logger.error('[POST /api/shops/[id]/admins]', { event: 'api.route_error', error: err })
@@ -315,6 +334,11 @@ export async function DELETE(req: NextRequest, ctx: RouteContext) {
 	          sessionVersion: { increment: 1 },
 	        },
       })
+      await purgeTelegramIdentityInTransaction(
+        tx,
+        { type: 'SHOP_ADMIN', shopId: id, shopAdminId: adminId },
+        { reason: TELEGRAM_PURGE_REASON.ACCOUNT_DELETED },
+      )
       await tx.authSession.updateMany({
         where: { actorType: 'SHOP_ADMIN', actorId: adminId, revokedAt: null },
         data: { revokedAt: new Date() },

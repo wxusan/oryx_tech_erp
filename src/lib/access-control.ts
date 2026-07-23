@@ -59,6 +59,7 @@ export function isShopFeatureCode(value: unknown): value is ShopFeatureCode {
 export const ACTIVE_SHOP_PERMISSION_CODES = [
   'INVENTORY_VIEW',
   'DEVICE_CREATE',
+  'DEVICE_PURCHASE_ON_CREDIT',
   'DEVICE_EDIT',
   'DEVICE_DELETE',
   'DEVICE_RESTOCK',
@@ -73,12 +74,16 @@ export const ACTIVE_SHOP_PERMISSION_CODES = [
   'NASIYA_CREATE',
   'NASIYA_EDIT',
   'NASIYA_PAYMENT_RECEIVE',
+  'NASIYA_PROFIT_WAIVE',
+  'NASIYA_RETURN_REFUND',
   'NASIYA_DEFER',
   'NASIYA_REMINDER_MANAGE',
   'NASIYA_ARCHIVE',
   'NASIYA_REOPEN',
   'OLIB_VIEW',
   'OLIB_CREATE',
+  'SUPPLIER_PAYABLE_VIEW',
+  'SUPPLIER_PAYMENT_RECORD',
   'SUPPLIER_PAYMENT_MARK_PAID',
   'CUSTOMER_VIEW',
   'CUSTOMER_CREATE',
@@ -169,6 +174,7 @@ export interface ShopPermissionCatalogItem {
 const SHOP_PERMISSION_CATALOG_DEFINITIONS: readonly ShopPermissionCatalogItem[] = [
   { code: 'INVENTORY_VIEW', label: "Qurilmalarni ko'rish", description: "Ombor ro'yxati va qurilma tafsilotlari", featureCode: 'INVENTORY', ownerOnly: false, retired: false, group: 'INVENTORY', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
   { code: 'DEVICE_CREATE', label: "Qurilma qo'shish", description: "Yangi qurilma va rasmlarini omborga kiritish", featureCode: 'INVENTORY', ownerOnly: false, retired: false, group: 'INVENTORY', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
+  { code: 'DEVICE_PURCHASE_ON_CREDIT', label: "Qurilmani keyin to'lashga olish", description: "Qurilma bilan birga yetkazib beruvchi qarzini yaratish", featureCode: 'INVENTORY', ownerOnly: false, retired: false, group: 'INVENTORY', risk: 'FINANCIAL', staffManagerDelegable: false, legacyOperational: false },
   { code: 'DEVICE_EDIT', label: 'Qurilmani tahrirlash', description: "Mavjud qurilma ma'lumotlarini o'zgartirish", featureCode: 'INVENTORY', ownerOnly: false, retired: false, group: 'INVENTORY', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
   { code: 'DEVICE_DELETE', label: "Sotilmagan qurilmani o'chirish", description: "Moliyaviy tarixsiz qurilmani sabab bilan o'chirish", featureCode: 'INVENTORY', ownerOnly: false, retired: false, group: 'INVENTORY', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: true },
   { code: 'DEVICE_RESTOCK', label: 'Qurilmani omborga qaytarish', description: 'Qaytarilgan qurilmani qayta omborga kiritish', featureCode: 'INVENTORY', ownerOnly: false, retired: false, group: 'INVENTORY', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
@@ -183,12 +189,16 @@ const SHOP_PERMISSION_CATALOG_DEFINITIONS: readonly ShopPermissionCatalogItem[] 
   { code: 'NASIYA_CREATE', label: 'Nasiya yaratish', description: 'Yangi nasiya shartnomasi va jadvalini yaratish', featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
   { code: 'NASIYA_EDIT', label: 'Nasiyani tahrirlash', description: "Nasiya ruxsat etilgan ma'lumotlarini o'zgartirish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
   { code: 'NASIYA_PAYMENT_RECEIVE', label: "Nasiya to'lovini qabul qilish", description: "Nasiya jadvali bo'yicha kirim to'lovini yozish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'FINANCIAL', staffManagerDelegable: true, legacyOperational: true },
+  { code: 'NASIYA_PROFIT_WAIVE', label: 'Nasiya foydasidan kechish', description: "Nasiyani yopishda faqat hali olinmagan foydadan voz kechish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
+  { code: 'NASIYA_RETURN_REFUND', label: 'Nasiyani qaytarish va pulni qaytarish', description: "Qurilmani omborga qaytarib, nasiya qarzini yopish va tasdiqlangan tushum chegarasida pul qaytarish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'NASIYA_DEFER', label: "Nasiya to'lovini kechiktirish", description: "Bitta jadval sanasini idempotent tarzda ko'chirish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'FINANCIAL', staffManagerDelegable: true, legacyOperational: true },
   { code: 'NASIYA_REMINDER_MANAGE', label: 'Nasiya eslatmalarini boshqarish', description: "Nasiya eslatmasini yoqish yoki o'chirish", featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
   { code: 'NASIYA_ARCHIVE', label: 'Nasiyani arxivga olish', description: 'Xodimga nasiyani arxivlash va qayta ochish ruxsatini beradi', featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'NASIYA_REOPEN', label: 'Nasiyani qayta ochish', description: 'Arxivlangan yoki yopilgan nasiyani qayta ochish', featureCode: 'NASIYA', ownerOnly: false, retired: false, group: 'NASIYA', risk: 'DESTRUCTIVE', staffManagerDelegable: false, legacyOperational: false },
   { code: 'OLIB_VIEW', label: "Olib-sotdimni ko'rish", description: "Olib-sotdim ro'yxati va tafsilotlari", featureCode: 'OLIB_SOTDIM', ownerOnly: false, retired: false, group: 'OLIB', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
-  { code: 'OLIB_CREATE', label: 'Olib-sotdim qilish', description: "Tashqi qurilma, yetkazuvchi va mijoz sotuvini yozish", featureCode: 'OLIB_SOTDIM', ownerOnly: false, retired: false, group: 'OLIB', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
+  { code: 'OLIB_CREATE', label: 'Olib-sotdim qilish', description: "Tashqi qurilma, yetkazuvchi va mijoz sotuvini yozish", featureCode: 'OLIB_SOTDIM', ownerOnly: false, retired: false, group: 'OLIB', risk: 'FINANCIAL', staffManagerDelegable: false, legacyOperational: true },
+  { code: 'SUPPLIER_PAYABLE_VIEW', label: "Bizning qarzlarimizni ko'rish", description: "Yetkazib beruvchiga ochiq qarzlar va xavfsiz tafsilotlarni ko'rish", featureCode: 'INVENTORY', ownerOnly: false, retired: false, group: 'OLIB', risk: 'FINANCIAL', staffManagerDelegable: true, legacyOperational: false },
+  { code: 'SUPPLIER_PAYMENT_RECORD', label: "Yetkazib beruvchi to'lovini yozish", description: "Qisman, ikki usulda yoki to'liq chiqim to'lovini yozish", featureCode: 'INVENTORY', ownerOnly: false, retired: false, group: 'OLIB', risk: 'FINANCIAL', staffManagerDelegable: false, legacyOperational: false },
   { code: 'SUPPLIER_PAYMENT_MARK_PAID', label: "Yetkazuvchiga to'lovni yopish", description: "Chiqim yetkazuvchi to'lovini to'langan deb yozish", featureCode: 'OLIB_SOTDIM', ownerOnly: false, retired: false, group: 'OLIB', risk: 'FINANCIAL', staffManagerDelegable: false, legacyOperational: true },
   { code: 'CUSTOMER_VIEW', label: "Mijozlarni ko'rish", description: "Mijoz ro'yxati va xodimga xavfsiz profil", featureCode: 'CUSTOMER_CRM', ownerOnly: false, retired: false, group: 'CUSTOMERS', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
   { code: 'CUSTOMER_CREATE', label: "Mijoz qo'shish", description: 'Alohida mijoz profilini yaratish', featureCode: 'CUSTOMER_CRM', ownerOnly: false, retired: false, group: 'CUSTOMERS', risk: 'ROUTINE', staffManagerDelegable: true, legacyOperational: true },
@@ -279,7 +289,7 @@ export const LEGACY_PERMISSION_EXPANSIONS: Readonly<Record<RetiredShopPermission
   CASH_SALE_MANAGE: ['SALE_EDIT', 'SALE_REMINDER_MANAGE'],
   NASIYA_MANAGE: ['NASIYA_EDIT', 'NASIYA_DEFER', 'NASIYA_REMINDER_MANAGE'],
   OLIB_MANAGE: ['OLIB_CREATE'],
-  PAYMENT_RECEIVE: ['SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE', 'SUPPLIER_PAYMENT_MARK_PAID'],
+  PAYMENT_RECEIVE: ['SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID'],
   CUSTOMER_MANAGE: ['CUSTOMER_CREATE', 'CUSTOMER_EDIT', 'CUSTOMER_PASSPORT_MANAGE', 'CUSTOMER_TRUST_OVERRIDE'],
   CUSTOMER_PII_REVEAL: ['CUSTOMER_PASSPORT_REVEAL'],
   RETURN_MANAGE: ['SALE_RETURN_REFUND', 'DEVICE_RESTOCK'],
@@ -301,6 +311,11 @@ export function expandShopPermissionCodes(codes: readonly string[]): Set<ShopPer
         expanded.add(replacement)
       }
     }
+  }
+  // A mutation-only grant must never leave a staff member unable to inspect
+  // the safe payable projection they are authorized to settle.
+  if (expanded.has('SUPPLIER_PAYMENT_RECORD') || expanded.has('SUPPLIER_PAYMENT_MARK_PAID')) {
+    expanded.add('SUPPLIER_PAYABLE_VIEW')
   }
   return expanded
 }

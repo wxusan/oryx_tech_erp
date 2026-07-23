@@ -220,6 +220,34 @@ export function convertMoneyDto(value: MoneyDto, targetCurrency: CurrencyCode, q
   return assertMoneyDto({ currency: targetCurrency, minorUnits: Number(converted) })
 }
 
+/**
+ * Convert a native upper bound into the largest target-currency amount that
+ * still converts back to no more than that bound. This matters for editable
+ * refund limits: a rounded USD display value must never become one so'm more
+ * than the verified native receipts when it is submitted back to the server.
+ */
+export function convertMoneyDtoAtMost(
+  value: MoneyDto,
+  targetCurrency: CurrencyCode,
+  quote: FxQuoteDto | null | undefined,
+): MoneyDto | null {
+  const source = assertMoneyDto(value)
+  const converted = convertMoneyDto(source, targetCurrency, quote)
+  if (!converted || source.currency === targetCurrency) return converted
+
+  let targetMinorUnits = converted.minorUnits
+  while (targetMinorUnits > 0) {
+    const roundTrip = convertMoneyDto(
+      { currency: targetCurrency, minorUnits: targetMinorUnits },
+      source.currency,
+      quote,
+    )
+    if (!roundTrip || roundTrip.minorUnits <= source.minorUnits) break
+    targetMinorUnits -= 1
+  }
+  return { currency: targetCurrency, minorUnits: targetMinorUnits }
+}
+
 export function isCurrencyCode(value: unknown): value is CurrencyCode {
   return value === 'UZS' || value === 'USD'
 }

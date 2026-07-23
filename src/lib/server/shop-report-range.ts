@@ -8,6 +8,8 @@ import { tashkentMonthRange } from '@/lib/timezone'
 
 interface MonthlyReportRow {
   month_key: string
+  contracts_uzs: unknown
+  contracts_usd: unknown
   cash_uzs: unknown
   cash_usd: unknown
   cash_incomplete_count: number
@@ -21,6 +23,15 @@ interface MonthlyReportRow {
   expected_interest_usd: unknown
   expected_uzs: unknown
   expected_usd: unknown
+  supplier_debt_uzs: unknown
+  supplier_debt_usd: unknown
+  supplier_debt_count: number
+  customer_pay_later_uzs: unknown
+  customer_pay_later_usd: unknown
+  customer_pay_later_count: number
+  supplier_paid_uzs: unknown
+  supplier_paid_usd: unknown
+  supplier_payment_count: number
   refunds_uzs: unknown
   refunds_usd: unknown
   write_off_uzs: unknown
@@ -35,12 +46,16 @@ interface MonthlyReportRow {
 
 export interface ShopMonthlyReportPoint {
   monthKey: string
+  contracts: { uzs: number; usd: number }
   cashCollected: { uzs: number; usd: number; complete: boolean }
   accrualRevenue: { uzs: number; usd: number }
   nasiyaInterest: { uzs: number; usd: number }
   expectedProfit: { uzs: number; usd: number }
   nasiyaInterestExpected: { uzs: number; usd: number }
   expectedReceivables: { uzs: number; usd: number }
+  supplierPayables: { uzs: number; usd: number; count: number }
+  customerPayLater: { uzs: number; usd: number; count: number }
+  supplierPaymentsMade: { uzs: number; usd: number; count: number }
   refunds: { uzs: number; usd: number }
   writeOffs: { uzs: number; usd: number; frozenUzs: number }
   grossProfitUzs: number
@@ -53,7 +68,7 @@ export interface ShopMonthlyReportPoint {
 export interface ShopRangeReport {
   range: Pick<ReportRange, 'preset' | 'startMonth' | 'endMonth' | 'monthKeys'>
   filteredByAdmin: string | null
-  nonAttributableFields: readonly ['expectedReceivables', 'expectedProfit', 'nasiyaInterestExpected']
+  nonAttributableFields: readonly ['expectedReceivables', 'expectedProfit', 'nasiyaInterestExpected', 'supplierPayables', 'customerPayLater']
   months: ShopMonthlyReportPoint[]
   totals: Omit<ShopMonthlyReportPoint, 'monthKey'>
 }
@@ -96,6 +111,12 @@ export async function getShopRangeReport(input: {
   range: ReportRange
   adminId: string | null
 }): Promise<ShopRangeReport> {
+  const saleContractActor = input.adminId
+    ? Prisma.sql`AND s."createdBy" = ${input.adminId}`
+    : Prisma.empty
+  const nasiyaContractActor = input.adminId
+    ? Prisma.sql`AND n."createdBy" = ${input.adminId}`
+    : Prisma.empty
   const salePaymentActor = input.adminId
     ? Prisma.sql`AND p."createdBy" = ${input.adminId}`
     : Prisma.empty
@@ -108,6 +129,9 @@ export async function getShopRangeReport(input: {
   const resolutionActor = input.adminId
     ? Prisma.sql`AND e."actorId" = ${input.adminId}`
     : Prisma.empty
+  const supplierPaymentActor = input.adminId
+    ? Prisma.sql`AND p."createdBy" = ${input.adminId}`
+    : Prisma.empty
 
   const rows = await prisma.$queryRaw<MonthlyReportRow[]>(Prisma.sql`
     WITH months AS (
@@ -116,6 +140,41 @@ export async function getShopRangeReport(input: {
         ordinal::integer AS ordinal
       FROM unnest(ARRAY[${Prisma.join(input.range.monthKeys.map((monthKey) => Prisma.sql`${monthKey}`))}]::text[])
         WITH ORDINALITY AS selected_months(month_key, ordinal)
+    ), contract_facts AS (
+      SELECT
+        to_char(s."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
+        s."contractCurrency" AS currency,
+        s."contractSalePrice"::numeric AS native_amount
+      FROM "Sale" s
+      WHERE s."shopId" = ${input.shopId}
+        AND s."deletedAt" IS NULL
+        AND s."createdAt" >= ${input.range.start}
+        AND s."createdAt" < ${input.range.end}
+        ${saleContractActor}
+
+      UNION ALL
+
+      SELECT
+        to_char(n."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
+        n."contractCurrency" AS currency,
+        CASE
+          WHEN n."resolutionState" = 'ARCHIVED' THEN n."contractDownPayment" + n."contractPaidAmount"
+          ELSE n."contractDownPayment" + n."contractFinalAmount"
+        END::numeric AS native_amount
+      FROM "Nasiya" n
+      WHERE n."shopId" = ${input.shopId}
+        AND n."deletedAt" IS NULL
+        AND n."isImported" = false
+        AND n."createdAt" >= ${input.range.start}
+        AND n."createdAt" < ${input.range.end}
+        ${nasiyaContractActor}
+    ), contract_months AS (
+      SELECT
+        month_key,
+        coalesce(sum(native_amount) FILTER (WHERE currency = 'UZS'), 0)::numeric AS contracts_uzs,
+        coalesce(sum(native_amount) FILTER (WHERE currency = 'USD'), 0)::numeric AS contracts_usd
+      FROM contract_facts
+      GROUP BY month_key
     ), sale_payment_facts AS (
       SELECT
         to_char(p."paidAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
@@ -267,15 +326,56 @@ export async function getShopRangeReport(input: {
         coalesce(sum(outstanding) FILTER (WHERE currency = 'USD'), 0)::numeric AS expected_usd
       FROM obligation_facts
       GROUP BY month_key
+    ), supplier_payable_months AS (
+      SELECT
+        to_char(p."dueDate" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
+        coalesce(sum(p."contractRemainingAmount") FILTER (WHERE p."contractCurrency" = 'UZS'), 0)::numeric AS supplier_debt_uzs,
+        coalesce(sum(p."contractRemainingAmount") FILTER (WHERE p."contractCurrency" = 'USD'), 0)::numeric AS supplier_debt_usd,
+        count(*)::integer AS supplier_debt_count
+      FROM "SupplierPayable" p
+      WHERE p."shopId" = ${input.shopId}
+        AND p."deletedAt" IS NULL
+        AND p."status" NOT IN ('PAID', 'CANCELLED')
+        AND p."contractRemainingAmount" > 0
+        AND p."dueDate" >= ${input.range.start}
+        AND p."dueDate" < ${input.range.end}
+      GROUP BY month_key
+    ), customer_pay_later_months AS (
+      SELECT
+        to_char(s."dueDate" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
+        coalesce(sum(s."contractRemainingAmount") FILTER (WHERE s."contractCurrency" = 'UZS'), 0)::numeric AS customer_pay_later_uzs,
+        coalesce(sum(s."contractRemainingAmount") FILTER (WHERE s."contractCurrency" = 'USD'), 0)::numeric AS customer_pay_later_usd,
+        count(*)::integer AS customer_pay_later_count
+      FROM "Sale" s
+      WHERE s."shopId" = ${input.shopId}
+        AND s."deletedAt" IS NULL
+        AND s."returnedAt" IS NULL
+        AND s."paidFully" = false
+        AND s."contractRemainingAmount" > 0
+        AND s."dueDate" >= ${input.range.start}
+        AND s."dueDate" < ${input.range.end}
+      GROUP BY month_key
+    ), supplier_payment_months AS (
+      SELECT
+        to_char(p."paidAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
+        coalesce(sum(p."paymentInputAmount") FILTER (WHERE p."paymentInputCurrency" = 'UZS'), 0)::numeric AS supplier_paid_uzs,
+        coalesce(sum(p."paymentInputAmount") FILTER (WHERE p."paymentInputCurrency" = 'USD'), 0)::numeric AS supplier_paid_usd,
+        count(*)::integer AS supplier_payment_count
+      FROM "SupplierPayablePayment" p
+      WHERE p."shopId" = ${input.shopId}
+        AND p."paidAt" >= ${input.range.start}
+        AND p."paidAt" < ${input.range.end}
+        ${supplierPaymentActor}
+      GROUP BY month_key
     ), expected_profit_facts AS (
       SELECT
         to_char(coalesce(s."delayedUntil", s."dueDate") AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
         n."contractCurrency" AS currency,
         (
           s."contractMarginAmount" - s."contractMarginPaidAmount"
-          +s."contractInterestAmount" - s."contractInterestPaidAmount"
+          +s."contractInterestAmount" - s."contractInterestPaidAmount" - s."contractInterestWaivedAmount"
         )::numeric AS expected_profit,
-        (s."contractInterestAmount" - s."contractInterestPaidAmount")::numeric AS expected_interest
+        (s."contractInterestAmount" - s."contractInterestPaidAmount" - s."contractInterestWaivedAmount")::numeric AS expected_interest
       FROM "NasiyaSchedule" s
       JOIN "Nasiya" n ON n.id = s."nasiyaId" AND n."shopId" = s."shopId"
       WHERE s."shopId" = ${input.shopId}
@@ -315,12 +415,22 @@ export async function getShopRangeReport(input: {
       SELECT
         to_char(r."createdAt" AT TIME ZONE 'UTC' AT TIME ZONE 'Asia/Tashkent', 'YYYY-MM') AS month_key,
         coalesce(sum(CASE
-          WHEN r."contractCurrency" = 'UZS' THEN
+          WHEN coalesce(
+            r."refundInputCurrency",
+            CASE WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0
+              THEN 'USD'::"CurrencyCode" ELSE 'UZS'::"CurrencyCode" END
+          ) = 'UZS' THEN coalesce(
+            r."refundInputAmount",
             CASE WHEN r."contractRefundAmount" > 0 THEN r."contractRefundAmount" ELSE r."refundAmount" END
+          )
           ELSE 0
         END), 0)::numeric AS refunds_uzs,
         coalesce(sum(CASE
-          WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
+          WHEN coalesce(
+            r."refundInputCurrency",
+            CASE WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0
+              THEN 'USD'::"CurrencyCode" ELSE 'UZS'::"CurrencyCode" END
+          ) = 'USD' THEN coalesce(r."refundInputAmount", r."contractRefundAmount")
           ELSE 0
         END), 0)::numeric AS refunds_usd,
         coalesce(sum(CASE WHEN pr.id IS NOT NULL THEN
@@ -364,6 +474,8 @@ export async function getShopRangeReport(input: {
     )
     SELECT
       m.month_key,
+      coalesce(c.contracts_uzs, 0)::numeric AS contracts_uzs,
+      coalesce(c.contracts_usd, 0)::numeric AS contracts_usd,
       coalesce(p.cash_uzs, 0)::numeric AS cash_uzs,
       coalesce(p.cash_usd, 0)::numeric AS cash_usd,
       coalesce(p.cash_incomplete_count, 0)::integer AS cash_incomplete_count,
@@ -377,6 +489,15 @@ export async function getShopRangeReport(input: {
       coalesce(ep.expected_interest_usd, 0)::numeric AS expected_interest_usd,
       coalesce(o.expected_uzs, 0)::numeric AS expected_uzs,
       coalesce(o.expected_usd, 0)::numeric AS expected_usd,
+      coalesce(sp.supplier_debt_uzs, 0)::numeric AS supplier_debt_uzs,
+      coalesce(sp.supplier_debt_usd, 0)::numeric AS supplier_debt_usd,
+      coalesce(sp.supplier_debt_count, 0)::integer AS supplier_debt_count,
+      coalesce(cp.customer_pay_later_uzs, 0)::numeric AS customer_pay_later_uzs,
+      coalesce(cp.customer_pay_later_usd, 0)::numeric AS customer_pay_later_usd,
+      coalesce(cp.customer_pay_later_count, 0)::integer AS customer_pay_later_count,
+      coalesce(spp.supplier_paid_uzs, 0)::numeric AS supplier_paid_uzs,
+      coalesce(spp.supplier_paid_usd, 0)::numeric AS supplier_paid_usd,
+      coalesce(spp.supplier_payment_count, 0)::integer AS supplier_payment_count,
       coalesce(r.refunds_uzs, 0)::numeric AS refunds_uzs,
       coalesce(r.refunds_usd, 0)::numeric AS refunds_usd,
       coalesce(w.write_off_uzs, 0)::numeric AS write_off_uzs,
@@ -388,9 +509,13 @@ export async function getShopRangeReport(input: {
       coalesce(w.write_off_count, 0)::integer AS write_off_count,
       coalesce(w.reopen_count, 0)::integer AS reopen_count
     FROM months m
+    LEFT JOIN contract_months c ON c.month_key = m.month_key
     LEFT JOIN payment_months p ON p.month_key = m.month_key
     LEFT JOIN recognition_months a ON a.month_key = m.month_key
     LEFT JOIN obligation_months o ON o.month_key = m.month_key
+    LEFT JOIN supplier_payable_months sp ON sp.month_key = m.month_key
+    LEFT JOIN customer_pay_later_months cp ON cp.month_key = m.month_key
+    LEFT JOIN supplier_payment_months spp ON spp.month_key = m.month_key
     LEFT JOIN expected_profit_months ep ON ep.month_key = m.month_key
     LEFT JOIN return_months r ON r.month_key = m.month_key
     LEFT JOIN resolution_months w ON w.month_key = m.month_key
@@ -399,6 +524,7 @@ export async function getShopRangeReport(input: {
 
   const months = rows.map((row): ShopMonthlyReportPoint => ({
     monthKey: row.month_key,
+    contracts: { uzs: number(row.contracts_uzs), usd: number(row.contracts_usd) },
     cashCollected: {
       uzs: number(row.cash_uzs),
       usd: number(row.cash_usd),
@@ -409,6 +535,21 @@ export async function getShopRangeReport(input: {
     expectedProfit: { uzs: number(row.expected_profit_uzs), usd: number(row.expected_profit_usd) },
     nasiyaInterestExpected: { uzs: number(row.expected_interest_uzs), usd: number(row.expected_interest_usd) },
     expectedReceivables: { uzs: number(row.expected_uzs), usd: number(row.expected_usd) },
+    supplierPayables: {
+      uzs: number(row.supplier_debt_uzs),
+      usd: number(row.supplier_debt_usd),
+      count: Number(row.supplier_debt_count ?? 0),
+    },
+    customerPayLater: {
+      uzs: number(row.customer_pay_later_uzs),
+      usd: number(row.customer_pay_later_usd),
+      count: Number(row.customer_pay_later_count ?? 0),
+    },
+    supplierPaymentsMade: {
+      uzs: number(row.supplier_paid_uzs),
+      usd: number(row.supplier_paid_usd),
+      count: Number(row.supplier_payment_count ?? 0),
+    },
     refunds: { uzs: number(row.refunds_uzs), usd: number(row.refunds_usd) },
     writeOffs: {
       uzs: number(row.write_off_uzs),
@@ -423,6 +564,10 @@ export async function getShopRangeReport(input: {
   }))
 
   const totals = months.reduce<Omit<ShopMonthlyReportPoint, 'monthKey'>>((sum, month) => ({
+    contracts: {
+      uzs: sum.contracts.uzs + month.contracts.uzs,
+      usd: sum.contracts.usd + month.contracts.usd,
+    },
     cashCollected: {
       uzs: sum.cashCollected.uzs + month.cashCollected.uzs,
       usd: sum.cashCollected.usd + month.cashCollected.usd,
@@ -448,6 +593,21 @@ export async function getShopRangeReport(input: {
       uzs: sum.expectedReceivables.uzs + month.expectedReceivables.uzs,
       usd: sum.expectedReceivables.usd + month.expectedReceivables.usd,
     },
+    supplierPayables: {
+      uzs: sum.supplierPayables.uzs + month.supplierPayables.uzs,
+      usd: sum.supplierPayables.usd + month.supplierPayables.usd,
+      count: sum.supplierPayables.count + month.supplierPayables.count,
+    },
+    customerPayLater: {
+      uzs: sum.customerPayLater.uzs + month.customerPayLater.uzs,
+      usd: sum.customerPayLater.usd + month.customerPayLater.usd,
+      count: sum.customerPayLater.count + month.customerPayLater.count,
+    },
+    supplierPaymentsMade: {
+      uzs: sum.supplierPaymentsMade.uzs + month.supplierPaymentsMade.uzs,
+      usd: sum.supplierPaymentsMade.usd + month.supplierPaymentsMade.usd,
+      count: sum.supplierPaymentsMade.count + month.supplierPaymentsMade.count,
+    },
     refunds: {
       uzs: sum.refunds.uzs + month.refunds.uzs,
       usd: sum.refunds.usd + month.refunds.usd,
@@ -463,12 +623,16 @@ export async function getShopRangeReport(input: {
     writeOffCount: sum.writeOffCount + month.writeOffCount,
     reopenCount: sum.reopenCount + month.reopenCount,
   }), {
+    contracts: { uzs: 0, usd: 0 },
     cashCollected: { uzs: 0, usd: 0, complete: true },
     accrualRevenue: { uzs: 0, usd: 0 },
     nasiyaInterest: { uzs: 0, usd: 0 },
     expectedProfit: { uzs: 0, usd: 0 },
     nasiyaInterestExpected: { uzs: 0, usd: 0 },
     expectedReceivables: { uzs: 0, usd: 0 },
+    supplierPayables: { uzs: 0, usd: 0, count: 0 },
+    customerPayLater: { uzs: 0, usd: 0, count: 0 },
+    supplierPaymentsMade: { uzs: 0, usd: 0, count: 0 },
     refunds: { uzs: 0, usd: 0 },
     writeOffs: { uzs: 0, usd: 0, frozenUzs: 0 },
     grossProfitUzs: 0,
@@ -486,7 +650,7 @@ export async function getShopRangeReport(input: {
       monthKeys: input.range.monthKeys,
     },
     filteredByAdmin: input.adminId,
-    nonAttributableFields: ['expectedReceivables', 'expectedProfit', 'nasiyaInterestExpected'],
+    nonAttributableFields: ['expectedReceivables', 'expectedProfit', 'nasiyaInterestExpected', 'supplierPayables', 'customerPayLater'],
     months,
     totals,
   }

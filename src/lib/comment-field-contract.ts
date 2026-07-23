@@ -17,11 +17,14 @@ export const HIGH_RISK_AUDIT_REASON_SURFACE_IDS = [
   'admin.shop-member.password-reset',
   'admin.shop-member.delete',
   'shop.staff.update',
+  'shop.staff-role.update',
   'device.delete',
   'device.return',
   'device.return.queue',
   'device.restock',
   'nasiya.resolve',
+  'nasiya.settle',
+  'nasiya.return',
 ] as const
 
 /** Every editable ordinary-comment UI surface.  Add an entry with any new
@@ -40,6 +43,7 @@ export const ORDINARY_COMMENT_UI_INVENTORY = [
   { source: 'src/app/(shop)/shop/sotuv/new/page.tsx', labels: ['Izoh'] },
   { source: 'src/components/shop/nasiya-defer-modal.tsx', labels: ['Izoh'] },
   { source: 'src/components/shop/nasiya-payment-modal.tsx', labels: ['Izoh'] },
+  { source: 'src/components/shop/staff-role-management.tsx', labels: ['Izoh'] },
 ] as const
 
 export const ORDINARY_COMMENT_FIELD_KEYS = ['note', 'importNote', 'reason'] as const

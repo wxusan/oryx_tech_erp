@@ -10,8 +10,8 @@ const operations = [
     href: '/shop/qurilmalar/new?from=yangi-operatsiya',
     icon: Smartphone,
     title: "Yangi qurilma qo'shish",
-    description: "Yangi kelgan qurilmani omborga kiriting",
-    permissions: ['DEVICE_CREATE'],
+    description: "Yangi kelgan qurilmani omborga kiriting yoki keyin to‘lashga oling",
+    permissions: ['DEVICE_CREATE', 'DEVICE_PURCHASE_ON_CREDIT'],
   },
   {
     href: '/shop/sotuv/new',
@@ -54,7 +54,7 @@ export default function YangiOperatsiyaPage() {
   const visibleOperations = operations.filter((operation) => operation.permissions.some((permission) => can(permission)))
 
   return (
-    <div className="p-6 flex flex-col items-center justify-center min-h-[calc(100vh-3rem)]">
+    <div className="flex min-h-full flex-col items-center justify-center p-6">
       <div className="w-full max-w-5xl">
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-zinc-900">Yangi operatsiya</h1>

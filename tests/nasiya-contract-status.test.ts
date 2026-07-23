@@ -104,6 +104,23 @@ describe('contract-authoritative nasiya status', () => {
     expect(derived).toMatchObject({ displayStatus: 'COMPLETED', isOverdue: false })
   })
 
+  it('preserves the SETTLED label while waived profit makes native remaining zero', () => {
+    const schedule = usdSchedule({ status: 'SETTLED', contractPaidAmount: 80, contractRemainingAmount: 0 })
+    const derived = deriveContractNasiyaStatus(
+      {
+        status: 'COMPLETED',
+        contractCurrency: 'USD',
+        contractFinalAmount: 100,
+        contractRemainingAmount: 0,
+        schedules: [schedule],
+      },
+      NOW,
+    )
+
+    expect(deriveContractScheduleStatus(schedule, 'USD', NOW)).toMatchObject({ displayStatus: 'SETTLED', outstanding: 0 })
+    expect(derived).toMatchObject({ displayStatus: 'COMPLETED', isOverdue: false })
+  })
+
   it('does not forgive a meaningful one-cent USD balance', () => {
     const schedule = usdSchedule({ paidAmount: 1_200_000, contractPaidAmount: 99.99 })
     const derived = deriveContractNasiyaStatus(

@@ -19,7 +19,7 @@ export interface ReturnReceiptSource {
 export interface ReturnRefundAllocationInput {
   salePaymentId?: string
   nasiyaPaymentId?: string
-  sourcePaymentMethod: PaymentBreakdownMethod
+  sourcePaymentMethod: PaymentBreakdownMethod | null
   refundMethod: PaymentBreakdownMethod
   contractCurrency: CurrencyCode
   contractAmount: number
@@ -28,7 +28,7 @@ export interface ReturnRefundAllocationInput {
 
 interface ReceiptBucket {
   source: ReturnReceiptSource
-  method: PaymentBreakdownMethod
+  method: PaymentBreakdownMethod | null
   contractAmount: number
 }
 
@@ -86,15 +86,16 @@ function receiptBuckets(
     }).filter((bucket) => bucket.contractAmount > 0)
   }
 
-  if (!source.paymentMethod) return []
   return [{ source, method: source.paymentMethod, contractAmount: applied }]
 }
 
 /**
- * Allocate a refund to the newest matching original receipts first. The
- * refund method must match the source method, which keeps cash/card/transfer
- * reconciliation honest. Every returned allocation references one immutable
- * payment row and the final allocation absorbs rounding remainder.
+ * Allocate a refund to the newest original receipts first. The original
+ * receipt method and the refund method are deliberately independent: a card
+ * receipt can be refunded in cash, and legacy receipts with no reliable
+ * method remain allocatable. Both facts are stored separately for audit.
+ * Every allocation references one immutable payment row and the final
+ * allocation absorbs the UZS rounding remainder.
  */
 export function allocateReturnRefund({
   sources,
@@ -118,16 +119,13 @@ export function allocateReturnRefund({
     .slice()
     .sort((left, right) => right.paidAt.getTime() - left.paidAt.getTime())
     .flatMap((source) => receiptBuckets(source, contractCurrency, frozenUsdUzsRate))
-    .filter((bucket) => bucket.method === refundMethod)
 
   const available = roundContractMoney(
     buckets.reduce((sum, bucket) => sum + bucket.contractAmount, 0),
     contractCurrency,
   )
   if (available < target) {
-    throw new Error(
-      `Tanlangan usul bo'yicha ko'pi bilan ${available.toFixed(contractCurrency === 'USD' ? 2 : 0)} ${contractCurrency} qaytarish mumkin.`,
-    )
+    throw new Error("Qaytarish summasi tasdiqlangan asl to'lovlardan oshib ketdi.")
   }
 
   const selected: { bucket: ReceiptBucket; contractAmount: number }[] = []

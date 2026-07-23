@@ -19,11 +19,11 @@ describe('cron generates early reminders in addition to due-day reminders', () =
   })
 
   it('uses the same 11:00 jitter helper (no separate jitter logic)', () => {
-    expect(cron).toContain("dedupeKey = `EARLY_REMINDER:")
-    expect(cron).toContain("dedupeKey = `SALE_EARLY_REMINDER:")
+    expect(cron).toContain("dedupeKey: (recipient) => `EARLY_REMINDER:")
+    expect(cron).toContain("dedupeKey: (recipient) => `SALE_EARLY_REMINDER:")
     // Both new dedupe keys feed into scheduledReminderSendAt like every other planned type
     // (total also includes the later supplier-payable reminder blocks — see cron-jitter.guard.test.ts).
-    const count = cron.split('scheduledAt: scheduledReminderSendAt(dedupeKey,').length - 1
+    const count = cron.split('scheduledReminderSendAt(').length - 1
     expect(count).toBe(9)
   })
 

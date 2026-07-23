@@ -82,10 +82,11 @@ describe('worker server boundary release guard', () => {
     const page = source('src/app/(shop)/shop/settings/settings-client.tsx')
     expect(api).toContain('function profileDto(')
     expect(api).toContain('telegramAllowed')
-    expect(api).toContain('if (isStaff && (!telegramFeatureEnabled || !admin.telegramNotificationsEnabled || !admin.shop.telegramNotificationsEnabled))')
+    expect(api).toContain('linkShopAdminTelegramIdentityInTransaction')
+    expect(api).toContain('unlinkShopAdminTelegramIdentityInTransaction')
     expect(api).toContain('if (isStaff) {\n        return forbidden("Xodim ism yoki telefonini o\'zgartira olmaydi')
     expect(page).toContain('const isStaff = memberKind === \'SHOP_STAFF\'')
-    expect(page).toContain('{settings.profile.telegramAllowed && (')
+    expect(page).toContain('(settings.profile.telegramAllowed || Boolean(settings.profile.telegramId))')
     expect(page).toContain('{canManageShop && settings.shop && (')
   })
 
@@ -121,7 +122,7 @@ describe('worker server boundary release guard', () => {
   it('redacts customer lifetime cash-flow and profit aggregates while retaining the worker debt queue', () => {
     expect(redactShopStaffCustomerProfileMetrics({
       contractValue: { UZS: 1_000_000, USD: 0 },
-      dueToday: { UZS: 250_000, USD: 0 },
+      dueThisMonth: { UZS: 250_000, USD: 0 },
       overdue: { UZS: 100_000, USD: 0 },
       cashCollected: { UZS: 750_000, USD: 0 },
       refunds: { UZS: 10_000, USD: 0 },
@@ -131,7 +132,7 @@ describe('worker server boundary release guard', () => {
       legacyUsdPaymentCount: 1,
     })).toEqual({
       contractValue: { UZS: 1_000_000, USD: 0 },
-      dueToday: { UZS: 250_000, USD: 0 },
+      dueThisMonth: { UZS: 250_000, USD: 0 },
       overdue: { UZS: 100_000, USD: 0 },
     })
   })
@@ -151,10 +152,10 @@ describe('worker server boundary release guard', () => {
     expect(deviceLists).toContain('function redactShopDeviceOwnerFinancials')
     expect(deviceLists).toContain('visibility.includeOwnerFinancials ? item : redactShopDeviceOwnerFinancials(item)')
     expect(sync).toContain('getShopDeviceListItemsByIds(guarded.shopId, deviceIds, { includeOwnerFinancials })')
-    expect(olib).toContain("...(includeOwnerFinancials\n              ? { profit:")
-    expect(olib).toContain('sale: {\n              id: p.sale.id,\n              customer: p.sale.customer,\n              ...(includeOwnerFinancials')
-    expect(olib).toContain('...(includeOwnerFinancials\n                ? {\n                    salePrice:')
-    expect(olib).toContain('return created({\n      deviceId: result.device.id')
+    expect(olib).toContain('...(includeOwnerFinancials ? {\n              purchasePrice:')
+    expect(olib).toContain('...(includeOwnerFinancials && customerOutcome ? {')
+    expect(olib).toContain('profit: customerOutcome.type === \'SALE\'')
+    expect(olib).toContain('const response = {\n      operationId: result.operation.id,')
     expect(logs).toContain('const isShopStaff =')
     expect(logs).toContain('redactShopStaffLogValue(log.newValue)')
     expect(logsBootstrap).toContain('includeOwnerFinancials: guarded.principal?.memberKind === \'SHOP_OWNER\'')
@@ -162,12 +163,16 @@ describe('worker server boundary release guard', () => {
 
   it('keeps customer-profile financial aggregates and resolution history owner-only at both API and UI boundaries', () => {
     const profileApi = source('src/app/api/customers/[id]/profile/route.ts')
+    const analyticsApi = source('src/app/api/customers/[id]/analytics/route.ts')
     const profileData = source('src/lib/server/customer-profile.ts')
-    const profileClient = source('src/app/(shop)/shop/mijozlar/[id]/customer-profile-client.tsx')
+    const analyticsData = source('src/lib/server/customer-profile-analytics.ts')
+    const profileHistory = source('src/app/(shop)/shop/mijozlar/[id]/customer-profile-history.tsx')
     expect(profileApi).toContain('const includeOwnerFinancials =')
     expect(profileApi).toContain("!includeOwnerFinancials && section === 'resolutions'")
     expect(profileData).toContain('redactShopStaffCustomerProfileMetrics(metrics)')
-    expect(profileClient).toContain(".filter((candidate) => canSeeOwnerFinancials || candidate !== 'resolutions')")
+    expect(analyticsApi).toContain('includeOwnerFinancials')
+    expect(analyticsData).toContain('redactShopStaffCustomerProfileAnalytics')
+    expect(profileHistory).toContain(".filter((candidate) => canSeeOwnerFinancials || candidate !== 'resolutions')")
   })
 
   it('returns Nasiya resolution data only to owners or an exact resolution capability', () => {
@@ -187,8 +192,8 @@ describe('worker server boundary release guard', () => {
     const deviceCreate = source('src/app/api/devices/route.ts')
     const deviceSell = source('src/app/api/devices/[id]/sell/route.ts')
     const olib = source('src/app/api/olib-sotdim/route.ts')
-    expect(deviceCreate).toContain("id: shop?.ownerAdminId ?? '__no-shop-owner__'")
-    expect(deviceSell).toContain("id: device.shop.ownerAdminId ?? '__no-shop-owner__'")
-    expect(olib).toContain("id: shop?.ownerAdminId ?? '__no-shop-owner__'")
+    expect(deviceCreate).toContain('audience: TELEGRAM_AUDIENCES.OWNER_ONLY')
+    expect(deviceSell).toContain('audience: TELEGRAM_AUDIENCES.OWNER_ONLY')
+    expect(olib).toContain('audience: TELEGRAM_AUDIENCES.OWNER_ONLY')
   })
 })

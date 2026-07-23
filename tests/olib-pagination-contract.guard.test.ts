@@ -8,7 +8,7 @@ const page = readFileSync(resolve(process.cwd(), 'src/app/(shop)/shop/olib-sotdi
 describe('Olib-sotdim bounded native-currency list', () => {
   it('returns a real pagination envelope', () => {
     expect(api).toContain('prisma.supplierPayable.count({ where })')
-    expect(api).toMatch(/items:\s*payables\.map[\s\S]*?total,\s*skip,\s*take,/)
+    expect(api).toMatch(/items:\s*rows\.map[\s\S]*?total,\s*skip,\s*take,/)
     expect(api).toContain('skip,')
   })
 
@@ -16,7 +16,7 @@ describe('Olib-sotdim bounded native-currency list', () => {
     expect(api).toContain('contractAmount: true')
     expect(api).toContain('contractSalePrice: true')
     expect(api).toContain('purchaseInputAmount: true')
-    expect(page).toContain('row.sale.contractCurrency')
+    expect(page).toContain('row.customerOutcome.contractCurrency')
     expect(page).toContain('row.device.purchaseCurrency')
   })
 })

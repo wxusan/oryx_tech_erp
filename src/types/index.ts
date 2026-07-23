@@ -40,10 +40,16 @@ export enum NotificationStatus {
 export enum NasiyaScheduleStatus {
   PENDING = 'PENDING',
   PAID = 'PAID',
+  SETTLED = 'SETTLED',
   PARTIAL = 'PARTIAL',
   OVERDUE = 'OVERDUE',
   DEFERRED = 'DEFERRED',
   CANCELLED = 'CANCELLED',
+}
+
+export enum NasiyaSettlementMode {
+  FULL_WITH_PROFIT = 'FULL_WITH_PROFIT',
+  WAIVE_REMAINING_PROFIT = 'WAIVE_REMAINING_PROFIT',
 }
 
 export enum ActorType {

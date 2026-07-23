@@ -44,7 +44,7 @@ describe('getShopStats: month/admin filter is additive, existing callers unaffec
   })
 
   it('the cache key includes month + admin so filtered views never collide with the default cache entry', () => {
-    expect(source).toContain("['shop-stats:v3-payment-basis', shopId, role, monthKey ?? 'current', adminId ?? 'all']")
+    expect(source).toContain("['shop-stats:v6-realized-profit-only', shopId, role, monthKey ?? 'current', adminId ?? 'all']")
   })
 })
 
@@ -94,6 +94,8 @@ describe('hisobot page: month selector + admin filter UI', () => {
     expect(rangeQuery).toContain('WITH ORDINALITY')
     expect(rangeQuery).toContain("FILTER (WHERE currency = 'UZS')")
     expect(rangeQuery).toContain("FILTER (WHERE currency = 'USD')")
+    expect(rangeQuery).toContain('contract_months AS')
+    expect(rangeQuery).toContain('AND n."isImported" = false')
     expect(rangeQuery).toContain('n."accountingReconstructionStatus" IN (\'COMPLETE\', \'PARTIAL\')')
     expect(rangeQuery).toContain('n."resolutionState" = \'ACTIVE\'')
   })
@@ -103,6 +105,8 @@ describe('hisobot page: month selector + admin filter UI', () => {
     expect(exportRoute).toContain("report-${range.startMonth}-${range.endMonth}")
     expect(exportRoute).toContain("'cashCollectedUzs'")
     expect(exportRoute).toContain("'cashCollectedUsd'")
+    expect(exportRoute).toContain("'contractsUzs'")
+    expect(exportRoute).toContain("'contractsUsd'")
     expect(exportRoute).toContain("'expectedReceivablesUzs'")
     expect(exportRoute).toContain("'expectedReceivablesUsd'")
     expect(exportRoute).toContain("report: 'EXPORT_REPORTS'")

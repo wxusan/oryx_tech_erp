@@ -38,9 +38,9 @@ function staffWithOnly(permission: ActiveShopPermissionCode): ShopPrincipalAcces
 }
 
 describe('Staff Permissions V2 behavioral authorization kernel', () => {
-  it('has exactly 55 unique active capabilities with complete operational metadata', () => {
-    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(55)
-    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(55)
+  it('has exactly 60 unique active capabilities with complete operational metadata', () => {
+    expect(ACTIVE_SHOP_PERMISSION_CODES).toHaveLength(60)
+    expect(new Set(ACTIVE_SHOP_PERMISSION_CODES).size).toBe(60)
 
     for (const code of ACTIVE_SHOP_PERMISSION_CODES) {
       const definition = permissionDefinition(code)
@@ -112,6 +112,9 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
     expect(createShopStaffSchema.safeParse({ ...base, permissionCodes: ['CASH_SALE_CREATE'] }).success).toBe(false)
     expect(createShopStaffSchema.safeParse({ ...base, permissionCodes: [STAFF_LOGS_PERMISSION] }).success).toBe(false)
     expect(createShopStaffSchema.safeParse({ ...base, logsViewEnabled: true }).success).toBe(true)
+    expect(createShopStaffSchema.safeParse({ ...base, roleId: 'role-1' }).success).toBe(true)
+    expect(createShopStaffSchema.safeParse({ ...base, roleId: 'role-1', permissionCodes: ['SALE_CREATE'] }).success).toBe(false)
+    expect(updateShopStaffSchema.safeParse({ staffId: 'staff-1', note: 'Lavozim yangilandi', roleId: 'role-1', permissionCodes: [] }).success).toBe(false)
   })
 
   it('bundles archive and restore into the one staff-facing archive checkbox capability', () => {
@@ -140,11 +143,20 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
   it('expands every retired alias only to its documented exact V2 targets', () => {
     for (const retired of RETIRED_SHOP_PERMISSION_CODES) {
       const expanded = expandShopPermissionCodes([retired])
-      expect([...expanded]).toEqual([retired, ...LEGACY_PERMISSION_EXPANSIONS[retired]])
+      const expected = [retired, ...LEGACY_PERMISSION_EXPANSIONS[retired]]
+      if (expected.includes('SUPPLIER_PAYMENT_RECORD') || expected.includes('SUPPLIER_PAYMENT_MARK_PAID')) {
+        expected.push('SUPPLIER_PAYABLE_VIEW')
+      }
+      expect([...expanded]).toEqual([...new Set(expected)])
       for (const replacement of LEGACY_PERMISSION_EXPANSIONS[retired]) {
         expect(ACTIVE_SHOP_PERMISSION_CODES).toContain(replacement)
       }
     }
+  })
+
+  it('never turns the retired generic return grant into Nasiya return/refund access', () => {
+    expect(LEGACY_PERMISSION_EXPANSIONS.RETURN_MANAGE).not.toContain('NASIYA_RETURN_REFUND')
+    expect(expandShopPermissionCodes(['RETURN_MANAGE'])).not.toContain('NASIYA_RETURN_REFUND')
   })
 
   it('materializes legacy full access conservatively and package-bounded', () => {
@@ -154,6 +166,7 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
     expect(legacyStaffPermissionCodes(allFeatures)).toEqual(expected)
     expect(expected).toContain('LOG_VIEW')
     expect(expected).not.toContain('SALE_RETURN_REFUND')
+    expect(expected).not.toContain('NASIYA_RETURN_REFUND')
     expect(expected).not.toContain('DASHBOARD_FINANCIAL_VIEW')
     expect(expected).not.toContain('REPORT_VIEW')
     expect(expected).not.toContain('STAFF_PERMISSION_MANAGE')
@@ -189,6 +202,8 @@ describe('Staff Permissions V2 behavioral authorization kernel', () => {
       telegramNotificationsEnabled: false,
       legacyFullAccess: false,
       permissionVersion: 1,
+      roleVersionApplied: null,
+      staffRole: null,
       createdAt: new Date('2026-07-15T00:00:00.000Z'),
       permissions: [
         { permissionCode: 'DEVICE_CREATE' },

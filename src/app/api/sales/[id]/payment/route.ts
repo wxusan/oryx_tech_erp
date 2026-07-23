@@ -4,7 +4,7 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireShopPermissionAndFeature, resolveActiveShopId } from '@/lib/api-auth'
 import { addSalePaymentSchema } from '@/lib/validations'
 import { ok, badRequest, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
-import { processPendingNotifications } from '@/lib/notification-service'
+import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { salePaymentMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
@@ -20,6 +20,7 @@ import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
 import { canonicalPaymentBreakdown, sameInstant, sameMoney, sameOptionalText } from '@/lib/idempotency-replay'
 import { allocateCumulativePaymentComponents, splitUzsReportingAmount } from '@/lib/payment-profit-allocation'
+import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -319,15 +320,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             },
           })
 
-          // Notify all active shop admins with a verified telegramId.
-          const shopAdmins = await tx.shopAdmin.findMany({
-            where: {
-              shopId,
-              deletedAt: null,
-              isActive: true,
-              telegramId: { not: '' },
-              telegramVerifiedAt: { not: null },
-            },
+          const recipients = await resolveTelegramRecipients(tx, {
+            shopId,
+            audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF,
           })
           const paymentMessage = salePaymentMessage({
             shopName: sale.shop.name,
@@ -348,20 +343,22 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             adminName: session.user.name,
             currency,
           })
-          for (const admin of shopAdmins) {
-            await tx.notification.create({
-              data: {
-                shopId,
-                type: 'PAYMENT_RECEIVED',
-                message: paymentMessage,
-                telegramId: admin.telegramId!,
-                recipientShopAdminId: admin.id,
-                scheduledAt: new Date(),
-                relatedId: saleId,
-                relatedType: 'Sale',
-              },
-            })
-          }
+          const scheduledAt = new Date()
+          const notificationRows = [
+            ...telegramNotificationRows(recipients, {
+              type: 'PAYMENT_RECEIVED',
+              message: paymentMessage,
+              scheduledAt,
+              relatedId: saleId,
+              relatedType: 'Sale',
+            }),
+            ...telegramUnavailableMarkerRows(recipients, {
+              type: 'PAYMENT_RECEIVED',
+              dedupeScope: payment.id,
+              cancelledAt: scheduledAt,
+            }),
+          ]
+          if (notificationRows.length > 0) await tx.notification.createMany({ data: notificationRows })
 
           return { payment, sale: updatedSale, duplicate: false }
         },
@@ -389,7 +386,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // Flush freshly-queued notifications after the response (non-blocking).
     // The rows are already committed, so cron is the backstop if this misses.
     after(() =>
-      processPendingNotifications().catch((e) =>
+      flushQueuedTelegramWork().catch((e) =>
         logger.warn('notification flush failed', {
           event: 'notification.flush_failed',
           error: e,

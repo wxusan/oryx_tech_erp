@@ -20,7 +20,7 @@ import { requireShopPermissionAndFeature } from '@/lib/api-auth'
 import { importNasiyaSchema } from '@/lib/validations'
 import { generateImportSchedule } from '@/lib/nasiya-utils'
 import { created, badRequest, conflict, forbidden, serverError, tooManyRequests } from '@/lib/api-helpers'
-import { processPendingNotifications } from '@/lib/notification-service'
+import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { nasiyaImportedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
 import { rateLimitKey } from '@/lib/rate-limit'
@@ -33,6 +33,7 @@ import { roundContractMoney } from '@/lib/nasiya-contract'
 import type { ZodError } from 'zod'
 import { formatDeviceStorage, normalizeImei } from '@/lib/device-specs'
 import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
+import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 
 export async function POST(req: NextRequest) {
   try {
@@ -323,8 +324,9 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      const shopAdmins = await tx.shopAdmin.findMany({
-        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
+      const recipients = await resolveTelegramRecipients(tx, {
+        shopId,
+        audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF,
       })
       const shop = await tx.shop.findUnique({ where: { id: shopId }, select: { name: true } })
       const message = nasiyaImportedMessage({
@@ -347,20 +349,22 @@ export async function POST(req: NextRequest) {
         adminName: session.user.name,
         currency,
       })
-      for (const admin of shopAdmins) {
-        await tx.notification.create({
-          data: {
-            shopId,
-            type: 'NASIYA_IMPORTED',
-            message,
-            telegramId: admin.telegramId!,
-            recipientShopAdminId: admin.id,
-            scheduledAt: new Date(),
-            relatedId: nasiya.id,
-            relatedType: 'Nasiya',
-          },
-        })
-      }
+      const scheduledAt = new Date()
+      const notificationRows = [
+        ...telegramNotificationRows(recipients, {
+          type: 'NASIYA_IMPORTED',
+          message,
+          scheduledAt,
+          relatedId: nasiya.id,
+          relatedType: 'Nasiya',
+        }),
+        ...telegramUnavailableMarkerRows(recipients, {
+          type: 'NASIYA_IMPORTED',
+          dedupeScope: nasiya.id,
+          cancelledAt: scheduledAt,
+        }),
+      ]
+      if (notificationRows.length > 0) await tx.notification.createMany({ data: notificationRows })
 
       return { nasiyaId: nasiya.id, deviceId: device.id, scheduleCount: schedule.length }
     })
@@ -368,7 +372,7 @@ export async function POST(req: NextRequest) {
     invalidateShopNasiyaMutation(shopId)
 
     after(() =>
-      processPendingNotifications().catch((e) =>
+      flushQueuedTelegramWork().catch((e) =>
         logger.warn('notification flush failed', { event: 'notification.flush_failed', route: '/api/nasiya/import', error: e }),
       ),
     )

@@ -39,7 +39,7 @@ function allowedDomainsForGuard(guarded: Awaited<ReturnType<typeof requireApiSes
       (!feature || principalHasFeature(guarded.principal!, feature))
     ) values.forEach((value) => domains.add(value))
   }
-  allow(['INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK'], ['devices'], 'INVENTORY')
+  allow(['INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_PURCHASE_ON_CREDIT', 'DEVICE_EDIT', 'DEVICE_DELETE', 'DEVICE_RESTOCK'], ['devices'], 'INVENTORY')
   allow([
     'SALE_VIEW',
     'SALE_CREATE',
@@ -53,12 +53,13 @@ function allowedDomainsForGuard(guarded: Awaited<ReturnType<typeof requireApiSes
     'NASIYA_CREATE',
     'NASIYA_EDIT',
     'NASIYA_PAYMENT_RECEIVE',
+    'NASIYA_RETURN_REFUND',
     'NASIYA_DEFER',
     'NASIYA_REMINDER_MANAGE',
     'NASIYA_ARCHIVE',
     'NASIYA_REOPEN',
   ], ['nasiyas'], 'NASIYA')
-  allow(['SALE_RETURN_REFUND', 'DEVICE_RESTOCK'], ['returns'])
+  allow(['SALE_RETURN_REFUND', 'NASIYA_RETURN_REFUND', 'DEVICE_RESTOCK'], ['returns'])
   allow([
     'CUSTOMER_VIEW',
     'CUSTOMER_CREATE',
@@ -68,7 +69,8 @@ function allowedDomainsForGuard(guarded: Awaited<ReturnType<typeof requireApiSes
     'CUSTOMER_PASSPORT_MANAGE',
     'CUSTOMER_TRUST_OVERRIDE',
   ], ['customers'], 'CUSTOMER_CRM')
-  allow(['OLIB_VIEW', 'OLIB_CREATE', 'SUPPLIER_PAYMENT_MARK_PAID'], ['olibSotdim'], 'OLIB_SOTDIM')
+  allow(['OLIB_VIEW', 'OLIB_CREATE', 'SUPPLIER_PAYABLE_VIEW', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID'], ['olibSotdim'], 'OLIB_SOTDIM')
+  allow(['SUPPLIER_PAYABLE_VIEW', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID', 'SALE_VIEW', 'SALE_PAYMENT_RECEIVE', 'RECEIVABLES_VIEW'], ['debts'])
   allow([
     'RECEIVABLES_VIEW',
     'SALE_VIEW',
@@ -77,7 +79,7 @@ function allowedDomainsForGuard(guarded: Awaited<ReturnType<typeof requireApiSes
     'NASIYA_PAYMENT_RECEIVE',
     'NASIYA_DEFER',
   ], ['overdue'])
-  allow(['SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE', 'SUPPLIER_PAYMENT_MARK_PAID'], ['payments'])
+  allow(['SALE_PAYMENT_RECEIVE', 'NASIYA_PAYMENT_RECEIVE', 'SUPPLIER_PAYMENT_RECORD', 'SUPPLIER_PAYMENT_MARK_PAID'], ['payments'])
   allow(['DASHBOARD_OPERATIONAL_VIEW', 'DASHBOARD_FINANCIAL_VIEW', 'REPORT_VIEW'], ['reports'], 'REPORTS')
   allow(['LOG_VIEW'], ['logs'])
   allow([

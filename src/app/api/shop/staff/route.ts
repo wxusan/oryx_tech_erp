@@ -15,6 +15,7 @@ import {
 } from '@/lib/server/shop-access'
 import {
   createShopStaffSchema,
+  STAFF_LOGS_PERMISSION,
   withNasiyaArchivePermissionBundle,
   withStaffLogsPermission,
 } from '@/lib/shop-staff-contract'
@@ -36,6 +37,10 @@ import {
   isPrismaUniqueConstraintOnField,
   SHOP_LOGIN_TAKEN_MESSAGE,
 } from '@/lib/shop-login-conflict'
+import {
+  processDueTelegramDisableTransitions,
+  telegramPreassignmentAllowed,
+} from '@/lib/server/telegram-lifecycle'
 
 const STAFF_ADMIN_PERMISSIONS = [
   'STAFF_VIEW',
@@ -103,6 +108,10 @@ export async function POST(request: NextRequest) {
         parsed.data.logsViewEnabled,
       ),
     )
+    if (principal.memberKind === 'SHOP_STAFF' && parsed.data.roleId) {
+      return forbidden("Xodimga lavozimni faqat do'kon egasi biriktiradi")
+    }
+    const telegramId = normalizeTelegramId(parsed.data.telegramId)
     if (
       principal.memberKind === 'SHOP_STAFF' &&
       (permissionCodes.length > 0 || parsed.data.telegramNotificationsEnabled)
@@ -114,8 +123,18 @@ export async function POST(request: NextRequest) {
     if (parsed.data.telegramNotificationsEnabled && !principal.enabledFeatures.has('TELEGRAM')) {
       return badRequest("Telegram moduli yoqilmagani uchun xodim bildirishnomalarini yoqib bo'lmaydi")
     }
-
-    const telegramId = normalizeTelegramId(parsed.data.telegramId)
+    if (telegramId && !parsed.data.telegramNotificationsEnabled) {
+      return badRequest("Telegram ID biriktirishdan oldin xodim uchun Telegram bildirishnomalarini yoqing")
+    }
+    if (parsed.data.telegramNotificationsEnabled || telegramId) {
+      await processDueTelegramDisableTransitions({ shopId, limit: 100 })
+    }
+    if (
+      (parsed.data.telegramNotificationsEnabled || telegramId) &&
+      !(await telegramPreassignmentAllowed(prisma, shopId))
+    ) {
+      return badRequest("Telegram funksiyasi do'kon uchun yoqilmagan")
+    }
     if (telegramId && await isTelegramIdTaken(telegramId)) {
       return conflict(`Bu Telegram ID allaqachon tizimda bor: ${telegramId}`)
     }
@@ -132,7 +151,7 @@ export async function POST(request: NextRequest) {
       }
       if (
         livePrincipal.memberKind === 'SHOP_STAFF' &&
-        (permissionCodes.length > 0 || parsed.data.telegramNotificationsEnabled)
+        (permissionCodes.length > 0 || parsed.data.roleId || parsed.data.telegramNotificationsEnabled)
       ) {
         throw Object.assign(new Error('DELEGATED_CREATE_SCOPE'), { code: 'DELEGATED_CREATE_SCOPE' })
       }
@@ -143,8 +162,17 @@ export async function POST(request: NextRequest) {
       if (parsed.data.telegramNotificationsEnabled && !livePrincipal.enabledFeatures.has('TELEGRAM')) {
         throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
       }
+      if (telegramId && !parsed.data.telegramNotificationsEnabled) {
+        throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
+      }
+      if (
+        (parsed.data.telegramNotificationsEnabled || telegramId) &&
+        !(await telegramPreassignmentAllowed(tx, shopId))
+      ) {
+        throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
+      }
       if (telegramId) {
-        await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`telegram:${telegramId}`}))`)
+        await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${telegramId}, 0))`)
         const [superAdminOwner, shopAdminOwner] = await Promise.all([
           tx.superAdmin.findFirst({ where: { telegramId, deletedAt: null }, select: { id: true } }),
           tx.shopAdmin.findFirst({ where: { telegramId, deletedAt: null }, select: { id: true } }),
@@ -152,6 +180,32 @@ export async function POST(request: NextRequest) {
         if (superAdminOwner || shopAdminOwner) {
           throw Object.assign(new Error('TELEGRAM_TAKEN'), { code: 'TELEGRAM_TAKEN' })
         }
+      }
+      const selectedRole = parsed.data.roleId
+        ? await tx.shopStaffRole.findFirst({
+            where: { id: parsed.data.roleId, shopId, isArchived: false },
+            select: {
+              id: true,
+              version: true,
+              name: true,
+              permissions: { select: { permissionCode: true } },
+            },
+          })
+        : null
+      if (parsed.data.roleId && !selectedRole) {
+        throw Object.assign(new Error('ROLE_NOT_FOUND'), { code: 'ROLE_NOT_FOUND' })
+      }
+      if (selectedRole && livePrincipal.memberKind !== 'SHOP_OWNER') {
+        throw Object.assign(new Error('ROLE_OWNER_ONLY'), { code: 'ROLE_OWNER_ONLY' })
+      }
+      const materializedPermissionCodes = selectedRole
+        ? selectedRole.permissions.map((permission) => permission.permissionCode as ShopPermissionCode)
+        : permissionCodes
+      if (selectedRole && materializedPermissionCodes.some((code) => {
+        const permission = SHOP_PERMISSION_CATALOG.find((item) => item.code === code)
+        return !permission || permission.retired || permission.ownerOnly
+      })) {
+        throw Object.assign(new Error('PERMISSION_INVALID'), { code: 'PERMISSION_INVALID' })
       }
       const createdStaff = await tx.shopAdmin.create({
         data: {
@@ -165,12 +219,14 @@ export async function POST(request: NextRequest) {
           isActive: parsed.data.isActive,
           passwordHash,
           legacyFullAccess: false,
+          staffRoleId: selectedRole?.id,
+          roleVersionApplied: selectedRole?.version,
         },
         select: { id: true },
       })
-      if (permissionCodes.length) {
+      if (materializedPermissionCodes.length) {
         await tx.shopMemberPermission.createMany({
-          data: permissionCodes.map((permissionCode) => ({
+          data: materializedPermissionCodes.map((permissionCode) => ({
             shopId,
             shopAdminId: createdStaff.id,
             permissionCode,
@@ -192,8 +248,10 @@ export async function POST(request: NextRequest) {
             name: parsed.data.name,
             login: parsed.data.login,
             isActive: parsed.data.isActive,
-            permissionCodes,
-            logsViewEnabled: parsed.data.logsViewEnabled,
+            permissionCodes: materializedPermissionCodes,
+            roleId: selectedRole?.id ?? null,
+            roleName: selectedRole?.name ?? null,
+            logsViewEnabled: materializedPermissionCodes.includes(STAFF_LOGS_PERMISSION),
             telegramNotificationsEnabled: parsed.data.telegramNotificationsEnabled,
           },
         },
@@ -210,6 +268,8 @@ export async function POST(request: NextRequest) {
       if (error.code === 'AUTHORIZATION_CHANGED') return forbidden('Ruxsatlaringiz o‘zgargan. Sahifani yangilab, qayta urinib ko‘ring.')
       if (error.code === 'DELEGATED_CREATE_SCOPE') return forbidden('Ushbu amal faqat ruxsat berilgan doirada bajarilishi mumkin.')
       if (error.code === 'PERMISSION_INVALID') return badRequest('Tanlangan ruxsat noto‘g‘ri.')
+      if (error.code === 'ROLE_NOT_FOUND') return badRequest('Tanlangan lavozim topilmadi yoki arxivlangan.')
+      if (error.code === 'ROLE_OWNER_ONLY') return forbidden('Xodimga lavozimni faqat do‘kon egasi biriktiradi.')
       if (error.code === 'TELEGRAM_DISABLED') return badRequest('Telegram funksiyasi o‘chirilgan.')
       if (error.code === 'TELEGRAM_TAKEN') return conflict('Bu Telegram hisobi boshqa foydalanuvchiga biriktirilgan.')
       if (isPrismaUniqueConstraintOnField(error, 'login')) return conflict(SHOP_LOGIN_TAKEN_MESSAGE)

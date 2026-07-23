@@ -27,6 +27,12 @@ import { presentDeviceSpecs } from '@/lib/device-specs'
 import { initializeRequestAuditContext } from '@/lib/server/request-context'
 import { activeShopIdsForFeature } from '@/lib/server/shop-access'
 import {
+  telegramNotificationRows,
+  telegramUnavailableMarkerRows,
+  TelegramRecipientResolverCache,
+  TELEGRAM_AUDIENCES,
+} from '@/lib/server/telegram-recipients'
+import {
   acquireReminderGenerationLease,
   checkpointReminderGeneration,
   completeReminderGeneration,
@@ -124,11 +130,41 @@ export async function GET(request: NextRequest): Promise<Response> {
       invalidNasiyaSchedulesSkipped: 0,
     }
     const transitionedShopIds = new Set<string>()
+    const recipientCache = new TelegramRecipientResolverCache(100)
+
+    async function queueReminder(input: {
+      shopId: string
+      type: string
+      message: string
+      scheduledAt: Date | ((recipient: { id: string; telegramId: string }) => Date)
+      relatedId: string
+      relatedType: string
+      dedupeKey: (recipient: { id: string; telegramId: string }) => string
+      gapDedupeScope: string
+    }) {
+      const resolution = await recipientCache.resolve(prisma, {
+        shopId: input.shopId,
+        audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF,
+      })
+      const markerTime = new Date()
+      const rows = [
+        ...telegramNotificationRows(resolution, input),
+        ...telegramUnavailableMarkerRows(resolution, {
+          type: input.type,
+          dedupeScope: input.gapDedupeScope,
+          cancelledAt: markerTime,
+        }),
+      ]
+      if (rows.length > 0) {
+        await prisma.notification.createMany({ data: rows, skipDuplicates: true })
+      }
+    }
 
     async function runPhase<T extends { id: string }>(
       phase: ReminderGenerationPhase,
       fetchPage: (cursor: string | null, take: number) => Promise<T[]>,
       processRow: (row: T) => Promise<void>,
+      shopIdForRow: (row: T) => string,
     ): Promise<void> {
       if (!acquired.acquired || generationStatus !== 'running' || !activePhase) return
 
@@ -141,6 +177,10 @@ export async function GET(request: NextRequest): Promise<Response> {
         initialCursor: activeCursor,
         fetchPage,
         processRow,
+        beforePage: (page) => recipientCache.primeMany(prisma, {
+          shopIds: page.map(shopIdForRow),
+          audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF,
+        }),
         checkpoint: (cursor) => checkpointReminderGeneration(acquired.state.leaseToken, phase, cursor),
         hasTime: () => Date.now() - startedAt < REMINDER_GENERATION_BUDGET_MS,
       })
@@ -198,7 +238,7 @@ export async function GET(request: NextRequest): Promise<Response> {
               include: {
                 customer: true,
                 device: { include: { imeis: { where: { deletedAt: null } } } },
-                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
+                shop: true,
               },
             },
           },
@@ -222,25 +262,18 @@ export async function GET(request: NextRequest): Promise<Response> {
             dueDate: effectiveDue,
             currency: await reminderCurrency(nasiya.shop),
           })
-          for (const admin of nasiya.shop.admins) {
-            const dedupeKey = `REMINDER:${triggerDay.dayKey}:${admin.telegramId}:${schedule.id}`
-            await prisma.notification.upsert({
-              where: { dedupeKey },
-              update: {},
-              create: {
-                dedupeKey,
-                shopId: nasiya.shopId,
-                type: 'REMINDER',
-                message: msg,
-                telegramId: admin.telegramId!,
-                recipientShopAdminId: admin.id,
-                scheduledAt: scheduledReminderSendAt(dedupeKey, effectiveDue),
-                relatedId: schedule.id,
-                relatedType: 'NasiyaSchedule',
-              },
-            })
-          }
+          await queueReminder({
+            shopId: nasiya.shopId,
+            type: 'REMINDER',
+            message: msg,
+            scheduledAt: (recipient) => scheduledReminderSendAt(`REMINDER:${triggerDay.dayKey}:${recipient.id}:${schedule.id}`, effectiveDue),
+            relatedId: schedule.id,
+            relatedType: 'NasiyaSchedule',
+            dedupeKey: (recipient) => `REMINDER:${triggerDay.dayKey}:${recipient.id}:${schedule.id}`,
+            gapDedupeScope: `REMINDER:${triggerDay.dayKey}:${schedule.id}`,
+          })
         },
+        (schedule) => schedule.nasiya.shopId,
       )
 
       await runPhase(
@@ -266,7 +299,7 @@ export async function GET(request: NextRequest): Promise<Response> {
               include: {
                 customer: true,
                 device: { include: { imeis: { where: { deletedAt: null } } } },
-                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
+                shop: true,
               },
             },
           },
@@ -292,6 +325,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             recipientShopAdminId: string
             scheduledAt: Date
           }> = []
+          let overdueGapMarkers: ReturnType<typeof telegramUnavailableMarkerRows> = []
           if (schedule.nasiya.reminderEnabled && reminderEnabledShopIds.has(schedule.nasiya.shopId)) {
             const msg = nasiyaOverdueMessage({
               customerName: schedule.nasiya.customer.name,
@@ -304,26 +338,38 @@ export async function GET(request: NextRequest): Promise<Response> {
               daysLate,
               currency: await reminderCurrency(schedule.nasiya.shop),
             })
-            notifications.push(...schedule.nasiya.shop.admins.map((admin) => {
-              const dedupeKey = `OVERDUE:${dayKey}:${admin.telegramId}:${schedule.id}`
+            const resolution = await recipientCache.resolve(prisma, {
+              shopId: schedule.nasiya.shopId,
+              audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF,
+            })
+            overdueGapMarkers = telegramUnavailableMarkerRows(resolution, {
+              type: 'OVERDUE',
+              dedupeScope: `OVERDUE:${dayKey}:${schedule.id}`,
+            })
+            notifications.push(...resolution.recipients.map((recipient) => {
+              const dedupeKey = `OVERDUE:${dayKey}:${recipient.id}:${schedule.id}`
               return {
                 dedupeKey,
                 message: msg,
-                telegramId: admin.telegramId!,
-                recipientShopAdminId: admin.id,
+                telegramId: recipient.telegramId,
+                recipientShopAdminId: recipient.id,
                 scheduledAt: scheduledReminderSendAt(dedupeKey, today),
               }
             }))
           }
-          const transitioned = await transitionNasiyaToOverdue({
+          const transition = await transitionNasiyaToOverdue({
             scheduleId: schedule.id,
             nasiyaId: schedule.nasiya.id,
             shopId: schedule.nasiya.shopId,
             overdueBefore: today,
             notifications,
+            gapMarkers: overdueGapMarkers,
           })
-          if (transitioned) transitionedShopIds.add(schedule.nasiya.shopId)
+          if (transition.stateChanged) {
+            transitionedShopIds.add(schedule.nasiya.shopId)
+          }
         },
+        (schedule) => schedule.nasiya.shopId,
       )
 
       await runPhase(
@@ -351,7 +397,7 @@ export async function GET(request: NextRequest): Promise<Response> {
               include: {
                 customer: true,
                 device: { include: { imeis: { where: { deletedAt: null } } } },
-                shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
+                shop: true,
               },
             },
           },
@@ -378,25 +424,18 @@ export async function GET(request: NextRequest): Promise<Response> {
             daysLeft: nasiya.earlyReminderDays!,
             currency: await reminderCurrency(nasiya.shop),
           })
-          for (const admin of nasiya.shop.admins) {
-            const dedupeKey = `EARLY_REMINDER:${triggerKey}:${admin.telegramId}:${schedule.id}`
-            await prisma.notification.upsert({
-              where: { dedupeKey },
-              update: {},
-              create: {
-                dedupeKey,
-                shopId: nasiya.shopId,
-                type: 'EARLY_REMINDER',
-                message: msg,
-                telegramId: admin.telegramId!,
-                recipientShopAdminId: admin.id,
-                scheduledAt: scheduledReminderSendAt(dedupeKey, triggerDay),
-                relatedId: schedule.id,
-                relatedType: 'NasiyaSchedule',
-              },
-            })
-          }
+          await queueReminder({
+            shopId: nasiya.shopId,
+            type: 'EARLY_REMINDER',
+            message: msg,
+            scheduledAt: (recipient) => scheduledReminderSendAt(`EARLY_REMINDER:${triggerKey}:${recipient.id}:${schedule.id}`, triggerDay),
+            relatedId: schedule.id,
+            relatedType: 'NasiyaSchedule',
+            dedupeKey: (recipient) => `EARLY_REMINDER:${triggerKey}:${recipient.id}:${schedule.id}`,
+            gapDedupeScope: `EARLY_REMINDER:${triggerKey}:${schedule.id}`,
+          })
         },
+        (schedule) => schedule.nasiya.shopId,
       )
 
       await runPhase(
@@ -414,7 +453,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           include: {
             customer: true,
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
+            shop: true,
           },
           orderBy: { id: 'asc' },
           take,
@@ -434,25 +473,18 @@ export async function GET(request: NextRequest): Promise<Response> {
             dueDate: sale.dueDate,
             currency: await reminderCurrency(sale.shop),
           })
-          for (const admin of sale.shop.admins) {
-            const dedupeKey = `SALE_REMINDER:${triggerDay.dayKey}:${admin.telegramId}:${sale.id}`
-            await prisma.notification.upsert({
-              where: { dedupeKey },
-              update: {},
-              create: {
-                dedupeKey,
-                shopId: sale.shopId,
-                type: 'SALE_REMINDER',
-                message: msg,
-                telegramId: admin.telegramId!,
-                recipientShopAdminId: admin.id,
-                scheduledAt: scheduledReminderSendAt(dedupeKey, sale.dueDate),
-                relatedId: sale.id,
-                relatedType: 'Sale',
-              },
-            })
-          }
+          await queueReminder({
+            shopId: sale.shopId,
+            type: 'SALE_REMINDER',
+            message: msg,
+            scheduledAt: (recipient) => scheduledReminderSendAt(`SALE_REMINDER:${triggerDay.dayKey}:${recipient.id}:${sale.id}`, sale.dueDate!),
+            relatedId: sale.id,
+            relatedType: 'Sale',
+            dedupeKey: (recipient) => `SALE_REMINDER:${triggerDay.dayKey}:${recipient.id}:${sale.id}`,
+            gapDedupeScope: `SALE_REMINDER:${triggerDay.dayKey}:${sale.id}`,
+          })
         },
+        (sale) => sale.shopId,
       )
 
       await runPhase(
@@ -470,7 +502,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           include: {
             customer: true,
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
+            shop: true,
           },
           orderBy: { id: 'asc' },
           take,
@@ -491,25 +523,18 @@ export async function GET(request: NextRequest): Promise<Response> {
             daysLate,
             currency: await reminderCurrency(sale.shop),
           })
-          for (const admin of sale.shop.admins) {
-            const dedupeKey = `SALE_OVERDUE:${dayKey}:${admin.telegramId}:${sale.id}`
-            await prisma.notification.upsert({
-              where: { dedupeKey },
-              update: {},
-              create: {
-                dedupeKey,
-                shopId: sale.shopId,
-                type: 'SALE_OVERDUE',
-                message: msg,
-                telegramId: admin.telegramId!,
-                recipientShopAdminId: admin.id,
-                scheduledAt: scheduledReminderSendAt(dedupeKey, today),
-                relatedId: sale.id,
-                relatedType: 'Sale',
-              },
-            })
-          }
+          await queueReminder({
+            shopId: sale.shopId,
+            type: 'SALE_OVERDUE',
+            message: msg,
+            scheduledAt: (recipient) => scheduledReminderSendAt(`SALE_OVERDUE:${dayKey}:${recipient.id}:${sale.id}`, today),
+            relatedId: sale.id,
+            relatedType: 'Sale',
+            dedupeKey: (recipient) => `SALE_OVERDUE:${dayKey}:${recipient.id}:${sale.id}`,
+            gapDedupeScope: `SALE_OVERDUE:${dayKey}:${sale.id}`,
+          })
         },
+        (sale) => sale.shopId,
       )
 
       await runPhase(
@@ -528,7 +553,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           include: {
             customer: true,
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
+            shop: true,
           },
           orderBy: { id: 'asc' },
           take,
@@ -551,25 +576,18 @@ export async function GET(request: NextRequest): Promise<Response> {
             daysLeft: sale.earlyReminderDays!,
             currency: await reminderCurrency(sale.shop),
           })
-          for (const admin of sale.shop.admins) {
-            const dedupeKey = `SALE_EARLY_REMINDER:${triggerKey}:${admin.telegramId}:${sale.id}`
-            await prisma.notification.upsert({
-              where: { dedupeKey },
-              update: {},
-              create: {
-                dedupeKey,
-                shopId: sale.shopId,
-                type: 'SALE_EARLY_REMINDER',
-                message: msg,
-                telegramId: admin.telegramId!,
-                recipientShopAdminId: admin.id,
-                scheduledAt: scheduledReminderSendAt(dedupeKey, triggerDay),
-                relatedId: sale.id,
-                relatedType: 'Sale',
-              },
-            })
-          }
+          await queueReminder({
+            shopId: sale.shopId,
+            type: 'SALE_EARLY_REMINDER',
+            message: msg,
+            scheduledAt: (recipient) => scheduledReminderSendAt(`SALE_EARLY_REMINDER:${triggerKey}:${recipient.id}:${sale.id}`, triggerDay),
+            relatedId: sale.id,
+            relatedType: 'Sale',
+            dedupeKey: (recipient) => `SALE_EARLY_REMINDER:${triggerKey}:${recipient.id}:${sale.id}`,
+            gapDedupeScope: `SALE_EARLY_REMINDER:${triggerKey}:${sale.id}`,
+          })
         },
+        (sale) => sale.shopId,
       )
 
       await runPhase(
@@ -584,7 +602,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           },
           include: {
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
+            shop: true,
           },
           orderBy: { id: 'asc' },
           take,
@@ -603,25 +621,18 @@ export async function GET(request: NextRequest): Promise<Response> {
             dueDate: payable.dueDate,
             currency: await reminderCurrency(payable.shop),
           })
-          for (const admin of payable.shop.admins) {
-            const dedupeKey = `SUPPLIER_PAYABLE_REMINDER:${triggerDay.dayKey}:${admin.telegramId}:${payable.id}`
-            await prisma.notification.upsert({
-              where: { dedupeKey },
-              update: {},
-              create: {
-                dedupeKey,
-                shopId: payable.shopId,
-                type: 'SUPPLIER_PAYABLE_REMINDER',
-                message: msg,
-                telegramId: admin.telegramId!,
-                recipientShopAdminId: admin.id,
-                scheduledAt: scheduledReminderSendAt(dedupeKey, payable.dueDate),
-                relatedId: payable.id,
-                relatedType: 'SupplierPayable',
-              },
-            })
-          }
+          await queueReminder({
+            shopId: payable.shopId,
+            type: 'SUPPLIER_PAYABLE_REMINDER',
+            message: msg,
+            scheduledAt: (recipient) => scheduledReminderSendAt(`SUPPLIER_PAYABLE_REMINDER:${triggerDay.dayKey}:${recipient.id}:${payable.id}`, payable.dueDate),
+            relatedId: payable.id,
+            relatedType: 'SupplierPayable',
+            dedupeKey: (recipient) => `SUPPLIER_PAYABLE_REMINDER:${triggerDay.dayKey}:${recipient.id}:${payable.id}`,
+            gapDedupeScope: `SUPPLIER_PAYABLE_REMINDER:${triggerDay.dayKey}:${payable.id}`,
+          })
         },
+        (payable) => payable.shopId,
       )
 
       await runPhase(
@@ -636,7 +647,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           },
           include: {
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
+            shop: true,
           },
           orderBy: { id: 'asc' },
           take,
@@ -656,24 +667,16 @@ export async function GET(request: NextRequest): Promise<Response> {
               daysLate,
               currency: await reminderCurrency(payable.shop),
             })
-            for (const admin of payable.shop.admins) {
-              const dedupeKey = `SUPPLIER_PAYABLE_OVERDUE:${dayKey}:${admin.telegramId}:${payable.id}`
-              await prisma.notification.upsert({
-                where: { dedupeKey },
-                update: {},
-                create: {
-                  dedupeKey,
-                  shopId: payable.shopId,
-                  type: 'SUPPLIER_PAYABLE_OVERDUE',
-                  message: msg,
-                  telegramId: admin.telegramId!,
-                  recipientShopAdminId: admin.id,
-                  scheduledAt: scheduledReminderSendAt(dedupeKey, today),
-                  relatedId: payable.id,
-                  relatedType: 'SupplierPayable',
-                },
-              })
-            }
+            await queueReminder({
+              shopId: payable.shopId,
+              type: 'SUPPLIER_PAYABLE_OVERDUE',
+              message: msg,
+              scheduledAt: (recipient) => scheduledReminderSendAt(`SUPPLIER_PAYABLE_OVERDUE:${dayKey}:${recipient.id}:${payable.id}`, today),
+              relatedId: payable.id,
+              relatedType: 'SupplierPayable',
+              dedupeKey: (recipient) => `SUPPLIER_PAYABLE_OVERDUE:${dayKey}:${recipient.id}:${payable.id}`,
+              gapDedupeScope: `SUPPLIER_PAYABLE_OVERDUE:${dayKey}:${payable.id}`,
+            })
           }
           if (payable.status !== 'OVERDUE') {
             await prisma.$transaction(async (tx) => {
@@ -697,6 +700,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             })
           }
         },
+        (payable) => payable.shopId,
       )
 
       await runPhase(
@@ -712,7 +716,7 @@ export async function GET(request: NextRequest): Promise<Response> {
           },
           include: {
             device: { include: { imeis: { where: { deletedAt: null } } } },
-            shop: { include: { admins: { where: { deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null }, telegramNotificationsEnabled: true } } } },
+            shop: true,
           },
           orderBy: { id: 'asc' },
           take,
@@ -734,25 +738,18 @@ export async function GET(request: NextRequest): Promise<Response> {
             daysLeft: payable.earlyReminderDays!,
             currency: await reminderCurrency(payable.shop),
           })
-          for (const admin of payable.shop.admins) {
-            const dedupeKey = `SUPPLIER_PAYABLE_EARLY_REMINDER:${triggerKey}:${admin.telegramId}:${payable.id}`
-            await prisma.notification.upsert({
-              where: { dedupeKey },
-              update: {},
-              create: {
-                dedupeKey,
-                shopId: payable.shopId,
-                type: 'SUPPLIER_PAYABLE_EARLY_REMINDER',
-                message: msg,
-                telegramId: admin.telegramId!,
-                recipientShopAdminId: admin.id,
-                scheduledAt: scheduledReminderSendAt(dedupeKey, triggerDay),
-                relatedId: payable.id,
-                relatedType: 'SupplierPayable',
-              },
-            })
-          }
+          await queueReminder({
+            shopId: payable.shopId,
+            type: 'SUPPLIER_PAYABLE_EARLY_REMINDER',
+            message: msg,
+            scheduledAt: (recipient) => scheduledReminderSendAt(`SUPPLIER_PAYABLE_EARLY_REMINDER:${triggerKey}:${recipient.id}:${payable.id}`, triggerDay),
+            relatedId: payable.id,
+            relatedType: 'SupplierPayable',
+            dedupeKey: (recipient) => `SUPPLIER_PAYABLE_EARLY_REMINDER:${triggerKey}:${recipient.id}:${payable.id}`,
+            gapDedupeScope: `SUPPLIER_PAYABLE_EARLY_REMINDER:${triggerKey}:${payable.id}`,
+          })
         },
+        (payable) => payable.shopId,
       )
     }
 

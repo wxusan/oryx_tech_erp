@@ -53,7 +53,7 @@ describe('currency source guards', () => {
       'src/app/api/sales/[id]/payment/route.ts',
       'src/app/api/nasiya/import/route.ts',
     ]) {
-      const src = read(file)
+      const src = read(file) + (file.endsWith('/nasiya/route.ts') ? read('src/lib/server/nasiya-contract-core.ts') : '')
       expect(src, file).toMatch(/moneyInputToUzs|createMoneyInputConverter/)
       expect(src, file).toContain('moneyInputMeta')
     }
@@ -65,15 +65,16 @@ describe('currency source guards', () => {
     expect(nasiyaPaymentRoute).toContain('convertMoneyDto(inputMoney, contractCurrency, conversionQuote)')
     expect(nasiyaPaymentRoute).toContain('createFxQuoteDto({')
 
-    // Returns settle against an existing contract and therefore use the pure
-    // normalizer with one route-scoped rate snapshot, then persist dedicated
-    // refund input/rate fields instead of the generic moneyInputMeta log shape.
+    // Returns use exact minor-unit DTO conversion with one route-scoped quote,
+    // then preserve the entered currency, rate, and provider provenance.
     const returnRoute = read('src/app/api/devices/[id]/return/route.ts')
-    expect(returnRoute).toContain('normalizeMoneyInput(parsed.data.refundAmount, settlementCurrency, liveUsdUzsRate)')
-    expect(returnRoute).toContain('refundAmountUzs = normalized.amountUzs')
-    expect(returnRoute).toContain('refundInputAmount: parsed.data.refundAmount')
+    expect(returnRoute).toContain('createMoneyDto(settlementCurrency, parsed.data.refundAmount)')
+    expect(returnRoute).toContain('convertMoneyDto(refundInputMoney, contractCurrency, currentFxQuote)')
+    expect(returnRoute).toContain("convertMoneyDto(refundInputMoney, 'UZS', currentFxQuote)")
+    expect(returnRoute).toContain('refundInputAmount: moneyDtoToAmount(refundInputMoney)')
     expect(returnRoute).toContain('refundInputCurrency: settlementCurrency')
-    expect(returnRoute).toContain('refundExchangeRateAtCreation:')
+    expect(returnRoute).toContain('refundExchangeRateSource:')
+    expect(returnRoute).toContain('expectedFxRateMinorUnits')
   })
 
   it('labels frozen native values, UZS snapshots, and current display values explicitly', () => {

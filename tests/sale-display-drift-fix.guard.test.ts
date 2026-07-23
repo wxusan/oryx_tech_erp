@@ -94,8 +94,9 @@ describe('Telegram: deviceSoldMessage / salePaymentMessage use the sale\'s own c
     expect(templates).not.toContain('data.paymentInput.currency !== data.contractCurrency')
   })
 
-  it('olibSotdimCreatedMessage formats purchase/sale/profit via the shared contract currency', () => {
-    expect(templates).toContain('const money = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency)')
+  it('olibSotdimCreatedMessage formats independent purchase and sale currencies without FX drift', () => {
+    expect(templates).toContain('const purchaseMoney = (amount: number) => contractMoney(amount, data.purchaseCurrency ?? data.contractCurrency, data.currency)')
+    expect(templates).toContain('const saleMoney = (amount: number) => contractMoney(amount, data.saleCurrency ?? data.contractCurrency, data.currency)')
   })
 })
 
@@ -115,11 +116,10 @@ describe('route wiring: Telegram calls pass native contract-currency amounts, no
     expect(route).toContain('contractCurrency: sale.contractCurrency,')
   })
 
-  it('olib-sotdim route passes contractPurchasePrice/contractSalePrice + contractCurrency to olibSotdimCreatedMessage', () => {
+  it('olib-sotdim route passes native purchase/sale values and both currencies to olibSotdimCreatedMessage', () => {
     const route = read('src/app/api/olib-sotdim/route.ts')
-    expect(route).toContain('purchasePrice: contractPurchasePrice,')
-    expect(route).toContain('salePrice: contractSalePrice,')
-    expect(route).toContain('profit: contractSalePrice - contractPurchasePrice,')
-    expect(route).toContain('contractCurrency,')
+    expect(route).toContain('purchasePrice: d.purchasePrice, salePrice: d.salePrice!, profit: saleProfit!,')
+    expect(route).toContain('purchaseCurrency: purchaseInput.inputCurrency,')
+    expect(route).toContain('saleCurrency: saleInput!.inputCurrency,')
   })
 })

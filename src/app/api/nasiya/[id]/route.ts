@@ -20,15 +20,28 @@ import { normalizePhone } from '@/lib/phone'
 import { phoneSchema } from '@/lib/validations'
 import { computeNasiyaPaymentScore } from '@/lib/nasiya-payment-score'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { computeCustomerTrustRating, isValidTrustTier, type CustomerNasiyaInput } from '@/lib/nasiya-customer-trust'
+import { computeCustomerTrustRatingFromFactors, isValidTrustTier, type CustomerTrustFactors } from '@/lib/nasiya-customer-trust'
 import { logger } from '@/lib/logger'
 import { principalHasPermission } from '@/lib/server/shop-access'
 import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
-import { createFxQuoteDto, createMoneyDto } from '@/lib/currency'
+import { createFxQuoteDto, createMoneyDto, moneyDtoToAmount } from '@/lib/currency'
 import { reconcileNasiyaLedger } from '@/lib/nasiya-ledger'
 import { hasNasiyaPaymentFxQuoteColumns } from '@/lib/server/nasiya-payment-schema'
+import { calculateNasiyaSettlement } from '@/lib/nasiya-settlement'
+import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
+import {
+  calculateNasiyaReturnQuote,
+  nasiyaReturnLedgerHasBlockingReasons,
+  presentNasiyaReturnQuote,
+} from '@/lib/nasiya-return'
+import type { ReturnReceiptSource } from '@/lib/return-accounting'
 
 type RouteContext = { params: Promise<{ id: string }> }
+
+const MAX_NASIYA_SCHEDULES = 60
+const MAX_LEDGER_ALLOCATIONS = 1000
+const MAX_DETAIL_PAYMENTS = 500
+const MAX_RESOLUTION_EVENTS = 100
 
 const forbiddenMoneyFields = [
   'totalAmount',
@@ -70,6 +83,31 @@ function mapPaymentBreakdown(value: unknown, currency: 'UZS' | 'USD') {
   })
 }
 
+function mapReturnReceiptSource(payment: {
+  id: string
+  paidAt: Date
+  paymentMethod: 'CASH' | 'TRANSFER' | 'CARD' | 'OTHER' | null
+  paymentBreakdown: unknown
+  amount: { toString(): string }
+  paymentInputAmount: { toString(): string } | null
+  paymentExchangeRate: { toString(): string } | null
+  appliedAmountInContractCurrency: { toString(): string } | null
+}): ReturnReceiptSource {
+  return {
+    id: payment.id,
+    kind: 'NASIYA',
+    paidAt: payment.paidAt,
+    paymentMethod: payment.paymentMethod,
+    paymentBreakdown: payment.paymentBreakdown,
+    amountUzs: Number(payment.amount),
+    paymentInputAmount: payment.paymentInputAmount == null ? null : Number(payment.paymentInputAmount),
+    paymentExchangeRate: payment.paymentExchangeRate == null ? null : Number(payment.paymentExchangeRate),
+    appliedContractAmount: payment.appliedAmountInContractCurrency == null
+      ? null
+      : Number(payment.appliedAmountInContractCurrency),
+  }
+}
+
 export async function GET(req: NextRequest, ctx: RouteContext) {
   try {
     const guarded = await requireShopAnyPermission([
@@ -77,6 +115,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       'NASIYA_CREATE',
       'NASIYA_EDIT',
       'NASIYA_PAYMENT_RECEIVE',
+      'NASIYA_RETURN_REFUND',
       'NASIYA_DEFER',
       'NASIYA_REMINDER_MANAGE',
       'NASIYA_ARCHIVE',
@@ -95,17 +134,24 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         guarded.principal && [
           'NASIYA_VIEW',
           'NASIYA_EDIT',
+          'NASIYA_RETURN_REFUND',
           'NASIYA_REMINDER_MANAGE',
           'NASIYA_ARCHIVE',
           'NASIYA_REOPEN',
         ].some((permission) => principalHasPermission(
           guarded.principal!,
-          permission as 'NASIYA_VIEW' | 'NASIYA_EDIT' | 'NASIYA_REMINDER_MANAGE' |
+          permission as 'NASIYA_VIEW' | 'NASIYA_EDIT' | 'NASIYA_RETURN_REFUND' | 'NASIYA_REMINDER_MANAGE' |
             'NASIYA_ARCHIVE' | 'NASIYA_REOPEN',
         )),
       )
     const includePaymentHistory = includeProfileData || session.user.role === 'SUPER_ADMIN' || Boolean(
       guarded.principal && principalHasPermission(guarded.principal, 'NASIYA_PAYMENT_RECEIVE'),
+    )
+    const canSettleNasiya = session.user.role === 'SUPER_ADMIN' || Boolean(
+      guarded.principal && principalHasPermission(guarded.principal, 'NASIYA_PAYMENT_RECEIVE'),
+    )
+    const canReturnNasiya = session.user.role === 'SUPER_ADMIN' || Boolean(
+      guarded.principal && principalHasPermission(guarded.principal, 'NASIYA_RETURN_REFUND'),
     )
     const includeCustomerTrust = session.user.role === 'SUPER_ADMIN' ||
       guarded.principal?.memberKind === 'SHOP_OWNER' || Boolean(
@@ -121,6 +167,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     const summaryOnly = req.nextUrl.searchParams.get('view') === 'summary'
     const includeResolutionEvents = includeResolutionData && !summaryOnly
     const includePaymentDetails = includePaymentHistory && !summaryOnly
+    const includeReturnReceiptEvidence = canReturnNasiya
+    const includeFinancialPayments = includePaymentDetails || includeReturnReceiptEvidence
     const includeCustomerTrustData = includeCustomerTrust && !summaryOnly
     const includePaymentScore = includeProfileData && !summaryOnly
 
@@ -152,6 +200,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         // Native contract-currency ledger — the actual source of truth for
         // debt/schedule math. See docs/currency-accounting-model.md.
         contractCurrency: true,
+        contractExchangeRateAtCreation: true,
         contractTotalAmount: true,
         contractDownPayment: true,
         contractBaseRemainingAmount: true,
@@ -160,8 +209,12 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         contractMonthlyPayment: true,
         contractRemainingAmount: true,
         contractPaidAmount: true,
+        contractInterestWaivedAmount: true,
+        interestWaivedAmount: true,
         accountingReconstructionStatus: true,
         status: true,
+        returnedAt: true,
+        returnedBy: true,
         resolutionState: true,
         resolutionUpdatedAt: true,
         ...(includeProfileData ? {
@@ -189,10 +242,12 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
           select: {
             id: true,
             model: true,
+            status: true,
           },
         },
         schedules: {
           orderBy: { monthNumber: 'asc' },
+          take: MAX_NASIYA_SCHEDULES + 1,
           select: {
             id: true,
             monthNumber: true,
@@ -204,19 +259,30 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
             paidAt: true,
             contractExpectedAmount: true,
             contractPaidAmount: true,
+            contractInterestWaivedAmount: true,
             contractRemainingAmount: true,
+            interestWaivedAmount: true,
+            contractPrincipalAmount: true,
+            contractMarginAmount: true,
+            contractInterestAmount: true,
+            contractPrincipalPaidAmount: true,
+            contractMarginPaidAmount: true,
+            contractInterestPaidAmount: true,
           },
         },
         paymentAllocations: {
+          orderBy: { id: 'asc' },
+          take: MAX_LEDGER_ALLOCATIONS + 1,
           select: {
             nasiyaScheduleId: true,
             contractCurrency: true,
             contractAmount: true,
           },
         },
-        ...(includePaymentDetails ? { payments: {
+        ...(includeFinancialPayments ? { payments: {
           where: { deletedAt: null },
           orderBy: { paidAt: 'desc' },
+          take: MAX_DETAIL_PAYMENTS + 1,
           select: {
             id: true,
             amount: true,
@@ -236,14 +302,78 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
             appliedAmountInContractCurrency: true,
           },
         } } : {}),
+        returns: {
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          select: {
+            id: true,
+            createdAt: true,
+            contractCurrency: true,
+            contractReceiptsAtReturn: true,
+            refundInputAmount: true,
+            refundInputCurrency: true,
+            contractRefundAmount: true,
+            contractRetainedAmount: true,
+            contractCancelledDebt: true,
+            refundAmount: true,
+            retainedValueAmountUzs: true,
+            refundMethod: true,
+            note: true,
+            createdBy: true,
+          },
+        },
+        settlement: {
+          select: {
+            id: true,
+            mode: true,
+            contractCurrency: true,
+            contractRemainingBefore: true,
+            contractCashReceivedAmount: true,
+            contractInterestWaivedAmount: true,
+            contractRemainingAfter: true,
+            cashReceivedAmountUzs: true,
+            interestWaivedAmountUzs: true,
+            settledAt: true,
+            reason: true,
+            actorId: true,
+            actorType: true,
+            ...(summaryOnly ? {} : {
+              allocations: {
+                orderBy: { sequence: 'asc' as const },
+                take: MAX_NASIYA_SCHEDULES + 1,
+                select: {
+                  id: true,
+                  nasiyaScheduleId: true,
+                  sequence: true,
+                  contractRemainingBefore: true,
+                  contractCashAmount: true,
+                  contractInterestWaivedAmount: true,
+                  contractRemainingAfter: true,
+                  cashAmountUzs: true,
+                  interestWaivedAmountUzs: true,
+                },
+              },
+            }),
+          },
+        },
       },
     })
 
-    if (!nasiya || nasiya.status === 'CANCELLED' || nasiya.resolutionState === 'WRITTEN_OFF') {
+    if (
+      !nasiya ||
+      (nasiya.status === 'CANCELLED' && !nasiya.returnedAt) ||
+      (nasiya.resolutionState === 'WRITTEN_OFF' && !nasiya.returnedAt)
+    ) {
       // Keep immutable legacy ledger rows in the database, but do not expose
       // cancelled/write-off contracts through the active Nasiya surface.
       return notFound('Nasiya topilmadi')
     }
+    const boundedHistoryExceeded = nasiya.schedules.length > MAX_NASIYA_SCHEDULES ||
+      nasiya.paymentAllocations.length > MAX_LEDGER_ALLOCATIONS
+    const paymentHistoryTruncated = 'payments' in nasiya && nasiya.payments.length > MAX_DETAIL_PAYMENTS
+    if (nasiya.schedules.length > MAX_NASIYA_SCHEDULES) nasiya.schedules.splice(MAX_NASIYA_SCHEDULES)
+    if (nasiya.paymentAllocations.length > MAX_LEDGER_ALLOCATIONS) nasiya.paymentAllocations.splice(MAX_LEDGER_ALLOCATIONS)
+    if ('payments' in nasiya && nasiya.payments.length > MAX_DETAIL_PAYMENTS) nasiya.payments.splice(MAX_DETAIL_PAYMENTS)
 
     // Resolution events contain immutable archive financial/audit context.
     // Staff may operate active Nasiyas but must not
@@ -252,6 +382,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       ? await prisma.nasiyaResolutionEvent.findMany({
           where: { shopId: nasiya.shopId, nasiyaId: nasiya.id },
           orderBy: { createdAt: 'desc' },
+          take: MAX_RESOLUTION_EVENTS + 1,
           select: {
             id: true,
             eventType: true,
@@ -269,6 +400,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
           },
         })
       : []
+    const resolutionHistoryTruncated = resolutionEvents.length > MAX_RESOLUTION_EVENTS
+    if (resolutionHistoryTruncated) resolutionEvents.splice(MAX_RESOLUTION_EVENTS)
 
     // One projection is the only source for detail status, progress, payment
     // validation data, and the parent-cache health badge. Do not re-add raw
@@ -278,6 +411,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       contractCurrency: nasiya.contractCurrency,
       contractFinalAmount: nasiya.contractFinalAmount.toString(),
       contractPaidAmount: nasiya.contractPaidAmount.toString(),
+      contractInterestWaivedAmount: nasiya.contractInterestWaivedAmount.toString(),
       contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
       schedules: nasiya.schedules.map((schedule) => ({
         id: schedule.id,
@@ -289,9 +423,10 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         contractCurrency: nasiya.contractCurrency,
         contractExpectedAmount: schedule.contractExpectedAmount.toString(),
         contractPaidAmount: schedule.contractPaidAmount.toString(),
+        contractInterestWaivedAmount: schedule.contractInterestWaivedAmount.toString(),
         contractRemainingAmount: schedule.contractRemainingAmount.toString(),
       })),
-      allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE',
+      allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE' && !boundedHistoryExceeded,
       allocations: nasiya.paymentAllocations.map((allocation) => ({
         nasiyaScheduleId: allocation.nasiyaScheduleId,
         contractCurrency: allocation.contractCurrency,
@@ -299,11 +434,68 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       })),
     })
 
+    const returned = nasiya.returnedAt != null
+    const returnRecord = nasiya.returns[0]
+      ? {
+          id: nasiya.returns[0].id,
+          returnedAt: nasiya.returns[0].createdAt.toISOString(),
+          contractCurrency: nasiya.returns[0].contractCurrency,
+          receipts: createMoneyDto(nasiya.returns[0].contractCurrency, nasiya.returns[0].contractReceiptsAtReturn.toString()),
+          refundInput: createMoneyDto(
+            nasiya.returns[0].refundInputCurrency ?? nasiya.returns[0].contractCurrency,
+            (nasiya.returns[0].refundInputAmount ?? nasiya.returns[0].contractRefundAmount).toString(),
+          ),
+          refund: createMoneyDto(nasiya.returns[0].contractCurrency, nasiya.returns[0].contractRefundAmount.toString()),
+          retained: createMoneyDto(nasiya.returns[0].contractCurrency, nasiya.returns[0].contractRetainedAmount.toString()),
+          cancelledDebt: createMoneyDto(nasiya.returns[0].contractCurrency, nasiya.returns[0].contractCancelledDebt.toString()),
+          refundMethod: nasiya.returns[0].refundMethod,
+          reason: nasiya.returns[0].note,
+          actorId: nasiya.returns[0].createdBy,
+        }
+      : null
+    const returnCurrencyContext = canReturnNasiya && !returned
+      ? await getShopCurrencyContext(nasiya.shopId)
+      : null
+    const contractReturnQuote = canReturnNasiya && !returned
+      ? calculateNasiyaReturnQuote({
+            contractCurrency: nasiya.contractCurrency,
+            contractDownPayment: Number(nasiya.contractDownPayment),
+            cancelledDebt: moneyDtoToAmount(ledger.remaining),
+            contractExchangeRateAtCreation: Number(nasiya.contractExchangeRateAtCreation ?? 0) || null,
+            accountingReconstructionStatus: nasiya.accountingReconstructionStatus,
+            resolutionState: nasiya.resolutionState,
+            deviceStatus: nasiya.device.status,
+            sources: (nasiya.payments ?? []).map(mapReturnReceiptSource),
+          })
+      : null
+    const rawReturnQuote = contractReturnQuote && returnCurrencyContext
+      ? presentNasiyaReturnQuote(
+          contractReturnQuote,
+          returnCurrencyContext.currency,
+          returnCurrencyContext.fxQuote,
+        )
+      : null
+    const returnQuote = rawReturnQuote && (paymentHistoryTruncated || nasiyaReturnLedgerHasBlockingReasons(ledger.reasons))
+      ? {
+          ...rawReturnQuote,
+          eligible: false,
+          ineligibilityReason: paymentHistoryTruncated
+            ? "Nasiya tushumlari tasdiqlangan chegaradan oshgan; avval tekshiruv kerak"
+            : "Nasiya hisob-kitobida tekshiruv talab qilinadigan tafovut bor",
+        }
+      : rawReturnQuote
+
     // Reason text must respect the shop's selected display currency, not
     // hardcode UZS — see docs/nasiya-payment-scoring.md. The score itself
     // must read the deal's own contract-currency amounts (never the legacy
     // UZS snapshot) — see docs/currency-accounting-model.md.
-    const paymentScore = includePaymentScore
+    const [scoreCurrencyContext, trustFactorMap] = await Promise.all([
+      includePaymentScore ? getShopCurrencyContext(nasiya.shopId) : Promise.resolve(null),
+      includeCustomerTrustData
+        ? getCustomerTrustFactorsForList({ shopId: nasiya.shopId, customerIds: [nasiya.customer.id] })
+        : Promise.resolve(new Map<string, CustomerTrustFactors>()),
+    ])
+    const paymentScore = includePaymentScore && scoreCurrencyContext
       ? computeNasiyaPaymentScore(
           {
             schedules: nasiya.schedules.map((s) => ({
@@ -312,54 +504,37 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
               delayedUntil: s.delayedUntil,
               expectedAmount: Number(s.contractExpectedAmount),
               paidAmount: Number(s.contractPaidAmount),
+              interestWaivedAmount: Number(s.contractInterestWaivedAmount),
               paidAt: s.paidAt,
             })),
           },
           new Date(),
-          await getShopCurrencyContext(nasiya.shopId),
+          scoreCurrencyContext,
           nasiya.contractCurrency,
         )
       : null
 
     // Item 12 — customer trust rating, aggregated across ALL of this
     // customer's nasiyas in this shop (not just this one deal).
-    const customerNasiyas = includeCustomerTrustData
-      ? await prisma.nasiya.findMany({
-          where: { customerId: nasiya.customer.id, shopId: nasiya.shopId, deletedAt: null },
-          select: {
-            status: true,
-            resolutionState: true,
-            contractCurrency: true,
-            schedules: {
-              select: {
-                status: true,
-                dueDate: true,
-                delayedUntil: true,
-                contractExpectedAmount: true,
-                contractPaidAmount: true,
-                paidAt: true,
-              },
-            },
-          },
-        })
-      : []
-    const customerTrustInputs: CustomerNasiyaInput[] = customerNasiyas.map((n) => ({
-      status: n.status,
-      resolutionState: n.resolutionState,
-      contractCurrency: n.contractCurrency,
-      schedules: n.schedules.map((s) => ({
-        status: s.status,
-        dueDate: s.dueDate,
-        delayedUntil: s.delayedUntil,
-        expectedAmount: Number(s.contractExpectedAmount),
-        paidAmount: Number(s.contractPaidAmount),
-        paidAt: s.paidAt,
-      })),
-    }))
     const trustOverrideValue = 'trustOverride' in nasiya.customer ? nasiya.customer.trustOverride : null
     const trustOverride = isValidTrustTier(trustOverrideValue) ? trustOverrideValue : null
+    const fallbackTrustFactors: CustomerTrustFactors = {
+      totalNasiyaCount: 0,
+      completedNasiyaCount: 0,
+      activeNasiyaCount: 0,
+      cancelledNasiyaCount: 0,
+      paidInstallmentCount: 0,
+      onTimeRatio: null,
+      lateInstallmentCount: 0,
+      maxDaysLate: 0,
+      currentOverdueScheduleCount: 0,
+      hasCurrentOverdue: false,
+    }
     const customerTrust = includeCustomerTrustData
-      ? computeCustomerTrustRating(customerTrustInputs, new Date(), trustOverride)
+      ? computeCustomerTrustRatingFromFactors(
+          trustFactorMap.get(nasiya.customer.id) ?? fallbackTrustFactors,
+          trustOverride,
+        )
       : null
     const passportPhotoUrl = 'passportPhotoUrl' in nasiya.customer ? nasiya.customer.passportPhotoUrl : null
     const customer = {
@@ -367,6 +542,54 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       name: nasiya.customer.name,
       phone: nasiya.customer.phone,
       ...(canViewPassportPhoto ? { hasPassportPhoto: isPrivateUploadStoredKey({ key: passportPhotoUrl, shopId: nasiya.shopId, kind: 'passport' }) } : {}),
+    }
+    let settlementQuotes: {
+      full: ReturnType<typeof calculateNasiyaSettlement>
+      waive: ReturnType<typeof calculateNasiyaSettlement>
+    } | null = null
+    if (
+      canSettleNasiya &&
+      !returned &&
+      !nasiya.settlement &&
+      nasiya.resolutionState === 'ACTIVE' &&
+      ledger.status !== 'COMPLETED' &&
+      ledger.health !== 'QUARANTINED' &&
+      ledger.remaining.minorUnits > 0
+    ) {
+      const settlementInput = {
+        contractCurrency: nasiya.contractCurrency,
+        contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
+        contractPaidAmount: nasiya.contractPaidAmount.toString(),
+        contractInterestWaivedAmount: nasiya.contractInterestWaivedAmount.toString(),
+        accountingReconstructionStatus: nasiya.accountingReconstructionStatus,
+        schedules: nasiya.schedules.map((schedule) => ({
+          id: schedule.id,
+          monthNumber: schedule.monthNumber,
+          contractExpectedAmount: schedule.contractExpectedAmount.toString(),
+          contractPaidAmount: schedule.contractPaidAmount.toString(),
+          contractRemainingAmount: schedule.contractRemainingAmount.toString(),
+          contractInterestWaivedAmount: schedule.contractInterestWaivedAmount.toString(),
+          contractPrincipalAmount: schedule.contractPrincipalAmount.toString(),
+          contractMarginAmount: schedule.contractMarginAmount.toString(),
+          contractInterestAmount: schedule.contractInterestAmount.toString(),
+          contractPrincipalPaidAmount: schedule.contractPrincipalPaidAmount.toString(),
+          contractMarginPaidAmount: schedule.contractMarginPaidAmount.toString(),
+          contractInterestPaidAmount: schedule.contractInterestPaidAmount.toString(),
+        })),
+      } as const
+      try {
+        settlementQuotes = {
+          full: calculateNasiyaSettlement({ ...settlementInput, mode: 'FULL_WITH_PROFIT' }),
+          waive: calculateNasiyaSettlement({ ...settlementInput, mode: 'WAIVE_REMAINING_PROFIT' }),
+        }
+      } catch (error) {
+        logger.warn('Nasiya settlement quote was quarantined', {
+          event: 'nasiya.settlement_quote_quarantined',
+          shopId: nasiya.shopId,
+          nasiyaId: nasiya.id,
+          error,
+        })
+      }
     }
     const reconciledScheduleById = new Map(ledger.schedules.map((schedule) => [schedule.id, schedule]))
     const responseSchedules = nasiya.schedules.map((schedule) => {
@@ -376,6 +599,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       const fallback = {
         expected: createMoneyDto(nasiya.contractCurrency, 0),
         paid: createMoneyDto(nasiya.contractCurrency, 0),
+        waived: createMoneyDto(nasiya.contractCurrency, 0),
         remaining: createMoneyDto(nasiya.contractCurrency, 0),
       }
       return {
@@ -387,11 +611,13 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         paidAt: schedule.paidAt?.toISOString() ?? null,
         expected: reconciled?.expected ?? fallback.expected,
         paid: reconciled?.paid ?? fallback.paid,
+        waived: reconciled?.waived ?? fallback.waived,
         remaining: reconciled?.remaining ?? fallback.remaining,
         // Explicit legacy mirrors are read-only reporting context; native
         // schedule DTOs above remain the debt source of truth.
         legacyExpected: createMoneyDto('UZS', schedule.expectedAmount.toString()),
         legacyPaid: createMoneyDto('UZS', schedule.paidAmount.toString()),
+        legacyWaived: createMoneyDto('UZS', schedule.interestWaivedAmount.toString()),
       }
     })
     const responsePayments = includePaymentDetails
@@ -450,6 +676,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         shopId: nasiya.shopId,
         contractCurrency: nasiya.contractCurrency,
         status: ledger.status,
+        returnedAt: nasiya.returnedAt?.toISOString() ?? null,
+        returnedBy: nasiya.returnedBy,
         resolutionState: nasiya.resolutionState,
         resolutionUpdatedAt: nasiya.resolutionUpdatedAt?.toISOString() ?? null,
         contractTerms: {
@@ -465,9 +693,45 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         customer,
         device: nasiya.device,
         schedules: responseSchedules,
+        settlementQuotes,
+        returnQuote,
+        returnRecord,
+        settlement: nasiya.settlement
+          ? {
+              id: nasiya.settlement.id,
+              mode: nasiya.settlement.mode,
+              contractCurrency: nasiya.settlement.contractCurrency,
+              remainingBefore: createMoneyDto(nasiya.settlement.contractCurrency, nasiya.settlement.contractRemainingBefore.toString()),
+              cashReceived: createMoneyDto(nasiya.settlement.contractCurrency, nasiya.settlement.contractCashReceivedAmount.toString()),
+              interestWaived: createMoneyDto(nasiya.settlement.contractCurrency, nasiya.settlement.contractInterestWaivedAmount.toString()),
+              remainingAfter: createMoneyDto(nasiya.settlement.contractCurrency, nasiya.settlement.contractRemainingAfter.toString()),
+              cashReceivedUzs: createMoneyDto('UZS', nasiya.settlement.cashReceivedAmountUzs.toString()),
+              interestWaivedUzs: createMoneyDto('UZS', nasiya.settlement.interestWaivedAmountUzs.toString()),
+              settledAt: nasiya.settlement.settledAt.toISOString(),
+              reason: nasiya.settlement.reason,
+              actorId: nasiya.settlement.actorId,
+              actorType: nasiya.settlement.actorType,
+              ...('allocations' in nasiya.settlement
+                ? {
+                    allocations: nasiya.settlement.allocations.map((allocation) => ({
+                      id: allocation.id,
+                      nasiyaScheduleId: allocation.nasiyaScheduleId,
+                      sequence: allocation.sequence,
+                      remainingBefore: createMoneyDto(nasiya.settlement!.contractCurrency, allocation.contractRemainingBefore.toString()),
+                      cash: createMoneyDto(nasiya.settlement!.contractCurrency, allocation.contractCashAmount.toString()),
+                      interestWaived: createMoneyDto(nasiya.settlement!.contractCurrency, allocation.contractInterestWaivedAmount.toString()),
+                      remainingAfter: createMoneyDto(nasiya.settlement!.contractCurrency, allocation.contractRemainingAfter.toString()),
+                      cashUzs: createMoneyDto('UZS', allocation.cashAmountUzs.toString()),
+                      interestWaivedUzs: createMoneyDto('UZS', allocation.interestWaivedAmountUzs.toString()),
+                    })),
+                  }
+                : {}),
+            }
+          : null,
         ...(responsePayments ? { payments: responsePayments } : {}),
+        ...(includePaymentDetails ? { paymentHistoryTruncated } : {}),
         ...profileData,
-        displayStatus: ledger.status,
+        displayStatus: returned ? 'RETURNED' : ledger.status,
         isOverdue: ledger.isOverdue,
         overdueAmount: ledger.overdue,
         ...(paymentScore ? { paymentScore } : {}),
@@ -495,6 +759,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
                 reversesEventId: event.reversesEventId,
                 createdAt: event.createdAt.toISOString(),
               })),
+              resolutionHistoryTruncated,
             }
           : {}),
       },

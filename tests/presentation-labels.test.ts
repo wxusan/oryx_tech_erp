@@ -49,6 +49,9 @@ describe('approved audit-log wording', () => {
     STAFF_CREATE: 'Yangi xodim qo‘shildi',
     STAFF_UPDATE: 'Xodim ma’lumotlari yangilandi',
     STAFF_DELETE: 'Xodim o‘chirildi',
+    STAFF_ROLE_CREATE: 'Yangi lavozim yaratildi',
+    STAFF_ROLE_UPDATE: 'Lavozim yangilandi',
+    STAFF_ROLE_ARCHIVE: 'Lavozim arxivlandi',
     OWNER_CREATE: 'Do‘kon egasi profili yaratildi',
     OWNER_RESOLVE: 'Do‘kon egasi biriktirildi',
     PACKAGE_VERSION_CREATE: 'Paket uchun yangi narx belgilandi',
@@ -162,7 +165,7 @@ describe('approved status and source wording', () => {
 
 describe('notification and operations wording', () => {
   it('maps every current and historical notification type', () => {
-    expect(Object.keys(NOTIFICATION_TYPE_LABELS)).toHaveLength(24)
+    expect(Object.keys(NOTIFICATION_TYPE_LABELS)).toHaveLength(26)
     for (const [type, label] of Object.entries(NOTIFICATION_TYPE_LABELS)) {
       expect(notificationTypeLabel(type)).toBe(label)
       expect(label.trim()).not.toBe('')

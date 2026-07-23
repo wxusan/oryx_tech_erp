@@ -89,10 +89,12 @@ export function affectedDomainsForChange(
   primary: NavigationDomain,
   mutationKind?: string,
 ): NavigationDomain[] {
-  const deviceDomains = mutationKind === 'device.sell'
+  const deviceDomains = mutationKind === 'device.create_device_pay_later'
+    ? ['devices', 'debts', 'payments', 'reports', 'logs'] satisfies NavigationDomain[]
+    : mutationKind === 'device.sell'
     ? ['devices', 'sales', 'customers', 'reports', 'logs', 'overdue'] satisfies NavigationDomain[]
     : mutationKind === 'device.return'
-      ? ['devices', 'sales', 'nasiyas', 'returns', 'reports', 'logs', 'overdue'] satisfies NavigationDomain[]
+      ? ['devices', 'sales', 'nasiyas', 'returns', 'customers', 'debts', 'reports', 'logs', 'overdue'] satisfies NavigationDomain[]
       : mutationKind === 'device.restock'
         ? ['devices', 'nasiyas', 'returns', 'reports', 'logs'] satisfies NavigationDomain[]
         : mutationKind
@@ -104,17 +106,20 @@ export function affectedDomainsForChange(
     Device: deviceDomains,
     // Olib-sotdim creation is audited against its Sale, so that domain must be
     // included even though the trigger's primary domain is `sales`.
-    Sale: ['devices', 'sales', 'payments', 'customers', 'returns', 'olibSotdim', 'reports', 'logs', 'overdue'],
-    SalePayment: ['devices', 'sales', 'payments', 'customers', 'reports', 'logs', 'overdue'],
-    Nasiya: ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
-    NasiyaPayment: ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
+    Sale: ['devices', 'sales', 'payments', 'customers', 'returns', 'olibSotdim', 'debts', 'reports', 'logs', 'overdue'],
+    SalePayment: ['devices', 'sales', 'payments', 'customers', 'debts', 'reports', 'logs', 'overdue'],
+    Nasiya: ['devices', 'nasiyas', 'payments', 'customers', 'debts', 'reports', 'logs', 'overdue'],
+    NasiyaPayment: ['devices', 'nasiyas', 'payments', 'customers', 'debts', 'reports', 'logs', 'overdue'],
+    NasiyaSettlement: ['devices', 'nasiyas', 'payments', 'customers', 'debts', 'reports', 'logs', 'overdue'],
     // Regular nasiya payments are audited against NasiyaSchedule.
-    NasiyaSchedule: ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
+    NasiyaSchedule: ['devices', 'nasiyas', 'payments', 'customers', 'debts', 'reports', 'logs', 'overdue'],
     NasiyaReminder: ['nasiyas', 'logs', 'overdue'],
     Customer: ['customers', 'nasiyas', 'sales', 'reports', 'logs'],
-    DeviceReturn: ['devices', 'sales', 'nasiyas', 'returns', 'reports', 'logs', 'overdue'],
-    SupplierPayable: ['olibSotdim', 'devices', 'sales', 'payments', 'reports', 'logs'],
-    CurrencyRate: ['currency', 'devices', 'sales', 'nasiyas', 'payments', 'customers', 'olibSotdim', 'reports', 'settings'],
+    DeviceReturn: ['devices', 'sales', 'nasiyas', 'returns', 'customers', 'debts', 'reports', 'logs', 'overdue'],
+    SupplierPayable: ['olibSotdim', 'debts', 'devices', 'sales', 'payments', 'reports', 'logs'],
+    SupplierPayablePayment: ['olibSotdim', 'debts', 'devices', 'payments', 'reports', 'logs'],
+    OlibSotdimOperation: ['olibSotdim', 'debts', 'devices', 'sales', 'nasiyas', 'payments', 'customers', 'reports', 'logs'],
+    CurrencyRate: ['currency', 'devices', 'sales', 'nasiyas', 'payments', 'customers', 'olibSotdim', 'debts', 'reports', 'settings'],
     Shop: primary === 'settings'
       ? ['settings', 'logs']
       : ['adminShops', 'adminPayments', 'adminReports', 'adminLogs', 'adminOps'],

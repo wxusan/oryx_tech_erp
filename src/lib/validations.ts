@@ -94,6 +94,19 @@ const paymentBreakdownSchema = z
   .min(2, "Aralash to'lov kamida 2 ta usulni o'z ichiga olishi kerak")
   .optional()
 
+// Supplier debt payments intentionally support either one method or exactly
+// two methods. Keeping this stricter contract separate avoids changing the
+// already-deployed Sale and Nasiya payment behavior.
+const supplierPaymentBreakdownSchema = z
+  .array(
+    z.object({
+      method: paymentMethodSchema,
+      amount: z.number().positive("Har bir qism musbat summa bo'lishi kerak"),
+    }),
+  )
+  .length(2, "Aralash to'lovda aynan 2 ta usul bo'lishi kerak")
+  .optional()
+
 // "Ertaroq eslatilsinmi?" — shared by nasiya creation and later-payment sale.
 const earlyReminderEnabledSchema = z.boolean().optional().default(false)
 const earlyReminderDaysSchema = z
@@ -210,9 +223,35 @@ export const addDeviceSchema = z.object({
   note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
   imageUrls: z.array(deviceImageKeySchema).optional(),
   inputCurrency: currencyCodeSchema.optional(),
+  purchaseSettlement: z.enum(['PAID_NOW', 'PAY_LATER']).optional().default('PAID_NOW'),
+  supplierDueDate: z.coerce.date().optional(),
+  supplierReminderEnabled: z.boolean().optional().default(true),
+  earlyReminderEnabled: earlyReminderEnabledSchema,
+  earlyReminderDays: earlyReminderDaysSchema,
+  supplierInitialPaymentAmount: z.number().min(0, "Boshlang'ich to'lov manfiy bo'lmasligi kerak").optional(),
+  supplierPaymentMethod: paymentMethodSchema.optional(),
+  supplierPaymentBreakdown: supplierPaymentBreakdownSchema,
 }).refine((data) => !data.secondaryImei || data.secondaryImei.replace(/[\s-]/g, '') !== data.imei.replace(/[\s-]/g, ''), {
   message: 'Asosiy va qo‘shimcha IMEI bir xil bo‘lishi mumkin emas',
   path: ['secondaryImei'],
+}).refine((data) => data.purchaseSettlement !== 'PAY_LATER' || Boolean(data.supplierName && data.supplierPhone), {
+  message: "Keyin to'lash uchun yetkazib beruvchi ismi va telefoni kiritilishi shart",
+  path: ['supplierName'],
+}).refine((data) => data.purchaseSettlement !== 'PAY_LATER' || data.supplierDueDate !== undefined, {
+  message: "Yetkazib beruvchiga to'lov muddati kiritilishi shart",
+  path: ['supplierDueDate'],
+}).refine((data) => !data.earlyReminderEnabled || data.earlyReminderDays !== undefined, {
+  message: "Necha kun oldin ekanligi kiritilishi shart",
+  path: ['earlyReminderDays'],
+}).refine((data) => (data.supplierInitialPaymentAmount ?? 0) <= data.purchasePrice, {
+  message: "Boshlang'ich to'lov xarid narxidan oshmasligi kerak",
+  path: ['supplierInitialPaymentAmount'],
+}).refine((data) => data.purchaseSettlement !== 'PAY_LATER' || (data.supplierInitialPaymentAmount ?? 0) < data.purchasePrice, {
+  message: "Keyin to'lashda boshlang'ich to'lov xarid narxidan kam bo'lishi kerak",
+  path: ['supplierInitialPaymentAmount'],
+}).refine((data) => (data.supplierInitialPaymentAmount ?? 0) === 0 || data.supplierPaymentMethod !== undefined || data.supplierPaymentBreakdown !== undefined, {
+  message: "Pul to'langanda to'lov usuli kiritilishi shart",
+  path: ['supplierPaymentMethod'],
 })
 
 export type AddDeviceInput = z.infer<typeof addDeviceSchema>
@@ -490,6 +529,48 @@ export const addNasiyaPaymentSchema = z
 
 export type AddNasiyaPaymentInput = z.infer<typeof addNasiyaPaymentSchema>
 
+// Early settlement is a fixed, server-calculated command. The three minor-unit
+// snapshots are optimistic-concurrency guards from the quote the user reviewed;
+// they are never trusted as accounting inputs.
+export const settleNasiyaSchema = z
+  .object({
+    mode: z.enum(['FULL_WITH_PROFIT', 'WAIVE_REMAINING_PROFIT']),
+    paymentMethod: paymentMethodSchema.optional(),
+    paymentBreakdown: paymentBreakdownSchema,
+    date: z.coerce.date({ error: "Yopish sanasi kiritilishi shart" }),
+    reason: z.string().trim().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
+    inputCurrency: currencyCodeSchema.optional(),
+    expectedContractCurrency: currencyCodeSchema,
+    expectedRemainingMinorUnits: z.number().int().positive(),
+    expectedCashMinorUnits: z.number().int().min(0),
+    expectedWaivedMinorUnits: z.number().int().min(0),
+  })
+  .superRefine((data, ctx) => {
+    if (data.mode === 'WAIVE_REMAINING_PROFIT' && (!data.reason || data.reason.length < 3)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['reason'],
+        message: "Foydadan kechish sababi kamida 3 ta belgidan iborat bo'lishi kerak",
+      })
+    }
+    if (data.expectedCashMinorUnits > 0 && !data.paymentMethod && !data.paymentBreakdown) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['paymentMethod'],
+        message: "To'lov usuli tanlanishi shart",
+      })
+    }
+    if (data.expectedCashMinorUnits === 0 && (data.paymentMethod || data.paymentBreakdown)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['paymentMethod'],
+        message: "Pul olinmaydigan yopishda to'lov usuli kiritilmaydi",
+      })
+    }
+  })
+
+export type SettleNasiyaInput = z.infer<typeof settleNasiyaSchema>
+
 // Deferral is deliberately a separate command from payment. It has no amount,
 // payment method, or payment breakdown and therefore cannot accidentally write
 // money through the payment endpoint.
@@ -572,6 +653,8 @@ export const createOlibSotdimSchema = z
       .positive("Narx musbat son bo'lishi kerak"),
     supplierPaidNow: z.boolean({ error: "To'lov holati ko'rsatilishi shart" }),
     supplierPaymentMethod: paymentMethodSchema.optional(),
+    supplierPaymentBreakdown: supplierPaymentBreakdownSchema,
+    supplierInitialPaymentAmount: z.number().min(0, "Boshlang'ich to'lov manfiy bo'lmasligi kerak").optional(),
     supplierPaidDate: z.coerce.date().optional(),
     supplierDueDate: z.coerce.date().optional(),
     supplierReminderEnabled: z.boolean().optional().default(true),
@@ -587,18 +670,43 @@ export const createOlibSotdimSchema = z
       .max(100, "Ism 100 ta belgidan oshmasligi kerak")
       .optional(),
     customerPhone: phoneSchema.optional(),
+    customerAdditionalPhones: z.array(z.string()).max(5).optional(),
+    customerNote: z.string().trim().max(1000, "Mijoz izohi 1000 ta belgidan oshmasligi kerak").optional(),
+    customerPassportIdentifier: z
+      .string()
+      .trim()
+      .refine(isValidPassportIdentifier, "Pasport seriya/raqami AA 1234567 formatida bo'lishi kerak")
+      .optional(),
+    customerTrustOverride: z.enum(['NEW', 'LOW', 'MEDIUM', 'HIGH', 'VERY_HIGH']).nullable().optional(),
+    passportPhotoUrl: privateFileKeySchema.optional(),
 
-    // Section 4 — sale to the customer (mirrors createSaleSchema)
+    // Section 4 — customer outcome. SALE keeps the deployed behavior; NASIYA
+    // uses the same calculator/schedule inputs as standalone Nasiya.
+    customerDealType: z.enum(['SALE', 'NASIYA']).optional().default('SALE'),
     salePrice: z
-      .number({ error: "Sotish narxi kiritilishi shart" })
-      .positive("Narx musbat son bo'lishi kerak"),
+      .number()
+      .positive("Narx musbat son bo'lishi kerak")
+      .optional(),
     paymentMethod: paymentMethodSchema.optional(),
-    paidFully: z.boolean({ error: "To'liq to'langan yoki yo'qligi ko'rsatilishi shart" }),
+    paymentBreakdown: supplierPaymentBreakdownSchema,
+    paidFully: z.boolean().optional(),
     amountPaid: z.number().min(0, "To'langan summa manfiy bo'lishi mumkin emas").optional(),
     dueDate: z.coerce.date().optional(),
     customerReminderEnabled: z.boolean().optional().default(false),
+    customerEarlyReminderEnabled: z.boolean().optional().default(false),
+    customerEarlyReminderDays: earlyReminderDaysSchema,
+    totalAmount: z.number().positive("Nasiya summasi musbat bo'lishi kerak").optional(),
+    downPayment: z.number().min(0, "Boshlang'ich to'lov manfiy bo'lmasligi kerak").optional(),
+    months: z.number().int().min(1).max(24).optional(),
+    interestPercent: z.number().int().min(0).max(MAX_NASIYA_INTEREST_PERCENT).optional().default(0),
+    monthlyPayment: z.number().positive("Oylik to'lov musbat son bo'lishi kerak").optional(),
+    useMonthlyPaymentOverride: z.boolean().optional(),
+    startDate: z.coerce.date().optional(),
+    nasiyaPaymentMethod: paymentMethodSchema.optional(),
     note: z.string().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional(),
     inputCurrency: currencyCodeSchema.optional(),
+    purchaseInputCurrency: currencyCodeSchema.optional(),
+    customerInputCurrency: currencyCodeSchema.optional(),
   })
   .refine((data) => data.customerMode !== 'EXISTING' || Boolean(data.customerId), {
     message: 'Mavjud mijoz tanlanishi shart',
@@ -608,7 +716,19 @@ export const createOlibSotdimSchema = z
     message: "Yangi mijozning ismi va telefoni kiritilishi shart",
     path: ['customerName'],
   })
-  .refine((data) => !(data.paidFully || (data.amountPaid ?? 0) > 0) || data.paymentMethod !== undefined, {
+  .refine((data) => data.customerDealType !== 'NASIYA' || data.customerMode !== 'NEW' || Boolean(data.passportPhotoUrl), {
+    message: 'Yangi nasiya mijozining pasport rasmi kiritilishi shart',
+    path: ['passportPhotoUrl'],
+  })
+  .refine((data) => data.customerDealType !== 'SALE' || data.salePrice !== undefined, {
+    message: "Sotish narxi kiritilishi shart",
+    path: ['salePrice'],
+  })
+  .refine((data) => data.customerDealType !== 'SALE' || data.paidFully !== undefined, {
+    message: "To'liq to'langan yoki yo'qligi ko'rsatilishi shart",
+    path: ['paidFully'],
+  })
+  .refine((data) => data.customerDealType !== 'SALE' || !(data.paidFully || (data.amountPaid ?? 0) > 0) || data.paymentMethod !== undefined || data.paymentBreakdown !== undefined, {
     message: "Pul qabul qilinganda to'lov usuli kiritilishi shart",
     path: ['paymentMethod'],
   })
@@ -616,8 +736,12 @@ export const createOlibSotdimSchema = z
     message: 'Asosiy va qo‘shimcha IMEI bir xil bo‘lishi mumkin emas',
     path: ['secondaryImei'],
   })
-  .refine((data) => !data.supplierPaidNow || data.supplierPaymentMethod !== undefined, {
+  .refine((data) => !data.supplierPaidNow || data.supplierPaymentMethod !== undefined || data.supplierPaymentBreakdown !== undefined, {
     message: "Yetkazib beruvchiga to'lov usuli kiritilishi shart",
+    path: ['supplierPaymentMethod'],
+  })
+  .refine((data) => (data.supplierInitialPaymentAmount ?? 0) === 0 || data.supplierPaymentMethod !== undefined || data.supplierPaymentBreakdown !== undefined, {
+    message: "Yetkazib beruvchiga pul to'langanda to'lov usuli kiritilishi shart",
     path: ['supplierPaymentMethod'],
   })
   .refine((data) => data.supplierPaidNow || data.supplierDueDate !== undefined, {
@@ -630,22 +754,62 @@ export const createOlibSotdimSchema = z
   })
   .refine(
     (data) => {
-      if (!data.paidFully && data.amountPaid === undefined) return false
+      if (data.customerDealType === 'SALE' && !data.paidFully && data.amountPaid === undefined) return false
       return true
     },
     { message: "To'lanmagan savdoda to'langan summa ko'rsatilishi shart", path: ['amountPaid'] },
   )
-  .refine((data) => data.amountPaid === undefined || data.amountPaid <= data.salePrice, {
+  .refine((data) => data.customerDealType !== 'SALE' || data.amountPaid === undefined || (data.salePrice !== undefined && data.amountPaid <= data.salePrice), {
     message: "To'langan summa sotuv narxidan oshmasligi kerak",
     path: ['amountPaid'],
   })
-  .refine((data) => data.paidFully || (data.amountPaid ?? 0) < data.salePrice, {
+  .refine((data) => data.customerDealType !== 'SALE' || data.paidFully || (data.salePrice !== undefined && (data.amountPaid ?? 0) < data.salePrice), {
     message: "Qisman savdoda to'langan summa sotuv narxidan kam bo'lishi kerak",
     path: ['amountPaid'],
   })
-  .refine((data) => data.paidFully || data.dueDate !== undefined, {
+  .refine((data) => data.customerDealType !== 'SALE' || data.paidFully || data.dueDate !== undefined, {
     message: "Qolgan to'lov sanasi kiritilishi shart",
     path: ['dueDate'],
+  })
+  .refine((data) => !data.customerEarlyReminderEnabled || data.customerEarlyReminderDays !== undefined, {
+    message: "Mijoz eslatmasi uchun necha kun oldin ekanligi kiritilishi shart",
+    path: ['customerEarlyReminderDays'],
+  })
+  .refine((data) => data.customerDealType !== 'NASIYA' || data.totalAmount !== undefined, {
+    message: 'Nasiya umumiy summasi kiritilishi shart',
+    path: ['totalAmount'],
+  })
+  .refine((data) => data.customerDealType !== 'NASIYA' || data.downPayment !== undefined, {
+    message: "Boshlang'ich to'lov kiritilishi shart",
+    path: ['downPayment'],
+  })
+  .refine((data) => data.customerDealType !== 'NASIYA' || data.months !== undefined, {
+    message: 'Nasiya oylar soni kiritilishi shart',
+    path: ['months'],
+  })
+  .refine((data) => data.customerDealType !== 'NASIYA' || data.startDate !== undefined, {
+    message: 'Nasiya boshlanish sanasi kiritilishi shart',
+    path: ['startDate'],
+  })
+  .refine((data) => data.customerDealType !== 'NASIYA' || data.nasiyaPaymentMethod !== undefined, {
+    message: "Nasiya to'lov usuli kiritilishi shart",
+    path: ['nasiyaPaymentMethod'],
+  })
+  .refine((data) => data.customerDealType !== 'NASIYA' || data.downPayment === undefined || data.totalAmount === undefined || data.downPayment <= data.totalAmount, {
+    message: "Boshlang'ich to'lov umumiy summadan oshmasligi kerak",
+    path: ['downPayment'],
+  })
+  .refine((data) => !data.useMonthlyPaymentOverride || data.monthlyPayment !== undefined, {
+    message: "Oylik to'lov kiritilishi shart",
+    path: ['monthlyPayment'],
+  })
+  .refine((data) => (data.supplierInitialPaymentAmount ?? (data.supplierPaidNow ? data.purchasePrice : 0)) <= data.purchasePrice, {
+    message: "Boshlang'ich to'lov xarid narxidan oshmasligi kerak",
+    path: ['supplierInitialPaymentAmount'],
+  })
+  .refine((data) => data.supplierPaidNow || (data.supplierInitialPaymentAmount ?? 0) < data.purchasePrice, {
+    message: "Keyin to'lashda boshlang'ich to'lov xarid narxidan kam bo'lishi kerak",
+    path: ['supplierInitialPaymentAmount'],
   })
 
 export type CreateOlibSotdimInput = z.infer<typeof createOlibSotdimSchema>
@@ -662,3 +826,15 @@ export const markSupplierPayablePaidSchema = z.object({
 })
 
 export type MarkSupplierPayablePaidInput = z.infer<typeof markSupplierPayablePaidSchema>
+
+export const recordSupplierPayablePaymentSchema = z.object({
+  amount: z.number({ error: "To'lov summasi kiritilishi shart" }).positive("To'lov summasi musbat bo'lishi kerak"),
+  paymentMethod: paymentMethodSchema,
+  paymentBreakdown: supplierPaymentBreakdownSchema,
+  paidAt: z.coerce.date().optional(),
+  note: z.string().trim().max(1000, "Izoh 1000 ta belgidan oshmasligi kerak").optional().transform((value) => value || undefined),
+  idempotencyKey: z.string().min(8).max(120).optional(),
+  inputCurrency: currencyCodeSchema.optional(),
+})
+
+export type RecordSupplierPayablePaymentInput = z.infer<typeof recordSupplierPayablePaymentSchema>

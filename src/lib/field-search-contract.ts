@@ -296,7 +296,8 @@ export const FORM_SURFACE_CONTRACT = [
       always('shop.staff.create', 'password', 'SECRET', { noSearchReason: 'Passwords are never searchable.' }),
       optional('shop.staff.create', 'telegramId', 'SECRET', { noSearchReason: 'Private delivery identity.' }),
       optional('shop.staff.create', 'telegramNotificationsEnabled', 'STATUS_FILTER'),
-      optional('shop.staff.create', 'permissionCodes', 'STATUS_FILTER'),
+      optional('shop.staff.create', 'permissionCodes', 'STATUS_FILTER'), optional('shop.staff.create', 'roleId', 'STATUS_FILTER'),
+      optional('shop.staff.create', 'logsViewEnabled', 'STATUS_FILTER'), optional('shop.staff.create', 'isActive', 'STATUS_FILTER'),
     ],
   },
   {
@@ -308,8 +309,30 @@ export const FORM_SURFACE_CONTRACT = [
       optional('shop.staff.update', 'name', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Bounded owner-only staff roster.' }),
       optional('shop.staff.update', 'phone', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Bounded owner-only staff roster.' }),
       optional('shop.staff.update', 'password', 'SECRET', { noSearchReason: 'Passwords are never searchable.' }),
-      optional('shop.staff.update', 'telegramNotificationsEnabled', 'STATUS_FILTER'), optional('shop.staff.update', 'permissionCodes', 'STATUS_FILTER'), optional('shop.staff.update', 'isActive', 'STATUS_FILTER'),
+      optional('shop.staff.update', 'login', 'SECRET', { noSearchReason: 'Authentication login is never public search.' }),
+      optional('shop.staff.update', 'telegramNotificationsEnabled', 'STATUS_FILTER'), optional('shop.staff.update', 'permissionCodes', 'STATUS_FILTER'), optional('shop.staff.update', 'roleId', 'STATUS_FILTER'), optional('shop.staff.update', 'logsViewEnabled', 'STATUS_FILTER'), optional('shop.staff.update', 'isActive', 'STATUS_FILTER'),
       always('shop.staff.update', 'note'),
+    ],
+  },
+  {
+    id: 'shop.staff-role.create',
+    source: 'src/components/shop/staff-role-management.tsx',
+    endpoint: 'POST /api/shop/staff/roles',
+    schemaSource: 'src/lib/shop-staff-role-contract.ts#createShopStaffRoleSchema',
+    fields: [
+      always('shop.staff-role.create', 'name', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Shop roles are capped at 35 and displayed as one bounded list.' }),
+      optional('shop.staff-role.create', 'description'), optional('shop.staff-role.create', 'permissionCodes', 'STATUS_FILTER'), optional('shop.staff-role.create', 'logsViewEnabled', 'STATUS_FILTER'),
+    ],
+  },
+  {
+    id: 'shop.staff-role.update',
+    source: 'src/components/shop/staff-role-management.tsx',
+    endpoint: 'PATCH /api/shop/staff/roles/[roleId]',
+    schemaSource: 'src/lib/shop-staff-role-contract.ts#updateShopStaffRoleSchema',
+    fields: [
+      optional('shop.staff-role.update', 'name', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Shop roles are capped at 35 and displayed as one bounded list.' }),
+      optional('shop.staff-role.update', 'description'), optional('shop.staff-role.update', 'permissionCodes', 'STATUS_FILTER'), optional('shop.staff-role.update', 'logsViewEnabled', 'STATUS_FILTER'),
+      always('shop.staff-role.update', 'note'),
     ],
   },
   {
@@ -330,6 +353,12 @@ export const FORM_SURFACE_CONTRACT = [
       optional('device.create', 'supplierPhone', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list', 'device-picker'] }),
       optional('device.create', 'note', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list', 'device-picker'] }),
       optional('device.create', 'imageUrls', 'PRIVATE_DOCUMENT', { noSearchReason: 'Private object keys and signed URLs are never searchable.' }),
+      always('device.create', 'purchaseSettlement', 'STATUS_FILTER'),
+      conditional('device.create', 'supplierDueDate', 'purchaseSettlement = PAY_LATER', 'DATE_FILTER'),
+      conditional('device.create', 'supplierInitialPaymentAmount', 'purchaseSettlement = PAY_LATER and an initial payment is entered', 'MONEY'),
+      conditional('device.create', 'supplierPaymentMethod', 'supplierInitialPaymentAmount > 0', 'STATUS_FILTER'),
+      optional('device.create', 'supplierReminderEnabled', 'STATUS_FILTER'),
+      conditional('device.create', 'earlyReminderDays', 'earlyReminderEnabled = true'),
     ],
   },
   {
@@ -349,10 +378,10 @@ export const FORM_SURFACE_CONTRACT = [
     id: 'device.delete', source: 'src/app/(shop)/shop/qurilmalar/[id]/page.tsx', endpoint: 'DELETE /api/devices/[id]', schemaSource: 'src/app/api/devices/[id]/route.ts#deleteDeviceSchema', fields: [always('device.delete', 'deleteNote')],
   },
   {
-    id: 'device.return', source: 'src/app/(shop)/shop/qurilmalar/[id]/page.tsx', endpoint: 'POST /api/devices/[id]/return', schemaSource: 'src/app/api/devices/[id]/return/route.ts#returnDeviceSchema', fields: [always('device.return', 'note'), optional('device.return', 'refundAmount', 'MONEY'), conditional('device.return', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER')],
+    id: 'device.return', source: 'src/app/(shop)/shop/qurilmalar/[id]/page.tsx', endpoint: 'POST /api/devices/[id]/return', schemaSource: 'src/app/api/devices/[id]/return/route.ts#returnDeviceSchema', fields: [always('device.return', 'note'), optional('device.return', 'refundAmount', 'MONEY'), conditional('device.return', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER'), always('device.return', 'inputCurrency', 'STATUS_FILTER'), always('device.return', 'expectedFxRateMinorUnits', 'MONEY')],
   },
   {
-    id: 'device.return.queue', source: 'src/app/(shop)/shop/qaytarish/return-work-queue.tsx', endpoint: 'POST /api/devices/[id]/return', schemaSource: 'src/app/api/devices/[id]/return/route.ts#returnDeviceSchema', fields: [always('device.return.queue', 'note'), optional('device.return.queue', 'refundAmount', 'MONEY'), conditional('device.return.queue', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER')],
+    id: 'device.return.queue', source: 'src/app/(shop)/shop/qaytarish/return-work-queue.tsx', endpoint: 'POST /api/devices/[id]/return', schemaSource: 'src/app/api/devices/[id]/return/route.ts#returnDeviceSchema', fields: [always('device.return.queue', 'note'), optional('device.return.queue', 'refundAmount', 'MONEY'), conditional('device.return.queue', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER'), always('device.return.queue', 'inputCurrency', 'STATUS_FILTER'), always('device.return.queue', 'expectedFxRateMinorUnits', 'MONEY')],
   },
   {
     id: 'device.restock', source: 'src/app/(shop)/shop/qurilmalar/[id]/page.tsx', endpoint: 'POST /api/devices/[id]/restock', schemaSource: 'src/app/api/devices/[id]/restock/route.ts#restockDeviceSchema', fields: [always('device.restock', 'note')],
@@ -397,6 +426,31 @@ export const FORM_SURFACE_CONTRACT = [
     id: 'nasiya.payment', source: 'src/components/shop/nasiya-payment-modal.tsx', endpoint: 'POST /api/nasiya/[id]/payment', schemaSource: 'src/lib/validations.ts#addNasiyaPaymentSchema', fields: [always('nasiya.payment', 'nasiyaScheduleId', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Selected from the tenant-bound contract schedule.' }), always('nasiya.payment', 'amount', 'MONEY'), always('nasiya.payment', 'paymentMethod', 'STATUS_FILTER'), conditional('nasiya.payment', 'paymentBreakdown', 'split payment is enabled', 'MONEY'), always('nasiya.payment', 'date', 'DATE_FILTER'), optional('nasiya.payment', 'note')],
   },
   {
+    id: 'nasiya.settle', source: 'src/components/shop/nasiya-settlement-modal.tsx', endpoint: 'POST /api/nasiya/[id]/settlement', schemaSource: 'src/lib/validations.ts#settleNasiyaSchema', fields: [
+      always('nasiya.settle', 'mode', 'STATUS_FILTER'),
+      conditional('nasiya.settle', 'paymentMethod', 'cash is received', 'STATUS_FILTER'),
+      conditional('nasiya.settle', 'paymentBreakdown', 'cash is split across two methods', 'MONEY'),
+      always('nasiya.settle', 'date', 'DATE_FILTER'),
+      conditional('nasiya.settle', 'reason', 'mode is WAIVE_REMAINING_PROFIT'),
+      optional('nasiya.settle', 'inputCurrency', 'STATUS_FILTER'),
+      always('nasiya.settle', 'expectedContractCurrency', 'STATUS_FILTER'),
+      always('nasiya.settle', 'expectedRemainingMinorUnits', 'MONEY'),
+      always('nasiya.settle', 'expectedCashMinorUnits', 'MONEY'),
+      always('nasiya.settle', 'expectedWaivedMinorUnits', 'MONEY'),
+    ],
+  },
+  {
+    id: 'nasiya.return', source: 'src/components/shop/nasiya-return-modal.tsx', endpoint: 'POST /api/nasiya/[id]/return', schemaSource: 'src/app/api/nasiya/[id]/return/route.ts#returnNasiyaSchema', fields: [
+      always('nasiya.return', 'note'),
+      always('nasiya.return', 'refundAmount', 'MONEY'),
+      conditional('nasiya.return', 'refundMethod', 'refundAmount > 0', 'STATUS_FILTER'),
+      always('nasiya.return', 'inputCurrency', 'STATUS_FILTER'),
+      always('nasiya.return', 'expectedContractReceiptsMinorUnits', 'MONEY'),
+      always('nasiya.return', 'expectedContractRemainingMinorUnits', 'MONEY'),
+      always('nasiya.return', 'expectedFxRateMinorUnits', 'MONEY'),
+    ],
+  },
+  {
     id: 'nasiya.defer', source: 'src/components/shop/nasiya-defer-modal.tsx', endpoint: 'POST /api/nasiya/[id]/defer', schemaSource: 'src/lib/validations.ts#deferNasiyaScheduleSchema', fields: [always('nasiya.defer', 'nasiyaScheduleId', 'BUSINESS_IDENTIFIER', { noSearchReason: 'Selected from the tenant-bound contract schedule.' }), always('nasiya.defer', 'newDueDate', 'DATE_FILTER'), optional('nasiya.defer', 'reason')],
   },
   {
@@ -417,8 +471,18 @@ export const FORM_SURFACE_CONTRACT = [
   {
     id: 'olib-sotdim.create', source: 'src/app/(shop)/shop/olib-sotdim/new/page.tsx', endpoint: 'POST /api/olib-sotdim', schemaSource: 'src/lib/validations.ts#createOlibSotdimSchema', fields: [
       always('olib-sotdim.create', 'device.model', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list', 'olib-sotdim-list'] }), optional('olib-sotdim.create', 'device.color', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list', 'olib-sotdim-list'] }), always('olib-sotdim.create', 'device.storageAmount', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list'] }), always('olib-sotdim.create', 'device.storageUnit', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list'] }), always('olib-sotdim.create', 'device.conditionCode', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list'] }), always('olib-sotdim.create', 'device.imei', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list', 'olib-sotdim-list'] }), optional('olib-sotdim.create', 'device.secondaryImei', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list', 'olib-sotdim-list'] }), optional('olib-sotdim.create', 'device.note', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['device-list'] }),
-      always('olib-sotdim.create', 'supplier.name', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['olib-sotdim-list'] }), always('olib-sotdim.create', 'supplier.phone', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['olib-sotdim-list'] }), always('olib-sotdim.create', 'supplier.purchasePrice', 'MONEY'), optional('olib-sotdim.create', 'supplier.note', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['olib-sotdim-list'] }), always('olib-sotdim.create', 'customerMode', 'STATUS_FILTER'), conditional('olib-sotdim.create', 'customerId', 'customerMode = EXISTING', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'customer-picker'] }), conditional('olib-sotdim.create', 'customerName', 'customerMode = NEW', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'customer-picker', 'olib-sotdim-list'] }), conditional('olib-sotdim.create', 'customerPhone', 'customerMode = NEW', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'customer-picker', 'olib-sotdim-list'] }), always('olib-sotdim.create', 'salePrice', 'MONEY'), always('olib-sotdim.create', 'paymentMethod', 'STATUS_FILTER'), optional('olib-sotdim.create', 'note'),
+      always('olib-sotdim.create', 'supplier.name', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['olib-sotdim-list', 'debt-list'] }), always('olib-sotdim.create', 'supplier.phone', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['olib-sotdim-list', 'debt-list'] }), always('olib-sotdim.create', 'supplier.purchasePrice', 'MONEY'), optional('olib-sotdim.create', 'supplier.location', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['debt-list'] }), optional('olib-sotdim.create', 'supplier.note', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['olib-sotdim-list'] }),
+      always('olib-sotdim.create', 'supplierPaidNow', 'STATUS_FILTER'), conditional('olib-sotdim.create', 'supplierDueDate', 'supplierPaidNow = false', 'DATE_FILTER'), conditional('olib-sotdim.create', 'supplierInitialPaymentAmount', 'supplierPaidNow = false and an initial payment is entered', 'MONEY'), conditional('olib-sotdim.create', 'supplierPaymentMethod', 'supplierPaidNow = true or supplierInitialPaymentAmount > 0', 'STATUS_FILTER'), conditional('olib-sotdim.create', 'supplierPaymentBreakdown', 'supplier payment is split across two methods', 'MONEY'), optional('olib-sotdim.create', 'supplierReminderEnabled', 'STATUS_FILTER'), conditional('olib-sotdim.create', 'earlyReminderDays', 'earlyReminderEnabled = true'),
+      always('olib-sotdim.create', 'customerDealType', 'STATUS_FILTER'), always('olib-sotdim.create', 'customerMode', 'STATUS_FILTER'), conditional('olib-sotdim.create', 'customerId', 'customerMode = EXISTING', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'customer-picker'] }), conditional('olib-sotdim.create', 'customerName', 'customerMode = NEW', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'customer-picker', 'olib-sotdim-list', 'debt-list'] }), conditional('olib-sotdim.create', 'customerPhone', 'customerMode = NEW', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['customer-list', 'customer-picker', 'olib-sotdim-list', 'debt-list'] }),
+      conditional('olib-sotdim.create', 'salePrice', 'customerDealType = SALE', 'MONEY'), conditional('olib-sotdim.create', 'paymentMethod', 'customerDealType = SALE and money is received', 'STATUS_FILTER'), conditional('olib-sotdim.create', 'paymentBreakdown', 'customerDealType = SALE and payment is split across two methods', 'MONEY'), conditional('olib-sotdim.create', 'amountPaid', 'customerDealType = SALE and paidFully = false', 'MONEY'), conditional('olib-sotdim.create', 'dueDate', 'customerDealType = SALE and amount remains', 'DATE_FILTER'),
+      conditional('olib-sotdim.create', 'passportPhotoUrl', 'customerDealType = NASIYA and customer has no saved passport image', 'PRIVATE_DOCUMENT', { noSearchReason: 'Private image key is never searchable.' }), conditional('olib-sotdim.create', 'totalAmount', 'customerDealType = NASIYA', 'MONEY'), conditional('olib-sotdim.create', 'downPayment', 'customerDealType = NASIYA', 'MONEY'), conditional('olib-sotdim.create', 'months', 'customerDealType = NASIYA'), conditional('olib-sotdim.create', 'startDate', 'customerDealType = NASIYA', 'DATE_FILTER'), conditional('olib-sotdim.create', 'nasiyaPaymentMethod', 'customerDealType = NASIYA', 'STATUS_FILTER'), optional('olib-sotdim.create', 'note'),
     ],
+  },
+  {
+    id: 'supplier-payable.payment', source: 'src/components/shop/supplier-payable-payment-dialog.tsx', endpoint: 'POST /api/supplier-payables/[id]/payments', schemaSource: 'src/lib/validations.ts#recordSupplierPayablePaymentSchema', fields: [always('supplier-payable.payment', 'amount', 'MONEY'), always('supplier-payable.payment', 'paymentMethod', 'STATUS_FILTER'), conditional('supplier-payable.payment', 'paymentBreakdown', 'split payment is enabled', 'MONEY'), optional('supplier-payable.payment', 'paidAt', 'DATE_FILTER'), optional('supplier-payable.payment', 'note')],
+  },
+  {
+    id: 'debt.query', source: 'src/app/(shop)/shop/qarzlar/qarzlar-client.tsx', endpoint: 'POST /api/debts/query', schemaSource: 'src/app/api/debts/query/route.ts#querySchema', fields: [always('debt.query', 'tab', 'STATUS_FILTER'), always('debt.query', 'month', 'DATE_FILTER'), always('debt.query', 'status', 'STATUS_FILTER'), optional('debt.query', 'search', 'BUSINESS_IDENTIFIER', { searchSurfaceIds: ['debt-list'] })],
   },
   {
     id: 'olib-sotdim.pay', source: 'src/app/(shop)/shop/olib-sotdim/olib-sotdim-client.tsx', endpoint: 'POST /api/olib-sotdim/[id]/pay', schemaSource: 'src/lib/validations.ts#markSupplierPayablePaidSchema', fields: [always('olib-sotdim.pay', 'paymentMethod', 'STATUS_FILTER'), optional('olib-sotdim.pay', 'paidAt', 'DATE_FILTER'), optional('olib-sotdim.pay', 'note')],
@@ -454,6 +518,9 @@ export const SEARCH_SURFACE_CONTRACT = [
   },
   {
     id: 'olib-sotdim-list', source: 'src/app/api/olib-sotdim/route.ts', endpoint: 'GET /api/olib-sotdim', transport: 'QUERY', parameters: ['search', 'status'], searchableFields: ['Supplier.name/phone/note', 'Customer.name/phone', 'Device.model/imei/secondaryImei'], scope: 'SHOP_SESSION', privacy: 'All joins remain constrained to the resolved shopId.',
+  },
+  {
+    id: 'debt-list', source: 'src/app/api/debts/query/route.ts', endpoint: 'POST /api/debts/query', transport: 'JSON_BODY', parameters: ['search', 'tab', 'month', 'status'], searchableFields: ['Supplier.name/phone', 'Customer.name/phone', 'Device.model/imei', 'explicit due month and status'], scope: 'SHOP_SESSION', privacy: 'Private POST-body search, bounded take+1 keyset pagination, exact permission projection, and resolved shopId; raw search never enters URLs or query keys.',
   },
   {
     id: 'audit-log-list', source: 'src/app/api/logs/route.ts', endpoint: 'GET /api/logs', transport: 'QUERY', parameters: ['search', 'actorType', 'actorId', 'targetType', 'category', 'from', 'to'], searchableFields: ['Log.action', 'Log.targetType', 'Log.targetId', 'Log.note', 'Shop.name', 'explicit date range'], scope: 'SHOP_SESSION', privacy: 'Shop sessions are forced to their tenant; super admin may explicitly select a shop.',

@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, ArrowRight, CalendarClock, ClipboardList, Package, ReceiptText, TrendingUp, WalletCards } from 'lucide-react'
+import { AlertTriangle, ArrowRight, CalendarClock, ClipboardList, HandCoins, Package, ReceiptText, TrendingUp, WalletCards } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import type { getShopStats } from '@/lib/server/shop-stats'
@@ -51,6 +51,9 @@ function KoLink({ href, enabled, label = "Ko'rish" }: { href: string; enabled: b
 }
 
 function activityLabel(action: string) {
+  if (action === 'NASIYA_SETTLED_FULL_WITH_PROFIT' || action === 'NASIYA_SETTLED_PROFIT_WAIVED') {
+    return 'Nasiya yopildi'
+  }
   return logActionLabel(action)
 }
 
@@ -71,6 +74,7 @@ export default function DashboardClient({ initialStats, financialView }: { initi
   const canViewNasiya = can('NASIYA_VIEW')
   const canViewReports = can('REPORT_VIEW')
   const canViewLogs = can('LOG_VIEW')
+  const canViewSupplierPayables = can('SUPPLIER_PAYABLE_VIEW')
   const statsQuery = useQuery({
     queryKey: queryKeys.domain(scope, 'reports'),
     queryFn: async ({ signal }) => {
@@ -103,6 +107,26 @@ export default function DashboardClient({ initialStats, financialView }: { initi
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
+  const supplierDebtText = formatPartitionedMoney({
+    amountUzs: stats.supplierPayablesOpenAllTimeUzs,
+    amountUsd: stats.supplierPayablesOpenAllTimeUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+  const supplierDebtCard = (
+    <Card className="rounded-lg border-amber-200 bg-amber-50/40 transition-colors hover:border-amber-300 hover:bg-amber-50">
+      <CardHeader>
+        <CardDescription className="text-amber-900">Bizning qarzlarimiz</CardDescription>
+        <CardAction><HandCoins className="size-4 text-amber-700" /></CardAction>
+      </CardHeader>
+      <CardContent>
+        <div className="text-2xl font-bold text-amber-950">{supplierDebtText}</div>
+        <p className="mt-2 text-xs text-amber-900/70">
+          {stats.supplierPayablesOpenAllTimeCount} ta ochiq qarz · muddati qaysi oyda bo&apos;lishidan qat&apos;i nazar
+        </p>
+      </CardContent>
+    </Card>
+  )
   const overdueCard = (
     <Card className="rounded-lg border-red-200 bg-red-50/40 transition-colors hover:border-red-300 hover:bg-red-50">
       <CardHeader>
@@ -194,6 +218,10 @@ export default function DashboardClient({ initialStats, financialView }: { initi
           {canViewNasiya
             ? <Link prefetch={false} href="/shop/nasiyalar?status=OVERDUE" className="block">{overdueCard}</Link>
             : overdueCard}
+
+          {canViewSupplierPayables
+            ? <Link prefetch={false} href="/shop/qarzlar?tab=outgoing" className="block">{supplierDebtCard}</Link>
+            : supplierDebtCard}
         </div>
       </div>}
 

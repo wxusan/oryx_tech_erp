@@ -1,10 +1,11 @@
 'use client'
 
-import { CalendarRange, CircleDollarSign, Download, RotateCcw, TrendingUp, WalletCards } from 'lucide-react'
+import { CalendarRange, CircleDollarSign, Download, HandCoins, RotateCcw, TrendingUp, UserRoundCheck, WalletCards } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { ExportDownloadButton } from '@/components/shop/export-download-button'
 import { formatMoneyByCurrency, formatPartitionedMoney, type CurrencyContext } from '@/lib/currency'
 import type { ShopRangeReport } from '@/lib/server/shop-report-range'
+import HisobotActivityChartLoader from './hisobot-activity-chart-loader'
 
 const UZ_MONTHS = ['Yanvar', 'Fevral', 'Mart', 'Aprel', 'May', 'Iyun', 'Iyul', 'Avgust', 'Sentabr', 'Oktabr', 'Noyabr', 'Dekabr']
 
@@ -20,54 +21,6 @@ function partitionText(value: { uzs: number; usd: number }, currency: CurrencyCo
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
-}
-
-function TrendBars({ report, currency }: { report: ShopRangeReport; currency: CurrencyContext }) {
-  const maxUzs = Math.max(1, ...report.months.flatMap((month) => [month.cashCollected.uzs, Math.abs(month.grossProfitUzs)]))
-  const maxUsd = Math.max(1, ...report.months.map((month) => month.cashCollected.usd))
-
-  return (
-    <Card className="rounded-lg">
-      <CardHeader>
-        <CardDescription>Oylik trend</CardDescription>
-      </CardHeader>
-      <CardContent className="space-y-5">
-        <div className="space-y-3" aria-label="UZS bo'yicha oylik tushum va foyda trendi">
-            <div className="text-xs font-medium text-zinc-600">UZS — tushum / haqiqiy foyda</div>
-          {report.months.map((month) => (
-            <div key={`uzs-${month.monthKey}`} className="grid grid-cols-[88px_1fr] items-center gap-3">
-              <span className="text-xs text-zinc-500">{monthLabel(month.monthKey)}</span>
-              <div className="space-y-1">
-                <div className="h-2 rounded-full bg-zinc-100" title={`Tushum: ${formatMoneyByCurrency(month.cashCollected.uzs, 'UZS', currency.usdUzsRate)}`}>
-                  <div className="h-2 rounded-full bg-blue-600" style={{ width: `${Math.max(0, month.cashCollected.uzs / maxUzs) * 100}%` }} />
-                </div>
-                <div className="h-2 rounded-full bg-zinc-100" title={`Foyda: ${formatMoneyByCurrency(month.grossProfitUzs, 'UZS', currency.usdUzsRate)}`}>
-                  <div
-                    className={`h-2 rounded-full ${month.grossProfitUzs < 0 ? 'bg-red-500' : 'bg-emerald-600'}`}
-                    style={{ width: `${Math.max(0, Math.abs(month.grossProfitUzs) / maxUzs) * 100}%` }}
-                  />
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-
-        {report.months.some((month) => month.cashCollected.usd > 0) && (
-          <div className="space-y-3 border-t border-zinc-100 pt-4" aria-label="USD bo'yicha oylik tushum trendi">
-            <div className="text-xs font-medium text-zinc-600">USD — tushum</div>
-            {report.months.map((month) => (
-              <div key={`usd-${month.monthKey}`} className="grid grid-cols-[88px_1fr] items-center gap-3">
-                <span className="text-xs text-zinc-500">{monthLabel(month.monthKey)}</span>
-                <div className="h-2 rounded-full bg-zinc-100" title={`Tushum: ${formatMoneyByCurrency(month.cashCollected.usd, 'USD', currency.usdUzsRate)}`}>
-                  <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${Math.max(0, month.cashCollected.usd / maxUsd) * 100}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  )
 }
 
 export default function ShopRangeReportPanel({
@@ -128,7 +81,7 @@ export default function ShopRangeReportPanel({
     {
       label: 'Qaytarilgan pul',
       value: partitionText(totals.refunds, currency),
-      note: `${totals.returnCount} ta qaytarish; asl shartnoma valyutasida`,
+      note: `${totals.returnCount} ta qaytarish; qaytarish paytida tanlangan valyutada`,
       icon: RotateCcw,
       color: 'text-purple-600',
     },
@@ -138,6 +91,27 @@ export default function ShopRangeReportPanel({
       note: `Olingan Nasiya foizi: ${formatMoneyByCurrency(totals.interestProfitUzs, currency.currency, currency.usdUzsRate)} · kutilayotgan: ${partitionText(totals.nasiyaInterestExpected, currency)}`,
       icon: TrendingUp,
       color: totals.grossProfitUzs < 0 ? 'text-red-600' : 'text-emerald-600',
+    },
+    {
+      label: 'Bizning qarzlarimiz',
+      value: partitionText(totals.supplierPayables, currency),
+      note: `${totals.supplierPayables.count} ta ochiq qarz; due date tanlangan oylar ichida bo'lgan joriy qoldiq`,
+      icon: HandCoins,
+      color: 'text-amber-700',
+    },
+    {
+      label: 'Bizga Pay Later qarzlar',
+      value: partitionText(totals.customerPayLater, currency),
+      note: `${totals.customerPayLater.count} ta ochiq Sotuv qoldig'i; Nasiya kiritilmagan`,
+      icon: UserRoundCheck,
+      color: 'text-blue-700',
+    },
+    {
+      label: "Yetkazib beruvchiga to'langan",
+      value: partitionText(totals.supplierPaymentsMade, currency),
+      note: `${totals.supplierPaymentsMade.count} ta to'lov; mavjud Sof tushum va foyda formulalaridan ayrilmagan`,
+      icon: HandCoins,
+      color: 'text-zinc-600',
     },
   ]
 
@@ -177,22 +151,26 @@ export default function ShopRangeReportPanel({
         ))}
       </div>
 
-      <TrendBars report={report} currency={currency} />
+      <HisobotActivityChartLoader months={report.months} currencyContext={currency} />
 
       <Card className="rounded-lg">
         <CardHeader>
           <CardDescription>Oyma-oy hisob</CardDescription>
         </CardHeader>
         <CardContent className="overflow-x-auto p-0">
-          <table className="min-w-[1020px] w-full text-left text-xs">
+          <table className="min-w-[1450px] w-full text-left text-xs">
             <thead className="border-y border-zinc-200 bg-zinc-50 text-zinc-600">
               <tr>
                 <th scope="col" className="px-4 py-3 font-medium">Oy</th>
+                <th scope="col" className="px-4 py-3 font-medium">Shartnomalar</th>
                 <th scope="col" className="px-4 py-3 font-medium">Tushum</th>
                 <th scope="col" className="px-4 py-3 font-medium">Haqiqiy foyda</th>
                 <th scope="col" className="px-4 py-3 font-medium">Kutilayotgan foyda</th>
                 <th scope="col" className="px-4 py-3 font-medium">Foiz: olingan / kutilayotgan</th>
                 <th scope="col" className="px-4 py-3 font-medium">Muddati keladigan qarz</th>
+                <th scope="col" className="px-4 py-3 font-medium">Bizning qarzlarimiz</th>
+                <th scope="col" className="px-4 py-3 font-medium">Bizga Pay Later qarzlar</th>
+                <th scope="col" className="px-4 py-3 font-medium">Yetkazib beruvchiga to&apos;langan</th>
                 <th scope="col" className="px-4 py-3 font-medium">Qaytarish</th>
               </tr>
             </thead>
@@ -200,6 +178,7 @@ export default function ShopRangeReportPanel({
               {report.months.map((month) => (
                 <tr key={month.monthKey}>
                   <th scope="row" className="whitespace-nowrap px-4 py-3 font-medium text-zinc-900">{monthLabel(month.monthKey)}</th>
+                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.contracts, currency)}</td>
                   <td className="px-4 py-3 text-zinc-700">{partitionText(month.cashCollected, currency)}</td>
                   <td className={month.grossProfitUzs < 0 ? 'px-4 py-3 text-red-700' : 'px-4 py-3 text-emerald-700'}>
                     {formatMoneyByCurrency(month.grossProfitUzs, currency.currency, currency.usdUzsRate)}
@@ -209,6 +188,9 @@ export default function ShopRangeReportPanel({
                     {formatMoneyByCurrency(month.interestProfitUzs, currency.currency, currency.usdUzsRate)} / {partitionText(month.nasiyaInterestExpected, currency)}
                   </td>
                   <td className="px-4 py-3 text-zinc-700">{partitionText(month.expectedReceivables, currency)}</td>
+                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.supplierPayables, currency)} · {month.supplierPayables.count} ta</td>
+                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.customerPayLater, currency)} · {month.customerPayLater.count} ta</td>
+                  <td className="px-4 py-3 text-zinc-700">{partitionText(month.supplierPaymentsMade, currency)} · {month.supplierPaymentsMade.count} ta</td>
                   <td className="px-4 py-3 text-zinc-700">{partitionText(month.refunds, currency)}</td>
                 </tr>
               ))}

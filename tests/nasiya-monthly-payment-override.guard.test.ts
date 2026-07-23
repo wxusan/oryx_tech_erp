@@ -23,16 +23,16 @@ describe('createNasiyaSchema accepts an explicit monthly-payment override', () =
 })
 
 describe('POST /api/devices/[id]/nasiya uses the reverse calculation when overridden', () => {
-  const source = read('src/app/api/devices/[id]/nasiya/route.ts')
+  const source = read('src/lib/server/nasiya-contract-core.ts')
 
   it('imports calculateNasiyaAmountsFromMonthlyPayment', () => {
     expect(source).toContain('calculateNasiyaAmountsFromMonthlyPayment')
   })
 
   it('branches on useMonthlyPaymentOverride for both the legacy UZS and contract-currency ledgers', () => {
-    expect(source).toContain('if (useMonthlyPaymentOverride && monthlyPaymentOverrideUzs !== undefined)')
-    const overrideBlockStart = source.indexOf('if (useMonthlyPaymentOverride && monthlyPaymentOverrideUzs')
-    const overrideBlock = source.slice(overrideBlockStart, overrideBlockStart + 700)
+    expect(source).toContain('input.useMonthlyPaymentOverride && monthlyPaymentUzs !== undefined')
+    const overrideBlockStart = source.indexOf('const amounts = input.useMonthlyPaymentOverride')
+    const overrideBlock = source.slice(overrideBlockStart, overrideBlockStart + 1200)
     expect(overrideBlock).toContain('calculateNasiyaAmountsFromMonthlyPayment({')
     // Both the UZS amounts and the native contract-currency amounts branch —
     // confirmed by two separate calls to the reverse function in this block.
@@ -44,8 +44,8 @@ describe('POST /api/devices/[id]/nasiya uses the reverse calculation when overri
     // The raw destructured `interestPercent` client input is only used as a
     // fallback default in the non-override forward-calculation branch —
     // every persisted/logged value reads amounts.interestPercent instead.
-    const occurrences = source.match(/interestPercent: amounts\.interestPercent/g) ?? []
-    expect(occurrences.length).toBeGreaterThanOrEqual(2)
+    const occurrences = source.match(/interestPercent: prepared\.amounts\.interestPercent/g) ?? []
+    expect(occurrences.length).toBeGreaterThanOrEqual(1)
   })
 })
 

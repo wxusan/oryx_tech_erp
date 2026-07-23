@@ -5,7 +5,8 @@ import { prisma } from '@/lib/prisma'
 import { computeCustomerTrustRatingFromFactors, isValidTrustTier, type CustomerTrustFactors } from '@/lib/nasiya-customer-trust'
 import { getCustomerTrustFactorsForList } from '@/lib/server/customer-trust-queries'
 import { isPrivateUploadStoredKey } from '@/lib/server/private-upload-reference'
-import { tashkentDayRange } from '@/lib/timezone'
+import { timeRequestPhase } from '@/lib/server/request-context'
+import { tashkentDayRange, tashkentMonthRange } from '@/lib/timezone'
 import {
   redactShopStaffCustomerProfileMetrics,
   type CustomerProfileMetrics,
@@ -20,8 +21,8 @@ interface MetricRow {
   contract_usd: unknown
   collected_uzs: unknown
   collected_usd: unknown
-  due_today_uzs: unknown
-  due_today_usd: unknown
+  due_this_month_uzs: unknown
+  due_this_month_usd: unknown
   overdue_uzs: unknown
   overdue_usd: unknown
   refunds_uzs: unknown
@@ -60,7 +61,7 @@ export async function getCustomerProfileOverview(input: {
   now?: Date
   visibility: CustomerProfileVisibility
 }) {
-  const customer = await prisma.customer.findFirst({
+  const customer = await timeRequestPhase('database', () => prisma.customer.findFirst({
     where: { id: input.customerId, shopId: input.shopId, deletedAt: null },
     select: {
       id: true,
@@ -73,11 +74,13 @@ export async function getCustomerProfileOverview(input: {
       passportPhotoUrl: true,
       createdAt: true,
     },
-  })
+  }))
   if (!customer) return null
 
-  const day = tashkentDayRange(input.now ?? new Date())
-  const [metricRows, trustMap] = await Promise.all([
+  const asOf = input.now ?? new Date()
+  const day = tashkentDayRange(asOf)
+  const month = tashkentMonthRange(asOf)
+  const [metricRows, trustMap] = await timeRequestPhase('database', () => Promise.all([
     prisma.$queryRaw<MetricRow[]>(Prisma.sql`
       WITH sale_base AS (
         SELECT s.*, d."purchasePrice" AS purchase_price
@@ -132,8 +135,8 @@ export async function getCustomerProfileOverview(input: {
         UNION ALL
         SELECT n."contractCurrency",
                CASE
-                 WHEN n."contractCurrency" = 'USD' THEN greatest(sc."contractExpectedAmount" - sc."contractPaidAmount", 0)
-                 ELSE greatest(sc."contractExpectedAmount" - sc."contractPaidAmount", 0)
+                 WHEN n."contractCurrency" = 'USD' THEN greatest(sc."contractRemainingAmount", 0)
+                 ELSE greatest(sc."contractRemainingAmount", 0)
                END,
                coalesce(sc."delayedUntil", sc."dueDate")
         FROM "NasiyaSchedule" sc
@@ -145,10 +148,12 @@ export async function getCustomerProfileOverview(input: {
           AND n."resolutionState" = 'ACTIVE'
       ), refunds AS (
         SELECT CASE
+                 WHEN r."refundInputCurrency" IS NOT NULL THEN r."refundInputCurrency"
                  WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0 THEN 'USD'::"CurrencyCode"
                  ELSE 'UZS'::"CurrencyCode"
                END AS currency,
                CASE
+                 WHEN r."refundInputAmount" IS NOT NULL THEN r."refundInputAmount"
                  WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
                  WHEN r."contractRefundAmount" > 0 THEN r."contractRefundAmount"
                  ELSE r."refundAmount"
@@ -189,8 +194,8 @@ export async function getCustomerProfileOverview(input: {
             END) FROM nasiya_base WHERE "contractCurrency" = 'USD'), 0))::numeric AS contract_usd,
         coalesce((SELECT sum(amount) FROM payments WHERE currency = 'UZS'), 0)::numeric AS collected_uzs,
         coalesce((SELECT sum(amount) FROM payments WHERE currency = 'USD'), 0)::numeric AS collected_usd,
-        coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'UZS' AND due_at >= ${day.start} AND due_at < ${day.end}), 0)::numeric AS due_today_uzs,
-        coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'USD' AND due_at >= ${day.start} AND due_at < ${day.end}), 0)::numeric AS due_today_usd,
+        coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'UZS' AND due_at >= ${month.start} AND due_at < ${month.end}), 0)::numeric AS due_this_month_uzs,
+        coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'USD' AND due_at >= ${month.start} AND due_at < ${month.end}), 0)::numeric AS due_this_month_usd,
         coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'UZS' AND due_at < ${day.start}), 0)::numeric AS overdue_uzs,
         coalesce((SELECT sum(amount) FROM obligations WHERE currency = 'USD' AND due_at < ${day.start}), 0)::numeric AS overdue_usd,
         coalesce((SELECT sum(amount) FROM refunds WHERE currency = 'UZS'), 0)::numeric AS refunds_uzs,
@@ -203,21 +208,34 @@ export async function getCustomerProfileOverview(input: {
           - (SELECT revenue_reversal FROM return_accounting)
           + (SELECT cost_recovery FROM return_accounting)
           + (SELECT retained_value FROM return_accounting))::numeric AS accrual_profit_uzs,
-        coalesce((SELECT sum("interestAmount") FROM nasiya_base
-            WHERE "isImported" = FALSE AND "resolutionState" <> 'ARCHIVED'), 0)::numeric AS nasiya_interest_uzs,
+        (
+          coalesce((
+            SELECT sum(a."interestAmountUzs")
+            FROM "NasiyaPaymentAllocation" a
+            JOIN "NasiyaPayment" p ON p.id = a."nasiyaPaymentId" AND p."shopId" = a."shopId"
+            JOIN nasiya_base n ON n.id = a."nasiyaId"
+            WHERE a."shopId" = ${input.shopId} AND p."deletedAt" IS NULL
+          ), 0)
+          - coalesce((
+            SELECT sum(pr."recognizedInterestAmountUzs")
+            FROM "ReturnProfitReversal" pr
+            JOIN nasiya_base n ON n.id = pr."nasiyaId"
+            WHERE pr."shopId" = ${input.shopId}
+          ), 0)
+        )::numeric AS nasiya_interest_uzs,
         coalesce((SELECT count(*) FROM payments WHERE legacy_usd), 0)::integer AS legacy_usd_payment_count,
         (SELECT count(DISTINCT device_id) FROM (
           SELECT "deviceId" AS device_id FROM sale_base UNION SELECT "deviceId" FROM nasiya_base
         ) devices)::integer AS device_count,
         (SELECT count(*) FROM sale_base)::integer AS sale_count,
-        (SELECT count(*) FROM nasiya_base WHERE "status" IN ('ACTIVE', 'OVERDUE') AND "resolutionState" = 'ACTIVE')::integer AS active_nasiya_count,
-        (SELECT count(*) FROM nasiya_base WHERE "status" = 'COMPLETED')::integer AS completed_nasiya_count,
-        (SELECT count(*) FROM nasiya_base WHERE "resolutionState" = 'ARCHIVED')::integer AS archived_nasiya_count,
-        (SELECT count(*) FROM nasiya_base WHERE "resolutionState" = 'WRITTEN_OFF')::integer AS written_off_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "status" IN ('ACTIVE', 'OVERDUE') AND "resolutionState" = 'ACTIVE')::integer AS active_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "status" = 'COMPLETED')::integer AS completed_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "resolutionState" = 'ARCHIVED')::integer AS archived_nasiya_count,
+        (SELECT count(*) FROM nasiya_base WHERE "returnedAt" IS NULL AND "resolutionState" = 'WRITTEN_OFF')::integer AS written_off_nasiya_count,
         (SELECT count(*) FROM refunds)::integer AS return_count
     `),
     getCustomerTrustFactorsForList({ shopId: input.shopId, customerIds: [input.customerId], now: input.now }),
-  ])
+  ]))
 
   const row = metricRows[0]
   const fallbackFactors: CustomerTrustFactors = {
@@ -233,7 +251,7 @@ export async function getCustomerProfileOverview(input: {
   const metrics: CustomerProfileMetrics = {
     contractValue: money(row?.contract_uzs, row?.contract_usd),
     cashCollected: money(row?.collected_uzs, row?.collected_usd),
-    dueToday: money(row?.due_today_uzs, row?.due_today_usd),
+    dueThisMonth: money(row?.due_this_month_uzs, row?.due_this_month_usd),
     overdue: money(row?.overdue_uzs, row?.overdue_usd),
     refunds: money(row?.refunds_uzs, row?.refunds_usd),
     writeOffs: money(row?.writeoffs_uzs, row?.writeoffs_usd),
@@ -272,15 +290,18 @@ export async function getCustomerProfileOverview(input: {
 }
 
 interface HistoryRow {
-  id: string
-  occurred_at: Date
-  kind: string
+  customer_marker: string
+  id: string | null
+  occurred_at: Date | null
+  kind: string | null
   reference_id: string | null
-  title: string
+  title: string | null
   subtitle: string | null
   currency: 'UZS' | 'USD' | null
   amount: unknown
   status: string | null
+  retained_amount?: unknown
+  cancelled_debt?: unknown
 }
 
 function historySql(section: CustomerProfileSection, input: { shopId: string; customerId: string }) {
@@ -294,12 +315,14 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
         FROM (
           SELECT 'sale'::text AS source, s."id" AS deal_id, s."createdAt" AS occurred_at,
                  d."id" AS device_id, d."model" AS model, d."storage", d."color", d."imei",
-                 s."contractCurrency" AS currency, s."contractSalePrice" AS amount, d."status"::text AS status
+                 s."contractCurrency" AS currency, s."contractSalePrice" AS amount,
+                 CASE WHEN s."returnedAt" IS NOT NULL THEN 'RETURNED' ELSE d."status"::text END AS status
           FROM "Sale" s JOIN "Device" d ON d."id" = s."deviceId" AND d."shopId" = s."shopId"
           WHERE s."shopId" = ${input.shopId} AND s."customerId" = ${input.customerId} AND s."deletedAt" IS NULL
           UNION ALL
           SELECT 'nasiya', n."id", n."createdAt", d."id", d."model", d."storage", d."color", d."imei",
-                 n."contractCurrency", n."contractTotalAmount", d."status"::text
+                 n."contractCurrency", n."contractTotalAmount",
+                 CASE WHEN n."returnedAt" IS NOT NULL THEN 'RETURNED' ELSE d."status"::text END
           FROM "Nasiya" n JOIN "Device" d ON d."id" = n."deviceId" AND d."shopId" = n."shopId"
           WHERE n."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId} AND n."deletedAt" IS NULL
         ) rows`
@@ -318,7 +341,8 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
         SELECT n."id", n."createdAt" AS occurred_at, 'nasiya'::text AS kind, n."id" AS reference_id,
                d."model" AS title, concat(n."months", ' oy') AS subtitle, n."contractCurrency" AS currency,
                (n."contractDownPayment" + n."contractFinalAmount") AS amount,
-               concat(n."status"::text, ':', n."resolutionState"::text) AS status
+               CASE WHEN n."returnedAt" IS NOT NULL THEN 'RETURNED'
+                    ELSE concat(n."status"::text, ':', n."resolutionState"::text) END AS status
         FROM "Nasiya" n JOIN "Device" d ON d."id" = n."deviceId" AND d."shopId" = n."shopId"
         WHERE n."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId} AND n."deletedAt" IS NULL`
     case 'payments':
@@ -355,12 +379,19 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
         WHERE p."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId} AND p."deletedAt" IS NULL`
     case 'returns':
       return Prisma.sql`
-        SELECT r."id", r."createdAt" AS occurred_at, 'return'::text AS kind, d."id" AS reference_id,
+        SELECT r."id", r."createdAt" AS occurred_at,
+               CASE WHEN r."nasiyaId" IS NOT NULL THEN 'nasiya-return'::text ELSE 'return'::text END AS kind,
+               coalesce(r."nasiyaId", d."id") AS reference_id,
                d."model" AS title, r."note" AS subtitle,
-               CASE WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0 THEN 'USD'::"CurrencyCode" ELSE 'UZS'::"CurrencyCode" END AS currency,
-               CASE WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
+               CASE WHEN r."refundInputCurrency" IS NOT NULL THEN r."refundInputCurrency"
+                    WHEN r."contractCurrency" = 'USD' AND r."contractRefundAmount" > 0 THEN 'USD'::"CurrencyCode"
+                    ELSE 'UZS'::"CurrencyCode" END AS currency,
+               CASE WHEN r."refundInputAmount" IS NOT NULL THEN r."refundInputAmount"
+                    WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
                     WHEN r."contractRefundAmount" > 0 THEN r."contractRefundAmount" ELSE r."refundAmount" END AS amount,
-               'RETURNED'::text AS status
+               'RETURNED'::text AS status,
+               r."contractRetainedAmount" AS retained_amount,
+               r."contractCancelledDebt" AS cancelled_debt
         FROM "DeviceReturn" r
         JOIN "Device" d ON d."id" = r."deviceId" AND d."shopId" = r."shopId"
         LEFT JOIN "Sale" s ON s."id" = r."saleId" AND s."shopId" = r."shopId"
@@ -368,12 +399,24 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
         WHERE r."shopId" = ${input.shopId} AND (s."customerId" = ${input.customerId} OR n."customerId" = ${input.customerId})`
     case 'resolutions':
       return Prisma.sql`
-        SELECT e."id", e."createdAt" AS occurred_at, 'resolution'::text AS kind, e."nasiyaId" AS reference_id,
-               e."eventType"::text AS title, e."reason" AS subtitle, e."contractCurrency" AS currency,
-               e."nativeRemainingAmount" AS amount, concat(e."previousState"::text, ':', e."newState"::text) AS status
-        FROM "NasiyaResolutionEvent" e
-        JOIN "Nasiya" n ON n."id" = e."nasiyaId" AND n."shopId" = e."shopId"
-        WHERE e."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId}`
+        SELECT * FROM (
+          SELECT e."id", e."createdAt" AS occurred_at, 'resolution'::text AS kind, e."nasiyaId" AS reference_id,
+                 e."eventType"::text AS title, e."reason" AS subtitle, e."contractCurrency" AS currency,
+                 e."nativeRemainingAmount" AS amount, concat(e."previousState"::text, ':', e."newState"::text) AS status
+          FROM "NasiyaResolutionEvent" e
+          JOIN "Nasiya" n ON n."id" = e."nasiyaId" AND n."shopId" = e."shopId"
+          WHERE e."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId}
+
+          UNION ALL
+
+          SELECT st."id", st."settledAt", 'settlement', st."nasiyaId",
+                 st."mode"::text, st."reason", st."contractCurrency",
+                 st."contractInterestWaivedAmount",
+                 CASE WHEN st."contractInterestWaivedAmount" > 0 THEN 'SETTLED' ELSE 'PAID' END
+          FROM "NasiyaSettlement" st
+          JOIN "Nasiya" n ON n."id" = st."nasiyaId" AND n."shopId" = st."shopId"
+          WHERE st."shopId" = ${input.shopId} AND n."customerId" = ${input.customerId}
+        ) settlement_and_resolution_history`
   }
 }
 
@@ -388,16 +431,32 @@ export async function getCustomerProfileHistory(input: {
   const page = Math.max(Math.trunc(input.page), 1)
   const offset = (page - 1) * take
   const base = historySql(input.section, input)
-  const [rows, countRows] = await Promise.all([
-    prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
-      SELECT * FROM (${base}) bounded_history
+  const rows = await timeRequestPhase('database', () => prisma.$queryRaw<HistoryRow[]>(Prisma.sql`
+    SELECT customer_scope.customer_marker, bounded_history.*
+    FROM (
+      SELECT c."id" AS customer_marker
+      FROM "Customer" c
+      WHERE c."id" = ${input.customerId}
+        AND c."shopId" = ${input.shopId}
+        AND c."deletedAt" IS NULL
+    ) customer_scope
+    LEFT JOIN LATERAL (
+      SELECT * FROM (${base}) history_rows
       ORDER BY occurred_at DESC, id DESC
-      LIMIT ${take} OFFSET ${offset}`),
-    prisma.$queryRaw<Array<{ count: number }>>(Prisma.sql`
-      SELECT count(*)::integer AS count FROM (${base}) bounded_history`),
-  ])
+      LIMIT ${take + 1} OFFSET ${offset}
+    ) bounded_history ON TRUE
+  `))
+  const boundedRows = rows.filter((row): row is HistoryRow & {
+    id: string
+    occurred_at: Date
+    kind: string
+    title: string
+  } => row.id !== null && row.occurred_at !== null && row.kind !== null && row.title !== null)
+  const hasNext = boundedRows.length > take
+  const pageRows = boundedRows.slice(0, take)
   return {
-    items: rows.map((row) => ({
+    found: rows.length > 0,
+    items: pageRows.map((row) => ({
       id: row.id,
       occurredAt: row.occurred_at.toISOString(),
       kind: row.kind,
@@ -407,9 +466,19 @@ export async function getCustomerProfileHistory(input: {
       currency: row.currency,
       amount: row.amount == null ? null : Number(row.amount),
       status: row.status,
+      retainedAmount: row.retained_amount == null ? null : Number(row.retained_amount),
+      cancelledDebt: row.cancelled_debt == null ? null : Number(row.cancelled_debt),
     })),
-    total: Number(countRows[0]?.count ?? 0),
+    // Compatibility lower bound for older consumers. It is intentionally not
+    // an exact count; take+1 is the only pagination work on the critical path.
+    total: offset + pageRows.length + (hasNext ? 1 : 0),
+    totalIsExact: false,
+    hasNext,
     page,
     take,
   }
 }
+
+export type CustomerProfileOverview = NonNullable<Awaited<ReturnType<typeof getCustomerProfileOverview>>>
+export type CustomerProfileHistory = Awaited<ReturnType<typeof getCustomerProfileHistory>>
+export type CustomerProfileHistoryItem = CustomerProfileHistory['items'][number]

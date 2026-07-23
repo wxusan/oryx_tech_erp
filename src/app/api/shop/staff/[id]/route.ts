@@ -32,6 +32,12 @@ import {
   isPrismaUniqueConstraintOnField,
   SHOP_LOGIN_TAKEN_MESSAGE,
 } from '@/lib/shop-login-conflict'
+import {
+  processDueTelegramDisableTransitions,
+  purgeTelegramIdentityInTransaction,
+  TELEGRAM_PURGE_REASON,
+  telegramPreassignmentAllowed,
+} from '@/lib/server/telegram-lifecycle'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -91,7 +97,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       [parsed.data.name !== undefined || parsed.data.phone !== undefined, 'STAFF_EDIT_PROFILE'],
       [parsed.data.password !== undefined, 'STAFF_RESET_PASSWORD'],
       [parsed.data.isActive !== undefined, 'STAFF_STATUS_MANAGE'],
-      [parsed.data.permissionCodes !== undefined || parsed.data.logsViewEnabled !== undefined, 'STAFF_PERMISSION_MANAGE'],
+      [parsed.data.permissionCodes !== undefined || parsed.data.logsViewEnabled !== undefined || parsed.data.roleId !== undefined, 'STAFF_PERMISSION_MANAGE'],
       [parsed.data.telegramNotificationsEnabled !== undefined, 'STAFF_NOTIFICATION_MANAGE'],
     ]
     for (const [included, permission] of requiredPermissions) {
@@ -118,6 +124,15 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
     if (parsed.data.telegramNotificationsEnabled === true && !principal.enabledFeatures.has('TELEGRAM')) {
       return badRequest("Telegram moduli yoqilmagani uchun bildirishnomalarni yoqib bo'lmaydi")
     }
+    if (parsed.data.telegramNotificationsEnabled === true) {
+      await processDueTelegramDisableTransitions({ shopId, limit: 100 })
+    }
+    if (
+      parsed.data.telegramNotificationsEnabled === true &&
+      !(await telegramPreassignmentAllowed(prisma, shopId))
+    ) {
+      return badRequest("Telegram funksiyasi do'kon uchun yoqilmagan")
+    }
     const passwordHash = parsed.data.password ? await bcrypt.hash(parsed.data.password, 12) : undefined
 
     const row = await runSerializable(() => prisma.$transaction(async (tx) => {
@@ -143,6 +158,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           isActive: true,
           name: true,
           legacyFullAccess: true,
+          staffRoleId: true,
+          roleVersionApplied: true,
           permissions: { select: { permissionCode: true } },
         },
       })
@@ -184,13 +201,60 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       if (parsed.data.telegramNotificationsEnabled === true && !activeFeatures.has('TELEGRAM')) {
         throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
       }
-      const permissionSnapshotChanged = parsed.data.permissionCodes !== undefined || parsed.data.logsViewEnabled !== undefined
+      if (
+        parsed.data.telegramNotificationsEnabled === true &&
+        !(await telegramPreassignmentAllowed(tx, shopId))
+      ) {
+        throw Object.assign(new Error('TELEGRAM_DISABLED'), { code: 'TELEGRAM_DISABLED' })
+      }
+      const selectedRole = parsed.data.roleId
+        ? await tx.shopStaffRole.findFirst({
+            where: { id: parsed.data.roleId, shopId, isArchived: false },
+            select: {
+              id: true,
+              name: true,
+              version: true,
+              permissions: { select: { permissionCode: true } },
+            },
+          })
+        : null
+      if (parsed.data.roleId && !selectedRole) {
+        throw Object.assign(new Error('ROLE_NOT_FOUND'), { code: 'ROLE_NOT_FOUND' })
+      }
+      const selectedRolePermissionCodes = selectedRole?.permissions
+        .map((permission) => permission.permissionCode as ShopPermissionCode) ?? []
+      if (selectedRolePermissionCodes.some((code) => {
+        const permission = SHOP_PERMISSION_CATALOG.find((item) => item.code === code)
+        return !permission || permission.retired || permission.ownerOnly
+      })) {
+        throw Object.assign(new Error('PERMISSION_INVALID'), { code: 'PERMISSION_INVALID' })
+      }
+      if (
+        selectedRole && livePrincipal.memberKind === 'SHOP_STAFF' &&
+        selectedRolePermissionCodes.some((code) => (
+          !SHOP_PERMISSION_CATALOG.find((item) => item.code === code)?.staffManagerDelegable
+        ))
+      ) {
+        throw Object.assign(new Error('DELEGATION_FORBIDDEN'), { code: 'DELEGATION_FORBIDDEN' })
+      }
+      const permissionSnapshotChanged = parsed.data.permissionCodes !== undefined ||
+        parsed.data.logsViewEnabled !== undefined || parsed.data.roleId !== undefined
       const existingPermissionCodes = withNasiyaArchivePermissionBundle(target.legacyFullAccess
         ? legacyStaffPermissionCodes(activeFeatures)
         : [...expandShopPermissionCodes(target.permissions.map((item) => item.permissionCode))]
             .filter(isActiveShopPermissionCode))
-      const nextPermissionCodes = withNasiyaArchivePermissionBundle(
-        livePrincipal.memberKind === 'SHOP_OWNER'
+      if (
+        selectedRole && livePrincipal.memberKind === 'SHOP_STAFF' &&
+        existingPermissionCodes.some((code) => (
+          !SHOP_PERMISSION_CATALOG.find((item) => item.code === code)?.staffManagerDelegable
+        ))
+      ) {
+        throw Object.assign(new Error('DELEGATION_FORBIDDEN'), { code: 'DELEGATION_FORBIDDEN' })
+      }
+      const nextPermissionCodes = selectedRole
+        ? selectedRolePermissionCodes
+        : withNasiyaArchivePermissionBundle(
+          livePrincipal.memberKind === 'SHOP_OWNER'
           ? withStaffLogsPermission(
               requestedPermissionCodes ?? existingPermissionCodes.filter((code) => code !== STAFF_LOGS_PERMISSION),
               parsed.data.logsViewEnabled ?? existingPermissionCodes.includes(STAFF_LOGS_PERMISSION),
@@ -203,7 +267,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
               SHOP_PERMISSION_CATALOG.find((item) => item.code === code)?.staffManagerDelegable
             ))),
           ],
-      )
+        )
       const sessionAffectingChange = parsed.data.isActive !== undefined ||
         passwordHash !== undefined || loginChanged || permissionSnapshotChanged ||
         parsed.data.telegramNotificationsEnabled !== undefined
@@ -220,9 +284,32 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
           passwordChangedAt: passwordHash ? new Date() : undefined,
           permissionVersion: permissionSnapshotChanged ? { increment: 1 } : undefined,
           legacyFullAccess: permissionSnapshotChanged ? false : undefined,
+          staffRoleId: parsed.data.roleId !== undefined
+            ? parsed.data.roleId
+            : permissionSnapshotChanged
+              ? null
+              : undefined,
+          roleVersionApplied: selectedRole
+            ? selectedRole.version
+            : permissionSnapshotChanged
+              ? null
+              : undefined,
           sessionVersion: sessionAffectingChange ? { increment: 1 } : undefined,
         },
       })
+
+      if (parsed.data.telegramNotificationsEnabled === false || parsed.data.isActive === false) {
+        await purgeTelegramIdentityInTransaction(
+          tx,
+          { type: 'SHOP_ADMIN', shopId, shopAdminId: id },
+          {
+            reason: parsed.data.telegramNotificationsEnabled === false
+              ? TELEGRAM_PURGE_REASON.STAFF_DISABLED
+              : TELEGRAM_PURGE_REASON.ACCOUNT_INACTIVE,
+            disablePersonalNotifications: parsed.data.telegramNotificationsEnabled === false,
+          },
+        )
+      }
 
       if (permissionSnapshotChanged) {
         await tx.shopMemberPermission.deleteMany({ where: { shopAdminId: id, shopId } })
@@ -259,6 +346,8 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
             isActive: target.isActive,
             legacyFullAccess: target.legacyFullAccess,
             permissionCodes: target.permissions.map((item) => item.permissionCode),
+            roleId: target.staffRoleId,
+            roleVersionApplied: target.roleVersionApplied,
             logsViewEnabled: existingPermissionCodes.includes(STAFF_LOGS_PERMISSION),
           },
           newValue: {
@@ -266,6 +355,12 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
             login: parsed.data.login,
             isActive: parsed.data.isActive,
             permissionCodes: nextPermissionCodes,
+            roleId: parsed.data.roleId !== undefined
+              ? parsed.data.roleId
+              : permissionSnapshotChanged
+                ? null
+                : target.staffRoleId,
+            roleVersionApplied: selectedRole?.version ?? (permissionSnapshotChanged ? null : target.roleVersionApplied),
             logsViewEnabled: nextPermissionCodes.includes(STAFF_LOGS_PERMISSION),
             legacyFullAccess: permissionSnapshotChanged ? false : target.legacyFullAccess,
             telegramNotificationsEnabled: parsed.data.telegramNotificationsEnabled,
@@ -288,6 +383,7 @@ export async function PATCH(request: NextRequest, context: RouteContext) {
       if (error.code === 'STAFF_ACCESS_DISABLED') return conflict('Xodimlar uchun kirish o‘chirilgan.')
       if (error.code === 'AUTHORIZATION_CHANGED') return forbidden('Ruxsatlaringiz o‘zgargan. Sahifani yangilab, qayta urinib ko‘ring.')
       if (error.code === 'PERMISSION_INVALID') return badRequest('Tanlangan ruxsat noto‘g‘ri.')
+      if (error.code === 'ROLE_NOT_FOUND') return badRequest('Tanlangan lavozim topilmadi yoki arxivlangan.')
       if (error.code === 'DELEGATION_FORBIDDEN') return forbidden('Bu amalni boshqa foydalanuvchi nomidan bajarishga ruxsat yo‘q.')
       if (error.code === 'LOGS_OWNER_ONLY') return forbidden('Faoliyat tarixini faqat do‘kon egasi ko‘ra oladi.')
       if (error.code === 'LOGIN_OWNER_ONLY') return forbidden('Tizimga faqat do‘kon egasi kira oladi.')
@@ -337,6 +433,11 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
           permissionVersion: { increment: 1 },
         },
       })
+      await purgeTelegramIdentityInTransaction(
+        tx,
+        { type: 'SHOP_ADMIN', shopId, shopAdminId: id },
+        { reason: TELEGRAM_PURGE_REASON.ACCOUNT_DELETED },
+      )
       await tx.authSession.updateMany({
         where: { actorType: 'SHOP_ADMIN', actorId: id, revokedAt: null },
         data: { revokedAt: new Date() },

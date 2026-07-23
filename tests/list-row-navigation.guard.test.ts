@@ -7,7 +7,7 @@ function read(relativePath: string) {
 }
 
 const CUSTOMERS = 'src/app/(shop)/shop/mijozlar/customers-client.tsx'
-const CUSTOMER_PROFILE = 'src/app/(shop)/shop/mijozlar/[id]/customer-profile-client.tsx'
+const CUSTOMER_PROFILE = 'src/app/(shop)/shop/mijozlar/[id]/customer-profile-history.tsx'
 const DEVICES = 'src/app/(shop)/shop/qurilmalar/qurilmalar-client.tsx'
 const NASIYALAR = 'src/app/(shop)/shop/nasiyalar/nasiyalar-client.tsx'
 const OLIB_SOTDIM = 'src/app/(shop)/shop/olib-sotdim/olib-sotdim-client.tsx'

@@ -15,6 +15,8 @@ Authoritative monthly query: `getShopMonthlyAccountingAggregate()`
 - A Nasiya down payment recognizes principal and ordinary device margin, but no Nasiya interest.
 - Every Nasiya installment is frozen as principal, ordinary device margin, and interest. A partial payment recognizes only the same cumulative paid proportion of those components.
 - Expected profit is the still-unpaid margin plus interest due in the selected month. Expected Nasiya interest is also reported separately.
+- Profit waived during an early settlement is never cash, actual profit, expected profit, income, turnover, a chart series, or a customer/trust statistic. It remains only in the immutable settlement detail and audit evidence needed to explain why the debt reached zero.
+- Once an early settlement is committed, the fulfilled schedules have no remaining receivable or expected profit; dashboards, reports, exports, and customer analytics continue to show only received payment components.
 - Future schedules are excluded from the selected month's actual and expected profit.
 - Full agreement interest remains visible on the Nasiya detail page only as a reference amount.
 - Cash collected, gross receivables due, overdue debt, actual profit, and expected profit are different facts and must not be substituted for one another.

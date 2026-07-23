@@ -26,6 +26,8 @@ import {
   privateUploadPreviewUrl,
   resolvePrivateUploadReference,
 } from '@/lib/server/private-upload-reference'
+import { principalHasPermission } from '@/lib/server/shop-access'
+import { createMoneyDto } from '@/lib/currency'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -81,7 +83,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
     if (req.nextUrl.searchParams.get('view') === 'picker' && pickerPurpose !== 'sale' && pickerPurpose !== 'nasiya') {
       return badRequest("Qurilma tanlash maqsadi noto'g'ri")
     }
-    if (detailPurpose && detailPurpose !== 'device' && detailPurpose !== 'sale') {
+    if (detailPurpose && detailPurpose !== 'device' && detailPurpose !== 'sale' && detailPurpose !== 'payable') {
       return badRequest("Qurilma ma'lumoti maqsadi noto'g'ri")
     }
     const guarded = pickerPurpose
@@ -98,11 +100,16 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
               'SALE_RETURN_REFUND',
               'OLIB_CREATE',
             ])
-      : await requireShopPermission('INVENTORY_VIEW')
+          : detailPurpose === 'payable'
+            ? await requireShopPermission('SUPPLIER_PAYABLE_VIEW')
+      : await requireShopAnyPermission(['INVENTORY_VIEW', 'SUPPLIER_PAYABLE_VIEW'])
     if (!guarded.ok) return guarded.response
     const { session } = guarded
     const includeOwnerFinancials =
       session.user.role === 'SUPER_ADMIN' || guarded.principal?.memberKind === 'SHOP_OWNER'
+    const canViewSupplierPayables = session.user.role === 'SUPER_ADMIN' || Boolean(
+      guarded.principal && principalHasPermission(guarded.principal, 'SUPPLIER_PAYABLE_VIEW'),
+    )
 
     const { id: deviceId } = await ctx.params
 
@@ -263,6 +270,31 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
           orderBy: { createdAt: 'desc' },
           take: 1,
         },
+        supplierPayables: {
+          where: { deletedAt: null },
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: 1,
+          select: {
+            id: true,
+            origin: true,
+            supplierName: true,
+            supplierPhone: true,
+            contractCurrency: true,
+            contractAmount: true,
+            contractPaidAmount: true,
+            contractRemainingAmount: true,
+            dueDate: true,
+            status: true,
+            lastPaymentAt: true,
+            reminderEnabled: true,
+            createdAt: true,
+            payments: {
+              orderBy: [{ paidAt: 'desc' }, { id: 'desc' }],
+              take: 3,
+              select: { id: true, paymentInputAmount: true, paymentInputCurrency: true, paymentMethod: true, paidAt: true },
+            },
+          },
+        },
       },
     })
 
@@ -298,15 +330,47 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         })()
 
     const purposeScopedDevice: Record<string, unknown> = { ...deviceForViewer }
+    const supplierPayables = canViewSupplierPayables
+      ? device.supplierPayables.map((payable) => ({
+          id: payable.id,
+          origin: payable.origin,
+          supplier: { name: payable.supplierName, phone: payable.supplierPhone },
+          originalAmount: createMoneyDto(payable.contractCurrency, payable.contractAmount.toString()),
+          paidAmount: createMoneyDto(payable.contractCurrency, payable.contractPaidAmount.toString()),
+          remainingAmount: createMoneyDto(payable.contractCurrency, payable.contractRemainingAmount.toString()),
+          dueDate: payable.dueDate.toISOString(),
+          status: payable.status,
+          lastPaymentAt: payable.lastPaymentAt?.toISOString() ?? null,
+          reminderEnabled: payable.reminderEnabled,
+          createdAt: payable.createdAt.toISOString(),
+          payments: payable.payments.map((payment) => ({
+            id: payment.id,
+            amount: createMoneyDto(payment.paymentInputCurrency, payment.paymentInputAmount.toString()),
+            method: payment.paymentMethod,
+            paidAt: payment.paidAt.toISOString(),
+          })),
+        }))
+      : []
+    purposeScopedDevice.supplierPayables = supplierPayables
     if (detailPurpose === 'device') {
       delete purposeScopedDevice.sales
       delete purposeScopedDevice.nasiya
       delete purposeScopedDevice.supplier
       delete purposeScopedDevice.supplierPhone
+      delete purposeScopedDevice.supplierPayables
     } else if (detailPurpose === 'sale') {
       delete purposeScopedDevice.nasiya
       delete purposeScopedDevice.supplier
       delete purposeScopedDevice.supplierPhone
+      delete purposeScopedDevice.supplierPayables
+    } else if (detailPurpose === 'payable') {
+      for (const key of Object.keys(purposeScopedDevice)) {
+        if (!['id', 'model', 'color', 'storage', 'storageAmount', 'storageUnit', 'conditionCode', 'batteryHealth', 'imei', 'imeis', 'status', 'createdAt', 'supplierPayables'].includes(key)) {
+          delete purposeScopedDevice[key]
+        }
+      }
+      purposeScopedDevice.imei = typeof device.imei === 'string' && device.imei.length > 4 ? `••••${device.imei.slice(-4)}` : device.imei
+      purposeScopedDevice.imeis = []
     }
 
     return ok({ ...purposeScopedDevice, imageUrls }, "Qurilma ma'lumotlari")

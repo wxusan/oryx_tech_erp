@@ -48,6 +48,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         contractCurrency: true,
         contractFinalAmount: true,
         contractPaidAmount: true,
+        contractInterestWaivedAmount: true,
         contractRemainingAmount: true,
         accountingReconstructionStatus: true,
         status: true,
@@ -66,7 +67,9 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
             contractCurrency: true,
             contractExpectedAmount: true,
             contractPaidAmount: true,
+            contractInterestWaivedAmount: true,
             contractRemainingAmount: true,
+            interestWaivedAmount: true,
           },
         },
         paymentAllocations: {
@@ -85,6 +88,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       contractCurrency: nasiya.contractCurrency,
       contractFinalAmount: nasiya.contractFinalAmount.toString(),
       contractPaidAmount: nasiya.contractPaidAmount.toString(),
+      contractInterestWaivedAmount: nasiya.contractInterestWaivedAmount.toString(),
       contractRemainingAmount: nasiya.contractRemainingAmount.toString(),
       schedules: nasiya.schedules.map((schedule) => ({
         id: schedule.id,
@@ -96,6 +100,7 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
         contractCurrency: schedule.contractCurrency,
         contractExpectedAmount: schedule.contractExpectedAmount.toString(),
         contractPaidAmount: schedule.contractPaidAmount.toString(),
+        contractInterestWaivedAmount: schedule.contractInterestWaivedAmount.toString(),
         contractRemainingAmount: schedule.contractRemainingAmount.toString(),
       })),
       allocationHistoryComplete: nasiya.accountingReconstructionStatus === 'COMPLETE',
@@ -112,6 +117,8 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
       device: nasiya.device,
       contractCurrency: nasiya.contractCurrency,
       ledger: {
+        paid: ledger.paid,
+        waived: ledger.waived,
         remaining: ledger.remaining,
         status: ledger.status,
         health: ledger.health,
@@ -126,9 +133,11 @@ export async function GET(req: NextRequest, ctx: RouteContext) {
           status: schedule.status,
           expected: reconciled?.expected ?? createMoneyDto(nasiya.contractCurrency, 0),
           paid: reconciled?.paid ?? createMoneyDto(nasiya.contractCurrency, 0),
+          waived: reconciled?.waived ?? createMoneyDto(nasiya.contractCurrency, 0),
           remaining: reconciled?.remaining ?? createMoneyDto(nasiya.contractCurrency, 0),
           legacyExpected: createMoneyDto('UZS', schedule.expectedAmount.toString()),
           legacyPaid: createMoneyDto('UZS', schedule.paidAmount.toString()),
+          legacyWaived: createMoneyDto('UZS', schedule.interestWaivedAmount.toString()),
         }
       }),
     }

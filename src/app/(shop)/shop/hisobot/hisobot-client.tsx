@@ -1,7 +1,7 @@
 'use client'
 
 import { useQuery } from '@tanstack/react-query'
-import { AlertTriangle, Boxes, CalendarClock, CircleDollarSign, Download, RotateCcw, TrendingUp, WalletCards } from 'lucide-react'
+import { AlertTriangle, Boxes, CalendarClock, CircleDollarSign, Download, HandCoins, RotateCcw, TrendingUp, UserRoundCheck, WalletCards } from 'lucide-react'
 import { Card, CardAction, CardContent, CardDescription, CardHeader } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { ExportDownloadButton } from '@/components/shop/export-download-button'
@@ -11,6 +11,7 @@ import type { ShopRangeReport } from '@/lib/server/shop-report-range'
 import type { ReportRangePreset } from '@/lib/report-range'
 import { formatMoneyByCurrency, formatPartitionedMoney, type CurrencyContext } from '@/lib/currency'
 import HisobotChartsLoader from './hisobot-charts-loader'
+import HisobotActivityChartLoader from './hisobot-activity-chart-loader'
 import HisobotFilters from './hisobot-filters'
 import ShopRangeReportPanel from './shop-range-report-panel'
 import { queryKeys } from '@/lib/query-keys'
@@ -120,6 +121,38 @@ export default function HisobotClient({
   const expected = stats.expectedThisMonth
   const overdue = stats.overdueMoney
   const refunds = stats.returnRefundsThisMonth
+  const nativeRefunds = rangeReport?.totals.refunds
+  const nativeCollected = rangeReport?.totals.cashCollected
+  const nativeNetCash = nativeRefunds && nativeCollected
+    ? {
+        uzs: nativeCollected.uzs - nativeRefunds.uzs,
+        usd: nativeCollected.usd - nativeRefunds.usd,
+      }
+    : null
+  const collectedText = nativeCollected
+    ? formatPartitionedMoney({
+        amountUzs: nativeCollected.uzs,
+        amountUsd: nativeCollected.usd,
+        displayCurrency: currency.currency,
+        rate: currency.usdUzsRate,
+      })
+    : fmt(collected, currency)
+  const refundsText = nativeRefunds
+    ? formatPartitionedMoney({
+        amountUzs: nativeRefunds.uzs,
+        amountUsd: nativeRefunds.usd,
+        displayCurrency: currency.currency,
+        rate: currency.usdUzsRate,
+      })
+    : fmt(refunds, currency)
+  const netCashText = nativeNetCash
+    ? formatPartitionedMoney({
+        amountUzs: nativeNetCash.uzs,
+        amountUsd: nativeNetCash.usd,
+        displayCurrency: currency.currency,
+        rate: currency.usdUzsRate,
+      })
+    : fmt(netCash, currency)
   const reversedRevenue = stats.returnRevenueReversalsThisMonth ?? 0
   const recoveredInventoryCost = stats.returnInventoryCostRecoveriesThisMonth ?? 0
   const retainedReturnValue = stats.returnRetainedValueThisMonth ?? 0
@@ -148,6 +181,24 @@ export default function HisobotClient({
   const expectedInterestText = formatPartitionedMoney({
     amountUzs: stats.nasiyaInterestExpectedThisMonthUzs,
     amountUsd: stats.nasiyaInterestExpectedThisMonthUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+  const supplierDebtText = formatPartitionedMoney({
+    amountUzs: stats.supplierPayablesOpenAllTimeUzs,
+    amountUsd: stats.supplierPayablesOpenAllTimeUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+  const customerPayLaterText = formatPartitionedMoney({
+    amountUzs: stats.customerPayLaterOpenAllTimeUzs,
+    amountUsd: stats.customerPayLaterOpenAllTimeUsd,
+    displayCurrency: currency.currency,
+    rate: currency.usdUzsRate,
+  })
+  const supplierPaymentsText = formatPartitionedMoney({
+    amountUzs: stats.supplierPaymentsMadeSelectedMonthUzs,
+    amountUsd: stats.supplierPaymentsMadeSelectedMonthUsd,
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
@@ -233,7 +284,7 @@ export default function HisobotClient({
 
       {adminId && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">
-          Admin filtri tushum, marja va Nasiya foizini to'lovni yozgan xodimga, qaytarish reversini esa qaytarishni yozgan xodimga bog'laydi.
+          Admin filtri shartnomani yaratgan, to'lovni, qaytarishni yoki nasiya yopish kelishuvini yozgan xodim harakatlarini alohida bog'laydi; marja va Nasiya foizi to'lovni yozgan xodimga tegishli.
           Ombordagi tannarx, faol nasiyalar, kutilayotgan foyda va kechikkan qarzdorlik do'kon bo'yicha ko'rsatiladi.
         </div>
       )}
@@ -274,7 +325,7 @@ export default function HisobotClient({
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-900">{fmt(collected, currency)}</div>
+            <div className="text-2xl font-bold text-zinc-900">{collectedText}</div>
             <p className="mt-3 text-xs text-zinc-500">
               Shu oy haqiqatda qabul qilingan barcha to'lovlar; ochiq majburiyatlar bilan foizga aylantirilmaydi.
             </p>
@@ -289,7 +340,7 @@ export default function HisobotClient({
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-emerald-900">{fmt(netCash, currency)}</div>
+            <div className="text-2xl font-bold text-emerald-900">{netCashText}</div>
             <p className="mt-3 text-xs text-emerald-800/70">Bu oy tushgan pul minus mijozga haqiqatda qaytarilgan pul</p>
           </CardContent>
         </Card>
@@ -366,6 +417,43 @@ export default function HisobotClient({
           </CardContent>
         </Card>
 
+        <Card className="rounded-lg border-amber-200 bg-amber-50/40">
+          <CardHeader>
+            <CardDescription className="text-amber-900">Bizning qarzlarimiz</CardDescription>
+            <CardAction><HandCoins className="size-4 text-amber-700" /></CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-amber-950">{supplierDebtText}</div>
+            <p className="mt-3 text-xs text-amber-900/70">
+              {stats.supplierPayablesOpenAllTimeCount} ta ochiq qarz · barcha muddatlardagi joriy qoldiq
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg border-blue-200 bg-blue-50/40">
+          <CardHeader>
+            <CardDescription className="text-blue-900">Bizga Pay Later qarzlar</CardDescription>
+            <CardAction><UserRoundCheck className="size-4 text-blue-700" /></CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-blue-950">{customerPayLaterText}</div>
+            <p className="mt-3 text-xs text-blue-900/70">
+              {stats.customerPayLaterOpenAllTimeCount} ta oddiy Sotuv qoldig&apos;i · barcha muddatlar, Nasiya bu raqamga kirmaydi
+            </p>
+          </CardContent>
+        </Card>
+
+        <Card className="rounded-lg">
+          <CardHeader>
+            <CardDescription>Yetkazib beruvchiga to&apos;langan</CardDescription>
+            <CardAction><HandCoins className="size-4 text-zinc-500" /></CardAction>
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-zinc-900">{supplierPaymentsText}</div>
+            <p className="mt-3 text-xs text-zinc-500">Tanlangan oyda yozilgan {stats.supplierPaymentsMadeSelectedMonthCount} ta to&apos;lov; Sof tushum va foydadan ayrilmaydi</p>
+          </CardContent>
+        </Card>
+
         <Card className="rounded-lg">
           <CardHeader>
             <CardDescription>Mijozga qaytarilgan pul</CardDescription>
@@ -374,7 +462,7 @@ export default function HisobotClient({
             </CardAction>
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-zinc-900">{fmt(refunds, currency)}</div>
+            <div className="text-2xl font-bold text-zinc-900">{refundsText}</div>
             <p className="mt-3 text-xs text-zinc-500">Bu oy {stats.returnsThisMonth} ta qaytarish bo&apos;yicha haqiqatda mijozga berilgan pul</p>
           </CardContent>
         </Card>
@@ -393,6 +481,8 @@ export default function HisobotClient({
         </Card>
       </div>
 
+      <HisobotActivityChartLoader months={rangeReport.months} currencyContext={currency} />
+
       {currencyTotalsComplete ? (
         <HisobotChartsLoader cashFlowData={cashFlowData} businessData={businessData} chartConfig={chartConfig} currency={currency} />
       ) : (
@@ -407,7 +497,7 @@ export default function HisobotClient({
           <summary className="cursor-pointer px-5 py-4 text-sm font-semibold text-zinc-900">Qaytarishlar qanday hisoblanganini ko&apos;rish</summary>
           <div className="grid gap-3 border-t border-zinc-100 px-5 py-4 text-sm sm:grid-cols-2 lg:grid-cols-4">
             {[
-              ['Mijozga qaytarilgan pul', fmt(refunds, currency)],
+              ['Mijozga qaytarilgan pul', refundsText],
               ['Oldin tan olingan foydadan bekor qilindi', fmt(reversedRevenue, currency)],
               ['Omborga qaytgan tannarx', fmt(recoveredInventoryCost, currency)],
               ['Do‘konda saqlab qolingan qiymat', fmt(retainedReturnValue, currency)],

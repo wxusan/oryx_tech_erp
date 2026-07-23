@@ -57,6 +57,7 @@ export const NASIYA_STATUS_LABELS = {
   COMPLETED: 'To‘liq yopilgan',
   OVERDUE: 'Muddati o‘tgan',
   CANCELLED: 'Bekor qilingan',
+  RETURNED: 'Qaytarilgan',
 } as const
 
 export const NASIYA_RESOLUTION_LABELS = {
@@ -86,6 +87,7 @@ export const ALLOCATION_LEDGER_STATE_LABELS = {
 export const SCHEDULE_STATUS_LABELS = {
   PENDING: 'To‘lov kutilmoqda',
   PAID: 'To‘langan',
+  SETTLED: 'Kelishuv bilan yopilgan',
   PARTIAL: 'Qisman to‘langan',
   OVERDUE: 'Muddati o‘tgan',
   DEFERRED: 'Muddati uzaytirilgan',
@@ -101,6 +103,7 @@ export const ACCOUNTING_RECONSTRUCTION_LABELS = {
 
 export const SUPPLIER_PAYABLE_STATUS_LABELS = {
   PENDING: 'To‘lanmagan',
+  PARTIAL: 'Qisman to‘langan',
   PAID: 'To‘langan',
   CANCELLED: 'Bekor qilingan',
   OVERDUE: 'To‘lov muddati o‘tgan',
@@ -150,6 +153,9 @@ export const LOG_TARGET_LABELS = {
   SuperAdmin: 'Bosh administrator',
   CurrencyRate: 'Valyuta kursi',
   SupplierPayable: 'Yetkazib beruvchiga qarz',
+  SupplierPayablePayment: 'Yetkazib beruvchiga to‘lov',
+  NasiyaSettlement: 'Nasiya yopish kelishuvi',
+  OlibSotdimOperation: 'Olib-sotdim operatsiyasi',
   ShopPackageVersion: 'Paket narxi',
 } as const
 
@@ -158,6 +164,8 @@ const DIRECT_ACTION_LABELS: Readonly<Record<string, string>> = {
   CREATE_NASIYA: 'Yangi nasiya yaratildi',
   IMPORT_NASIYA: 'Avvalgi nasiya import qilindi',
   NASIYA_COMPLETED: 'Nasiya to‘liq yopildi',
+  NASIYA_SETTLED_FULL_WITH_PROFIT: 'Nasiya foydasi bilan yopildi',
+  NASIYA_SETTLED_PROFIT_WAIVED: 'Nasiya kelgusi foydasi kechilib yopildi',
   NASIYA_DEFER: 'Nasiya to‘lovi muddati uzaytirildi',
   NASIYA_ARCHIVE: 'Nasiya arxivga olindi',
   NASIYA_REOPEN: 'Nasiya qayta ochildi',
@@ -167,7 +175,12 @@ const DIRECT_ACTION_LABELS: Readonly<Record<string, string>> = {
   CUSTOMER_CREATE: 'Yangi mijoz qo‘shildi',
   CUSTOMER_PASSPORT_REVEAL: 'Mijozning pasport raqami ko‘rildi',
   OLIB_SOTDIM_CREATE: 'Olib-sotdim savdosi yaratildi',
+  OLIB_SOTDIM_NASIYA_CREATE: 'Olib-sotdim orqali nasiya yaratildi',
+  CREATE_DEVICE_PAY_LATER: 'Qurilma keyin to‘lash sharti bilan olindi',
+  CREATE_SUPPLIER_PAYABLE: 'Yetkazib beruvchiga qarz yaratildi',
   SUPPLIER_PAYABLE_PAID: 'Yetkazib beruvchi qarzi to‘landi',
+  SUPPLIER_PAYABLE_PARTIAL_PAYMENT: 'Yetkazib beruvchi qarzi qisman to‘landi',
+  SUPPLIER_PAYABLE_PAYMENT: 'Yetkazib beruvchi qarzi bo‘yicha to‘lov yozildi',
   UPDATE_REMINDER: 'Eslatma sozlamalari yangilandi',
   UPDATE_TELEGRAM_ID: 'Telegram ulanishi yangilandi',
   CHANGE_PASSWORD: 'Parol o‘zgartirildi',
@@ -175,6 +188,9 @@ const DIRECT_ACTION_LABELS: Readonly<Record<string, string>> = {
   STAFF_CREATE: 'Yangi xodim qo‘shildi',
   STAFF_UPDATE: 'Xodim ma’lumotlari yangilandi',
   STAFF_DELETE: 'Xodim o‘chirildi',
+  STAFF_ROLE_CREATE: 'Yangi lavozim yaratildi',
+  STAFF_ROLE_UPDATE: 'Lavozim yangilandi',
+  STAFF_ROLE_ARCHIVE: 'Lavozim arxivlandi',
   OWNER_CREATE: 'Do‘kon egasi profili yaratildi',
   OWNER_RESOLVE: 'Do‘kon egasi biriktirildi',
   PACKAGE_VERSION_CREATE: 'Paket uchun yangi narx belgilandi',
@@ -366,7 +382,9 @@ export const NOTIFICATION_TYPE_LABELS = {
   PAYMENT_RECEIVED: 'To‘lov qabul qilindi',
   NASIYA_IMPORTED: 'Avvalgi nasiya import qilindi',
   OLIB_SOTDIM_CREATED: 'Olib-sotdim savdosi yaratildi',
+  OLIB_SOTDIM_NASIYA_CREATED: 'Olib-sotdim orqali nasiya yaratildi',
   SUPPLIER_PAYABLE_PAID: 'Yetkazib beruvchi qarzi to‘landi',
+  SUPPLIER_PAYABLE_PARTIAL_PAYMENT: 'Yetkazib beruvchi qarzi qisman to‘landi',
   NASIYA_COMPLETED: 'Nasiya to‘liq yopildi',
   NASIYA_REMINDER: 'Nasiya to‘lovi eslatmasi',
   SALE_PAYMENT: 'Sotuv qarzi bo‘yicha to‘lov',
@@ -386,10 +404,24 @@ export const NOTIFICATION_CANCELLATION_LABELS = {
   reminders_not_entitled: 'Eslatmalar funksiyasidan foydalanish huquqi mavjud emas',
   invalid_reminder_reference: 'Eslatma tegishli yozuv bilan bog‘lanmagan',
   debt_resolved_or_changed: 'Qarz yopilgan yoki qarz ma’lumotlari o‘zgargan',
+  unlinked_or_unverified: 'Telegram hisobi ulanmagan yoki tasdiqlanmagan',
+  personal_disabled: 'Xodim uchun Telegram xabarlari o‘chirilgan',
+  shop_disabled: 'Do‘kon uchun Telegram xabarlari o‘chirilgan',
+  package_not_entitled: 'Do‘kon paketida Telegram yoki xodimlar imkoniyati mavjud emas',
+  recipient_limit_reached: 'Faol xodimlar soni Telegram qabul qiluvchilarining xavfsiz chegarasidan oshgan',
 } as const
 
 export function notificationCancellationLabel(value?: string | null) {
   return labelFrom(NOTIFICATION_CANCELLATION_LABELS, value, 'Bekor qilish sababi noma’lum')
+}
+
+export const TELEGRAM_AUDIENCE_LABELS = {
+  OWNER_ONLY: 'Faqat do‘kon egasi',
+  OWNER_AND_ACTIVE_STAFF: 'Do‘kon egasi va faol xodimlar',
+} as const
+
+export function telegramAudienceLabel(value?: string | null) {
+  return labelFrom(TELEGRAM_AUDIENCE_LABELS, value, 'Qabul qiluvchilar noma’lum')
 }
 
 export const OPERATIONS_EVENT_LABELS: Readonly<Record<string, string>> = {
@@ -416,6 +448,7 @@ export const OPERATIONS_EVENT_LABELS: Readonly<Record<string, string>> = {
   'notification.flush_failed': 'Xabarnomalar navbatini qayta ishlashda xatolik',
   'notification.no_recipients': 'Qabul qiluvchilar topilmadi',
   'notification.queue_failed': 'Xabarnomani navbatga qo‘shishda xatolik',
+  'notification.recipient_unavailable': 'Telegram qabul qiluvchisi mavjud emas',
   'notification.queued': 'Xabarnoma yuborish navbatiga qo‘shildi',
   'notification.run': 'Xabarnomalarni yuborish jarayoni ishga tushdi',
   'notification.run_failed': 'Xabarnomalarni yuborish jarayonida xatolik',
@@ -485,6 +518,7 @@ export function shopFeatureLabel(value?: string | null) {
 export const SHOP_PERMISSION_LABELS: Readonly<Record<string, string>> = {
   INVENTORY_VIEW: 'Ombordagi qurilmalarni ko‘rish',
   DEVICE_CREATE: 'Qurilma qo‘shish',
+  DEVICE_PURCHASE_ON_CREDIT: 'Qurilmani keyin to‘lashga olish',
   DEVICE_EDIT: 'Qurilma ma’lumotlarini tahrirlash',
   DEVICE_DELETE: 'Qurilmani o‘chirish',
   DEVICE_RESTOCK: 'Qurilmani qayta omborga qo‘shish',
@@ -499,12 +533,16 @@ export const SHOP_PERMISSION_LABELS: Readonly<Record<string, string>> = {
   NASIYA_CREATE: 'Nasiya yaratish',
   NASIYA_EDIT: 'Nasiya ma’lumotlarini tahrirlash',
   NASIYA_PAYMENT_RECEIVE: 'Nasiya to‘lovini qabul qilish',
+  NASIYA_PROFIT_WAIVE: 'Nasiya foydasidan kechish',
+  NASIYA_RETURN_REFUND: 'Nasiyani qaytarish va pulni qaytarish',
   NASIYA_DEFER: 'Nasiya to‘lovi muddatini uzaytirish',
   NASIYA_REMINDER_MANAGE: 'Nasiya eslatmalarini boshqarish',
   NASIYA_ARCHIVE: 'Nasiyani arxivga olish',
   NASIYA_REOPEN: 'Nasiyani qayta ochish',
   OLIB_VIEW: 'Olib-sotdim yozuvlarini ko‘rish',
   OLIB_CREATE: 'Olib-sotdim savdosini yaratish',
+  SUPPLIER_PAYABLE_VIEW: 'Bizning yetkazib beruvchi qarzlarimizni ko‘rish',
+  SUPPLIER_PAYMENT_RECORD: 'Yetkazib beruvchi qarzi bo‘yicha to‘lov yozish',
   SUPPLIER_PAYMENT_MARK_PAID: 'Yetkazib beruvchiga to‘lovni to‘langan deb belgilash',
   CUSTOMER_VIEW: 'Mijozlarni ko‘rish',
   CUSTOMER_CREATE: 'Mijoz qo‘shish',
@@ -648,6 +686,7 @@ export const NAVIGATION_DOMAIN_LABELS: Readonly<Record<string, string>> = {
   currency: 'Valyuta kursi',
   overdue: 'Muddati o‘tgan to‘lovlar',
   olibSotdim: 'Olib-sotdim',
+  debts: 'Qarzlarim',
   settings: 'Sozlamalar',
   access: 'Kirish va ruxsatlar',
   adminShops: 'Do‘konlar boshqaruvi',
@@ -769,6 +808,8 @@ export function historyStatusLabel(value?: string | null) {
     ...NASIYA_RESOLUTION_EVENT_LABELS,
     DEBT: 'Qarz',
     RECORDED: 'Qayd etilgan',
+    FULL_WITH_PROFIT: 'Foydasi bilan yopish',
+    WAIVE_REMAINING_PROFIT: 'Foydani kechib yopish',
     LEGACY_AMOUNT_UNAVAILABLE: 'Avvalgi yozuvda aniq summa mavjud emas',
   }
   return value.split(':').map((part) => labels[part] ?? 'Holat noma’lum').join(' → ')

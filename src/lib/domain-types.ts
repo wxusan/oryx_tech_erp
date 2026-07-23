@@ -22,5 +22,5 @@ export type NasiyaStatus = (typeof NASIYA_STATUSES)[number]
 export const PAYMENT_METHODS = ['CASH', 'CARD', 'TRANSFER', 'OTHER'] as const
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number]
 
-export const SUPPLIER_PAYABLE_STATUSES = ['PENDING', 'OVERDUE', 'PAID', 'CANCELLED'] as const
+export const SUPPLIER_PAYABLE_STATUSES = ['PENDING', 'PARTIAL', 'OVERDUE', 'PAID', 'CANCELLED'] as const
 export type SupplierPayableStatus = (typeof SUPPLIER_PAYABLE_STATUSES)[number]

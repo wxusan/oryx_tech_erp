@@ -20,17 +20,19 @@ describe('telegram webhook /start recognition guard', () => {
     expect(src).toContain('ensureWebhookBot')
   })
 
-  it('looks up manually-entered IDs in both admin tables via findTelegramOwner', () => {
-    expect(src).toContain('findTelegramOwner(telegramId)')
+  it('verifies manually-entered IDs under lifecycle locks before replying', () => {
+    expect(src).toContain('verifyTelegramOwnerForStart(telegramId)')
   })
 
-  it('stamps telegramVerifiedAt on first /start when it is still null', () => {
-    expect(src).toContain('telegramVerifiedAt: null')
-    expect(src).toContain('telegramVerifiedAt: new Date()')
+  it('does not compose a welcome unless the locked verification succeeds', () => {
+    expect(src).toContain('if (!owner)')
+    expect(read('src/lib/server/telegram-lifecycle.ts')).toContain('verifyTelegramOwnerForStart')
   })
 
-  it('stamps verification only for the exact Telegram ID that sent /start', () => {
-    expect(src).toContain('where: { id: owner.user.id, telegramId, telegramVerifiedAt: null }')
+  it('stamps verification only for the exact current Telegram owner', () => {
+    const lifecycle = read('src/lib/server/telegram-lifecycle.ts')
+    expect(lifecycle).toContain('state.actor.telegramId !== telegramId')
+    expect(lifecycle).toContain('where: { id: state.actor.id, shopId: state.actor.shopId, telegramId }')
   })
 
   it('replies with role-specific welcome templates and an unknown-user reply', () => {
@@ -84,8 +86,9 @@ describe('telegram manual ID save verification guard', () => {
     }
   })
 
-  it('profile updates preserve verification only through the shared unchanged-ID helper', () => {
-    expect(read('src/app/api/shop-admin/profile/route.ts')).toContain('nextTelegramVerifiedAt(')
+  it('profile updates preserve verification only from a locked live actor', () => {
+    expect(read('src/lib/server/telegram-lifecycle.ts')).toContain('state.actor.telegramId === input.telegramId')
+    expect(read('src/app/api/shop-admin/profile/route.ts')).toContain('linkShopAdminTelegramIdentityInTransaction')
     expect(read('src/app/api/admin/profile/route.ts')).toContain('nextTelegramVerifiedAt(')
   })
 
@@ -97,34 +100,40 @@ describe('telegram manual ID save verification guard', () => {
 
 describe('device return notification guard', () => {
   const src = read('src/app/api/devices/[id]/return/route.ts')
+  const resolver = read('src/lib/server/telegram-recipients.ts')
 
   it('queues a RETURN notification for verified shop admins inside the txn', () => {
     expect(src).toContain('deviceReturnedMessage')
     expect(src).toContain("type: 'RETURN'")
-    // Recipient isolation: shop-scoped, active, non-deleted, verified only.
-    expect(src).toContain('telegramVerifiedAt: { not: null }')
-    expect(src).toContain('isActive: true')
-    expect(src).toContain('deletedAt: null')
+    expect(src).toContain('resolveTelegramRecipients(tx')
+    expect(src).toContain('audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF')
+    // Recipient isolation lives in the one shared resolver.
+    expect(resolver).toContain('telegramVerifiedAt: true')
+    expect(resolver).toContain('where: { isActive: true, deletedAt: null }')
   })
 
   it('flushes notifications after the response (non-blocking)', () => {
-    expect(src).toContain('after(() => processPendingNotifications()')
+    expect(src).toContain('after(() => flushQueuedTelegramWork()')
+    expect(src).toContain('telegramUnavailableMarkerRows')
   })
 })
 
 describe('device restock notification guard', () => {
   const src = read('src/app/api/devices/[id]/restock/route.ts')
+  const resolver = read('src/lib/server/telegram-recipients.ts')
 
   it('queues a RESTOCK notification for verified shop admins inside the txn', () => {
     expect(src).toContain('deviceRestockedMessage')
     expect(src).toContain("type: 'RESTOCK'")
-    expect(src).toContain('telegramVerifiedAt: { not: null }')
-    expect(src).toContain('isActive: true')
-    expect(src).toContain('deletedAt: null')
+    expect(src).toContain('resolveTelegramRecipients(tx')
+    expect(src).toContain('audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF')
+    expect(resolver).toContain('telegramVerifiedAt: true')
+    expect(resolver).toContain('where: { isActive: true, deletedAt: null }')
   })
 
   it('flushes notifications after the response (non-blocking)', () => {
-    expect(src).toContain('after(() => processPendingNotifications()')
+    expect(src).toContain('after(() => flushQueuedTelegramWork()')
+    expect(src).toContain('telegramUnavailableMarkerRows')
   })
 })
 
@@ -160,6 +169,7 @@ describe('canonical device identity in Telegram producers', () => {
     'src/app/api/devices/[id]/return/route.ts',
     'src/app/api/devices/[id]/restock/route.ts',
     'src/app/api/nasiya/[id]/payment/route.ts',
+    'src/app/api/nasiya/[id]/settlement/route.ts',
     'src/app/api/sales/[id]/payment/route.ts',
     'src/app/api/olib-sotdim/[id]/pay/route.ts',
     'src/app/api/cron/reminders/route.ts',
@@ -167,7 +177,8 @@ describe('canonical device identity in Telegram producers', () => {
 
   it('uses one shared mapper wherever an existing device is messaged', () => {
     for (const file of producers) {
-      expect(read(file), file).toContain('presentDeviceSpecs(')
+      const source = read(file) + (file.endsWith('/olib-sotdim/[id]/pay/route.ts') ? read('src/lib/server/supplier-payable-payments.ts') : '')
+      expect(source, file).toContain('presentDeviceSpecs(')
     }
   })
 

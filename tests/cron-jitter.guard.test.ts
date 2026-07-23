@@ -13,7 +13,7 @@ describe('cron schedules planned reminders with jitter', () => {
     expect(cron).toContain("import { scheduledReminderSendAt } from '@/lib/notification-schedule'")
     // No planned reminder is scheduled at raw `new Date()` (would fire immediately).
     expect(cron).not.toContain('scheduledAt: new Date(),')
-    const count = cron.split('scheduledAt: scheduledReminderSendAt(dedupeKey,').length - 1
+    const count = cron.split('scheduledReminderSendAt(').length - 1
     // REMINDER, OVERDUE, EARLY_REMINDER, SALE_REMINDER, SALE_OVERDUE, SALE_EARLY_REMINDER,
     // SUPPLIER_PAYABLE_REMINDER, SUPPLIER_PAYABLE_OVERDUE, SUPPLIER_PAYABLE_EARLY_REMINDER
     expect(count).toBe(9)
@@ -21,15 +21,17 @@ describe('cron schedules planned reminders with jitter', () => {
 
   it('only busts caches for shops that actually transitioned to OVERDUE (no thrash)', () => {
     expect(cron).toContain('const transitionedShopIds = new Set<string>()')
-    expect(cron).toContain('if (transitioned) transitionedShopIds.add(schedule.nasiya.shopId)')
+    expect(cron).toContain('if (transition.stateChanged) {')
+    expect(cron).toContain('transitionedShopIds.add(schedule.nasiya.shopId)')
     expect(cron).toContain('for (const overdueShopId of transitionedShopIds)')
   })
 
   it('queues reminders only for opted-in, verified, non-deleted admins', () => {
+    const recipients = read('src/lib/server/telegram-recipients.ts')
     expect(cron).toContain('reminderEnabled: true')
-    expect(cron).toContain('telegramVerifiedAt: { not: null }')
-    expect(cron).toContain('telegramNotificationsEnabled: true')
-    expect(cron).toContain('deletedAt: null')
+    expect(recipients).toContain('telegramVerifiedAt: true')
+    expect(recipients).toContain('admin.telegramNotificationsEnabled')
+    expect(recipients).toContain('where: { isActive: true, deletedAt: null }')
   })
 })
 
@@ -37,7 +39,7 @@ describe('immediate notifications are NOT jittered', () => {
   it('sale/nasiya/payment events still queue with scheduledAt = now', () => {
     // Spot-check the sell route: an immediate SALE notification keeps new Date().
     const sell = read('src/app/api/devices/[id]/sell/route.ts')
-    expect(sell).toContain('scheduledAt: new Date()')
+    expect(sell).toContain('const scheduledAt = new Date()')
     expect(sell).not.toContain('scheduledReminderSendAt')
   })
 })

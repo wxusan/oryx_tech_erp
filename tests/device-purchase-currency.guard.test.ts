@@ -57,7 +57,7 @@ describe('Device creation/edit/olib-sotdim routes populate the purchase-currency
     const route = read('src/app/api/olib-sotdim/route.ts')
     expect(route).toContain('purchaseCurrency: purchaseInput.inputCurrency,')
     expect(route).toContain('purchaseInputAmount: d.purchasePrice,')
-    expect(route).toContain('purchaseAmountUzsSnapshot: purchasePriceUzs,')
+    expect(route).toContain('purchaseAmountUzsSnapshot: purchaseInput.amountUzs,')
   })
 
   it('deviceAddedMessage shows the device\'s own native purchase currency, not always UZS', () => {

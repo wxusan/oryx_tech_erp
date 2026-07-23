@@ -34,12 +34,23 @@ interface FormData {
   secondaryImei: string
   supplierName: string
   supplierPhone: string
+  purchaseSettlement: 'PAID_NOW' | 'PAY_LATER'
+  supplierDueDate: string
+  supplierInitialPaymentAmount: string
+  supplierPaymentMethod: 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
+  supplierSplitPayment: boolean
+  supplierSecondPaymentMethod: 'CASH' | 'CARD' | 'TRANSFER' | 'OTHER'
+  supplierFirstPaymentAmount: string
+  supplierSecondPaymentAmount: string
+  supplierReminderEnabled: boolean
+  earlyReminderEnabled: boolean
+  earlyReminderDays: string
   note: string
 }
 
 export default function NewDevicePage() {
   const { can } = useShopAccess()
-  if (!can('DEVICE_CREATE')) return <ShopAccessDenied />
+  if (!can('DEVICE_CREATE') && !can('DEVICE_PURCHASE_ON_CREDIT')) return <ShopAccessDenied />
   return <AuthorizedNewDevicePage />
 }
 
@@ -50,6 +61,9 @@ function AuthorizedNewDevicePage() {
   const queryClient = useQueryClient()
   const queryScope = useAuthenticatedQueryScope()
   const { currency, currencyError } = useShopCurrency()
+  const canCreatePaidNow = can('DEVICE_CREATE')
+  const canCreatePayLater = can('DEVICE_PURCHASE_ON_CREDIT')
+  const [idempotencyKey] = useState(() => crypto.randomUUID())
   const [form, setForm] = useState<FormData>({
     model: '',
     color: '',
@@ -62,6 +76,17 @@ function AuthorizedNewDevicePage() {
     secondaryImei: '',
     supplierName: '',
     supplierPhone: '',
+    purchaseSettlement: canCreatePaidNow ? 'PAID_NOW' : 'PAY_LATER',
+    supplierDueDate: '',
+    supplierInitialPaymentAmount: '',
+    supplierPaymentMethod: 'CASH',
+    supplierSplitPayment: false,
+    supplierSecondPaymentMethod: 'CARD',
+    supplierFirstPaymentAmount: '',
+    supplierSecondPaymentAmount: '',
+    supplierReminderEnabled: true,
+    earlyReminderEnabled: false,
+    earlyReminderDays: '3',
     note: '',
   })
   const [loading, setLoading] = useState(false)
@@ -78,7 +103,20 @@ function AuthorizedNewDevicePage() {
   const set = (field: keyof FormData) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
     setForm((prev) => ({ ...prev, [field]: e.target.value }))
 
-  const isValid = form.model.trim() && form.color.trim() && form.storage.trim() && form.conditionCode && form.purchasePrice.trim() && /^\d{15}$/.test(form.imei) && (!form.secondaryImei || /^\d{15}$/.test(form.secondaryImei)) && !imageSelection.hasBlockingErrors
+  const supplierInitialPayment = Number(form.supplierInitialPaymentAmount || 0)
+  const supplierSplitValid = !form.supplierSplitPayment || (
+    supplierInitialPayment > 0 &&
+    form.supplierPaymentMethod !== form.supplierSecondPaymentMethod &&
+    Number(form.supplierFirstPaymentAmount) > 0 &&
+    Number(form.supplierSecondPaymentAmount) > 0 &&
+    Math.abs(Number(form.supplierFirstPaymentAmount) + Number(form.supplierSecondPaymentAmount) - supplierInitialPayment) < (currency.currency === 'UZS' ? 0.5 : 0.005)
+  )
+  const isPayLaterValid = form.purchaseSettlement === 'PAID_NOW' || (
+    canCreatePayLater && form.supplierName.trim().length >= 2 && Boolean(form.supplierPhone) && Boolean(form.supplierDueDate) &&
+    supplierInitialPayment < Number(form.purchasePrice || 0) && supplierSplitValid &&
+    (!form.earlyReminderEnabled || (Number(form.earlyReminderDays) >= 1 && Number(form.earlyReminderDays) <= 60))
+  )
+  const isValid = form.model.trim() && form.color.trim() && form.storage.trim() && form.conditionCode && form.purchasePrice.trim() && /^\d{15}$/.test(form.imei) && (!form.secondaryImei || /^\d{15}$/.test(form.secondaryImei)) && isPayLaterValid && !imageSelection.hasBlockingErrors
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -94,7 +132,10 @@ function AuthorizedNewDevicePage() {
       const imageUrls = await imageSelection.uploadAll()
       const res = await fetch('/api/devices', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(form.purchaseSettlement === 'PAY_LATER' ? { 'Idempotency-Key': idempotencyKey } : {}),
+        },
         body: JSON.stringify({
           model: form.model,
           color: form.color,
@@ -108,6 +149,21 @@ function AuthorizedNewDevicePage() {
           secondaryImei: form.secondaryImei || undefined,
           supplierName: form.supplierName || undefined,
           supplierPhone: form.supplierPhone || undefined,
+          purchaseSettlement: form.purchaseSettlement,
+          supplierDueDate: form.purchaseSettlement === 'PAY_LATER' ? form.supplierDueDate : undefined,
+          supplierInitialPaymentAmount: form.purchaseSettlement === 'PAY_LATER' ? Number(form.supplierInitialPaymentAmount || 0) : undefined,
+          supplierPaymentMethod: form.purchaseSettlement === 'PAY_LATER' && Number(form.supplierInitialPaymentAmount || 0) > 0
+            ? form.supplierPaymentMethod
+            : undefined,
+          supplierPaymentBreakdown: form.purchaseSettlement === 'PAY_LATER' && supplierInitialPayment > 0 && form.supplierSplitPayment
+            ? [
+                { method: form.supplierPaymentMethod, amount: Number(form.supplierFirstPaymentAmount) },
+                { method: form.supplierSecondPaymentMethod, amount: Number(form.supplierSecondPaymentAmount) },
+              ]
+            : undefined,
+          supplierReminderEnabled: form.purchaseSettlement === 'PAY_LATER' ? form.supplierReminderEnabled : undefined,
+          earlyReminderEnabled: form.purchaseSettlement === 'PAY_LATER' && form.supplierReminderEnabled ? form.earlyReminderEnabled : false,
+          earlyReminderDays: form.purchaseSettlement === 'PAY_LATER' && form.supplierReminderEnabled && form.earlyReminderEnabled ? Number(form.earlyReminderDays) : undefined,
           note: form.note || undefined,
           imageUrls,
         }),
@@ -238,6 +294,35 @@ function AuthorizedNewDevicePage() {
             <span className="text-sm font-semibold text-zinc-900">Yetkazib beruvchi</span>
           </div>
           <div className="grid grid-cols-1 gap-4 p-4 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <span className="mb-2 block text-xs font-medium text-zinc-700">Xarid bo‘yicha to‘lov</span>
+              <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label="Xarid to‘lov turi">
+                {canCreatePaidNow && (
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={form.purchaseSettlement === 'PAID_NOW'}
+                    onClick={() => setForm((prev) => ({ ...prev, purchaseSettlement: 'PAID_NOW' }))}
+                    className={`rounded-lg border px-3 py-3 text-left text-sm ${form.purchaseSettlement === 'PAID_NOW' ? 'border-zinc-900 bg-zinc-900 text-white' : 'border-zinc-200 bg-white text-zinc-700'}`}
+                  >
+                    <span className="block font-semibold">Hozir to‘langan</span>
+                    <span className="mt-0.5 block text-xs opacity-75">Yetkazib beruvchi qarzi yaratilmaydi</span>
+                  </button>
+                )}
+                {canCreatePayLater && (
+                  <button
+                    type="button"
+                    role="radio"
+                    aria-checked={form.purchaseSettlement === 'PAY_LATER'}
+                    onClick={() => setForm((prev) => ({ ...prev, purchaseSettlement: 'PAY_LATER' }))}
+                    className={`rounded-lg border px-3 py-3 text-left text-sm ${form.purchaseSettlement === 'PAY_LATER' ? 'border-amber-500 bg-amber-50 text-amber-950' : 'border-zinc-200 bg-white text-zinc-700'}`}
+                  >
+                    <span className="block font-semibold">Keyin to‘lanadi</span>
+                    <span className="mt-0.5 block text-xs opacity-75">Qarzlarimda yetkazib beruvchi qarzi ochiladi</span>
+                  </button>
+                )}
+              </div>
+            </div>
             <Field label="Yetkazib beruvchi ismi">
               <Input
                 value={form.supplierName}
@@ -253,6 +338,68 @@ function AuthorizedNewDevicePage() {
                 className="h-9 text-sm border-zinc-200 rounded"
               />
             </Field>
+            {form.purchaseSettlement === 'PAY_LATER' && (
+              <>
+                <Field label="To‘lov muddati" required>
+                  <Input type="date" value={form.supplierDueDate} onChange={set('supplierDueDate')} className="h-9 text-sm border-zinc-200 rounded" />
+                </Field>
+                <Field label={`Hozir berilgan summa (${currencyLabel(currency.currency)})`} help="Ixtiyoriy boshlang‘ich to‘lov">
+                  <MoneyInput currency={currency.currency} value={form.supplierInitialPaymentAmount} onChange={(value) => setForm((prev) => ({ ...prev, supplierInitialPaymentAmount: value }))} className="h-9 text-sm border-zinc-200 rounded" />
+                </Field>
+                {supplierInitialPayment > 0 && (<>
+                  <div className="sm:col-span-2">
+                    <label htmlFor="supplier-payment-method" className="mb-1.5 block text-xs font-medium text-zinc-700">To‘lov usuli</label>
+                    <Select value={form.supplierPaymentMethod} onValueChange={(value) => value && setForm((prev) => ({ ...prev, supplierPaymentMethod: value as FormData['supplierPaymentMethod'] }))}>
+                      <SelectTrigger id="supplier-payment-method" className="h-9 w-full"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CASH">Naqd pul</SelectItem>
+                        <SelectItem value="CARD">Karta</SelectItem>
+                        <SelectItem value="TRANSFER">O‘tkazma</SelectItem>
+                        <SelectItem value="OTHER">Boshqa</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <label htmlFor="device-supplier-split" className="flex items-center gap-2 text-sm text-zinc-700 sm:col-span-2">
+                    <input id="device-supplier-split" type="checkbox" checked={form.supplierSplitPayment} onChange={(event) => setForm((prev) => ({ ...prev, supplierSplitPayment: event.target.checked }))} className="h-4 w-4 rounded border-zinc-300" />
+                    Boshlang‘ich to‘lovni ikki usulda berish
+                  </label>
+                  {form.supplierSplitPayment && <div className="grid gap-3 rounded-lg border border-zinc-200 p-3 sm:col-span-2 sm:grid-cols-2">
+                    <Field label={`1-usul summasi (${currencyLabel(currency.currency)})`} required>
+                      <MoneyInput currency={currency.currency} value={form.supplierFirstPaymentAmount} onChange={(value) => setForm((prev) => ({ ...prev, supplierFirstPaymentAmount: value }))} className="h-9" />
+                    </Field>
+                    <div>
+                      <label htmlFor="device-supplier-second-method" className="mb-1.5 block text-xs font-medium text-zinc-700">Ikkinchi usul</label>
+                      <Select value={form.supplierSecondPaymentMethod} onValueChange={(value) => value && setForm((prev) => ({ ...prev, supplierSecondPaymentMethod: value as FormData['supplierSecondPaymentMethod'] }))}>
+                        <SelectTrigger id="device-supplier-second-method" className="h-9 w-full"><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="CASH">Naqd pul</SelectItem>
+                          <SelectItem value="CARD">Karta</SelectItem>
+                          <SelectItem value="TRANSFER">O‘tkazma</SelectItem>
+                          <SelectItem value="OTHER">Boshqa</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <Field label={`2-usul summasi (${currencyLabel(currency.currency)})`} required>
+                      <MoneyInput currency={currency.currency} value={form.supplierSecondPaymentAmount} onChange={(value) => setForm((prev) => ({ ...prev, supplierSecondPaymentAmount: value }))} className="h-9" />
+                    </Field>
+                    <p className={`text-xs sm:col-span-2 ${supplierSplitValid ? 'text-zinc-500' : 'text-red-600'}`}>
+                      Ikki usul har xil bo‘lishi va summalar jami boshlang‘ich to‘lovga teng bo‘lishi kerak.
+                    </p>
+                  </div>}
+                </>)}
+                <label htmlFor="device-supplier-reminder" className="flex items-center gap-2 text-sm text-zinc-700 sm:col-span-2">
+                  <input id="device-supplier-reminder" type="checkbox" checked={form.supplierReminderEnabled} onChange={(event) => setForm((prev) => ({ ...prev, supplierReminderEnabled: event.target.checked }))} className="h-4 w-4 rounded border-zinc-300" />
+                  To‘lov muddati haqida eslatish
+                </label>
+                {form.supplierReminderEnabled && <label htmlFor="device-supplier-early-reminder" className="flex items-center gap-2 text-sm text-zinc-700 sm:col-span-2">
+                  <input id="device-supplier-early-reminder" type="checkbox" checked={form.earlyReminderEnabled} onChange={(event) => setForm((prev) => ({ ...prev, earlyReminderEnabled: event.target.checked }))} className="h-4 w-4 rounded border-zinc-300" />
+                  Muddatdan oldin eslatish
+                </label>}
+                {form.supplierReminderEnabled && form.earlyReminderEnabled && <Field label="Necha kun oldin?" required>
+                  <Input type="number" min={1} max={60} value={form.earlyReminderDays} onChange={set('earlyReminderDays')} className="h-9" />
+                </Field>}
+              </>
+            )}
           </div>
         </div>
 

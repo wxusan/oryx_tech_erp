@@ -49,6 +49,7 @@ const DYNAMIC_ID_ROUTES = [
   'src/app/api/devices/[id]/route.ts',
   'src/app/api/devices/[id]/sell/route.ts',
   'src/app/api/nasiya/[id]/payment/route.ts',
+  'src/app/api/nasiya/[id]/settlement/route.ts',
   'src/app/api/nasiya/[id]/reminder/route.ts',
   'src/app/api/nasiya/[id]/route.ts',
   'src/app/api/olib-sotdim/[id]/pay/route.ts',

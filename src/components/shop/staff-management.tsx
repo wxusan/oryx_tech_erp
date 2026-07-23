@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Loader2, Plus, ShieldCheck, Trash2, UserRoundCog } from 'lucide-react'
+import { Loader2, Plus, ShieldCheck, Trash2, UserRoundCog, UsersRound } from 'lucide-react'
 import { commitNavigationMutation } from '@/lib/client-events'
 import {
   SHOP_PERMISSION_CATALOG,
@@ -34,6 +34,8 @@ import {
 import { AsyncButton } from '@/components/ui/async-button'
 import { QueryActivity } from '@/components/query-activity'
 import { markQueryIntent } from '@/lib/client-performance'
+import type { ShopStaffRoleDto } from '@/lib/shop-staff-role-contract'
+import { StaffRoleManagement } from '@/components/shop/staff-role-management'
 
 const assignablePermissions = SHOP_PERMISSION_CATALOG.filter(
   (item) => !item.ownerOnly && !item.retired &&
@@ -71,6 +73,8 @@ interface StaffForm {
   telegramNotificationsEnabled: boolean
   logsViewEnabled: boolean
   permissionCodes: ShopPermissionCode[]
+  accessMode: 'ROLE' | 'INDIVIDUAL' | 'NONE'
+  roleId: string | null
   isActive: boolean
   note: string
 }
@@ -84,21 +88,11 @@ const emptyForm: StaffForm = {
   telegramNotificationsEnabled: false,
   logsViewEnabled: false,
   permissionCodes: [],
+  accessMode: 'NONE',
+  roleId: null,
   isActive: true,
   note: '',
 }
-
-const staffPermissionPresets: ReadonlyArray<{
-  id: string
-  label: string
-  permissionCodes: readonly ShopPermissionCode[]
-}> = [
-  { id: 'cashier', label: 'Kassir', permissionCodes: ['SALE_CREATE', 'SALE_PAYMENT_RECEIVE', 'RECEIVABLES_VIEW', 'CUSTOMER_CREATE'] },
-  { id: 'inventory', label: 'Omborchi', permissionCodes: ['INVENTORY_VIEW', 'DEVICE_CREATE', 'DEVICE_EDIT'] },
-  { id: 'nasiya-collector', label: 'Nasiya undiruvchi', permissionCodes: ['RECEIVABLES_VIEW', 'NASIYA_PAYMENT_RECEIVE', 'NASIYA_DEFER', 'NASIYA_REMINDER_MANAGE'] },
-  { id: 'supervisor', label: 'Nazoratchi', permissionCodes: ['INVENTORY_VIEW', 'SALE_VIEW', 'SALE_EDIT', 'SALE_REMINDER_MANAGE', 'NASIYA_VIEW', 'NASIYA_EDIT', 'NASIYA_REMINDER_MANAGE', 'OLIB_VIEW', 'CUSTOMER_VIEW', 'DASHBOARD_OPERATIONAL_VIEW'] },
-  { id: 'accountant', label: 'Hisobchi', permissionCodes: ['DASHBOARD_FINANCIAL_VIEW', 'REPORT_VIEW', 'EXPORT_SALES', 'EXPORT_NASIYA', 'EXPORT_OLIB', 'EXPORT_RETURNS', 'EXPORT_REPORTS'] },
-]
 
 async function apiError(response: Response) {
   try {
@@ -109,7 +103,13 @@ async function apiError(response: Response) {
   }
 }
 
-export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[] }) {
+export function StaffManagement({
+  initialStaff,
+  initialRoles,
+}: {
+  initialStaff: ShopStaffDto[]
+  initialRoles: ShopStaffRoleDto[]
+}) {
   const { can, enabledFeatures, memberKind } = useShopAccess()
   const scope = useAuthenticatedQueryScope()
   const queryClient = useQueryClient()
@@ -119,6 +119,7 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
   const [saving, setSaving] = useState(false)
   const [formError, setFormError] = useState('')
   const [submitted, setSubmitted] = useState(false)
+  const [activeTab, setActiveTab] = useState<'EMPLOYEES' | 'ROLES'>('EMPLOYEES')
   const canCreate = can('STAFF_CREATE')
   const canEditProfile = can('STAFF_EDIT_PROFILE')
   const canResetPassword = can('STAFF_RESET_PASSWORD')
@@ -140,7 +141,19 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
     enabled: hasRosterWorkflow,
     initialData: hasRosterWorkflow ? initialStaff : undefined,
   })
+  const rolesQuery = useQuery({
+    queryKey: [...queryKeys.domain(scope, 'access'), 'staff-roles'],
+    queryFn: async ({ signal }) => {
+      const response = await fetch('/api/shop/staff/roles', { signal, cache: 'no-store' })
+      if (!response.ok) throw new Error(await apiError(response))
+      const payload = await response.json()
+      return (payload.data ?? []) as ShopStaffRoleDto[]
+    },
+    enabled: hasRosterWorkflow || canCreate || canManagePermissions,
+    initialData: initialRoles,
+  })
   const staff = staffQuery.data ?? []
+  const roles = useMemo(() => rolesQuery.data ?? [], [rolesQuery.data])
   const loading = hasRosterWorkflow && staffQuery.isPending && !staffQuery.data
   const error = staffQuery.error instanceof Error ? staffQuery.error.message : null
 
@@ -155,16 +168,7 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
       permissions: visible.filter((permission) => permission.group === group),
     })).filter((section) => section.permissions.length > 0)
   }, [isOwner])
-  const availablePresetPermissions = useMemo(() => new Set(
-    assignablePermissions
-      .filter((permission) => isOwner || permission.staffManagerDelegable)
-      .filter((permission) => permissionRequiredFeatures(permission.code).every((feature) => enabledFeatures.has(feature)))
-      .map((permission) => permission.code),
-  ), [enabledFeatures, isOwner])
-  const presetOptions = useMemo(() => staffPermissionPresets.map((preset) => ({
-    ...preset,
-    permissionCodes: preset.permissionCodes.filter((code) => availablePresetPermissions.has(code)),
-  })), [availablePresetPermissions])
+  const assignableRoles = useMemo(() => roles.filter((role) => role.assignable && !role.isArchived), [roles])
 
   const valid = useMemo(() => {
     if ((!editing || canEditProfile) && (form.name.trim().length < 2 || !isValidPhone(form.phone))) return false
@@ -197,6 +201,12 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
       ),
       logsViewEnabled: member.logsViewEnabled ?? false,
       permissionCodes: withNasiyaArchivePermissionBundle(member.permissionCodes ?? []),
+      accessMode: member.staffRole
+        ? 'ROLE'
+        : (member.permissionCodes?.length || member.logsViewEnabled)
+          ? 'INDIVIDUAL'
+          : 'NONE',
+      roleId: member.staffRole?.id ?? null,
       isActive: member.isActive ?? true,
       note: '',
     })
@@ -220,6 +230,8 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
     ) return
     setForm((current) => ({
       ...current,
+      accessMode: 'INDIVIDUAL',
+      roleId: null,
       permissionCodes: isArchiveBundle
         ? enabling
           ? withNasiyaArchivePermissionBundle([...current.permissionCodes, 'NASIYA_ARCHIVE'])
@@ -230,16 +242,30 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
     }))
   }
 
-  function applyPreset(permissionCodes: readonly ShopPermissionCode[]) {
-    const sensitiveAdditions = permissionCodes.filter((code) => {
-      const definition = SHOP_PERMISSION_CATALOG.find((item) => item.code === code)
-      return !form.permissionCodes.includes(code) && definition?.risk !== 'ROUTINE'
-    })
-    if (
-      isOwner && sensitiveAdditions.length > 0 &&
-      !window.confirm(`${sensitiveAdditions.length} ta muhim ruxsatni yoqishni tasdiqlaysizmi?`)
-    ) return
-    setForm((current) => ({ ...current, permissionCodes: [...permissionCodes] }))
+  function selectAccess(value: string) {
+    if (value === 'NONE') {
+      setForm((current) => ({
+        ...current,
+        accessMode: 'NONE',
+        roleId: null,
+        permissionCodes: [],
+        logsViewEnabled: false,
+      }))
+      return
+    }
+    if (value === 'INDIVIDUAL') {
+      setForm((current) => ({ ...current, accessMode: 'INDIVIDUAL', roleId: null }))
+      return
+    }
+    const role = assignableRoles.find((item) => item.id === value)
+    if (!role) return
+    setForm((current) => ({
+      ...current,
+      accessMode: 'ROLE',
+      roleId: role.id,
+      permissionCodes: withNasiyaArchivePermissionBundle(role.permissionCodes),
+      logsViewEnabled: role.logsViewEnabled,
+    }))
   }
 
   async function save(event?: React.FormEvent<HTMLFormElement>) {
@@ -263,8 +289,23 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
       if (canResetPassword && form.password) updateBody.password = form.password
       if (canManageStatus) updateBody.isActive = form.isActive
       if (canManagePermissions) {
-        updateBody.permissionCodes = form.permissionCodes
-        if (isOwner) updateBody.logsViewEnabled = form.logsViewEnabled
+        const currentMode = editing?.staffRole
+          ? 'ROLE'
+          : (editing?.permissionCodes?.length || editing?.logsViewEnabled)
+            ? 'INDIVIDUAL'
+            : 'NONE'
+        if (form.accessMode === 'ROLE') {
+          if (currentMode !== 'ROLE' || editing?.staffRole?.id !== form.roleId) updateBody.roleId = form.roleId
+        } else {
+          const directCodesChanged = JSON.stringify([...form.permissionCodes].sort()) !==
+            JSON.stringify([...(editing?.permissionCodes ?? [])].sort())
+          const logsChanged = isOwner && form.logsViewEnabled !== Boolean(editing?.logsViewEnabled)
+          if (currentMode === 'ROLE') updateBody.roleId = null
+          if (directCodesChanged || logsChanged || currentMode !== form.accessMode) {
+            updateBody.permissionCodes = form.accessMode === 'NONE' ? [] : form.permissionCodes
+            if (isOwner) updateBody.logsViewEnabled = form.accessMode === 'NONE' ? false : form.logsViewEnabled
+          }
+        }
       }
       if (canManageNotifications && enabledFeatures.has('TELEGRAM')) {
         updateBody.telegramNotificationsEnabled = form.telegramNotificationsEnabled
@@ -277,12 +318,15 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
           phone: form.phone,
           login: form.login.trim(),
           password: form.password,
-          telegramId: form.telegramId.trim() || undefined,
+          telegramId: isOwner && enabledFeatures.has('TELEGRAM') && form.telegramNotificationsEnabled
+            ? form.telegramId.trim() || undefined
+            : undefined,
           telegramNotificationsEnabled: isOwner && enabledFeatures.has('TELEGRAM')
             ? form.telegramNotificationsEnabled
             : false,
-          logsViewEnabled: isOwner ? form.logsViewEnabled : false,
-          permissionCodes: isOwner ? form.permissionCodes : [],
+          roleId: isOwner && form.accessMode === 'ROLE' ? form.roleId : null,
+          logsViewEnabled: isOwner && form.accessMode === 'INDIVIDUAL' ? form.logsViewEnabled : false,
+          permissionCodes: isOwner && form.accessMode === 'INDIVIDUAL' ? form.permissionCodes : [],
           isActive: form.isActive,
         }),
       })
@@ -326,12 +370,12 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
     <div className="mx-auto max-w-6xl space-y-5 p-4 sm:p-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-zinc-900">Xodimlar</h1>
+          <h1 className="text-xl font-bold text-zinc-900">Xodimlar va lavozimlar</h1>
           <p className="mt-1 text-sm text-zinc-500">
             Xodim profillari bepul. Ular do&apos;kon paketining narxini oshirmaydi.
           </p>
         </div>
-        {canCreate && <Button onClick={openCreate} className="bg-zinc-900 text-white hover:bg-zinc-800">
+        {activeTab === 'EMPLOYEES' && canCreate && <Button onClick={openCreate} className="bg-zinc-900 text-white hover:bg-zinc-800">
           <Plus className="size-4" /> Xodim qo&apos;shish
         </Button>}
       </div>
@@ -341,7 +385,43 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
         Har bir ruxsat mustaqil ishlaydi. Telegram xabarlari yangi xodim uchun avvaldan o&apos;chirilgan bo&apos;ladi.
       </div>
 
-      {hasRosterWorkflow && <QueryActivity
+      <div className="flex gap-1 rounded-lg bg-zinc-100 p-1" role="tablist" aria-label="Xodim boshqaruvi">
+        <button
+          type="button"
+          role="tab"
+          id="staff-employees-tab"
+          aria-controls="staff-employees-panel"
+          aria-selected={activeTab === 'EMPLOYEES'}
+          onClick={() => setActiveTab('EMPLOYEES')}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${activeTab === 'EMPLOYEES' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-600'}`}
+        >
+          <UsersRound className="size-4" /> Xodimlar
+        </button>
+        <button
+          type="button"
+          role="tab"
+          id="staff-roles-tab"
+          aria-controls="staff-roles-panel"
+          aria-selected={activeTab === 'ROLES'}
+          onClick={() => setActiveTab('ROLES')}
+          className={`flex flex-1 items-center justify-center gap-2 rounded-md px-3 py-2 text-sm font-medium ${activeTab === 'ROLES' ? 'bg-white text-zinc-900 shadow-sm' : 'text-zinc-600'}`}
+        >
+          <ShieldCheck className="size-4" /> Lavozimlar
+        </button>
+      </div>
+
+      {activeTab === 'ROLES' && <div id="staff-roles-panel" role="tabpanel" aria-labelledby="staff-roles-tab">
+        <StaffRoleManagement
+          roles={roles}
+          staff={staff}
+          isOwner={isOwner}
+          isFetching={rolesQuery.isFetching}
+          error={rolesQuery.error instanceof Error ? rolesQuery.error.message : null}
+          onRetry={() => { markQueryIntent('staff-roles'); void rolesQuery.refetch() }}
+        />
+      </div>}
+
+      {activeTab === 'EMPLOYEES' && hasRosterWorkflow && <div id="staff-employees-panel" role="tabpanel" aria-labelledby="staff-employees-tab"><QueryActivity
         isFetching={staffQuery.isFetching}
         isInitialLoading={loading}
         error={error}
@@ -373,8 +453,14 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
                   <div className="mt-0.5 font-mono text-xs text-zinc-500">{member.login}{member.phone ? ` · ${formatUzPhoneDisplay(member.phone)}` : ''}</div>
                 </div>
                 {member.isActive !== null && <span className={member.isActive ? 'bg-emerald-100 px-2 py-1 text-xs text-emerald-800' : 'bg-zinc-100 px-2 py-1 text-xs text-zinc-500'}>
-                  {member.isActive ? 'Faol' : 'Nofaol'}
+                  {member.isActive ? 'Faol' : 'Bloklangan'}
                 </span>}
+              </div>
+              <div className="mt-3 flex flex-wrap gap-2">
+                <span className="rounded-full bg-blue-50 px-2 py-1 text-xs font-medium text-blue-700">
+                  {member.staffRole?.name ?? 'Individual'}
+                  {member.staffRole?.isArchived ? ' · arxiv' : ''}
+                </span>
               </div>
               {(member.permissionCodes !== null || member.logsViewEnabled !== null || member.telegramNotificationsEnabled !== null) && <div className="mt-3 text-xs text-zinc-500">
                 {[
@@ -387,7 +473,7 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
           ))}
         </div>
       )}
-      </QueryActivity>}
+      </QueryActivity></div>}
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
@@ -399,27 +485,57 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
             <Field controlId="staff-phone" label="Telefon" required error={submitted && !isValidPhone(form.phone) ? "Telefon raqami noto'g'ri" : undefined}><PhoneInput disabled={Boolean(editing) && !canEditProfile} value={form.phone} onChange={(phone) => setForm((current) => ({ ...current, phone }))} /></Field>
             <Field controlId="staff-login" label="Login" required={!editing} help={editing && isOwner ? "Faqat do'kon egasi loginni o'zgartira oladi. Saqlangandan keyin xodim qayta kiradi." : undefined} error={submitted && ((!editing || (isOwner && form.login.trim() !== editing?.login)) && (form.login.trim().length < 3 || !loginPattern.test(form.login.trim()))) ? "Login 3-64 ta lotin harfi, raqam yoki _ belgisidan iborat bo'lishi kerak" : undefined}><Input autoComplete="off" disabled={Boolean(editing) && !isOwner} value={form.login} onChange={(event) => setForm((current) => ({ ...current, login: event.target.value }))} /></Field>
             <Field controlId="staff-password" label={editing ? 'Yangi parol (ixtiyoriy)' : 'Parol'} required={!editing} error={submitted && ((!editing && form.password.length < 10) || (Boolean(editing) && Boolean(form.password) && form.password.length < 10)) ? "Parol kamida 10 ta belgidan iborat bo'lishi kerak" : undefined}><Input autoComplete="new-password" disabled={Boolean(editing) && !canResetPassword} type="password" value={form.password} onChange={(event) => setForm((current) => ({ ...current, password: event.target.value }))} placeholder="Kamida 10 ta belgi" /></Field>
-            {!editing && <Field label="Telegram ID"><Input inputMode="numeric" value={form.telegramId} onChange={(event) => setForm((current) => ({ ...current, telegramId: event.target.value.replace(/\D/g, '') }))} /></Field>}
+            {!editing && isOwner && <Field
+              controlId="staff-telegram-id"
+              label="Telegram ID"
+              help={!enabledFeatures.has('TELEGRAM')
+                ? 'Do\'kon paketida Telegram yoqilmagan. ID biriktirib bo\'lmaydi.'
+                : !form.telegramNotificationsEnabled
+                  ? 'ID kiritishdan oldin xodim uchun Telegram xabarlarini yoqing.'
+                  : 'Raqamli Telegram ID kiriting; xodim botga /start yuborib tasdiqlaydi.'}
+            >
+              <Input
+                inputMode="numeric"
+                pattern="[0-9]*"
+                disabled={!enabledFeatures.has('TELEGRAM') || !form.telegramNotificationsEnabled}
+                value={form.telegramId}
+                onChange={(event) => setForm((current) => ({ ...current, telegramId: event.target.value.replace(/\D/g, '') }))}
+              />
+            </Field>}
           </div>
 
-          {((!editing && isOwner) || (editing && canManagePermissions)) && (
-            <div className="flex flex-wrap gap-2 border-t border-zinc-200 pt-3" aria-label="Ruxsat andozalari">
-              {presetOptions.map((preset) => (
-                <Button
-                  key={preset.id}
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={preset.permissionCodes.length === 0}
-                  onClick={() => applyPreset(preset.permissionCodes)}
-                >
-                  {preset.label}
-                </Button>
-              ))}
-            </div>
-          )}
+          {((!editing && isOwner) || (editing && canManagePermissions)) && <Field
+            controlId="staff-access-mode"
+            label="Lavozim va ruxsatlar"
+            help="Lavozim ruxsatlarni birgalikda boshqaradi. Individual rejimda ruxsatlarni alohida tanlaysiz."
+          >
+            <select
+              value={form.accessMode === 'ROLE' ? form.roleId ?? 'NONE' : form.accessMode}
+              onChange={(event) => selectAccess(event.target.value)}
+              className="h-10 w-full rounded-md border border-zinc-300 bg-white px-3 text-sm"
+            >
+              <option value="NONE">Ruxsatsiz</option>
+              <optgroup label="Lavozimlar">
+                {editing?.staffRole?.isArchived && !assignableRoles.some((role) => role.id === editing.staffRole?.id) && (
+                  <option value={editing.staffRole.id} disabled>{editing.staffRole.name} · arxiv</option>
+                )}
+                {assignableRoles.map((role) => (
+                  <option key={role.id} value={role.id}>{role.name}{role.kind === 'BUILT_IN' ? ' · standart' : ''}</option>
+                ))}
+              </optgroup>
+              <option value="INDIVIDUAL">Individual ruxsatlar</option>
+            </select>
+          </Field>}
 
-          {((!editing && isOwner) || (editing && canManagePermissions)) && permissionGroups.map((section) => (
+          {form.accessMode === 'ROLE' && form.roleId && (() => {
+            const role = roles.find((item) => item.id === form.roleId) ?? editing?.staffRole
+            return role ? <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-sm text-blue-800">
+              <span className="font-semibold">{role.name}</span> · {form.permissionCodes.length + (form.logsViewEnabled ? 1 : 0)} ta ruxsat.
+              Lavozim o&apos;zgarsa, unga biriktirilgan xodimlar xavfsiz tarzda qayta kiradi.
+            </div> : null
+          })()}
+
+          {form.accessMode === 'INDIVIDUAL' && ((!editing && isOwner) || (editing && canManagePermissions)) && permissionGroups.map((section) => (
             <fieldset key={section.group} className="space-y-2 border-t border-zinc-200 pt-3">
               <legend className="text-sm font-semibold text-zinc-900">{section.label}</legend>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -436,20 +552,24 @@ export function StaffManagement({ initialStaff }: { initialStaff: ShopStaffDto[]
             </fieldset>
           ))}
 
-          {isOwner && ((!editing) || canManagePermissions) && <label htmlFor="staff-logs-enabled" className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 p-3 text-sm">
+          {form.accessMode === 'INDIVIDUAL' && isOwner && ((!editing) || canManagePermissions) && <label htmlFor="staff-logs-enabled" className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 p-3 text-sm">
             <span><span className="block font-medium">Loglarni ko&apos;rish</span><span className="text-xs text-zinc-500">Egasi xodim uchun alohida boshqaradi. Moliyaviy hisobotlar berilmaydi.</span></span>
             <input id="staff-logs-enabled" type="checkbox" checked={form.logsViewEnabled} onChange={(event) => {
               if (event.target.checked && !window.confirm("Faoliyat loglari maxfiy ma'lumot bo'lishi mumkin. Ruxsatni yoqishni tasdiqlaysizmi?")) return
-              setForm((current) => ({ ...current, logsViewEnabled: event.target.checked }))
+              setForm((current) => ({ ...current, accessMode: 'INDIVIDUAL', roleId: null, logsViewEnabled: event.target.checked }))
             }} />
           </label>}
 
           {((!editing && isOwner) || (editing && canManageNotifications)) && <label htmlFor="staff-telegram-enabled" className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 p-3 text-sm">
             <span><span className="block font-medium">Telegram xabarlari</span><span className="text-xs text-zinc-500">{enabledFeatures.has('TELEGRAM') ? 'Egasi xodim uchun alohida boshqaradi' : 'Paketda yoqilmagan'}</span></span>
-            <input id="staff-telegram-enabled" type="checkbox" disabled={!enabledFeatures.has('TELEGRAM')} checked={form.telegramNotificationsEnabled} onChange={(event) => setForm((current) => ({ ...current, telegramNotificationsEnabled: event.target.checked }))} />
+            <input id="staff-telegram-enabled" type="checkbox" disabled={!enabledFeatures.has('TELEGRAM')} checked={form.telegramNotificationsEnabled} onChange={(event) => setForm((current) => ({
+              ...current,
+              telegramNotificationsEnabled: event.target.checked,
+              ...(!event.target.checked ? { telegramId: '' } : {}),
+            }))} />
           </label>}
           {(!editing || canManageStatus) && <label htmlFor="staff-account-active" className="flex items-center justify-between gap-3 rounded-lg border border-zinc-200 p-3 text-sm">
-            <span className="font-medium">Xodim faol</span>
+            <span><span className="block font-medium">Hisob holati</span><span className="text-xs text-zinc-500">Faol xodim kira oladi; bloklangan xodimning sessiyalari bekor qilinadi.</span></span>
             <input id="staff-account-active" type="checkbox" checked={form.isActive} onChange={(event) => setForm((current) => ({ ...current, isActive: event.target.checked }))} />
           </label>}
           {editing && (

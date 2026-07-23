@@ -13,6 +13,7 @@ export const navigationDomains = [
   'currency',
   'overdue',
   'olibSotdim',
+  'debts',
   'settings',
   'access',
   'adminShops',
@@ -37,6 +38,7 @@ export type NavigationMutationKind =
   | 'nasiya.updated'
   | 'nasiya.reminderUpdated'
   | 'nasiya.paymentRecorded'
+  | 'nasiya.settled'
   | 'nasiya.deferred'
   | 'nasiya.archived'
   | 'nasiya.writtenOff'
@@ -103,8 +105,8 @@ export function navigationImpactForMutation(mutation: NavigationMutation): Navig
     case 'device.updated':
     case 'device.deleted':
       return shopImpact(
-        ['devices', 'reports', 'logs'],
-        [...SHOP_INVENTORY_PATHS, deviceDetail, ...SHOP_FINANCIAL_PATHS],
+        ['devices', 'reports', 'logs', 'debts'],
+        [...SHOP_INVENTORY_PATHS, deviceDetail, '/shop/qarzlar', ...SHOP_FINANCIAL_PATHS],
       )
     case 'device.restocked':
       return shopImpact(
@@ -114,13 +116,13 @@ export function navigationImpactForMutation(mutation: NavigationMutation): Navig
     case 'sale.created':
     case 'sale.updated':
       return shopImpact(
-        ['devices', 'sales', 'customers', 'reports', 'logs', 'overdue'],
-        [...SHOP_INVENTORY_PATHS, deviceDetail, '/shop/mijozlar', ...SHOP_FINANCIAL_PATHS],
+        ['devices', 'sales', 'customers', 'reports', 'logs', 'overdue', 'debts'],
+        [...SHOP_INVENTORY_PATHS, deviceDetail, '/shop/mijozlar', '/shop/qarzlar', ...SHOP_FINANCIAL_PATHS],
       )
     case 'sale.paymentRecorded':
       return shopImpact(
-        ['devices', 'sales', 'payments', 'customers', 'reports', 'logs', 'overdue'],
-        ['/shop/qurilmalar', deviceDetail, '/shop/mijozlar', ...SHOP_FINANCIAL_PATHS],
+        ['devices', 'sales', 'payments', 'customers', 'reports', 'logs', 'overdue', 'debts'],
+        ['/shop/qurilmalar', deviceDetail, '/shop/mijozlar', '/shop/qarzlar', ...SHOP_FINANCIAL_PATHS],
       )
     case 'nasiya.created':
     case 'nasiya.imported':
@@ -130,9 +132,10 @@ export function navigationImpactForMutation(mutation: NavigationMutation): Navig
         [...SHOP_INVENTORY_PATHS, '/shop/nasiyalar', deviceDetail, nasiyaDetail, '/shop/mijozlar', ...SHOP_FINANCIAL_PATHS],
       )
     case 'nasiya.paymentRecorded':
+    case 'nasiya.settled':
       return shopImpact(
-        ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue'],
-        ['/shop/qurilmalar', '/shop/nasiyalar', deviceDetail, nasiyaDetail, '/shop/mijozlar', ...SHOP_FINANCIAL_PATHS],
+        ['devices', 'nasiyas', 'payments', 'customers', 'reports', 'logs', 'overdue', 'debts'],
+        ['/shop/qurilmalar', '/shop/nasiyalar', deviceDetail, nasiyaDetail, '/shop/mijozlar', '/shop/qarzlar', ...SHOP_FINANCIAL_PATHS],
       )
     case 'nasiya.deferred':
     case 'nasiya.archived':
@@ -149,18 +152,18 @@ export function navigationImpactForMutation(mutation: NavigationMutation): Navig
       )
     case 'return.created':
       return shopImpact(
-        ['devices', 'sales', 'nasiyas', 'returns', 'customers', 'reports', 'logs', 'overdue'],
-        [...SHOP_INVENTORY_PATHS, '/shop/nasiyalar', '/shop/mijozlar', deviceDetail, nasiyaDetail, ...SHOP_FINANCIAL_PATHS],
+        ['devices', 'sales', 'nasiyas', 'returns', 'customers', 'reports', 'logs', 'overdue', 'debts'],
+        [...SHOP_INVENTORY_PATHS, '/shop/nasiyalar', '/shop/mijozlar', '/shop/qarzlar', deviceDetail, nasiyaDetail, ...SHOP_FINANCIAL_PATHS],
       )
     case 'olibSotdim.created':
       return shopImpact(
-        ['olibSotdim', 'devices', 'sales', 'payments', 'customers', 'reports', 'logs'],
-        ['/shop/olib-sotdim', '/shop/qurilmalar', '/shop/mijozlar', deviceDetail, ...SHOP_FINANCIAL_PATHS],
+        ['olibSotdim', 'devices', 'sales', 'payments', 'customers', 'reports', 'logs', 'debts'],
+        ['/shop/olib-sotdim', '/shop/qurilmalar', '/shop/mijozlar', '/shop/qarzlar', deviceDetail, ...SHOP_FINANCIAL_PATHS],
       )
     case 'olibSotdim.paymentRecorded':
       return shopImpact(
-        ['olibSotdim', 'devices', 'sales', 'payments', 'reports', 'logs'],
-        ['/shop/olib-sotdim', '/shop/qurilmalar', deviceDetail, ...SHOP_FINANCIAL_PATHS],
+        ['olibSotdim', 'devices', 'sales', 'payments', 'reports', 'logs', 'debts'],
+        ['/shop/olib-sotdim', '/shop/qurilmalar', '/shop/qarzlar', deviceDetail, ...SHOP_FINANCIAL_PATHS],
       )
     case 'customer.updated':
       return shopImpact(
@@ -176,8 +179,8 @@ export function navigationImpactForMutation(mutation: NavigationMutation): Navig
     case 'shop.currencyUpdated':
     case 'currency.updated':
       return shopImpact(
-        ['currency', 'devices', 'sales', 'nasiyas', 'payments', 'customers', 'olibSotdim', 'reports', 'settings'],
-        ['/shop', '/shop/dashboard', '/shop/qurilmalar', '/shop/nasiyalar', '/shop/mijozlar', '/shop/olib-sotdim', '/shop/hisobot', '/shop/settings'],
+        ['currency', 'devices', 'sales', 'nasiyas', 'payments', 'customers', 'olibSotdim', 'debts', 'reports', 'settings'],
+        ['/shop', '/shop/dashboard', '/shop/qurilmalar', '/shop/nasiyalar', '/shop/mijozlar', '/shop/olib-sotdim', '/shop/qarzlar', '/shop/hisobot', '/shop/settings'],
       )
     case 'admin.profileUpdated':
       return shopImpact(['settings', 'adminLogs'], ['/admin', '/admin/settings', '/admin/logs'])

@@ -297,7 +297,7 @@ describe('migration-managed active-only uniqueness', () => {
         contractSalePrice: 200,
         contractAmountPaid: 200,
         contractRemainingAmount: 0,
-        paymentMethod: 'CASH',
+        paymentMethod: 'CARD',
         createdBy: first.owner.id,
       },
     })).rejects.toMatchObject({ code: 'P2003' })
@@ -324,7 +324,7 @@ describe('migration-managed active-only uniqueness', () => {
         contractSalePrice: 500,
         contractAmountPaid: 500,
         contractRemainingAmount: 0,
-        paymentMethod: 'CASH',
+        paymentMethod: 'CARD',
         createdBy: owner.id,
       },
     })
@@ -333,7 +333,7 @@ describe('migration-managed active-only uniqueness', () => {
         shopId: shop.id,
         saleId: sale.id,
         amount: 6_250_000,
-        paymentMethod: 'CASH',
+        paymentMethod: 'CARD',
         paymentInputAmount: 500,
         paymentInputCurrency: 'USD',
         paymentExchangeRate: 12_500,
@@ -341,29 +341,52 @@ describe('migration-managed active-only uniqueness', () => {
         createdBy: owner.id,
       },
     })
+    const exactReturnSnapshot = {
+      shopId: shop.id,
+      deviceId: device.id,
+      saleId: sale.id,
+      ledgerVersion: 2,
+      refundAmount: 6_250_000,
+      refundInputAmount: 500,
+      refundInputCurrency: 'USD' as const,
+      refundExchangeRateAtCreation: 12_500,
+      refundExchangeRateSource: 'CBU',
+      refundExchangeRateFetchedAt: new Date('2026-07-23T08:00:00.000Z'),
+      refundMethod: 'CASH' as const,
+      contractCurrency: 'USD' as const,
+      contractAmount: 500,
+      contractReceiptsAtReturn: 500,
+      contractRefundAmount: 500,
+      contractRetainedAmount: 0,
+      contractCancelledDebt: 0,
+      revenueReversalAmountUzs: 6_250_000,
+      inventoryCostRecoveryUzs: 100,
+      note: 'Integration refund',
+      createdBy: owner.id,
+    }
+
+    await expect(prisma.deviceReturn.create({
+      data: {
+        ...exactReturnSnapshot,
+        idempotencyKey: 'integration-refund-missing-provenance',
+        refundExchangeRateSource: null,
+        refundExchangeRateFetchedAt: null,
+      },
+    })).rejects.toThrow(/DeviceReturn_refund_input_snapshot_check/)
+
+    await expect(prisma.deviceReturn.create({
+      data: {
+        ...exactReturnSnapshot,
+        idempotencyKey: 'integration-refund-mismatched-conversion',
+        refundAmount: 6_250_001,
+      },
+    })).rejects.toThrow(/DeviceReturn_refund_input_snapshot_check/)
+
     const returned = await prisma.$transaction(async (tx) => {
       const returnRow = await tx.deviceReturn.create({
         data: {
-          shopId: shop.id,
-          deviceId: device.id,
-          saleId: sale.id,
+          ...exactReturnSnapshot,
           idempotencyKey: 'integration-refund-snapshot',
-          ledgerVersion: 2,
-          refundAmount: 6_250_000,
-          refundInputAmount: 500,
-          refundInputCurrency: 'USD',
-          refundExchangeRateAtCreation: 12_500,
-          refundMethod: 'CASH',
-          contractCurrency: 'USD',
-          contractAmount: 500,
-          contractReceiptsAtReturn: 500,
-          contractRefundAmount: 500,
-          contractRetainedAmount: 0,
-          contractCancelledDebt: 0,
-          revenueReversalAmountUzs: 6_250_000,
-          inventoryCostRecoveryUzs: 100,
-          note: 'Integration refund',
-          createdBy: owner.id,
         },
       })
       await tx.returnRefundAllocation.create({
@@ -371,7 +394,7 @@ describe('migration-managed active-only uniqueness', () => {
           shopId: shop.id,
           deviceReturnId: returnRow.id,
           salePaymentId: payment.id,
-          sourcePaymentMethod: 'CASH',
+          sourcePaymentMethod: 'CARD',
           refundMethod: 'CASH',
           contractCurrency: 'USD',
           contractAmount: 500,
@@ -385,6 +408,7 @@ describe('migration-managed active-only uniqueness', () => {
     })
     expect(Number(returned.refundInputAmount)).toBe(500)
     expect(Number(returned.refundExchangeRateAtCreation)).toBe(12_500)
+    expect(returned.refundExchangeRateSource).toBe('CBU')
     expect(Number(returned.refundAmount)).toBe(6_250_000)
   })
 })
@@ -502,6 +526,80 @@ describe('ERP 2.0 package, grantor, and recipient constraints', () => {
         scheduledAt: new Date(),
       },
     })).rejects.toMatchObject({ code: 'P2003' })
+
+    const markerTime = new Date()
+    const markerData = {
+      shopId: first.shop.id,
+      dedupeKey: `TELEGRAM_GAP:${'a'.repeat(64)}`,
+      type: 'SALE',
+      message: '',
+      telegramId: '',
+      recipientShopAdminId: null,
+      status: 'CANCELLED' as const,
+      scheduledAt: markerTime,
+      cancelledAt: markerTime,
+      lastError: 'Cancelled before delivery: unlinked_or_unverified',
+      recipientUnavailableReason: 'unlinked_or_unverified',
+      sentAt: null,
+      attemptCount: 0,
+      lastAttemptAt: null,
+      nextAttemptAt: null,
+      mediaKeys: [],
+      mediaSentPositions: [],
+      mediaSnapshotAt: null,
+      textSentAt: null,
+      relatedId: null,
+      relatedType: null,
+    } satisfies Prisma.NotificationUncheckedCreateInput
+    const marker = await prisma.notification.create({ data: markerData })
+
+    await expect(prisma.notification.update({
+      where: { id: marker.id },
+      data: { cancelledAt: marker.cancelledAt },
+    })).rejects.toThrow(/gap markers are immutable/i)
+
+    const invalidMarkerInserts: Array<Prisma.NotificationUncheckedCreateInput> = [
+      {
+        ...markerData,
+        dedupeKey: `TELEGRAM_GAP:${'b'.repeat(64)}`,
+        lastError: 'PRIVATE CUSTOMER LOLA',
+      },
+      {
+        ...markerData,
+        dedupeKey: 'TELEGRAM_GAP:not-a-64-character-lowercase-hex-digest',
+      },
+      {
+        ...markerData,
+        dedupeKey: `TELEGRAM_GAP:${'c'.repeat(64)}`,
+        type: 'CUSTOMER_LOLA',
+      },
+      {
+        ...markerData,
+        dedupeKey: `TELEGRAM_GAP:${'d'.repeat(64)}`,
+        mediaKeys: ['private/customer/object-key'],
+      },
+      {
+        ...markerData,
+        dedupeKey: `TELEGRAM_GAP:${'e'.repeat(64)}`,
+        mediaSentPositions: [0],
+      },
+    ]
+    for (const data of invalidMarkerInserts) {
+      await expect(prisma.notification.create({ data }))
+        .rejects.toThrow(/strict gap marker|intended shop-member recipient/i)
+    }
+
+    for (const data of [
+      { message: 'private content escalation' },
+      { telegramId: '777999111' },
+      { relatedId: 'customer-or-payment-id', relatedType: 'Customer' },
+      { status: 'PENDING' as const },
+    ]) {
+      await expect(prisma.notification.update({
+        where: { id: marker.id },
+        data,
+      })).rejects.toThrow(/gap markers are immutable|strict gap marker|intended shop-member recipient/i)
+    }
   })
 })
 
@@ -833,7 +931,7 @@ describe('transactional incremental change events', () => {
       nasiyaId: nasiya.id,
       shopId: shop.id,
       overdueBefore: new Date('2026-01-10T00:00:00.000Z'),
-    })).toBe(false)
+    })).toEqual({ notificationEligible: false, stateChanged: false })
     expect(await prisma.nasiya.findUnique({ where: { id: nasiya.id }, select: { status: true } }))
       .toEqual({ status: 'ACTIVE' })
 
@@ -842,7 +940,7 @@ describe('transactional incremental change events', () => {
       nasiyaId: nasiya.id,
       shopId: shop.id,
       overdueBefore: new Date('2026-01-11T00:00:00.000Z'),
-    })).toBe(true)
+    })).toEqual({ notificationEligible: true, stateChanged: true })
     expect(await prisma.nasiya.findUnique({ where: { id: nasiya.id }, select: { status: true } }))
       .toEqual({ status: 'OVERDUE' })
     expect(await prisma.changeEvent.findFirst({

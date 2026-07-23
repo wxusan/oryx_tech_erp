@@ -1,3 +1,5 @@
+import type { CustomerProfileAnalytics } from '@/lib/customer-profile-analytics'
+
 export interface CustomerProfileNativeMoney {
   UZS: number
   USD: number
@@ -5,7 +7,7 @@ export interface CustomerProfileNativeMoney {
 
 export interface CustomerProfileMetrics {
   contractValue: CustomerProfileNativeMoney
-  dueToday: CustomerProfileNativeMoney
+  dueThisMonth: CustomerProfileNativeMoney
   overdue: CustomerProfileNativeMoney
   cashCollected: CustomerProfileNativeMoney
   refunds: CustomerProfileNativeMoney
@@ -15,7 +17,7 @@ export interface CustomerProfileMetrics {
   legacyUsdPaymentCount: number
 }
 
-export type CustomerProfileOperationalMetrics = Pick<CustomerProfileMetrics, 'contractValue' | 'dueToday' | 'overdue'>
+export type CustomerProfileOperationalMetrics = Pick<CustomerProfileMetrics, 'contractValue' | 'dueThisMonth' | 'overdue'>
 export type CustomerProfileOwnerFinancialMetrics = Omit<CustomerProfileMetrics, keyof CustomerProfileOperationalMetrics>
 export type CustomerProfileVisibleMetrics = CustomerProfileOperationalMetrics & Partial<CustomerProfileOwnerFinancialMetrics>
 
@@ -26,7 +28,24 @@ export type CustomerProfileVisibleMetrics = CustomerProfileOperationalMetrics & 
 export function redactShopStaffCustomerProfileMetrics(metrics: CustomerProfileMetrics): CustomerProfileOperationalMetrics {
   return {
     contractValue: metrics.contractValue,
-    dueToday: metrics.dueToday,
+    dueThisMonth: metrics.dueThisMonth,
     overdue: metrics.overdue,
+  }
+}
+
+/** Owner cash-flow series and caveats never cross the staff API boundary. */
+export function redactShopStaffCustomerProfileAnalytics(
+  analytics: CustomerProfileAnalytics,
+): CustomerProfileAnalytics {
+  return {
+    asOf: analytics.asOf,
+    timezone: analytics.timezone,
+    months: analytics.months,
+    visibility: 'OPERATIONAL',
+    obligations: analytics.obligations,
+    activity: analytics.activity.map(({ month, contracts }) => ({ month, contracts })),
+    discipline: analytics.discipline,
+    counts: analytics.counts,
+    caveats: {},
   }
 }

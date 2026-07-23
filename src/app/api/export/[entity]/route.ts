@@ -143,6 +143,8 @@ function exportResponse(entity: string, format: ExportFormat, data: ExportData) 
 function reportExportData(report: ShopRangeReport): ExportData {
   const row = (month: ShopRangeReport['months'][number], label: string): ExportCell[] => [
     label,
+    month.contracts.uzs,
+    month.contracts.usd,
     month.cashCollected.uzs,
     month.cashCollected.usd,
     month.cashCollected.complete,
@@ -168,6 +170,8 @@ function reportExportData(report: ShopRangeReport): ExportData {
   return {
     headers: [
       'month',
+      'contractsUzs',
+      'contractsUsd',
       'cashCollectedUzs',
       'cashCollectedUsd',
       'cashCollectedComplete',
@@ -390,6 +394,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
           baseRemainingAmount: true,
           interestPercent: true,
           interestAmount: true,
+          interestWaivedAmount: true,
           finalNasiyaAmount: true,
           remainingAmount: true,
           months: true,
@@ -402,6 +407,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
           contractDownPayment: true,
           contractBaseRemainingAmount: true,
           contractInterestAmount: true,
+          contractInterestWaivedAmount: true,
           contractFinalAmount: true,
           contractMonthlyPayment: true,
           contractPaidAmount: true,
@@ -417,6 +423,22 @@ async function exportData(entity: string, shopId: string, role: string): Promise
           originalSaleDate: true,
           customer: { select: { name: true, phone: true } },
           device: { select: { model: true } },
+          settlement: {
+            select: {
+              mode: true,
+              contractCurrency: true,
+              contractRemainingBefore: true,
+              contractCashReceivedAmount: true,
+              contractInterestWaivedAmount: true,
+              contractRemainingAfter: true,
+              cashReceivedAmountUzs: true,
+              interestWaivedAmountUzs: true,
+              frozenUsdUzsRate: true,
+              settledAt: true,
+              reason: true,
+              actorId: true,
+            },
+          },
           schedules: {
             select: {
               status: true,
@@ -426,6 +448,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
               paidAmount: true,
               contractExpectedAmount: true,
               contractPaidAmount: true,
+              contractRemainingAmount: true,
             },
           },
         },
@@ -464,6 +487,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'contractDownPayment',
         'contractBaseRemainingAmount',
         'contractInterestAmount',
+        'contractInterestWaivedAmount',
         'contractFinalAmount',
         'contractMonthlyPayment',
         'contractPaidAmount',
@@ -478,11 +502,23 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'baseRemainingAmountCurrentShopDisplay',
         'interestPercent',
         'interestAmountUzsSnapshot',
+        'interestWaivedAmountUzsSnapshot',
         'interestAmountCurrentShopDisplay',
         'finalNasiyaAmountUzsSnapshot',
         'finalNasiyaAmountCurrentShopDisplay',
         'remainingAmountUzsSnapshot',
         'remainingAmountCurrentShopDisplay',
+        'settlementMode',
+        'settlementDate',
+        'settlementRemainingBefore',
+        'settlementCashReceived',
+        'settlementInterestWaived',
+        'settlementRemainingAfter',
+        'settlementCashReceivedUzsSnapshot',
+        'settlementInterestWaivedUzsSnapshot',
+        'settlementFrozenUsdUzsRate',
+        'settlementReason',
+        'settlementActorId',
         'months',
         'status',
         'resolutionState',
@@ -517,6 +553,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         n.contractDownPayment.toString(),
         n.contractBaseRemainingAmount.toString(),
         n.contractInterestAmount.toString(),
+        n.contractInterestWaivedAmount.toString(),
         n.contractFinalAmount.toString(),
         n.contractMonthlyPayment.toString(),
         n.contractPaidAmount.toString(),
@@ -531,14 +568,27 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         formatMoneyByCurrency(Number(n.baseRemainingAmount), currency.currency, currency.usdUzsRate),
         n.interestPercent.toString(),
         n.interestAmount.toString(),
+        n.interestWaivedAmount.toString(),
         formatMoneyByCurrency(Number(n.interestAmount), currency.currency, currency.usdUzsRate),
         n.finalNasiyaAmount.toString(),
         formatMoneyByCurrency(Number(n.finalNasiyaAmount), currency.currency, currency.usdUzsRate),
         n.remainingAmount.toString(),
         formatMoneyByCurrency(Number(n.remainingAmount), currency.currency, currency.usdUzsRate),
+        n.settlement?.mode ?? '',
+        n.settlement?.settledAt ?? '',
+        n.settlement?.contractRemainingBefore.toString() ?? '',
+        n.settlement?.contractCashReceivedAmount.toString() ?? '',
+        n.settlement?.contractInterestWaivedAmount.toString() ?? '',
+        n.settlement?.contractRemainingAfter.toString() ?? '',
+        n.settlement?.cashReceivedAmountUzs.toString() ?? '',
+        n.settlement?.interestWaivedAmountUzs.toString() ?? '',
+        n.settlement?.frozenUsdUzsRate?.toString() ?? '',
+        n.settlement?.reason ?? '',
+        n.settlement?.actorId ?? '',
         n.months,
-        nasiyaStatusLabel(
-          deriveContractNasiyaStatus(
+        n.returnedAt
+          ? nasiyaStatusLabel('RETURNED')
+          : nasiyaStatusLabel(deriveContractNasiyaStatus(
             {
               status: n.status,
               contractCurrency: n.contractCurrency,
@@ -552,11 +602,11 @@ async function exportData(entity: string, shopId: string, role: string): Promise
                 paidAmount: Number(s.paidAmount),
                 contractExpectedAmount: Number(s.contractExpectedAmount),
                 contractPaidAmount: Number(s.contractPaidAmount),
+                contractRemainingAmount: Number(s.contractRemainingAmount),
               })),
             },
             exportNow,
-          ).displayStatus,
-        ),
+          ).displayStatus),
         nasiyaResolutionLabel(n.resolutionState),
         n.resolutionUpdatedAt,
         resolution ? nasiyaResolutionEventLabel(resolution.eventType) : '',
@@ -582,7 +632,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
   }
 
   if (entity === 'olib') {
-    const where = { shopId, deletedAt: null }
+    const where = { shopId, deletedAt: null, origin: 'OLIB_SOTDIM' as const }
     const total = await assertExportSize(entity, prisma.supplierPayable.count({ where }))
     const payables = await fetchExportRows(total, (skip, take) =>
       prisma.supplierPayable.findMany({
@@ -613,6 +663,14 @@ async function exportData(entity: string, shopId: string, role: string): Promise
               customer: { select: { name: true, phone: true } },
             },
           },
+          olibSotdimOperation: {
+            select: {
+              dealType: true,
+              customer: { select: { name: true, phone: true } },
+              sale: { select: { contractCurrency: true, contractSalePrice: true } },
+              nasiya: { select: { contractCurrency: true, contractFinalAmount: true } },
+            },
+          },
         },
       }),
     )
@@ -639,28 +697,40 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'note',
         'createdAt',
       ],
-      rows: payables.map((item) => [
+      rows: payables.map((item) => {
+        const customer = item.olibSotdimOperation?.customer ?? item.sale?.customer
+        const outcome = item.olibSotdimOperation?.dealType === 'NASIYA'
+          ? item.olibSotdimOperation.nasiya && {
+              currency: item.olibSotdimOperation.nasiya.contractCurrency,
+              amount: item.olibSotdimOperation.nasiya.contractFinalAmount,
+            }
+          : (item.olibSotdimOperation?.sale ?? item.sale) && {
+              currency: (item.olibSotdimOperation?.sale ?? item.sale)!.contractCurrency,
+              amount: (item.olibSotdimOperation?.sale ?? item.sale)!.contractSalePrice,
+            }
+        return [
         item.supplierName,
         item.supplierPhone,
         item.supplierLocation,
         item.supplierNote,
         item.device.model,
         displayImei(item.device.imei),
-        item.sale.customer.name,
-        item.sale.customer.phone,
+        customer?.name ?? '',
+        customer?.phone ?? '',
         currencyLabel(item.contractCurrency),
         item.contractExchangeRateAtCreation?.toString() ?? '',
         item.contractAmount.toString(),
         item.amount.toString(),
-        currencyLabel(item.sale.contractCurrency),
-        item.sale.contractSalePrice.toString(),
+        outcome ? currencyLabel(outcome.currency) : '',
+        outcome?.amount.toString() ?? '',
         supplierPayableStatusLabel(item.status),
         item.dueDate,
         item.paidAt,
         paymentMethodLabel(item.paymentMethod),
         item.note,
         item.createdAt,
-      ]),
+        ]
+      }),
     }
   }
 
@@ -674,10 +744,16 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         skip,
         take,
         select: {
+          id: true,
+          saleId: true,
+          nasiyaId: true,
           refundAmount: true,
           refundInputAmount: true,
           refundInputCurrency: true,
           refundExchangeRateAtCreation: true,
+          refundExchangeRateSource: true,
+          refundExchangeRateEffectiveAt: true,
+          refundExchangeRateFetchedAt: true,
           refundMethod: true,
           contractCurrency: true,
           contractAmount: true,
@@ -700,6 +776,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
             },
           },
           note: true,
+          createdBy: true,
           createdAt: true,
           device: { select: { model: true, imei: true } },
           sale: { select: { customer: { select: { name: true } } } },
@@ -709,6 +786,9 @@ async function exportData(entity: string, shopId: string, role: string): Promise
     )
     return {
       headers: [
+        'returnId',
+        'saleId',
+        'nasiyaId',
         'device',
         'imei',
         'customer',
@@ -716,6 +796,9 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'refundInputAmount',
         'refundInputCurrency',
         'refundExchangeRateAtCreation',
+        'refundExchangeRateSource',
+        'refundExchangeRateEffectiveAt',
+        'refundExchangeRateFetchedAt',
         'refundNativeDisplay',
         'refundMethod',
         'contractCurrency',
@@ -730,9 +813,13 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         'retainedValueAmountUzs',
         'refundAllocations',
         'note',
+        'operatorId',
         'createdAt',
       ],
       rows: returns.map((item) => [
+        item.id,
+        item.saleId ?? '',
+        item.nasiyaId ?? '',
         item.device.model,
         displayImei(item.device.imei),
         item.sale?.customer.name ?? item.nasiya?.customer.name ?? '',
@@ -740,6 +827,9 @@ async function exportData(entity: string, shopId: string, role: string): Promise
         (item.refundInputAmount ?? item.refundAmount).toString(),
         currencyLabel(item.refundInputCurrency ?? 'UZS'),
         item.refundExchangeRateAtCreation?.toString() ?? '',
+        item.refundExchangeRateSource ?? '',
+        item.refundExchangeRateEffectiveAt ?? '',
+        item.refundExchangeRateFetchedAt ?? '',
         formatUserFacingMoney({
           amount: (item.refundInputAmount ?? item.refundAmount).toString(),
           amountCurrency: item.refundInputCurrency ?? 'UZS',
@@ -762,6 +852,7 @@ async function exportData(entity: string, shopId: string, role: string): Promise
           refundMethod: paymentMethodLabel(allocation.refundMethod),
         }))),
         item.note,
+        item.createdBy,
         item.createdAt,
       ]),
     }

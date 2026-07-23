@@ -17,10 +17,11 @@ import { Prisma } from '@/generated/prisma/client'
 import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { ok, badRequest, notFound, conflict, serverError } from '@/lib/api-helpers'
 import { invalidateShopDeviceMutation } from '@/lib/server/cache-tags'
-import { processPendingNotifications } from '@/lib/notification-service'
+import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { logger } from '@/lib/logger'
 import { deviceRestockedMessage } from '@/lib/telegram-templates'
 import { presentDeviceSpecs } from '@/lib/device-specs'
+import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
@@ -87,32 +88,31 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       // Notify the shop's verified Telegram admins. Rows are committed with the
       // transaction (behind the atomic RETURNED->IN_STOCK guard, so a
       // double-click that 409s never reaches here) and flushed after response.
-      const shopAdmins = await tx.shopAdmin.findMany({
-        where: { shopId, deletedAt: null, isActive: true, telegramId: { not: '' }, telegramVerifiedAt: { not: null } },
-        select: { id: true, telegramId: true },
+      const recipients = await resolveTelegramRecipients(tx, {
+        shopId,
+        audience: TELEGRAM_AUDIENCES.OWNER_AND_ACTIVE_STAFF,
       })
-      if (shopAdmins.length > 0) {
-        const message = deviceRestockedMessage({
-          shopName: device.shop.name,
-          device: presentDeviceSpecs(device),
-          note: parsed.data.note,
-          adminName: session.user.name,
-        })
-        for (const admin of shopAdmins) {
-          await tx.notification.create({
-            data: {
-              shopId,
-              type: 'RESTOCK',
-              message,
-              telegramId: admin.telegramId!,
-              recipientShopAdminId: admin.id,
-              scheduledAt: new Date(),
-              relatedId: deviceId,
-              relatedType: 'Device',
-            },
-          })
-        }
-      }
+      const scheduledAt = new Date()
+      const rows = [
+        ...telegramNotificationRows(recipients, {
+          type: 'RESTOCK',
+          message: deviceRestockedMessage({
+            shopName: device.shop.name,
+            device: presentDeviceSpecs(device),
+            note: parsed.data.note,
+            adminName: session.user.name,
+          }),
+          scheduledAt,
+          relatedId: deviceId,
+          relatedType: 'Device',
+        }),
+        ...telegramUnavailableMarkerRows(recipients, {
+          type: 'RESTOCK',
+          dedupeScope: `${deviceId}:${device.updatedAt.toISOString()}`,
+          cancelledAt: scheduledAt,
+        }),
+      ]
+      if (rows.length > 0) await tx.notification.createMany({ data: rows })
 
       return tx.device.findFirst({ where: { id: deviceId, shopId } })
     })
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     // Flush freshly-queued notifications after the response (non-blocking).
     // Rows are already committed, so cron is the backstop if this misses.
-    after(() => processPendingNotifications().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
+    after(() => flushQueuedTelegramWork().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
 
     return ok(result, 'Qurilma qayta omborga qo‘shildi va sotuvga tayyor')
   } catch (err: unknown) {

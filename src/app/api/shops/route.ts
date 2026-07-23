@@ -27,6 +27,8 @@ import { SHOP_FEATURE_CODES } from '@/lib/access-control'
 import { tashkentTodayInputValue } from '@/lib/timezone'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { normalizePhone } from '@/lib/phone'
+import { createTelegramDisableTransitionInTransaction } from '@/lib/server/telegram-lifecycle'
+import { seedBuiltInStaffRoles } from '@/lib/server/shop-staff-roles'
 
 async function runSerializable<T>(operation: () => Promise<T>) {
   for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -157,6 +159,16 @@ export async function POST(req: NextRequest) {
     const telegramIds = normalizedAdmins
       .map((admin) => admin.telegramId)
       .filter((telegramId): telegramId is string => telegramId !== null)
+    const telegramPackageEnabled = packageDraft.features.some((feature) => (
+      feature.featureCode === 'TELEGRAM' && feature.enabled
+    ))
+    if (telegramIds.length && !telegramPackageEnabled) {
+      return badRequest("Telegram moduli paketda yoqilmagan")
+    }
+    const staffWithTelegram = normalizedAdmins.slice(1).find((admin) => admin.telegramId)
+    if (staffWithTelegram) {
+      return badRequest("Xodim Telegram ID sini xodimning o'zi yangi ulanish orqali biriktirishi kerak")
+    }
     const duplicateTelegramId = telegramIds.find((telegramId, index) => telegramIds.indexOf(telegramId) !== index)
     if (duplicateTelegramId) {
       return conflict(`Telegram ID takrorlangan: ${duplicateTelegramId}`)
@@ -176,7 +188,7 @@ export async function POST(req: NextRequest) {
 
     const shop = await runSerializable(() => prisma.$transaction(async (tx: Prisma.TransactionClient) => {
       for (const telegramId of [...telegramIds].sort()) {
-        await tx.$queryRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtext(${`telegram:${telegramId}`}))`)
+        await tx.$executeRaw(Prisma.sql`SELECT pg_advisory_xact_lock(hashtextextended(${telegramId}, 0))`)
       }
       if (telegramIds.length) {
         const [superAdminOwner, shopAdminOwner] = await Promise.all([
@@ -202,6 +214,8 @@ export async function POST(req: NextRequest) {
         },
       })
 
+      await seedBuiltInStaffRoles(tx, newShop.id)
+
       let ownerAdminId: string | null = null
       for (const [index, admin] of adminsWithPasswordHash.entries()) {
         const member = await tx.shopAdmin.create({
@@ -212,6 +226,7 @@ export async function POST(req: NextRequest) {
             login: admin.login,
             telegramId: admin.telegramId,
             telegramVerifiedAt: null,
+            telegramNotificationsEnabled: index === 0 && Boolean(admin.telegramId),
             passwordHash: admin.passwordHash,
             legacyFullAccess: false,
           },
@@ -232,7 +247,7 @@ export async function POST(req: NextRequest) {
         },
       })
 
-      await tx.shopPackageVersion.create({
+      const initialPackage = await tx.shopPackageVersion.create({
         data: {
           shopId: newShop.id,
           effectiveOn: new Date(`${packageDraft.effectiveOn}T00:00:00.000Z`),
@@ -250,7 +265,16 @@ export async function POST(req: NextRequest) {
             })),
           },
         },
+        select: { id: true, effectiveOn: true },
       })
+
+      if (!telegramPackageEnabled) {
+        await createTelegramDisableTransitionInTransaction(tx, {
+          packageVersionId: initialPackage.id,
+          shopId: newShop.id,
+          effectiveOn: initialPackage.effectiveOn,
+        })
+      }
 
       await tx.log.create({
         data: {
