@@ -16,7 +16,6 @@ import { getShopCurrencyContext } from '@/lib/server/currency'
 import { roundContractMoney, computeSaleContractMargin } from '@/lib/nasiya-contract'
 import { allocateCumulativePaymentComponents, buildSaleComponentPlan, splitUzsReportingAmount } from '@/lib/payment-profit-allocation'
 import { prepareNasiyaContract, createNasiyaContractCore, type PreparedNasiyaContract } from '@/lib/server/nasiya-contract-core'
-import { hasNasiyaPaymentFxQuoteColumns } from '@/lib/server/nasiya-payment-schema'
 import { createSupplierPayableCore } from '@/lib/server/supplier-payable-payments'
 import { getActiveShopPackage, enabledFeatureSet, getLiveShopPrincipalForMutation, principalHasFeature, principalHasPermission } from '@/lib/server/shop-access'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
@@ -248,6 +247,47 @@ export async function POST(req: NextRequest) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
     const commandHash = createHash('sha256').update(JSON.stringify({ shopId, actorId: session.user.id, command: d })).digest('hex')
+    // Nasiya has its own tenant-scoped command namespace. Domain-separating
+    // the Olib key prevents an otherwise-identical standalone Nasiya header
+    // from colliding with this compound operation's child row.
+    const nasiyaCreationIdempotencyKey = `olib:${createHash('sha256').update(idempotencyKey).digest('hex')}`
+    const saleCreationIdempotencyKey = `olib-sale:${createHash('sha256').update(idempotencyKey).digest('hex')}`
+    // Resolve a committed retry before rate-provider, upload-reference, or FX
+    // work. A lost response must never turn into a failed retry merely because
+    // an external dependency changed after the durable commit.
+    const committedReplay = await prisma.olibSotdimOperation.findUnique({
+      where: { shopId_creationIdempotencyKey: { shopId, creationIdempotencyKey: idempotencyKey } },
+      select: {
+        id: true,
+        deviceId: true,
+        saleId: true,
+        nasiyaId: true,
+        dealType: true,
+        createdBy: true,
+        creationCommandHash: true,
+        supplierPayable: { select: { id: true, status: true } },
+      },
+    })
+    if (committedReplay) {
+      if (
+        committedReplay.createdBy !== session.user.id
+        || committedReplay.creationCommandHash !== commandHash
+        || committedReplay.dealType !== d.customerDealType
+        || !committedReplay.supplierPayable
+      ) {
+        return conflict("Idempotency-Key boshqa yoki o'zgartirilgan olib-sotdim uchun ishlatilgan")
+      }
+      return ok({
+        operationId: committedReplay.id,
+        deviceId: committedReplay.deviceId,
+        dealType: committedReplay.dealType,
+        saleId: committedReplay.saleId,
+        nasiyaId: committedReplay.nasiyaId,
+        payableId: committedReplay.supplierPayable.id,
+        payableStatus: committedReplay.supplierPayable.status,
+      }, "Olib-sotdim allaqachon saqlangan")
+    }
+
     const rate = await checkRateLimitDistributed(rateLimitKey('olib-sotdim-create', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
@@ -256,12 +296,12 @@ export async function POST(req: NextRequest) {
     if (d.customerMode === 'NEW' && d.customerPassportIdentifier && !canManagePassport) return forbidden("Pasport ma'lumotlarini qo'shish ruxsati berilmagan")
     if (d.customerMode === 'NEW' && d.customerTrustOverride !== undefined && !canOverrideTrust) return forbidden("Ishonch darajasini o'zgartirish ruxsati berilmagan")
     if (d.supplierPaymentBreakdown) {
-      const breakdownError = validatePaymentBreakdown(d.supplierPaymentBreakdown, d.supplierPaidNow ? d.purchasePrice : (d.supplierInitialPaymentAmount ?? 0), d.purchaseInputCurrency ?? d.inputCurrency ?? 'UZS')
+      const breakdownError = validatePaymentBreakdown(d.supplierPaymentBreakdown, d.supplierPaidNow ? d.purchasePrice : (d.supplierInitialPaymentAmount ?? 0), d.purchaseInputCurrency)
       if (breakdownError) return badRequest(breakdownError)
     }
     if (d.paymentBreakdown && d.customerDealType === 'SALE') {
       const customerPaid = d.paidFully ? d.salePrice! : (d.amountPaid ?? 0)
-      const breakdownError = validatePaymentBreakdown(d.paymentBreakdown, customerPaid, d.customerInputCurrency ?? d.inputCurrency ?? 'UZS')
+      const breakdownError = validatePaymentBreakdown(d.paymentBreakdown, customerPaid, d.customerInputCurrency)
       if (breakdownError) return badRequest(breakdownError)
     }
 
@@ -279,15 +319,20 @@ export async function POST(req: NextRequest) {
     let preparedNasiya: PreparedNasiyaContract | null = null
     const supplierInitialRaw = d.supplierPaidNow ? d.purchasePrice : (d.supplierInitialPaymentAmount ?? 0)
     try {
-      const convertPurchase = await createMoneyInputConverter(d.purchaseInputCurrency ?? d.inputCurrency)
+      const convertPurchase = await createMoneyInputConverter(d.purchaseInputCurrency)
       purchaseInput = convertPurchase(d.purchasePrice)
       if (supplierInitialRaw > 0) supplierInitialInput = convertPurchase(supplierInitialRaw)
       if (d.customerDealType === 'SALE') {
-        const convertCustomer = await createMoneyInputConverter(d.customerInputCurrency ?? d.inputCurrency)
+        const convertCustomer = d.customerInputCurrency === d.purchaseInputCurrency
+          ? convertPurchase
+          : await createMoneyInputConverter(d.customerInputCurrency)
         saleInput = convertCustomer(d.salePrice!)
         const rawPaid = d.paidFully ? d.salePrice! : (d.amountPaid ?? 0)
         if (rawPaid > 0) salePaidInput = convertCustomer(rawPaid)
       } else {
+        const convertCustomer = d.customerInputCurrency === d.purchaseInputCurrency
+          ? convertPurchase
+          : await createMoneyInputConverter(d.customerInputCurrency)
         preparedNasiya = await prepareNasiyaContract({
           totalAmount: d.totalAmount!,
           downPayment: d.downPayment!,
@@ -296,20 +341,30 @@ export async function POST(req: NextRequest) {
           monthlyPayment: d.monthlyPayment,
           useMonthlyPaymentOverride: d.useMonthlyPaymentOverride,
           startDate: d.startDate!,
-          inputCurrency: d.customerInputCurrency ?? d.inputCurrency,
+          inputCurrency: d.customerInputCurrency,
+          convertMoney: convertCustomer,
         })
       }
     } catch (error) {
       return badRequest(error instanceof Error ? error.message : 'Valyuta kursi mavjud emas')
     }
-    if (supplierInitialRaw > 0 && !d.supplierPaymentMethod) return badRequest("Yetkazib beruvchiga to'lov usuli kiritilishi shart")
+    if (supplierInitialRaw > 0 && !d.supplierPaymentMethod && !d.supplierPaymentBreakdown) {
+      return badRequest("Yetkazib beruvchiga to'lov usuli kiritilishi shart")
+    }
+    const supplierPaymentMethod = d.supplierPaymentBreakdown
+      ? representativePaymentMethod(d.supplierPaymentBreakdown)
+      : d.supplierPaymentMethod
     const imei = normalizeImei(d.imei)!
     const secondaryImei = d.secondaryImei ? normalizeImei(d.secondaryImei) : null
     const currency = await getShopCurrencyContext(shopId)
-    const paymentFxQuoteColumnsAvailable = d.customerDealType === 'NASIYA' ? await hasNasiyaPaymentFxQuoteColumns() : false
     const storage = formatDeviceStorage(d)
 
     const run = () => prisma.$transaction(async (tx) => {
+      await tx.$executeRaw(Prisma.sql`
+        SELECT pg_advisory_xact_lock(
+          hashtextextended(${`olib-sotdim-create:${shopId}:${idempotencyKey}`}, 0)
+        )
+      `)
       if (session.user.role === 'SHOP_ADMIN') {
         const live = await getLiveShopPrincipalForMutation(tx, { shopId, actorId: session.user.id })
         if (!live || !principalHasPermission(live, 'OLIB_CREATE') || !principalHasFeature(live, 'OLIB_SOTDIM')) {
@@ -351,6 +406,10 @@ export async function POST(req: NextRequest) {
           storageUnit: d.storageUnit, batteryHealth: d.batteryHealth,
           purchasePrice: purchaseInput.amountUzs, purchaseCurrency: purchaseInput.inputCurrency,
           purchaseInputAmount: d.purchasePrice, purchaseExchangeRateAtCreation: purchaseInput.exchangeRateUsed,
+          purchaseExchangeRateSource: purchaseInput.exchangeRateSource,
+          purchaseExchangeRateEffectiveAt: purchaseInput.exchangeRateEffectiveAt,
+          purchaseExchangeRateFetchedAt: purchaseInput.exchangeRateFetchedAt,
+          evidenceVersion: 2, evidenceStatus: 'CAPTURED',
           purchaseAmountUzsSnapshot: purchaseInput.amountUzs, imei, supplierPhone: d.supplierPhone,
           imageUrls: imageKeys as string[], status: deviceStatus, addedBy: session.user.id,
           note: d.deviceNote, condition: d.conditionCode === 'NEW' ? 'Yangi' : 'B/U',
@@ -400,9 +459,14 @@ export async function POST(req: NextRequest) {
             earlyReminderDays: contractRemaining > 0 && d.customerReminderEnabled && d.customerEarlyReminderEnabled
               ? d.customerEarlyReminderDays
               : null,
-            note: d.note, createdBy: session.user.id, creationIdempotencyKey: idempotencyKey,
+            note: d.note, createdBy: session.user.id,
+            creationIdempotencyKey: saleCreationIdempotencyKey,
             creationCommandHash: commandHash, creationCurrency: contractCurrency,
             creationExchangeRate: saleInput!.exchangeRateUsed, contractCurrency,
+            creationExchangeRateSource: saleInput!.exchangeRateSource,
+            creationExchangeRateEffectiveAt: saleInput!.exchangeRateEffectiveAt,
+            creationExchangeRateFetchedAt: saleInput!.exchangeRateFetchedAt,
+            evidenceVersion: 2, evidenceStatus: 'CAPTURED',
             contractExchangeRateAtCreation: saleInput!.exchangeRateUsed, contractSalePrice,
             contractAmountPaid: contractPaid, contractRemainingAmount: contractRemaining,
             contractCostBasisAmount: componentPlan.principal, contractMarginAmount: componentPlan.margin,
@@ -420,9 +484,14 @@ export async function POST(req: NextRequest) {
               paymentMethod: d.paymentBreakdown ? representativePaymentMethod(d.paymentBreakdown) : d.paymentMethod!,
               paymentBreakdown: d.paymentBreakdown ?? undefined, paidAt: new Date(),
               note: contractRemaining > 0 ? "Boshlang'ich to'lov" : "To'liq to'lov",
-              idempotencyKey: `${idempotencyKey}:customer-initial`, createdBy: session.user.id,
+              idempotencyKey: `sale-initial:${saleRow.id}`, createdBy: session.user.id,
               paymentInputAmount: rawPaid, paymentInputCurrency: salePaidInput!.inputCurrency,
-              paymentExchangeRate: salePaidInput!.exchangeRateUsed, appliedAmountInContractCurrency: contractPaid,
+              paymentExchangeRate: salePaidInput!.exchangeRateUsed,
+              paymentExchangeRateSource: salePaidInput!.exchangeRateSource,
+              paymentExchangeRateEffectiveAt: salePaidInput!.exchangeRateEffectiveAt,
+              paymentExchangeRateFetchedAt: salePaidInput!.exchangeRateFetchedAt,
+              evidenceVersion: 2, evidenceStatus: 'CAPTURED',
+              appliedAmountInContractCurrency: contractPaid,
               contractPrincipalAmount: initialComponents!.allocation.principal, contractMarginAmount: initialComponents!.allocation.margin,
               principalAmountUzs: reporting.principal, marginAmountUzs: reporting.margin,
             },
@@ -439,7 +508,9 @@ export async function POST(req: NextRequest) {
           },
           months: d.months!, startDate: d.startDate!, paymentMethod: d.nasiyaPaymentMethod!,
           earlyReminderEnabled: d.customerEarlyReminderEnabled, earlyReminderDays: d.customerEarlyReminderDays,
-          note: d.note, actorId: session.user.id, paymentFxQuoteColumnsAvailable,
+          note: d.note, actorId: session.user.id,
+          creationIdempotencyKey: nasiyaCreationIdempotencyKey,
+          creationCommandHash: commandHash,
         })
         customer = core.customer
         nasiya = core.nasiya
@@ -461,9 +532,9 @@ export async function POST(req: NextRequest) {
         reminderEnabled: !d.supplierPaidNow && (d.supplierReminderEnabled ?? true),
         earlyReminderEnabled: !d.supplierPaidNow && d.earlyReminderEnabled,
         earlyReminderDays: d.earlyReminderDays,
-        initialPayment: supplierInitialInput && d.supplierPaymentMethod ? {
+        initialPayment: supplierInitialInput && supplierPaymentMethod ? {
           rawAmount: supplierInitialRaw, converted: supplierInitialInput,
-          paymentMethod: d.supplierPaymentMethod, paymentBreakdown: d.supplierPaymentBreakdown,
+          paymentMethod: supplierPaymentMethod, paymentBreakdown: d.supplierPaymentBreakdown,
           paidAt: d.supplierPaidDate ?? new Date(), note: d.supplierPaidNow ? "To'liq to'lov" : "Boshlang'ich to'lov",
         } : undefined,
         actorId: session.user.id, commandHash, idempotencyScope: idempotencyKey,

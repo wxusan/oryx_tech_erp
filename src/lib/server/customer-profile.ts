@@ -298,6 +298,7 @@ interface HistoryRow {
   title: string | null
   subtitle: string | null
   currency: 'UZS' | 'USD' | null
+  contract_currency?: 'UZS' | 'USD' | null
   amount: unknown
   status: string | null
   retained_amount?: unknown
@@ -389,6 +390,7 @@ function historySql(section: CustomerProfileSection, input: { shopId: string; cu
                CASE WHEN r."refundInputAmount" IS NOT NULL THEN r."refundInputAmount"
                     WHEN r."contractCurrency" = 'USD' THEN r."contractRefundAmount"
                     WHEN r."contractRefundAmount" > 0 THEN r."contractRefundAmount" ELSE r."refundAmount" END AS amount,
+               r."contractCurrency" AS contract_currency,
                'RETURNED'::text AS status,
                r."contractRetainedAmount" AS retained_amount,
                r."contractCancelledDebt" AS cancelled_debt
@@ -464,6 +466,7 @@ export async function getCustomerProfileHistory(input: {
       title: row.title,
       subtitle: row.subtitle,
       currency: row.currency,
+      contractCurrency: row.contract_currency ?? null,
       amount: row.amount == null ? null : Number(row.amount),
       status: row.status,
       retainedAmount: row.retained_amount == null ? null : Number(row.retained_amount),

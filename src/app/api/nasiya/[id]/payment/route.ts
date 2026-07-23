@@ -33,16 +33,14 @@ import {
 } from '@/lib/payment-profit-allocation'
 import { convertMoneyDto, createFxQuoteDto, createMoneyDto, moneyDtoToAmount, type CurrencyCode } from '@/lib/currency'
 import { moneyDtoDatabaseAmount, reconcileNasiyaLedger } from '@/lib/nasiya-ledger'
-import {
-  hasNasiyaPaymentFxQuoteColumns,
-  nasiyaPaymentFxSourceForPersistence,
-} from '@/lib/server/nasiya-payment-schema'
+import { nasiyaPaymentFxSourceForPersistence } from '@/lib/server/nasiya-payment-schema'
 import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 
 type RouteContext = { params: Promise<{ id: string }> }
 
 type ExistingPaymentForReplay = {
   nasiyaId: string
+  createdBy: string
   nasiyaScheduleId: string | null
   amount: unknown
   paymentMethod: string | null
@@ -68,6 +66,7 @@ function matchesExistingPaymentPayload(
   existing: ExistingPaymentForReplay,
   submitted: {
     nasiyaId: string
+    actorId: string
     nasiyaScheduleId: string
     amount: number
     inputCurrency: 'UZS' | 'USD'
@@ -78,6 +77,7 @@ function matchesExistingPaymentPayload(
   },
 ): boolean {
   if (existing.nasiyaId !== submitted.nasiyaId) return false
+  if (existing.createdBy !== submitted.actorId) return false
   if (existing.nasiyaScheduleId !== null && existing.nasiyaScheduleId !== submitted.nasiyaScheduleId) return false
 
   const storedCurrency = existing.paymentInputCurrency ?? 'UZS'
@@ -117,15 +117,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     const { nasiyaScheduleId, amount, paymentMethod, paymentBreakdown, date, note } = parsed.data
     const idempotencyKey = req.headers.get('idempotency-key')?.trim()
-    if (!idempotencyKey) {
-      return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
     }
 
     // Item 12 — split payment (e.g. half cash, half card). Parts must sum
     // to the payment amount; the existing paymentMethod field stays
     // populated with a representative value so no existing reader breaks.
     if (paymentBreakdown) {
-      const breakdownError = validatePaymentBreakdown(paymentBreakdown, amount, parsed.data.inputCurrency ?? 'UZS')
+      const breakdownError = validatePaymentBreakdown(paymentBreakdown, amount, parsed.data.inputCurrency)
       if (breakdownError) return badRequest(breakdownError)
     }
     const effectivePaymentMethod = paymentBreakdown ? representativePaymentMethod(paymentBreakdown) : paymentMethod
@@ -134,8 +134,82 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
-    // Distributed when Upstash is configured; bounded in-process fallback otherwise.
     measuredShopId = shopId
+    const auditNote = note?.trim() || undefined
+    const inputCurrency = parsed.data.inputCurrency as CurrencyCode
+    const committedReplay = await prisma.nasiyaPayment.findUnique({
+      where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+      select: {
+        nasiyaId: true,
+        createdBy: true,
+        nasiyaScheduleId: true,
+        amount: true,
+        paymentMethod: true,
+        paymentBreakdown: true,
+        paidAt: true,
+        note: true,
+        paymentInputAmount: true,
+        paymentInputCurrency: true,
+        appliedAmountInContractCurrency: true,
+        paymentExchangeRate: true,
+      },
+    })
+    if (committedReplay) {
+      if (!matchesExistingPaymentPayload(committedReplay, {
+        nasiyaId,
+        actorId: session.user.id,
+        nasiyaScheduleId,
+        amount,
+        inputCurrency,
+        paymentMethod: effectivePaymentMethod,
+        paymentBreakdown,
+        paidAt: date,
+        note: auditNote,
+      })) {
+        return conflict("Idempotency-Key boshqa yoki o'zgartirilgan nasiya to'lovi uchun ishlatilgan")
+      }
+      const current = await prisma.nasiya.findFirst({
+        where: { id: nasiyaId, shopId },
+        select: {
+          contractCurrency: true,
+          contractPaidAmount: true,
+          contractRemainingAmount: true,
+          status: true,
+        },
+      })
+      if (!current) return notFound('Nasiya topilmadi')
+      return ok({
+        nasiyaId,
+        nasiyaScheduleId: committedReplay.nasiyaScheduleId ?? nasiyaScheduleId,
+        receipt: {
+          input: createMoneyDto(
+            committedReplay.paymentInputCurrency ?? 'UZS',
+            String(committedReplay.paymentInputAmount ?? committedReplay.amount),
+          ),
+          recordedUzs: createMoneyDto('UZS', String(committedReplay.amount)),
+          applied: committedReplay.appliedAmountInContractCurrency == null
+            ? null
+            : createMoneyDto(current.contractCurrency, String(committedReplay.appliedAmountInContractCurrency)),
+          paymentFxQuote: committedReplay.paymentExchangeRate == null
+            ? null
+            : createFxQuoteDto({
+                rate: String(committedReplay.paymentExchangeRate),
+                source: 'RECORDED_FROZEN',
+                freshness: 'FROZEN',
+              }),
+        },
+        ledger: {
+          paid: createMoneyDto(current.contractCurrency, String(current.contractPaidAmount)),
+          remaining: createMoneyDto(current.contractCurrency, String(current.contractRemainingAmount)),
+          status: current.status,
+        },
+        duplicate: true,
+      }, "To'lov allaqachon qabul qilingan")
+    }
+
+    // Distributed when Upstash is configured; bounded in-process fallback
+    // otherwise. A committed retry above is not a new mutation and must remain
+    // recoverable even if the limiter is temporarily unavailable or exhausted.
     const rateLimitStartedAt = performance.now()
     const rate = await checkRateLimitDistributed(rateLimitKey('nasiya-payment', shopId, session.user.id), { windowMs: 60_000, max: 20 })
     timings.rateLimiter = performance.now() - rateLimitStartedAt
@@ -145,9 +219,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     // do them concurrently instead of extending the login-to-payment path
     // with a needless three-query waterfall.
     const initialReadsStartedAt = performance.now()
-    const [currency, paymentFxQuoteColumnsAvailable, contractLookup] = await Promise.all([
+    const [currency, contractLookup] = await Promise.all([
       getShopCurrencyContext(shopId),
-      hasNasiyaPaymentFxQuoteColumns(),
       prisma.nasiya.findFirst({
         where: { id: nasiyaId, shopId, resolutionState: 'ACTIVE' },
         select: { contractCurrency: true, contractExchangeRateAtCreation: true },
@@ -156,8 +229,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     timings.initialDatabaseReads = performance.now() - initialReadsStartedAt
     // A regular payment note is optional. Store blank input as NULL, never as
     // a fabricated placeholder or an empty string.
-    const auditNote = note?.trim() || undefined
-    const inputCurrency = (parsed.data.inputCurrency ?? 'UZS') as CurrencyCode
     let inputMoney
     try {
       inputMoney = createMoneyDto(inputCurrency, amount)
@@ -189,9 +260,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       try {
         paymentTimeSnapshot = await getUsdUzsRateSnapshot()
       } catch {
-        if (!paymentFxQuoteColumnsAvailable) {
-          return badRequest("USDdan USDga to'lov kurs talab qilmaydi, lekin bu ma'lumotlar bazasiga avval nasiya ledger yangilanishini qo'llash kerak")
-        }
         paymentTimeSnapshot = null
       }
     }
@@ -299,8 +367,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
               // stage-1 quote columns on an older local database. This replay
               // shape intentionally includes only columns that predate the
               // staged migration.
-              select: {
-                nasiyaId: true,
+               select: {
+                 nasiyaId: true,
+                 createdBy: true,
                 nasiyaScheduleId: true,
                 amount: true,
                 paymentMethod: true,
@@ -315,8 +384,9 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             })
             if (existingPayment) {
               if (
-                !matchesExistingPaymentPayload(existingPayment, {
-                  nasiyaId,
+                 !matchesExistingPaymentPayload(existingPayment, {
+                   nasiyaId,
+                   actorId: session.user.id,
                   nasiyaScheduleId,
                   amount,
                   inputCurrency: amountInput.inputCurrency,
@@ -546,15 +616,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
                 paymentInputCurrency: amountInput.inputCurrency,
                 appliedAmountInContractCurrency,
                 paymentExchangeRate: paymentTimeRate,
-                ...(paymentFxQuoteColumnsAvailable ? {
-                  paymentExchangeRateSource: paymentTimeRateSource ?? (
-                    inputCurrency === 'USD' && contractCurrency === 'USD'
-                      ? 'UNAVAILABLE_SAME_CURRENCY'
-                      : null
-                  ),
-                  paymentExchangeRateEffectiveAt: paymentTimeSnapshot?.effectiveAt ?? null,
-                  paymentExchangeRateFetchedAt: paymentTimeSnapshot?.fetchedAt ?? null,
-                } : {}),
+                paymentExchangeRateSource: paymentTimeRateSource ?? (
+                  inputCurrency === 'USD' && contractCurrency === 'USD'
+                    ? 'UNAVAILABLE_SAME_CURRENCY'
+                    : null
+                ),
+                paymentExchangeRateEffectiveAt: paymentTimeSnapshot?.effectiveAt ?? null,
+                paymentExchangeRateFetchedAt: paymentTimeSnapshot?.fetchedAt ?? null,
+                evidenceVersion: 2,
+                evidenceStatus: 'CAPTURED',
               },
             })
             if (profitAllocations.length > 0) {

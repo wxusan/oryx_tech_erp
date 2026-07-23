@@ -318,7 +318,7 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
         // contractScheduleOutstanding above.
         const toUzs = (amount: unknown) =>
           payment.nasiya.contractCurrency === 'USD'
-            ? convertContractAmountToUzs(Number(amount), 'USD', usdUzsRate) ?? 0
+            ? convertContractAmountToUzs(Number(amount), 'USD', usdUzsRate)
             : Number(amount)
         return {
           ...payment,
@@ -330,6 +330,7 @@ export function computeShopStatsFromRows(rows: ShopStatsRows) {
           contractRemainingAmount: scheduleOutstandingNative(payment),
           expectedAmount: toUzs(payment.contractExpectedAmount),
           paidAmount: toUzs(payment.contractPaidAmount),
+          reportingUzsAvailable: payment.nasiya.contractCurrency === 'UZS' || Boolean(usdUzsRate),
         }
       }),
   }

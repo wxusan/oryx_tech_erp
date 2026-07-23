@@ -30,18 +30,46 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
 
     const idempotencyKey = req.headers.get('idempotency-key')?.trim()
-    if (!idempotencyKey) return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
+    }
 
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+    const { nasiyaScheduleId, newDueDate, reason } = parsed.data
+
+    // Lost-success retries are reads, not new mutations. Resolve them before
+    // the distributed limiter and before consulting any mutable ledger state.
+    const committedReplay = await prisma.nasiyaDeferral.findUnique({
+      where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+    })
+    if (committedReplay) {
+      if (
+        committedReplay.nasiyaId !== nasiyaId
+        || committedReplay.nasiyaScheduleId !== nasiyaScheduleId
+        || !sameInstant(committedReplay.newDueDate, newDueDate)
+        || !sameOptionalText(committedReplay.note, reason)
+        || committedReplay.createdBy !== session.user.id
+      ) {
+        return conflict("Idempotency-Key boshqa yoki o'zgartirilgan kechiktirish amali uchun ishlatilgan")
+      }
+      return ok({
+        id: committedReplay.id,
+        nasiyaId,
+        nasiyaScheduleId,
+        originalDueDate: committedReplay.originalDueDate,
+        newDueDate: committedReplay.newDueDate,
+        duplicate: true,
+      }, 'Kechiktirish avval yozilgan')
+    }
+
     const rate = await checkRateLimitDistributed(
       rateLimitKey('nasiya-defer', shopId, session.user.id),
       { windowMs: 60_000, max: 20 },
     )
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
-    const { nasiyaScheduleId, newDueDate, reason } = parsed.data
     const run = () => prisma.$transaction(async (tx) => {
       const existing = await tx.nasiyaDeferral.findUnique({
         where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
@@ -52,6 +80,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           || existing.nasiyaScheduleId !== nasiyaScheduleId
           || !sameInstant(existing.newDueDate, newDueDate)
           || !sameOptionalText(existing.note, reason)
+          || existing.createdBy !== session.user.id
         ) {
           throw {
             status: 409,

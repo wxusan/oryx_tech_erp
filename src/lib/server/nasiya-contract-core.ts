@@ -2,7 +2,11 @@ import 'server-only'
 
 import type { Prisma } from '@/generated/prisma/client'
 import { calculateNasiyaAmounts, calculateNasiyaAmountsFromMonthlyPayment, generatePaymentSchedule } from '@/lib/nasiya-utils'
-import { createMoneyInputConverter, type MoneyInputResult } from '@/lib/server/money-input'
+import {
+  createMoneyInputConverter,
+  type MoneyInputConverter,
+  type MoneyInputResult,
+} from '@/lib/server/money-input'
 import { computeSaleContractMargin } from '@/lib/nasiya-contract'
 import { buildNasiyaComponentPlan, splitUzsReportingAmount } from '@/lib/payment-profit-allocation'
 import { resolveCustomerSelection } from '@/lib/server/customer-selection'
@@ -35,9 +39,11 @@ export async function prepareNasiyaContract(input: {
   monthlyPayment?: number
   useMonthlyPaymentOverride?: boolean
   startDate: Date
-  inputCurrency?: 'UZS' | 'USD'
+  inputCurrency: 'UZS' | 'USD'
+  /** Reuse an operation-scoped quote when a compound command already has one. */
+  convertMoney?: MoneyInputConverter
 }): Promise<PreparedNasiyaContract> {
-  const convertMoney = await createMoneyInputConverter(input.inputCurrency)
+  const convertMoney = input.convertMoney ?? await createMoneyInputConverter(input.inputCurrency)
   const totalInput = convertMoney(input.totalAmount)
   const downPaymentInput = convertMoney(input.downPayment)
   const monthlyPaymentUzs = input.useMonthlyPaymentOverride && input.monthlyPayment !== undefined
@@ -134,7 +140,8 @@ export async function createNasiyaContractCore(input: {
   earlyReminderDays?: number
   note?: string
   actorId: string
-  paymentFxQuoteColumnsAvailable: boolean
+  creationIdempotencyKey: string
+  creationCommandHash: string
 }) {
   const {
     tx, shopId, device, prepared, months, startDate, paymentMethod,
@@ -203,8 +210,15 @@ export async function createNasiyaContractCore(input: {
       earlyReminderDays: earlyReminderEnabled ? earlyReminderDays : null,
       note,
       createdBy: actorId,
+      creationIdempotencyKey: input.creationIdempotencyKey,
+      creationCommandHash: input.creationCommandHash,
       creationCurrency: prepared.totalInput.inputCurrency,
       creationExchangeRate: prepared.totalInput.exchangeRateUsed,
+      creationExchangeRateSource: prepared.totalInput.exchangeRateSource,
+      creationExchangeRateEffectiveAt: prepared.totalInput.exchangeRateEffectiveAt,
+      creationExchangeRateFetchedAt: prepared.totalInput.exchangeRateFetchedAt,
+      evidenceVersion: 2,
+      evidenceStatus: 'CAPTURED',
       contractCurrency: prepared.totalInput.inputCurrency,
       contractExchangeRateAtCreation: prepared.totalInput.exchangeRateUsed,
       contractTotalAmount: prepared.contractAmounts.totalAmount,
@@ -251,14 +265,17 @@ export async function createNasiyaContractCore(input: {
         paidAt: new Date(),
         note: "Boshlang'ich to'lov",
         createdBy: actorId,
+        idempotencyKey: `nasiya-initial:${nasiya.id}`,
         paymentInputAmount: prepared.raw.downPayment,
         paymentInputCurrency: prepared.downPaymentInput.inputCurrency,
         paymentExchangeRate: prepared.downPaymentInput.exchangeRateUsed,
-        ...(input.paymentFxQuoteColumnsAvailable ? {
-          paymentExchangeRateSource: nasiyaPaymentFxSourceForPersistence(prepared.downPaymentInput.exchangeRateSource),
-          paymentExchangeRateEffectiveAt: prepared.downPaymentInput.exchangeRateEffectiveAt,
-          paymentExchangeRateFetchedAt: prepared.downPaymentInput.exchangeRateFetchedAt,
-        } : {}),
+        paymentExchangeRateSource: nasiyaPaymentFxSourceForPersistence(
+          prepared.downPaymentInput.exchangeRateSource,
+        ),
+        paymentExchangeRateEffectiveAt: prepared.downPaymentInput.exchangeRateEffectiveAt,
+        paymentExchangeRateFetchedAt: prepared.downPaymentInput.exchangeRateFetchedAt,
+        evidenceVersion: 2,
+        evidenceStatus: 'CAPTURED',
         appliedAmountInContractCurrency: prepared.contractAmounts.downPayment,
       },
     })

@@ -82,4 +82,22 @@ describe('reminder generation pagination', () => {
       'prime:1', 'row-002', 'flush', 'checkpoint',
     ])
   })
+
+  it('does not checkpoint a page when a row fails before the page is fully handled', async () => {
+    const checkpoints: string[] = []
+    const failure = new Error('USD kursi mavjud emas')
+
+    await expect(processReminderPages({
+      initialCursor: null,
+      fetchPage: fetchFrom(rows.slice(0, 3)),
+      processRow: async (row) => {
+        if (row.id === 'row-001') throw failure
+      },
+      checkpoint: async (cursor) => { checkpoints.push(cursor) },
+      hasTime: () => true,
+      pageSize: 3,
+    })).rejects.toBe(failure)
+
+    expect(checkpoints).toEqual([])
+  })
 })

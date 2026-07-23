@@ -36,10 +36,10 @@ describe('nasiya detail page: no double-conversion drift for USD contracts', () 
       "Oylik to'lov",
       'mfmt(contractTerms.original)',
       'mfmt(contractTerms.downPayment)',
-      'mfmt(ledger.financed)',
-      'mfmt(ledger.paid)',
-      'mfmt(ledger.remaining)',
-      'mfmt(contractMonthlyPayment)',
+      'ledgerFmt(ledger.financed)',
+      'ledgerFmt(ledger.paid)',
+      'ledgerFmt(currentCustomerDebt)',
+      'ledgerFmt(contractMonthlyPayment)',
     ]) {
       expect(page).toContain(text)
     }

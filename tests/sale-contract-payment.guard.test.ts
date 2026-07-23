@@ -32,10 +32,15 @@ describe('P0-02 sale payment route guard: contract currency is authoritative', (
 
   it('preserves input history and applied native amount on SalePayment', () => {
     const createStart = route.indexOf('const payment = await tx.salePayment.create')
-    const createBlock = route.slice(createStart, createStart + 900)
+    const createBlock = route.slice(createStart, createStart + 1400)
     expect(createBlock).toContain('paymentInputAmount: parsed.data.amount')
     expect(createBlock).toContain('paymentInputCurrency: amountInput.inputCurrency')
     expect(createBlock).toContain('paymentExchangeRate: contractRate')
+    expect(createBlock).toContain('paymentExchangeRateSource: contractRateSource')
+    expect(createBlock).toContain('paymentExchangeRateEffectiveAt: contractRateEffectiveAt')
+    expect(createBlock).toContain('paymentExchangeRateFetchedAt: contractRateFetchedAt')
+    expect(createBlock).toContain('evidenceVersion: 2')
+    expect(createBlock).toContain("evidenceStatus: 'CAPTURED'")
     expect(createBlock).toContain('appliedAmountInContractCurrency: contractPayment.appliedAmountInContractCurrency')
   })
 

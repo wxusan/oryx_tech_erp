@@ -11,6 +11,8 @@ export interface NasiyaOperationSchedule {
   dueDate: string
   delayedUntil: string | null
   status: 'PENDING' | 'PARTIAL' | 'PAID' | 'SETTLED' | 'OVERDUE' | 'DEFERRED' | 'CANCELLED'
+  /** False means the zero-shaped safety DTO is not financial evidence. */
+  moneyAvailable?: boolean
   expected: MoneyDto
   paid: MoneyDto
   waived?: MoneyDto

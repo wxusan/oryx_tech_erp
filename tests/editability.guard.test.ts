@@ -33,8 +33,11 @@ describe('device edit safety guard', () => {
     expect(src).toContain("session.user.role === 'SHOP_ADMIN' ? { shopId: session.user.shopId ?? '' } : {}")
   })
 
-  it('locks the purchase price once a device is financially linked', () => {
-    expect(src).toContain('isFinanciallyLinked && updateData.purchasePrice !== undefined')
+  it('locks all acquisition facts once a device has any financial evidence', () => {
+    expect(src).toContain('isFinanciallyLinked && purchaseFactsChanged')
+    expect(src).toContain('updateData.purchasePrice !== undefined || inputCurrency !== undefined || supplierSourceChanged')
+    expect(src).toContain('existing.supplierPayables.length > 0')
+    expect(src).toContain('existing.purchaseReceipt !== null')
   })
 
   it('rechecks financial state atomically before writing purchase data', () => {
@@ -42,8 +45,10 @@ describe('device edit safety guard', () => {
     const guardedUpdateBlock = src.slice(guardedUpdateStart, guardedUpdateStart + 1200)
     expect(guardedUpdateStart).toBeGreaterThan(-1)
     expect(guardedUpdateBlock).toContain("status: 'IN_STOCK' as const")
-    expect(guardedUpdateBlock).toContain('sales: { none: { deletedAt: null } }')
-    expect(guardedUpdateBlock).toContain('nasiya: { none: { deletedAt: null } }')
+    expect(guardedUpdateBlock).toContain('sales: { none: {} }')
+    expect(guardedUpdateBlock).toContain('nasiya: { none: {} }')
+    expect(guardedUpdateBlock).toContain('supplierPayables: { none: {} }')
+    expect(guardedUpdateBlock).toContain('purchaseReceipt: { is: null }')
     expect(guardedUpdateBlock).toContain('if (guardedUpdate.count !== 1)')
   })
 

@@ -6,7 +6,11 @@ import { validatePaymentBreakdown } from '@/lib/payment-breakdown'
 import { checkRateLimitDistributed } from '@/lib/rate-limit-adapter'
 import { rateLimitKey } from '@/lib/rate-limit'
 import { getShopCurrencyContext } from '@/lib/server/currency'
-import { recordSupplierPayablePayment, SupplierPayablePaymentError } from '@/lib/server/supplier-payable-payments'
+import {
+  recordSupplierPayablePayment,
+  replayCommittedSupplierPayablePayment,
+  SupplierPayablePaymentError,
+} from '@/lib/server/supplier-payable-payments'
 import { invalidateShopSupplierPayableMutation } from '@/lib/server/cache-tags'
 import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { logger } from '@/lib/logger'
@@ -26,18 +30,31 @@ export async function POST(req: NextRequest, context: RouteContext) {
       return badRequest((parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot")
     }
     const idempotencyKey = req.headers.get('idempotency-key')?.trim() || parsed.data.idempotencyKey?.trim()
-    if (!idempotencyKey) return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
+    }
     if (parsed.data.paymentBreakdown) {
       const breakdownError = validatePaymentBreakdown(
         parsed.data.paymentBreakdown,
         parsed.data.amount,
-        parsed.data.inputCurrency ?? 'UZS',
+        parsed.data.inputCurrency,
       )
       if (breakdownError) return badRequest(breakdownError)
     }
 
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
+    const committedReplay = await replayCommittedSupplierPayablePayment({
+      shopId: resolved.shopId,
+      supplierPayableId: id,
+      actorId: session.user.id,
+      idempotencyKey,
+      input: parsed.data,
+    })
+    if (committedReplay) {
+      return ok(committedReplay, "To'lov avval qayd etilgan")
+    }
+
     const rate = await checkRateLimitDistributed(
       rateLimitKey('supplier-payable-payment', resolved.shopId, session.user.id),
       { windowMs: 60_000, max: 20 },
@@ -53,6 +70,7 @@ export async function POST(req: NextRequest, context: RouteContext) {
       input: parsed.data,
       idempotencyKey,
       currency: await getShopCurrencyContext(resolved.shopId),
+      committedReplayChecked: true,
     })
     if (!result.duplicate) invalidateShopSupplierPayableMutation(resolved.shopId)
     after(() => flushQueuedTelegramWork().catch((error) => {

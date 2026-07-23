@@ -251,18 +251,32 @@ export function deviceReturnedMessage(data: {
   shopName: string
   device: DeviceSpecs
   refundAmount: number
+  refundInput?: { amount: number; currency: CurrencyCode } | null
+  refundExchangeRate?: number | null
+  refundExchangeRateSource?: string | null
   refundMethod?: string | null
   note: string
   adminName?: string | null
   currency?: CurrencyContext | null
 }): string {
-  const showMethod = data.refundAmount > 0 || Boolean(formatPaymentMethod(data.refundMethod))
+  const exactRefund = data.refundInput
+    ? telegramTypography(formatUserFacingMoney({
+        amount: data.refundInput.amount,
+        amountCurrency: data.refundInput.currency,
+        displayCurrency: data.refundInput.currency,
+      }))
+    : telegramMoney(data.refundAmount, data.currency)
+  const showMethod = (data.refundInput?.amount ?? data.refundAmount) > 0 || Boolean(formatPaymentMethod(data.refundMethod))
+  const frozenRateLine = data.refundExchangeRate
+    ? `📐 Muzlatilgan USD/UZS kursi: 1 USD = ${formatMoney(data.refundExchangeRate)}${data.refundExchangeRateSource ? ` (${escapeTelegramHtml(data.refundExchangeRateSource)})` : ''}`
+    : null
   return compose(
     '<b>↩️ Qurilma qaytarildi</b>',
     optionalLine('Do‘kon', data.shopName, '🏪'),
     formatDeviceSpecs(data.device),
     block(
-      `💵 Qaytarilgan summa: ${telegramMoney(data.refundAmount, data.currency)}`,
+      `💵 Qaytarilgan summa: ${exactRefund}`,
+      frozenRateLine,
       showMethod ? optionalLine('Qaytarish usuli', formatPaymentMethod(data.refundMethod), '💳') : null,
     ),
     block(optionalLine('Izoh', cleanNote(data.note), '📝'), optionalLine('Admin', data.adminName, '👨‍💼')),
@@ -341,6 +355,9 @@ export function nasiyaReturnedMessage(data: {
   device: DeviceSpecs
   receipts: number
   refund: number
+  refundInput?: { amount: number; currency: CurrencyCode } | null
+  refundExchangeRate?: number | null
+  refundExchangeRateSource?: string | null
   retained: number
   cancelledDebt: number
   contractCurrency: CurrencyCode
@@ -349,7 +366,21 @@ export function nasiyaReturnedMessage(data: {
   adminName?: string | null
   currency?: CurrencyContext | null
 }): string {
-  const money = (amount: number) => contractMoney(amount, data.contractCurrency, data.currency)
+  const money = (amount: number) => telegramTypography(formatUserFacingMoney({
+    amount,
+    amountCurrency: data.contractCurrency,
+    displayCurrency: data.contractCurrency,
+  }))
+  const exactRefund = data.refundInput
+    ? telegramTypography(formatUserFacingMoney({
+        amount: data.refundInput.amount,
+        amountCurrency: data.refundInput.currency,
+        displayCurrency: data.refundInput.currency,
+      }))
+    : money(data.refund)
+  const frozenRateLine = data.refundExchangeRate
+    ? `📐 Muzlatilgan USD/UZS kursi: 1 USD = ${formatMoney(data.refundExchangeRate)}${data.refundExchangeRateSource ? ` (${escapeTelegramHtml(data.refundExchangeRateSource)})` : ''}`
+    : null
   return compose(
     '<b>↩️ Nasiya qaytarildi</b>',
     optionalLine('Do‘kon', data.shopName, '🏪'),
@@ -357,10 +388,11 @@ export function nasiyaReturnedMessage(data: {
     formatDeviceSpecs(data.device),
     block(
       `💰 Jami olingan: ${money(data.receipts)}`,
-      `💵 Mijozga qaytarildi: ${money(data.refund)}`,
+      `💵 Mijozga qaytarildi: ${exactRefund}`,
+      frozenRateLine,
       `🏪 Do‘konda qoldi: ${money(data.retained)}`,
       `🧾 Bekor qilingan qarz: ${money(data.cancelledDebt)}`,
-      data.refund > 0 ? optionalLine('Qaytarish usuli', formatPaymentMethod(data.refundMethod), '💳') : null,
+      (data.refundInput?.amount ?? data.refund) > 0 ? optionalLine('Qaytarish usuli', formatPaymentMethod(data.refundMethod), '💳') : null,
     ),
     block(optionalLine('Sabab', cleanNote(data.reason), '📝'), optionalLine('Admin', data.adminName, '👨‍💼')),
   )

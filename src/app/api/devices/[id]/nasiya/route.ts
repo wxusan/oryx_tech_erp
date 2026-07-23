@@ -6,12 +6,13 @@
  * notifications, and logs the action.
  */
 
+import { createHash } from 'node:crypto'
 import { NextRequest, after } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { Prisma } from '@/generated/prisma/client'
 import { requireShopPermission, resolveActiveShopId } from '@/lib/api-auth'
 import { createNasiyaSchema } from '@/lib/validations'
-import { created, badRequest, forbidden, notFound, conflict, serverError, tooManyRequests } from '@/lib/api-helpers'
+import { created, badRequest, forbidden, notFound, conflict, ok, serverError, tooManyRequests } from '@/lib/api-helpers'
 import { flushQueuedTelegramWork } from '@/lib/notification-service'
 import { nasiyaCreatedMessage } from '@/lib/telegram-templates'
 import { logger } from '@/lib/logger'
@@ -26,7 +27,6 @@ import { getShopCurrencyContext } from '@/lib/server/currency'
 import type { ZodError } from 'zod'
 import { presentDeviceSpecs } from '@/lib/device-specs'
 import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
-import { hasNasiyaPaymentFxQuoteColumns } from '@/lib/server/nasiya-payment-schema'
 import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
 import { createNasiyaContractCore, prepareNasiyaContract } from '@/lib/server/nasiya-contract-core'
 
@@ -39,12 +39,19 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const { session } = guarded
 
     const { id: deviceId } = await ctx.params
+    const idempotencyKey = req.headers.get('idempotency-key')?.trim()
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
+    }
     const body: unknown = await req.json()
     const parsed = createNasiyaSchema.safeParse(body)
 
     if (!parsed.success) {
       const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
       return badRequest(firstError)
+    }
+    if (parsed.data.deviceId !== deviceId) {
+      return badRequest("Qurilma ID manzil bilan mos emas")
     }
 
     const {
@@ -60,6 +67,46 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     const resolved = await resolveActiveShopId(session, (body as { shopId?: string }).shopId)
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
+
+    // Hash only the canonical, validated command. Dates are serialized
+    // explicitly, Zod defaults are already applied, and unrecognised request
+    // fields were stripped. This identity is independent of later FX quotes
+    // and private-upload expiry.
+    const commandHash = createHash('sha256').update(JSON.stringify({
+      version: 2,
+      scope: 'standalone-nasiya',
+      shopId,
+      actorId: session.user.id,
+      deviceId,
+      command: {
+        ...parsed.data,
+        startDate: parsed.data.startDate.toISOString(),
+      },
+    })).digest('hex')
+    const replayMatches = (replay: {
+      deviceId: string
+      createdBy: string
+      creationCommandHash: string | null
+    }) => (
+      replay.deviceId === deviceId
+      && replay.createdBy === session.user.id
+      && replay.creationCommandHash === commandHash
+    )
+    // A lost successful response must remain replayable even if the rate
+    // provider is down or the submitted private-upload reference has expired.
+    const committedReplay = await prisma.nasiya.findUnique({
+      where: { shopId_creationIdempotencyKey: { shopId, creationIdempotencyKey: idempotencyKey } },
+      select: { id: true, deviceId: true, createdBy: true, creationCommandHash: true },
+    })
+    if (committedReplay) {
+      if (!replayMatches(committedReplay)) {
+        return conflict("Idempotency-Key boshqa yoki o'zgartirilgan nasiya uchun ishlatilgan")
+      }
+      // Repair cache visibility if the original process committed but exited
+      // before it could publish its normal invalidation.
+      invalidateShopNasiyaMutation(shopId)
+      return ok({ id: committedReplay.id }, "Nasiya allaqachon saqlangan")
+    }
 
     const canManagePassport = session.user.role === 'SUPER_ADMIN' ||
       Boolean(guarded.principal && principalHasPermission(guarded.principal, 'CUSTOMER_PASSPORT_MANAGE'))
@@ -77,11 +124,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!rate.allowed) return tooManyRequests(rate.retryAfterSeconds)
 
     const currency = await getShopCurrencyContext(shopId)
-    // The quote provenance columns are an additive migration stage. Keep
-    // local development readable before that migration exists; the base
-    // receipt values remain valid and the detailed quote is written as soon
-    // as the stage is applied.
-    const paymentFxQuoteColumnsAvailable = await hasNasiyaPaymentFxQuoteColumns()
     const passportPhotoKey = passportPhotoUrl
       ? resolvePrivateUploadReference({
           value: passportPhotoUrl,
@@ -110,6 +152,25 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     }
 
     const result = await prisma.$transaction(async (tx: Prisma.TransactionClient) => {
+      // The durable command lock is acquired before reserving the device.
+      // Concurrent retries with the same key therefore re-check the committed
+      // Nasiya row instead of losing to the device status transition.
+      await tx.$executeRaw(Prisma.sql`
+        SELECT pg_advisory_xact_lock(
+          hashtextextended(${`nasiya-create:${shopId}:${idempotencyKey}`}, 0)
+        )
+      `)
+      const replay = await tx.nasiya.findUnique({
+        where: { shopId_creationIdempotencyKey: { shopId, creationIdempotencyKey: idempotencyKey } },
+        select: { id: true, deviceId: true, createdBy: true, creationCommandHash: true },
+      })
+      if (replay) {
+        if (!replayMatches(replay)) {
+          throw { status: 409, message: "Idempotency-Key boshqa yoki o'zgartirilgan nasiya uchun ishlatilgan" }
+        }
+        return { id: replay.id, duplicate: true as const }
+      }
+
       const device = await tx.device.findFirst({
         where: { id: deviceId, shopId, deletedAt: null },
         include: { shop: { select: { name: true } }, imeis: { where: { deletedAt: null } } },
@@ -142,7 +203,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         earlyReminderDays,
         note,
         actorId: session.user.id,
-        paymentFxQuoteColumnsAvailable,
+        creationIdempotencyKey: idempotencyKey,
+        creationCommandHash: commandHash,
       })
 
       const recipients = await resolveTelegramRecipients(tx, {
@@ -211,16 +273,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       // This mutation's caller only needs the identifier to navigate to the
       // detail endpoint. Keeping its response identifier-only guarantees no
       // Prisma Decimal values bypass the MoneyDto boundary into React.
-      return { id: nasiya.id }
+      return { id: nasiya.id, duplicate: false as const }
     })
 
     invalidateShopNasiyaMutation(shopId)
 
     // Flush freshly-queued notifications after the response (non-blocking).
     // The rows are already committed, so cron is the backstop if this misses.
-    after(() => flushQueuedTelegramWork().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
+    if (!result.duplicate) {
+      after(() => flushQueuedTelegramWork().catch((e) => logger.warn('notification flush failed', { event: 'notification.flush_failed', error: e })))
+    }
 
-    return created(result, "Nasiya muvaffaqiyatli yaratildi")
+    const response = { id: result.id }
+    return result.duplicate
+      ? ok(response, "Nasiya allaqachon saqlangan")
+      : created(response, "Nasiya muvaffaqiyatli yaratildi")
   } catch (err: unknown) {
     if (err instanceof CustomerPassportConfigurationError) {
       return serverError("Pasport ma'lumotlarini saqlash sozlanmagan. CUSTOMER_PII_ENCRYPTION_KEY va CUSTOMER_PII_SEARCH_KEY ni sozlang.")

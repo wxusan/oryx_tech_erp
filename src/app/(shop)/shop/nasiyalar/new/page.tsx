@@ -44,6 +44,7 @@ import { ImageViewer, useImageViewer } from '@/components/ui/image-viewer'
 import { ImageViewerTrigger } from '@/components/ui/image-viewer-trigger'
 import { formatPassportIdentifierInput, isValidPassportIdentifier } from '@/lib/passport-identifier-format'
 import type { TrustTier } from '@/components/shop/trust-badge'
+import { useLogicalCommandIdempotency } from '@/lib/use-logical-command-idempotency'
 
 type Device = InStockPickerDevice
 
@@ -117,6 +118,7 @@ export default function NewNasiyaPage() {
 
 function AuthorizedNewNasiyaPage() {
   const router = useRouter()
+  const nasiyaCommand = useLogicalCommandIdempotency()
   const { currency } = useShopCurrency()
   const { memberKind, can } = useShopAccess()
   const canSeeOwnerFinancials = memberKind === 'SHOP_OWNER'
@@ -523,44 +525,49 @@ function AuthorizedNewNasiyaPage() {
     setSubmitError('')
     try {
       const [passportPhotoUrl] = await passportSelection.uploadAll()
-
+      const payload = {
+        deviceId: selectedDevice.id,
+        customerMode: customerMode === 'EXISTING' ? 'EXISTING' as const : 'NEW' as const,
+        customerId: selectedCustomer?.id,
+        customerName: customerMode === 'NEW' ? customerName.trim() : undefined,
+        customerPhone: customerMode === 'NEW' ? customerPhone.trim() : undefined,
+        ...(customerMode === 'NEW' ? {
+          customerAdditionalPhones,
+          customerNote: customerNote.trim() || undefined,
+          ...(canManageCustomerPassport && customerPassportIdentifier.trim()
+            ? { customerPassportIdentifier: customerPassportIdentifier.trim() }
+            : {}),
+          ...(canOverrideCustomerTrust ? { customerTrustOverride: customerTrustOverride || null } : {}),
+        } : {}),
+        passportPhotoUrl,
+        totalAmount: Number(totalPrice),
+        downPayment: Number(downPayment),
+        inputCurrency: currency.currency,
+        months: Number(months),
+        interestPercent: Number(interestPercent || 0),
+        ...(monthlyPaymentInput !== null && monthlyPaymentInput.trim() !== ''
+          ? { monthlyPayment: Number(monthlyPaymentInput), useMonthlyPaymentOverride: true }
+          : {}),
+        startDate,
+        paymentMethod: payMethod,
+        earlyReminderEnabled: earlyReminder,
+        earlyReminderDays: earlyReminder ? Number(earlyReminderDays) : undefined,
+        note: note.trim() || undefined,
+      }
       const res = await fetch(`/api/devices/${selectedDevice.id}/nasiya`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          deviceId: selectedDevice.id,
-          customerMode: customerMode === 'EXISTING' ? 'EXISTING' : 'NEW',
-          customerId: selectedCustomer?.id,
-          customerName: customerMode === 'NEW' ? customerName.trim() : undefined,
-          customerPhone: customerMode === 'NEW' ? customerPhone.trim() : undefined,
-          ...(customerMode === 'NEW' ? {
-            customerAdditionalPhones,
-            customerNote: customerNote.trim() || undefined,
-            ...(canManageCustomerPassport && customerPassportIdentifier.trim()
-              ? { customerPassportIdentifier: customerPassportIdentifier.trim() }
-              : {}),
-            ...(canOverrideCustomerTrust ? { customerTrustOverride: customerTrustOverride || null } : {}),
-          } : {}),
-          passportPhotoUrl,
-          totalAmount: Number(totalPrice),
-          downPayment: Number(downPayment),
-          inputCurrency: currency.currency,
-          months: Number(months),
-          interestPercent: Number(interestPercent || 0),
-          ...(monthlyPaymentInput !== null && monthlyPaymentInput.trim() !== ''
-            ? { monthlyPayment: Number(monthlyPaymentInput), useMonthlyPaymentOverride: true }
-            : {}),
-          startDate,
-          paymentMethod: payMethod,
-          earlyReminderEnabled: earlyReminder,
-          earlyReminderDays: earlyReminder ? Number(earlyReminderDays) : undefined,
-          note: note.trim() || undefined,
-        }),
+        headers: {
+          'Content-Type': 'application/json',
+          'Idempotency-Key': nasiyaCommand.keyFor(payload),
+        },
+        body: JSON.stringify(payload),
       })
       const json = await res.json() as { success: boolean; data?: { id?: string }; error?: string }
       if (!res.ok || !json.success || !json.data?.id) {
+        nasiyaCommand.rejected(res.status)
         throw new Error(json.error || 'Nasiyani saqlashda xatolik')
       }
+      nasiyaCommand.committed()
       await navigateAfterMutation(router, `/shop/nasiyalar/${json.data.id}`, {
         kind: 'nasiya.created',
         deviceId: selectedDevice.id,

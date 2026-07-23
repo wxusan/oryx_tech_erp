@@ -1,3 +1,5 @@
+import type { FxQuoteDto } from '@/lib/currency'
+
 export interface ShopAdminProfileDto {
   id: string
   name: string
@@ -27,6 +29,9 @@ export interface ShopProfileDto {
   subscriptionDue: string
   preferredCurrency: 'UZS' | 'USD'
   usdUzsRate: number | null
+  usdUzsRateSource: string | null
+  usdUzsRateFetchedAt: string | null
+  fxQuote: FxQuoteDto | null
   telegramNotificationsEnabled: boolean
 }
 

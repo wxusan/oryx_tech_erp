@@ -36,8 +36,10 @@ describe('device edit modal — purchase price follows shop currency', () => {
 describe('device update API — converts USD to the UZS base server-side', () => {
   const route = read('src/app/api/devices/[id]/route.ts')
 
-  it('accepts an optional inputCurrency (UZS default, back-compatible)', () => {
+  it('requires inputCurrency whenever purchasePrice is supplied and rejects an orphan currency', () => {
     expect(route).toContain("inputCurrency: z.enum(['UZS', 'USD']).optional()")
+    expect(route).toContain("data.purchasePrice === undefined || data.inputCurrency !== undefined")
+    expect(route).toContain("data.inputCurrency === undefined || data.purchasePrice !== undefined")
   })
 
   it('converts the entered price with moneyInputToUzs and stores the UZS amount', () => {
@@ -46,8 +48,21 @@ describe('device update API — converts USD to the UZS base server-side', () =>
     // Server-side conversion is the source of truth — client value is not trusted as UZS.
   })
 
-  it('keeps the money lock for sold / nasiya-linked devices', () => {
-    expect(route).toContain('isFinanciallyLinked && updateData.purchasePrice !== undefined')
-    expect(route).toContain("Sotilgan yoki nasiya qurilmaning kelish narxini o'zgartirib bo'lmaydi")
+  it('locks purchase and supplier-source facts once any receipt, payable, sale, or nasiya exists', () => {
+    expect(route).toContain('isFinanciallyLinked && purchaseFactsChanged')
+    expect(route).toContain('existing.evidenceVersion === 2')
+    expect(route).toContain('existing.supplierPayables.length > 0')
+    expect(route).toContain('existing.purchaseReceipt !== null')
+    expect(route).toContain('supplierPayables: { none: {} }')
+    expect(route).toContain('purchaseReceipt: { is: null }')
+  })
+
+  it('never upgrades a corrected legacy row to captured evidence without acquisition proof', () => {
+    const patchBlock = route.slice(
+      route.indexOf('export async function PATCH'),
+      route.indexOf('export async function DELETE'),
+    )
+    expect(patchBlock).not.toContain('evidenceVersion: 2')
+    expect(patchBlock).not.toContain("evidenceStatus: 'CAPTURED'")
   })
 })

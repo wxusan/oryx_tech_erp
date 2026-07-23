@@ -3,12 +3,13 @@
  *
  * The payment-rate quote columns are intentionally introduced before the
  * deferred ledger trigger. Older local databases must still be able to read
- * existing contracts while operators review the dry-run repair, so callers
- * may only select/write the new columns once the full quote shape exists.
+ * existing contracts while operators review the dry-run repair, so read-only
+ * detail callers may omit the new projection until the full quote shape exists.
  *
  * A deployment restarts the server after the additive migration. Caching the
  * answer for the process lifetime is therefore safe and avoids a schema query
- * on every detail-page request.
+ * on every detail-page request. Mutation code must not use this compatibility
+ * probe because a partial v2 receipt is invalid by design.
  */
 
 import { Prisma } from '@/generated/prisma/client'
@@ -29,7 +30,13 @@ export function nasiyaPaymentFxSourceForPersistence(source: string | null | unde
   return source ? 'RECORDED_FROZEN' : null
 }
 
-export function hasNasiyaPaymentFxQuoteColumns(): Promise<boolean> {
+/**
+ * Read-only compatibility probe for detail pages opened against an older
+ * local database. Financial writers must never use this probe: the guarded
+ * production release applies the schema first, and every v2 receipt must write
+ * the complete provenance shape or fail explicitly.
+ */
+export function hasNasiyaPaymentFxQuoteColumnsForRead(): Promise<boolean> {
   paymentFxQuoteColumns ??= prisma.$queryRaw<Array<{ count: number }>>(Prisma.sql`
     SELECT COUNT(*)::integer AS count
     FROM information_schema.columns
@@ -49,6 +56,3 @@ export function hasNasiyaPaymentFxQuoteColumns(): Promise<boolean> {
 
   return paymentFxQuoteColumns
 }
-
-/** @deprecated Use `hasNasiyaPaymentFxQuoteColumns` for all new callers. */
-export const hasNasiyaPaymentExchangeRateSourceColumn = hasNasiyaPaymentFxQuoteColumns

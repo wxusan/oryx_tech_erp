@@ -111,14 +111,14 @@ export function CustomerProfileHistorySection({
                     <p className="text-sm font-semibold text-zinc-800">
                       {item.kind.endsWith('return') ? `Qaytarilgan: ${historyAmount(item)}` : historyAmount(item)}
                     </p>
-                    {item.kind.endsWith('return') && item.retainedAmount != null && item.currency && (
+                    {item.kind.endsWith('return') && item.retainedAmount != null && (item.contractCurrency ?? item.currency) && (
                       <p className="mt-0.5 text-[11px] text-zinc-500">
-                        Do‘konda qolgan: {formatMoneyByCurrency(item.retainedAmount, item.currency, null)}
+                        Do‘konda qolgan: {formatMoneyByCurrency(item.retainedAmount, item.contractCurrency ?? item.currency!, null)}
                       </p>
                     )}
-                    {item.kind === 'nasiya-return' && item.cancelledDebt != null && item.currency && (
+                    {item.kind === 'nasiya-return' && item.cancelledDebt != null && (item.contractCurrency ?? item.currency) && (
                       <p className="mt-0.5 text-[11px] text-zinc-500">
-                        Bekor qilingan qarz: {formatMoneyByCurrency(item.cancelledDebt, item.currency, null)}
+                        Bekor qilingan qarz: {formatMoneyByCurrency(item.cancelledDebt, item.contractCurrency ?? item.currency!, null)}
                       </p>
                     )}
                     {item.status && <p className="mt-0.5 text-[11px] text-zinc-500">{historyStatusLabel(item.status)}</p>}

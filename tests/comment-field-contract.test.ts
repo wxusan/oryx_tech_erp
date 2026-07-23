@@ -68,6 +68,7 @@ describe('ordinary comment requiredness contract', () => {
   it('normalizes blank payment/deferral comments to undefined rather than rejecting the command', () => {
     const sale = addSalePaymentSchema.safeParse({
       amount: 100,
+      inputCurrency: 'UZS',
       paymentMethod: 'CASH',
       note: '   ',
       reason: '   ',
@@ -81,6 +82,7 @@ describe('ordinary comment requiredness contract', () => {
     const nasiya = addNasiyaPaymentSchema.safeParse({
       nasiyaScheduleId: 'schedule_1',
       amount: 100,
+      inputCurrency: 'UZS',
       paymentMethod: 'CASH',
       date: new Date('2026-07-14T00:00:00.000Z'),
       note: '   ',

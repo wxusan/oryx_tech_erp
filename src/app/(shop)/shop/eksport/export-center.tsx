@@ -10,16 +10,23 @@ const exports = [
   { entity: 'devices', permission: 'EXPORT_DEVICES', label: 'Qurilmalar' },
   { entity: 'customers', permission: 'EXPORT_CUSTOMERS', label: 'Mijozlar' },
   { entity: 'sales', permission: 'EXPORT_SALES', label: 'Sotuvlar' },
+  { entity: 'sale-payments', permission: 'EXPORT_SALES', label: 'Sotuv to‘lovlari daftari', ownerOnly: true },
   { entity: 'nasiya', permission: 'EXPORT_NASIYA', label: 'Nasiyalar' },
+  { entity: 'nasiya-schedules', permission: 'EXPORT_NASIYA', label: 'Nasiya jadvallari daftari', ownerOnly: true },
+  { entity: 'nasiya-payments', permission: 'EXPORT_NASIYA', label: 'Nasiya to‘lovlari daftari', ownerOnly: true },
+  { entity: 'nasiya-payment-allocations', permission: 'EXPORT_NASIYA', label: 'Nasiya to‘lov taqsimotlari', ownerOnly: true },
   { entity: 'olib', permission: 'EXPORT_OLIB', label: 'Olib-sotdim' },
+  { entity: 'supplier-payable-payments', permission: 'EXPORT_OLIB', label: 'Yetkazib beruvchi to‘lovlari', ownerOnly: true },
   { entity: 'returns', permission: 'EXPORT_RETURNS', label: 'Qaytarishlar' },
   { entity: 'logs', permission: 'EXPORT_LOGS', label: 'Faoliyat tarixi' },
   { entity: 'report', permission: 'EXPORT_REPORTS', label: 'Hisobot' },
-] satisfies Array<{ entity: ExportEntity; permission: ShopPermissionCode; label: string }>
+] satisfies Array<{ entity: ExportEntity; permission: ShopPermissionCode; label: string; ownerOnly?: boolean }>
 
 export default function ExportCenter() {
-  const { can } = useShopAccess()
-  const available = exports.filter((item) => can(item.permission))
+  const { can, memberKind } = useShopAccess()
+  const available = exports.filter(
+    (item) => can(item.permission) && (!item.ownerOnly || memberKind === 'SHOP_OWNER'),
+  )
 
   return (
     <div className="mx-auto max-w-5xl space-y-5 p-6">

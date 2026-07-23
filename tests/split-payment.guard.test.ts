@@ -79,7 +79,8 @@ describe('POST /api/nasiya/[id]/payment validates and stores the split breakdown
     expect(validateIndex).toBeGreaterThan(-1)
     expect(block).toContain('paymentBreakdown')
     expect(block).toContain('amount')
-    expect(block).toContain("parsed.data.inputCurrency ?? 'UZS'")
+    expect(block).toContain('parsed.data.inputCurrency')
+    expect(block).not.toContain("?? 'UZS'")
   })
 
   it('rejects (does not proceed) when validatePaymentBreakdown returns an error', () => {

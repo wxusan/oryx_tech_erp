@@ -14,6 +14,7 @@ import {
   convertMoneyDto,
   createMoneyDto,
   fxQuoteRate,
+  moneyDtoEquals,
   moneyDtoToAmount,
   type CurrencyCode,
 } from '@/lib/currency'
@@ -91,6 +92,42 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
     if (!resolved.ok) return resolved.response
     const { shopId } = resolved
 
+    let refundInputMoney
+    try {
+      refundInputMoney = createMoneyDto(parsed.data.inputCurrency, parsed.data.refundAmount)
+    } catch (error) {
+      return badRequest(error instanceof Error ? error.message : "Qaytariladigan summa noto‘g‘ri")
+    }
+
+    // A committed return is independently replayable even if the current
+    // quote disappears. Resolve it before currency I/O and bind the key to
+    // the original actor plus exact native minor units.
+    const committedReplay = await prisma.deviceReturn.findUnique({
+      where: { shopId_idempotencyKey: { shopId, idempotencyKey } },
+    })
+    if (committedReplay) {
+      if (!committedReplay.saleId) {
+        return conflict("Idempotency-Key boshqa qaytarish amali uchun ishlatilgan")
+      }
+      const storedInput = createMoneyDto(
+        committedReplay.refundInputCurrency ?? committedReplay.contractCurrency,
+        String(committedReplay.refundInputAmount ?? committedReplay.refundAmount),
+      )
+      const samePayload = (
+        committedReplay.deviceId === deviceId
+        && committedReplay.createdBy === session.user.id
+        && moneyDtoEquals(storedInput, refundInputMoney)
+        && (committedReplay.refundMethod ?? undefined) === parsed.data.refundMethod
+        && committedReplay.note === parsed.data.note
+      )
+      if (!samePayload) {
+        return conflict("Idempotency-Key boshqa qaytarish ma'lumoti uchun ishlatilgan")
+      }
+      const device = await prisma.device.findFirst({ where: { id: deviceId, shopId } })
+      if (!device) return notFound('Qurilma topilmadi')
+      return ok(device, 'Qaytarish avval muvaffaqiyatli saqlangan')
+    }
+
     // One governed snapshot is reused for validation, conversion, persistence,
     // and notification display.
     const displayCurrency = await getShopCurrencyContext(shopId)
@@ -104,12 +141,16 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       })
       if (replay) {
         if (!replay.saleId) throw { status: 409, message: 'Nasiya shartnomasini bekor qilish qo\'llab-quvvatlanmaydi' }
+        const storedInput = createMoneyDto(
+          replay.refundInputCurrency ?? replay.contractCurrency,
+          String(replay.refundInputAmount ?? replay.refundAmount),
+        )
         const samePayload = (
-          replay.deviceId === deviceId &&
-          Number(replay.refundInputAmount ?? replay.refundAmount) === parsed.data.refundAmount &&
-          (replay.refundInputCurrency ?? replay.contractCurrency) === parsed.data.inputCurrency &&
-          (replay.refundMethod ?? undefined) === parsed.data.refundMethod &&
-          replay.note === parsed.data.note
+          replay.deviceId === deviceId
+          && replay.createdBy === session.user.id
+          && moneyDtoEquals(storedInput, refundInputMoney)
+          && (replay.refundMethod ?? undefined) === parsed.data.refundMethod
+          && replay.note === parsed.data.note
         )
         if (!samePayload) {
           throw { status: 409, message: 'Idempotency-Key boshqa qaytarish ma\'lumoti uchun ishlatilgan' }
@@ -160,12 +201,6 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         throw { status: 409, message: "Do‘kon valyutasi o‘zgargan. Sahifani yangilab, summani qayta tekshiring" }
       }
 
-      let refundInputMoney
-      try {
-        refundInputMoney = createMoneyDto(settlementCurrency, parsed.data.refundAmount)
-      } catch (error) {
-        throw { status: 400, message: error instanceof Error ? error.message : "Qaytariladigan summa noto‘g‘ri" }
-      }
       const needsFx = refundInputMoney.minorUnits > 0 && (
         settlementCurrency === 'USD' || contractCurrency === 'USD'
       )
@@ -192,6 +227,15 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const refundAmountUzs = moneyDtoToAmount(refundUzsMoney)
 
       const sources = sale.payments.map((payment) => paymentSource('SALE', payment))
+      if (
+        contractRefundAmount > 0
+        && sources.some((source) => source.appliedContractAmount === null)
+      ) {
+        throw {
+          status: 409,
+          message: 'Avvalgi to‘lovning shartnoma valyutasidagi summasi tasdiqlanmagan. Pul qaytarishdan oldin moliyaviy yozuvni tekshiring.',
+        }
+      }
       const contractReceiptsAtReturn = roundContractMoney(
         sources.reduce(
           (sum, source) => sum + resolveAppliedContractAmount(source, contractCurrency, frozenRate),
@@ -329,6 +373,12 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           shopName: device.shop.name,
           device: presentDeviceSpecs(device),
           refundAmount: refundAmountUzs,
+          refundInput: {
+            amount: moneyDtoToAmount(refundInputMoney),
+            currency: settlementCurrency,
+          },
+          refundExchangeRate: needsFx ? liveUsdUzsRate : null,
+          refundExchangeRateSource: needsFx ? currentFxQuote?.source : null,
           refundMethod: parsed.data.refundMethod,
           note: parsed.data.note,
           adminName: session.user.name,

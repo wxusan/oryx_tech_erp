@@ -51,7 +51,8 @@ describe('P0 nasiya deferral idempotency guard', () => {
   const ui = read('src/components/shop/nasiya-defer-modal.tsx')
 
   it('records deferrals in a durable idempotency ledger without creating a payment row', () => {
-    expect(route).toContain("if (!idempotencyKey) return badRequest")
+    expect(route).toContain('idempotencyKey.length < 8')
+    expect(route).toContain('idempotencyKey.length > 120')
     expect(route).toContain('tx.nasiyaDeferral.findUnique')
     expect(route).toContain('tx.nasiyaDeferral.create')
     expect(route).toContain('duplicate: true')

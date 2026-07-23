@@ -59,14 +59,20 @@ export const maxDuration = 60
 const REMINDER_GENERATION_BUDGET_MS = 40_000
 const DAY_MS = 86_400_000
 
-let usdUzsRateForRun: Promise<number | null> | null = null
+let usdUzsRateForRun: Promise<number> | null = null
 
 function getUsdUzsRateForRun() {
-  usdUzsRateForRun ??= getUsdUzsRate().catch(() => null)
+  usdUzsRateForRun ??= getUsdUzsRate()
   return usdUzsRateForRun
 }
 
-async function reminderCurrency(shop: { preferredCurrency: CurrencyCode }): Promise<CurrencyContext> {
+async function reminderCurrency(
+  shop: { preferredCurrency: CurrencyCode },
+  contractCurrency: CurrencyCode,
+): Promise<CurrencyContext> {
+  if (shop.preferredCurrency === contractCurrency) {
+    return { currency: shop.preferredCurrency, usdUzsRate: null }
+  }
   return { currency: shop.preferredCurrency, usdUzsRate: await getUsdUzsRateForRun() }
 }
 
@@ -260,7 +266,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             amountDue: Number(schedule.contractRemainingAmount),
             contractCurrency: nasiya.contractCurrency,
             dueDate: effectiveDue,
-            currency: await reminderCurrency(nasiya.shop),
+            currency: await reminderCurrency(nasiya.shop, nasiya.contractCurrency),
           })
           await queueReminder({
             shopId: nasiya.shopId,
@@ -336,7 +342,7 @@ export async function GET(request: NextRequest): Promise<Response> {
               contractCurrency: schedule.nasiya.contractCurrency,
               dueDate: effectiveDue,
               daysLate,
-              currency: await reminderCurrency(schedule.nasiya.shop),
+              currency: await reminderCurrency(schedule.nasiya.shop, schedule.nasiya.contractCurrency),
             })
             const resolution = await recipientCache.resolve(prisma, {
               shopId: schedule.nasiya.shopId,
@@ -422,7 +428,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             contractCurrency: nasiya.contractCurrency,
             dueDate: effectiveDue,
             daysLeft: nasiya.earlyReminderDays!,
-            currency: await reminderCurrency(nasiya.shop),
+            currency: await reminderCurrency(nasiya.shop, nasiya.contractCurrency),
           })
           await queueReminder({
             shopId: nasiya.shopId,
@@ -445,7 +451,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             deletedAt: null,
             returnedAt: null,
             paidFully: false,
-            remainingAmount: { gt: 0 },
+            contractRemainingAmount: { gt: 0 },
             reminderEnabled: true,
             dueDate: { gte: windowStart, lt: windowEnd },
             shop: { status: 'ACTIVE', deletedAt: null },
@@ -471,7 +477,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             remainingAmount: Number(sale.contractRemainingAmount),
             contractCurrency: sale.contractCurrency,
             dueDate: sale.dueDate,
-            currency: await reminderCurrency(sale.shop),
+            currency: await reminderCurrency(sale.shop, sale.contractCurrency),
           })
           await queueReminder({
             shopId: sale.shopId,
@@ -494,7 +500,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             deletedAt: null,
             returnedAt: null,
             paidFully: false,
-            remainingAmount: { gt: 0 },
+            contractRemainingAmount: { gt: 0 },
             reminderEnabled: true,
             dueDate: { lt: today },
             shop: { status: 'ACTIVE', deletedAt: null },
@@ -521,7 +527,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             contractCurrency: sale.contractCurrency,
             dueDate: sale.dueDate,
             daysLate,
-            currency: await reminderCurrency(sale.shop),
+            currency: await reminderCurrency(sale.shop, sale.contractCurrency),
           })
           await queueReminder({
             shopId: sale.shopId,
@@ -544,7 +550,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             deletedAt: null,
             returnedAt: null,
             paidFully: false,
-            remainingAmount: { gt: 0 },
+            contractRemainingAmount: { gt: 0 },
             reminderEnabled: true,
             earlyReminderEnabled: true,
             dueDate: { gte: tomorrow, lt: earlyWindowEnd },
@@ -574,7 +580,7 @@ export async function GET(request: NextRequest): Promise<Response> {
             contractCurrency: sale.contractCurrency,
             dueDate: sale.dueDate,
             daysLeft: sale.earlyReminderDays!,
-            currency: await reminderCurrency(sale.shop),
+            currency: await reminderCurrency(sale.shop, sale.contractCurrency),
           })
           await queueReminder({
             shopId: sale.shopId,
@@ -595,7 +601,8 @@ export async function GET(request: NextRequest): Promise<Response> {
         (cursor, take) => prisma.supplierPayable.findMany({
           where: {
             deletedAt: null,
-            status: 'PENDING',
+            status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] },
+            contractRemainingAmount: { gt: 0 },
             reminderEnabled: true,
             dueDate: { gte: windowStart, lt: windowEnd },
             shop: { status: 'ACTIVE', deletedAt: null },
@@ -616,10 +623,10 @@ export async function GET(request: NextRequest): Promise<Response> {
             device: presentDeviceSpecs(payable.device),
             supplierName: payable.supplierName,
             supplierPhone: payable.supplierPhone,
-            amount: Number(payable.contractAmount),
+            amount: Number(payable.contractRemainingAmount),
             contractCurrency: payable.contractCurrency,
             dueDate: payable.dueDate,
-            currency: await reminderCurrency(payable.shop),
+            currency: await reminderCurrency(payable.shop, payable.contractCurrency),
           })
           await queueReminder({
             shopId: payable.shopId,
@@ -640,7 +647,8 @@ export async function GET(request: NextRequest): Promise<Response> {
         (cursor, take) => prisma.supplierPayable.findMany({
           where: {
             deletedAt: null,
-            status: { in: ['PENDING', 'OVERDUE'] },
+            status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] },
+            contractRemainingAmount: { gt: 0 },
             reminderEnabled: true,
             dueDate: { lt: today },
             shop: { status: 'ACTIVE', deletedAt: null },
@@ -661,11 +669,11 @@ export async function GET(request: NextRequest): Promise<Response> {
               device: presentDeviceSpecs(payable.device),
               supplierName: payable.supplierName,
               supplierPhone: payable.supplierPhone,
-              amount: Number(payable.contractAmount),
+              amount: Number(payable.contractRemainingAmount),
               contractCurrency: payable.contractCurrency,
               dueDate: payable.dueDate,
               daysLate,
-              currency: await reminderCurrency(payable.shop),
+              currency: await reminderCurrency(payable.shop, payable.contractCurrency),
             })
             await queueReminder({
               shopId: payable.shopId,
@@ -681,7 +689,11 @@ export async function GET(request: NextRequest): Promise<Response> {
           if (payable.status !== 'OVERDUE') {
             await prisma.$transaction(async (tx) => {
               const changed = await tx.supplierPayable.updateMany({
-                where: { id: payable.id, status: 'PENDING' },
+                where: {
+                  id: payable.id,
+                  status: { in: ['PENDING', 'PARTIAL'] },
+                  contractRemainingAmount: { gt: 0 },
+                },
                 data: { status: 'OVERDUE' },
               })
               if (changed.count > 0) {
@@ -708,7 +720,8 @@ export async function GET(request: NextRequest): Promise<Response> {
         (cursor, take) => prisma.supplierPayable.findMany({
           where: {
             deletedAt: null,
-            status: 'PENDING',
+            status: { in: ['PENDING', 'PARTIAL', 'OVERDUE'] },
+            contractRemainingAmount: { gt: 0 },
             reminderEnabled: true,
             earlyReminderEnabled: true,
             dueDate: { gte: tomorrow, lt: earlyWindowEnd },
@@ -732,11 +745,11 @@ export async function GET(request: NextRequest): Promise<Response> {
             device: presentDeviceSpecs(payable.device),
             supplierName: payable.supplierName,
             supplierPhone: payable.supplierPhone,
-            amount: Number(payable.contractAmount),
+            amount: Number(payable.contractRemainingAmount),
             contractCurrency: payable.contractCurrency,
             dueDate: payable.dueDate,
             daysLeft: payable.earlyReminderDays!,
-            currency: await reminderCurrency(payable.shop),
+            currency: await reminderCurrency(payable.shop, payable.contractCurrency),
           })
           await queueReminder({
             shopId: payable.shopId,

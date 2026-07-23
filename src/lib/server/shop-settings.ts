@@ -86,5 +86,8 @@ export async function getShopSettingsProfile(shopId: string): Promise<ShopProfil
     ...shop,
     subscriptionDue: shop.subscriptionDue.toISOString(),
     usdUzsRate: currency.usdUzsRate,
+    usdUzsRateSource: currency.usdUzsRateSource ?? null,
+    usdUzsRateFetchedAt: currency.usdUzsRateFetchedAt ?? null,
+    fxQuote: currency.fxQuote ?? null,
   } : null
 }

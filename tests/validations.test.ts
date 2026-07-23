@@ -19,6 +19,9 @@ describe('validation hardening', () => {
       storageAmount: 256,
       storageUnit: 'GB',
       conditionCode: 'NEW',
+      inputCurrency: 'UZS',
+      purchaseSettlement: 'PAID_NOW',
+      supplierPaymentMethod: 'CASH',
     }
 
     expect(addDeviceSchema.safeParse({ ...base, imageUrls: ['https://example.com/device.jpg'] }).success).toBe(false)
@@ -44,6 +47,9 @@ describe('validation hardening', () => {
       storageAmount: 1,
       storageUnit: 'TB',
       conditionCode: 'NEW',
+      inputCurrency: 'UZS',
+      purchaseSettlement: 'PAID_NOW',
+      supplierPaymentMethod: 'CASH',
     })
     expect(parsed).not.toHaveProperty('storage')
     expect(parsed).toMatchObject({ storageAmount: 1, storageUnit: 'TB' })
@@ -58,6 +64,7 @@ describe('validation hardening', () => {
       storageAmount: 256,
       storageUnit: 'GB' as const,
       conditionCode: 'NEW' as const,
+      inputCurrency: 'UZS' as const,
       purchaseSettlement: 'PAY_LATER' as const,
       supplierName: 'Ali aka',
       supplierPhone: '+998901234567',
@@ -67,6 +74,104 @@ describe('validation hardening', () => {
     expect(addDeviceSchema.safeParse({ ...base, supplierDueDate: undefined }).success).toBe(false)
     expect(addDeviceSchema.safeParse({ ...base, supplierInitialPaymentAmount: 10_000_000, supplierPaymentMethod: 'CASH' }).success).toBe(false)
     expect(addDeviceSchema.safeParse({ ...base, supplierInitialPaymentAmount: 2_000_000, supplierPaymentMethod: 'CARD' }).success).toBe(true)
+  })
+
+  it('requires explicit acquisition currency, settlement, and paid-now evidence without contradictory debt fields', () => {
+    const base = {
+      model: 'iPhone 15',
+      color: 'Qora',
+      purchasePrice: 10_000_000,
+      imei: '123456789012345',
+      storageAmount: 256,
+      storageUnit: 'GB' as const,
+      conditionCode: 'NEW' as const,
+    }
+
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      purchaseSettlement: 'PAID_NOW',
+      supplierPaymentMethod: 'CASH',
+    }).success).toBe(false)
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      inputCurrency: 'UZS',
+      supplierPaymentMethod: 'CASH',
+    }).success).toBe(false)
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      inputCurrency: 'UZS',
+      purchaseSettlement: 'PAID_NOW',
+    }).success).toBe(false)
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      inputCurrency: 'UZS',
+      purchaseSettlement: 'PAID_NOW',
+      supplierPaymentMethod: 'CASH',
+    }).success).toBe(true)
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      inputCurrency: 'UZS',
+      purchaseSettlement: 'PAID_NOW',
+      supplierPaymentBreakdown: [
+        { method: 'CASH', amount: 4_000_000 },
+        { method: 'CARD', amount: 6_000_000 },
+      ],
+    }).success).toBe(true)
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      inputCurrency: 'UZS',
+      purchaseSettlement: 'PAID_NOW',
+      supplierPaymentMethod: 'CASH',
+      supplierPaymentBreakdown: [
+        { method: 'CASH', amount: 4_000_000 },
+        { method: 'CARD', amount: 6_000_000 },
+      ],
+    }).success).toBe(false)
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      inputCurrency: 'UZS',
+      purchaseSettlement: 'PAID_NOW',
+      supplierPaymentMethod: 'CASH',
+      supplierInitialPaymentAmount: 1,
+    }).success).toBe(false)
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      inputCurrency: 'UZS',
+      purchaseSettlement: 'PAID_NOW',
+      supplierPaymentMethod: 'CASH',
+      supplierDueDate: '2026-08-01',
+    }).success).toBe(false)
+  })
+
+  it('accepts a Pay Later split without a redundant top-level method and rejects method-without-money', () => {
+    const base = {
+      model: 'iPhone 15',
+      color: 'Qora',
+      purchasePrice: 10_000_000,
+      inputCurrency: 'UZS' as const,
+      imei: '123456789012345',
+      storageAmount: 256,
+      storageUnit: 'GB' as const,
+      conditionCode: 'NEW' as const,
+      purchaseSettlement: 'PAY_LATER' as const,
+      supplierName: 'Ali aka',
+      supplierPhone: '+998901234567',
+      supplierDueDate: '2026-08-01',
+    }
+
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      supplierInitialPaymentAmount: 2_000_000,
+      supplierPaymentBreakdown: [
+        { method: 'CASH', amount: 1_000_000 },
+        { method: 'CARD', amount: 1_000_000 },
+      ],
+    }).success).toBe(true)
+    expect(addDeviceSchema.safeParse({
+      ...base,
+      supplierInitialPaymentAmount: 0,
+      supplierPaymentMethod: 'CASH',
+    }).success).toBe(false)
   })
 
   it('caps long text fields on core create flows', () => {
@@ -87,12 +192,12 @@ describe('validation hardening', () => {
 
   it('rejects negative/zero payment amounts (sale and nasiya) — production-readiness audit gap', () => {
     // Sale payments: strictly positive, no legitimate "$0 payment" use case.
-    expect(addSalePaymentSchema.safeParse({ amount: -1000, paymentMethod: 'CASH' }).success).toBe(false)
-    expect(addSalePaymentSchema.safeParse({ amount: 0, paymentMethod: 'CASH' }).success).toBe(false)
-    expect(addSalePaymentSchema.safeParse({ amount: 1000, paymentMethod: 'CASH' }).success).toBe(true)
+    expect(addSalePaymentSchema.safeParse({ amount: -1000, paymentMethod: 'CASH', inputCurrency: 'UZS' }).success).toBe(false)
+    expect(addSalePaymentSchema.safeParse({ amount: 0, paymentMethod: 'CASH', inputCurrency: 'UZS' }).success).toBe(false)
+    expect(addSalePaymentSchema.safeParse({ amount: 1000, paymentMethod: 'CASH', inputCurrency: 'UZS' }).success).toBe(true)
 
     // Nasiya payments are money-only. Deferral is a separate command schema.
-    const base = { nasiyaScheduleId: 'sched_1', date: '2026-08-01' }
+    const base = { nasiyaScheduleId: 'sched_1', date: '2026-08-01', inputCurrency: 'UZS' as const }
     expect(addNasiyaPaymentSchema.safeParse({ ...base, amount: -1000, paymentMethod: 'CASH' }).success).toBe(false)
     expect(addNasiyaPaymentSchema.safeParse({ ...base, amount: 0, paymentMethod: 'CASH' }).success).toBe(false)
     expect(
@@ -113,6 +218,7 @@ describe('validation hardening', () => {
       salePrice: 1_000,
       paidFully: false,
       dueDate: '2026-08-15',
+      inputCurrency: 'UZS' as const,
     }
 
     expect(createSaleSchema.safeParse({ ...base, amountPaid: 0, inputCurrency: 'UZS' }).success).toBe(true)

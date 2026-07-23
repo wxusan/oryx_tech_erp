@@ -5,7 +5,7 @@ import type { Session } from 'next-auth'
 import { prisma } from '@/lib/prisma'
 import { shopCacheTag } from '@/lib/server/cache-tags'
 import { tashkentDayRange, tashkentMonthRangeFromKey } from '@/lib/timezone'
-import { getUsdUzsRate } from '@/lib/server/currency'
+import { getStoredUsdUzsRateSnapshot } from '@/lib/server/currency'
 import { computeShopStatsFromRows } from '@/lib/shop-stats-formulas'
 import {
   getShopMonthlyAccountingAggregate,
@@ -316,11 +316,8 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
   const { start: monthStart, end: monthEnd } = tashkentMonthRangeFromKey(monthKey, now)
   const { start: todayStart } = tashkentDayRange(now)
   const attributedTo = adminId ? { createdBy: adminId } : {}
-  // Single rate fetch for the whole batch, matching every other "live view"
-  // conversion in this codebase — best-effort, never blocks the dashboard.
-  const usdUzsRate = await getUsdUzsRate().catch(() => null)
-
   const [
+    storedFxQuote,
     totalDevices,
     soldThisMonth,
     monthlyAccountingAggregate,
@@ -337,6 +334,9 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
     writeOffAggregate,
     debtStatsAggregate,
   ] = await Promise.all([
+    // Presentation uses only a governed stored quote. Run it beside the
+    // bounded SQL batch instead of placing a possible CBU wait in front.
+    getStoredUsdUzsRateSnapshot(),
     prisma.device.count({
       // Imported devices exist only to carry pre-Oryx debt — they were never
       // stocked through Oryx, so they don't count as the shop's devices.
@@ -446,6 +446,7 @@ async function getShopStatsFresh(role: StatsRole, shopId: string, monthKey: stri
 
     getShopDebtStatsAggregate({ shopId, monthStart, monthEnd, todayStart, adminId }),
   ])
+  const usdUzsRate = storedFxQuote?.rate ?? null
 
   const upcomingRows = upcomingScheduleIds.length
     ? await prisma.nasiyaSchedule.findMany({

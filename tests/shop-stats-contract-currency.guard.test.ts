@@ -17,8 +17,11 @@ describe('shop stats use bounded set-based native-currency aggregates', () => {
   const source = read('src/lib/server/shop-stats.ts')
   const queries = read('src/lib/server/shop-stats-queries.ts')
 
-  it('fetches a single usdUzsRate for the whole batch (best-effort, never throws)', () => {
-    expect(source).toContain('const usdUzsRate = await getUsdUzsRate().catch(() => null)')
+  it('fetches one stored-only quote inside the parallel batch and never waits on CBU', () => {
+    expect(source).toContain('getStoredUsdUzsRateSnapshot(),')
+    expect(source).toContain('const usdUzsRate = storedFxQuote?.rate ?? null')
+    expect(source.indexOf('getStoredUsdUzsRateSnapshot(),')).toBeGreaterThan(source.indexOf('Promise.all(['))
+    expect(source).not.toContain('getUsdUzsRate().catch')
   })
 
   it('delegates expected/overdue totals to getShopObligationAggregate and does not hydrate those full row sets', () => {
@@ -79,9 +82,11 @@ describe('shop-stats-formulas.ts consumes native partitions without mixing curre
 
   it('upcomingPayments exposes the authoritative native remaining balance for the client', () => {
     const idx = source.indexOf('upcomingPayments: upcomingPayments')
-    const block = source.slice(idx, idx + 1_200)
+    const block = source.slice(idx, idx + 1_500)
     expect(block).toContain("payment.nasiya.contractCurrency === 'USD'")
-    expect(block).toContain("convertContractAmountToUzs(Number(amount), 'USD', usdUzsRate) ?? 0")
+    expect(block).toContain("convertContractAmountToUzs(Number(amount), 'USD', usdUzsRate)")
+    expect(block).not.toContain("convertContractAmountToUzs(Number(amount), 'USD', usdUzsRate) ?? 0")
+    expect(block).toContain('reportingUzsAvailable:')
     expect(block).toContain('contractExpectedAmount: Number(payment.contractExpectedAmount)')
     expect(block).toContain('contractPaidAmount: Number(payment.contractPaidAmount)')
     expect(block).toContain('contractRemainingAmount: scheduleOutstandingNative(payment)')

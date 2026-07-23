@@ -17,10 +17,34 @@ import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
 import { sameMoney, sameOptionalText } from '@/lib/idempotency-replay'
 import { getActiveShopPackage, packageRecurringPrice } from '@/lib/server/shop-access'
 import { tashkentTodayInputValue } from '@/lib/timezone'
-import { getUsdUzsRate } from '@/lib/server/currency'
+import { getStoredUsdUzsRateSnapshot } from '@/lib/server/currency'
 import { buildShopPaymentSnapshots } from '@/lib/admin-money'
+import { moneyMinorUnitsFromAmount, type CurrencyCode } from '@/lib/currency'
 
 type RouteContext = { params: Promise<{ id: string }> }
+
+function submittedAmountMinorUnits(amount: number, currency: CurrencyCode) {
+  try {
+    return moneyMinorUnitsFromAmount(amount, currency)
+  } catch (error) {
+    throw {
+      status: 400,
+      message: error instanceof Error ? error.message : "To'lov summasi noto'g'ri",
+    }
+  }
+}
+
+function storedAmountMatchesMinorUnits(
+  storedAmount: unknown,
+  submittedMinorUnits: number,
+  currency: CurrencyCode,
+) {
+  try {
+    return moneyMinorUnitsFromAmount(String(storedAmount), currency) === submittedMinorUnits
+  } catch {
+    return false
+  }
+}
 
 export async function POST(req: NextRequest, ctx: RouteContext) {
   try {
@@ -30,8 +54,8 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
 
     const { id } = await ctx.params
     const idempotencyKey = req.headers.get('idempotency-key')?.trim()
-    if (!idempotencyKey) {
-      return badRequest('Idempotency-Key sarlavhasi kiritilishi shart')
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
     }
 
     const body: unknown = await req.json()
@@ -41,11 +65,59 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
       const firstError = (parsed.error as ZodError).issues[0]?.message ?? "Noto'g'ri ma'lumot"
       return badRequest(firstError)
     }
+    const submittedMinorUnits = submittedAmountMinorUnits(
+      parsed.data.amount,
+      parsed.data.expectedCurrency,
+    )
+
+    // A committed command is replayable without consulting today's FX quote
+    // or package state. This keeps retries deterministic during provider
+    // outages and after later package changes.
+    const committedReplay = await prisma.shopPayment.findUnique({
+      where: { shopId_idempotencyKey: { shopId: id, idempotencyKey } },
+    })
+    if (committedReplay) {
+      if (
+        committedReplay.recordedById !== session.user.id
+        || committedReplay.currency !== parsed.data.expectedCurrency
+        || !storedAmountMatchesMinorUnits(
+          committedReplay.amount,
+          submittedMinorUnits,
+          committedReplay.currency,
+        )
+        || committedReplay.months !== parsed.data.months
+        || committedReplay.paymentMethod !== parsed.data.paymentMethod
+        || !sameOptionalText(committedReplay.note, parsed.data.note)
+        || committedReplay.packageVersionId !== parsed.data.expectedPackageVersionId
+        || !sameMoney(
+          committedReplay.packageMonthlyPriceSnapshot,
+          parsed.data.expectedMonthlyPrice,
+          committedReplay.currency,
+        )
+      ) {
+        return conflict("Idempotency-Key boshqa yoki o'zgartirilgan do'kon to'lovi uchun ishlatilgan")
+      }
+      const duplicateShop = await prisma.shop.findUnique({
+        where: { id },
+        include: {
+          admins: { where: { deletedAt: null, isActive: true }, select: shopAdminPublicSelect },
+          payments: {
+            where: { deletedAt: null },
+            orderBy: { paidAt: 'desc' },
+            take: 5,
+            include: { recordedBy: { select: { name: true, login: true } } },
+          },
+        },
+      })
+      if (!duplicateShop) return notFound("Do'kon topilmadi")
+      return ok(duplicateShop, "To'lov allaqachon qabul qilingan")
+    }
 
     // Fetch once, before the serializable transaction. A missing rate does
     // not block a native-currency receipt; the opposite-currency reporting
     // snapshot is left explicitly PARTIAL instead of being guessed later.
-    const paymentTimeRate = await getUsdUzsRate().catch(() => null)
+    const paymentTimeQuote = await getStoredUsdUzsRateSnapshot()
+    const paymentTimeRate = paymentTimeQuote?.rate ?? null
 
     const runPaymentTransaction = () =>
       prisma.$transaction(async (tx: Prisma.TransactionClient) => {
@@ -61,10 +133,21 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
           if (
             existingPayment.shopId !== id
             || existingPayment.recordedById !== session.user.id
-            || !sameMoney(existingPayment.amount, parsed.data.amount, existingPayment.currency)
+            || existingPayment.currency !== parsed.data.expectedCurrency
+            || !storedAmountMatchesMinorUnits(
+              existingPayment.amount,
+              submittedMinorUnits,
+              existingPayment.currency,
+            )
             || existingPayment.months !== parsed.data.months
             || existingPayment.paymentMethod !== parsed.data.paymentMethod
             || !sameOptionalText(existingPayment.note, parsed.data.note)
+            || existingPayment.packageVersionId !== parsed.data.expectedPackageVersionId
+            || !sameMoney(
+              existingPayment.packageMonthlyPriceSnapshot,
+              parsed.data.expectedMonthlyPrice,
+              existingPayment.currency,
+            )
           ) {
             throw {
               status: 409,
@@ -95,9 +178,27 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
         if (packageVersion.pricingNeedsReview) {
           throw { status: 409, message: "To'lovdan oldin do'kon paketining narxini tasdiqlang" }
         }
+        const packageSubmittedMinorUnits = submittedAmountMinorUnits(
+          parsed.data.amount,
+          packageVersion.currency,
+        )
         const monthlyPrice = packageRecurringPrice(packageVersion).recurringPrice
+        if (
+          packageVersion.id !== parsed.data.expectedPackageVersionId
+          || packageVersion.currency !== parsed.data.expectedCurrency
+          || !sameMoney(monthlyPrice, parsed.data.expectedMonthlyPrice, packageVersion.currency)
+        ) {
+          throw {
+            status: 409,
+            message: "Paket versiyasi, valyutasi yoki narxi o'zgargan. Ma'lumotni yangilab, qayta tekshiring.",
+          }
+        }
         const expectedAmount = new Prisma.Decimal(monthlyPrice).mul(parsed.data.months).toDecimalPlaces(2)
-        if (!sameMoney(expectedAmount, parsed.data.amount, packageVersion.currency)) {
+        const expectedAmountMinorUnits = moneyMinorUnitsFromAmount(
+          expectedAmount.toString(),
+          packageVersion.currency,
+        )
+        if (expectedAmountMinorUnits !== packageSubmittedMinorUnits) {
           throw {
             status: 409,
             message: `Bu davr uchun to'lov ${expectedAmount.toString()} ${packageVersion.currency} bo'lishi kerak`,
@@ -132,6 +233,11 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
             allocationStatus: 'PACKAGE_ALLOCATED',
             currency: packageVersion.currency,
             exchangeRateAtPayment: snapshots.exchangeRateAtPayment,
+            exchangeRateSourceAtPayment: paymentTimeQuote?.source ?? null,
+            exchangeRateEffectiveAtPayment: paymentTimeQuote?.effectiveAt ?? null,
+            exchangeRateFetchedAtPayment: paymentTimeQuote?.fetchedAt ?? null,
+            evidenceVersion: 2,
+            evidenceStatus: 'CAPTURED',
             amountUzsSnapshot: snapshots.amountUzsSnapshot,
             amountUsdSnapshot: snapshots.amountUsdSnapshot,
             currencyReconstructionStatus: snapshots.currencyReconstructionStatus,
@@ -205,6 +311,7 @@ export async function POST(req: NextRequest, ctx: RouteContext) {
   } catch (err: unknown) {
     if (typeof err === 'object' && err !== null && 'status' in err) {
       const e = err as { status: number; message: string }
+      if (e.status === 400) return badRequest(e.message)
       if (e.status === 404) return notFound(e.message)
       if (e.status === 409) return conflict(e.message)
     }

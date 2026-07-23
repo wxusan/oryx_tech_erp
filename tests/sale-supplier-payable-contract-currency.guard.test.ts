@@ -77,14 +77,15 @@ describe('sale payment route dual-writes the contract-currency ledger', () => {
   const route = read('src/app/api/sales/[id]/payment/route.ts')
 
   it('computes appliedAmountInContractCurrency once, reusing the payment rate when possible', () => {
-    const lookupStart = route.indexOf('const contractLookup = await prisma.sale.findFirst({')
-    const lookupBlock = route.slice(lookupStart, lookupStart + 300)
+    const lookupStart = route.indexOf('prisma.sale.findFirst({')
+    const lookupBlock = route.slice(lookupStart, lookupStart + 400)
     expect(lookupStart).toBeGreaterThan(-1)
     expect(lookupBlock).toContain('id: saleId')
     expect(lookupBlock).toContain('shopId')
     expect(lookupBlock).toContain('deletedAt: null')
     expect(lookupBlock).toContain('returnedAt: null')
-    expect(lookupBlock).toContain('select: { contractCurrency: true }')
+    expect(lookupBlock).toContain('contractCurrency: true')
+    expect(lookupBlock).toContain('contractExchangeRateAtCreation: true')
     expect(route).toContain('let contractRate: number | null = amountInput.exchangeRateUsed')
     expect(route).toContain('amountInput.inputCurrency !== contractCurrency && contractRate == null')
     const conversionStart = route.indexOf('const requestedAppliedAmountInContractCurrency = convertPaymentToContractCurrency(')

@@ -178,6 +178,8 @@ export default function HisobotClient({
     displayCurrency: currency.currency,
     rate: currency.usdUzsRate,
   })
+  const hasOverdueDebt =
+    stats.overdueCount > 0 || stats.overdueMoneyUzs > 0 || stats.overdueMoneyUsd > 0
   const expectedInterestText = formatPartitionedMoney({
     amountUzs: stats.nasiyaInterestExpectedThisMonthUzs,
     amountUsd: stats.nasiyaInterestExpectedThisMonthUsd,
@@ -247,8 +249,8 @@ export default function HisobotClient({
             <Badge variant="outline" className="rounded-md border-zinc-200 bg-white text-zinc-600">
               {monthLabel} · {currency.currency}
             </Badge>
-            <Badge variant={overdue > 0 ? 'destructive' : 'secondary'} className="rounded-md">
-              {overdue > 0 ? "Kechikkan to'lov bor" : "Kechikkan to'lov yo'q"}
+            <Badge variant={hasOverdueDebt ? 'destructive' : 'secondary'} className="rounded-md">
+              {hasOverdueDebt ? "Kechikkan to'lov bor" : "Kechikkan to'lov yo'q"}
             </Badge>
           </div>
           <h1 className="text-2xl font-bold tracking-tight text-zinc-900">Hisobot</h1>
@@ -413,7 +415,9 @@ export default function HisobotClient({
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-red-700">{overdueText}</div>
-            <p className="mt-3 text-xs text-red-700/70">Bugun ko'rib chiqilishi kerak bo'lgan qarzdorlik · joriy kurs bo'yicha</p>
+            <p className="mt-3 text-xs text-red-700/70">
+              Bugun ko&apos;rib chiqilishi kerak bo&apos;lgan qarzdorlik · {currency.usdUzsRate ? 'joriy kurs bo‘yicha' : 'asl valyutalarda (kurs mavjud emas)'}
+            </p>
           </CardContent>
         </Card>
 

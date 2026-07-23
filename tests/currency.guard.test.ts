@@ -15,6 +15,9 @@ describe('currency source guards', () => {
     expect(src).toContain("latestStoredUsdRate('CBU')")
     expect(src).toContain("freshness: 'FALLBACK'")
     expect(src).toContain('effectiveAt: latest.effectiveDate')
+    expect(src).toContain("source: source ?? { in: ['CBU', 'MANUAL'] }")
+    expect(src).toContain('effectiveDate: { not: null }')
+    expect(src).toContain('rate: { gte: MIN_USD_UZS_RATE, lte: MAX_USD_UZS_RATE }')
     expect(src).toContain('prisma.currencyRate.create')
     expect(src).toContain('prisma.opsEvent.create')
     expect(src).toContain('currency.rate_fetch_failed')
@@ -28,6 +31,7 @@ describe('currency source guards', () => {
     expect(api).toContain("source: 'MANUAL'")
     expect(api).toContain('tx.currencyRate.create')
     expect(api).toContain('tx.log.create')
+    expect(api).toContain('isOperationalUsdUzsRate')
     expect(ui).toContain('/api/admin/currency-rate')
     expect(ui).toContain('Qo‘lda kiritilgan oxirgi kurs')
   })
@@ -68,7 +72,7 @@ describe('currency source guards', () => {
     // Returns use exact minor-unit DTO conversion with one route-scoped quote,
     // then preserve the entered currency, rate, and provider provenance.
     const returnRoute = read('src/app/api/devices/[id]/return/route.ts')
-    expect(returnRoute).toContain('createMoneyDto(settlementCurrency, parsed.data.refundAmount)')
+    expect(returnRoute).toContain('createMoneyDto(parsed.data.inputCurrency, parsed.data.refundAmount)')
     expect(returnRoute).toContain('convertMoneyDto(refundInputMoney, contractCurrency, currentFxQuote)')
     expect(returnRoute).toContain("convertMoneyDto(refundInputMoney, 'UZS', currentFxQuote)")
     expect(returnRoute).toContain('refundInputAmount: moneyDtoToAmount(refundInputMoney)')

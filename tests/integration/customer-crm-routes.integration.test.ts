@@ -198,7 +198,10 @@ describe('customer CRM protected routes', () => {
     const { POST } = await import('@/app/api/devices/[id]/sell/route')
     const selected = await POST(new NextRequest(`http://localhost/api/devices/${firstDevice.id}/sell`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': 'crm-existing-sale',
+      },
       body: JSON.stringify({
         deviceId: firstDevice.id, customerMode: 'EXISTING', customerId: customer.id,
         customerName: 'Attempted overwrite', customerPhone: '+998907777777',
@@ -219,7 +222,10 @@ describe('customer CRM protected routes', () => {
     })
     const collision = await POST(new NextRequest(`http://localhost/api/devices/${collisionDevice.id}/sell`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        'idempotency-key': 'crm-collision-sale',
+      },
       body: JSON.stringify({
         deviceId: collisionDevice.id, customerMode: 'NEW', customerName: 'Duplicate Name', customerPhone: customer.phone,
         salePrice: 1000, inputCurrency: 'UZS', paymentMethod: 'CASH', paidFully: true,

@@ -28,11 +28,15 @@ import { displayImei } from '@/lib/device-display'
 import { enabledFeatureSet, getActiveShopPackage, getLiveShopPrincipalForMutation, principalHasPermission } from '@/lib/server/shop-access'
 import { computeSaleContractMargin } from '@/lib/nasiya-contract'
 import { resolveTelegramRecipients, telegramNotificationRows, telegramUnavailableMarkerRows, TELEGRAM_AUDIENCES } from '@/lib/server/telegram-recipients'
-import { createSupplierPayableCore } from '@/lib/server/supplier-payable-payments'
+import {
+  createSupplierPayableCore,
+  supplierPayableCreationIdempotencyKey,
+} from '@/lib/server/supplier-payable-payments'
 import { isRetryableTransactionError } from '@/lib/server/transaction-retry'
-import { validatePaymentBreakdown } from '@/lib/payment-breakdown'
+import { representativePaymentMethod, validatePaymentBreakdown } from '@/lib/payment-breakdown'
 import { prepareSearchNeedle } from '@/lib/search-needle'
 import { searchMatchEvidence } from '@/lib/search-match-evidence'
+import { canonicalPaymentBreakdown } from '@/lib/idempotency-replay'
 
 const deviceStatuses = ['IN_STOCK', 'SOLD_CASH', 'SOLD_DEBT', 'SOLD_NASIYA', 'RETURNED', 'DELETED'] as const
 
@@ -428,8 +432,8 @@ export async function POST(req: NextRequest) {
       (!guarded.principal || !principalHasPermission(guarded.principal, requiredPermission))
     ) return forbidden("Bu amal uchun ruxsat berilmagan")
     const idempotencyKey = req.headers.get('idempotency-key')?.trim()
-    if (purchaseSettlement === 'PAY_LATER' && (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120)) {
-      return badRequest("Keyin to'lash operatsiyasi uchun Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
+    if (!idempotencyKey || idempotencyKey.length < 8 || idempotencyKey.length > 120) {
+      return badRequest("Qurilma xaridi uchun Idempotency-Key sarlavhasi 8–120 belgidan iborat bo'lishi shart")
     }
 
     const {
@@ -446,6 +450,113 @@ export async function POST(req: NextRequest) {
     )
     if (!resolved.ok) return resolved.response
     const resolvedShopId = resolved.shopId
+    const commandHash = createHash('sha256').update(JSON.stringify({
+      version: 2,
+      shopId: resolvedShopId,
+      actorId: session.user.id,
+      command: {
+        model,
+        color,
+        storageAmount,
+        storageUnit,
+        conditionCode,
+        batteryHealth: batteryHealth ?? null,
+        purchasePrice,
+        inputCurrency: parsed.data.inputCurrency,
+        imei,
+        secondaryImei,
+        supplierName: supplierName ?? null,
+        supplierPhone: supplierPhone ?? null,
+        purchaseSettlement,
+        supplierDueDate: parsed.data.supplierDueDate?.toISOString() ?? null,
+        supplierInitialPaymentAmount: parsed.data.supplierInitialPaymentAmount ?? null,
+        supplierPaymentMethod: parsed.data.supplierPaymentMethod ?? null,
+        supplierPaymentBreakdown: canonicalPaymentBreakdown(
+          parsed.data.supplierPaymentBreakdown,
+          parsed.data.inputCurrency,
+        ),
+        supplierReminderEnabled: parsed.data.supplierReminderEnabled ?? null,
+        earlyReminderEnabled: parsed.data.earlyReminderEnabled ?? null,
+        earlyReminderDays: parsed.data.earlyReminderDays ?? null,
+        note: note ?? null,
+        imageUrls: imageUrls ?? [],
+      },
+    })).digest('hex')
+    const payableCreationIdempotencyKey = supplierPayableCreationIdempotencyKey(
+      'DEVICE_PURCHASE',
+      idempotencyKey,
+    )
+
+    const lookupAcquisitionReplay = async (db: Prisma.TransactionClient) => {
+      const receipt = await db.devicePurchaseReceipt.findUnique({
+        where: { shopId_idempotencyKey: { shopId: resolvedShopId, idempotencyKey } },
+        select: { id: true, deviceId: true, actorId: true, commandHash: true },
+      })
+      const payable = await db.supplierPayable.findUnique({
+        where: {
+          shopId_creationIdempotencyKey: {
+            shopId: resolvedShopId,
+            creationIdempotencyKey: payableCreationIdempotencyKey,
+          },
+        },
+        select: { id: true, deviceId: true, status: true, createdBy: true, creationCommandHash: true, origin: true },
+      })
+      if (receipt && payable) {
+        throw { status: 409, message: "Idempotency-Key bir nechta xarid daliliga bog'langan" }
+      }
+      if (receipt) {
+        if (
+          purchaseSettlement !== 'PAID_NOW' ||
+          receipt.actorId !== session.user.id ||
+          receipt.commandHash !== commandHash
+        ) {
+          throw { status: 409, message: "Idempotency-Key boshqa yoki o'zgartirilgan qurilma xaridi uchun ishlatilgan" }
+        }
+        return {
+          deviceId: receipt.deviceId,
+          payable: null,
+          purchaseReceiptId: receipt.id,
+          duplicate: true as const,
+        }
+      }
+      if (payable) {
+        if (
+          purchaseSettlement !== 'PAY_LATER' ||
+          payable.origin !== 'DEVICE_PURCHASE' ||
+          payable.createdBy !== session.user.id ||
+          payable.creationCommandHash !== commandHash
+        ) {
+          throw { status: 409, message: "Idempotency-Key boshqa yoki o'zgartirilgan qurilma xaridi uchun ishlatilgan" }
+        }
+        return {
+          deviceId: payable.deviceId,
+          payable,
+          purchaseReceiptId: null,
+          duplicate: true as const,
+        }
+      }
+      return null
+    }
+
+    const replay = await lookupAcquisitionReplay(prisma)
+    if (replay) {
+      const [item, changeCursor] = await Promise.all([
+        getShopDeviceListItemsByIds(resolvedShopId, [replay.deviceId], { includeOwnerFinancials }).then((items) => items[0]),
+        latestChangeCursorForShop(resolvedShopId),
+      ])
+      if (!item) return serverError('Qurilma topilmadi. Sahifani yangilang.')
+      return ok({
+        id: replay.deviceId,
+        item,
+        purchaseReceiptId: replay.purchaseReceiptId,
+        supplierPayableId: replay.payable?.id ?? null,
+        supplierPayableStatus: replay.payable?.status ?? null,
+        changeCursor,
+        affectedDomains: replay.payable ? ['devices', 'debts', 'reports', 'logs'] : ['devices', 'reports', 'logs'],
+        mutationId: `device.acquisition.replay:${replay.purchaseReceiptId ?? replay.payable?.id}`,
+      }, "Qurilma xaridi allaqachon saqlangan")
+    }
+
     const imageKeys = imageUrls?.map((value) => resolvePrivateUploadReference({
       value,
       shopId: resolvedShopId,
@@ -470,45 +581,25 @@ export async function POST(req: NextRequest) {
     if (parsed.data.supplierPaymentBreakdown) {
       const breakdownError = validatePaymentBreakdown(
         parsed.data.supplierPaymentBreakdown,
-        supplierInitialRaw,
+        purchaseSettlement === 'PAID_NOW' ? purchasePrice : supplierInitialRaw,
         purchaseInput.inputCurrency,
       )
       if (breakdownError) return badRequest(breakdownError)
     }
-    const commandHash = createHash('sha256').update(JSON.stringify({
-      shopId: resolvedShopId,
-      actorId: session.user.id,
-      command: parsed.data,
-    })).digest('hex')
+    const effectivePurchasePaymentMethod = parsed.data.supplierPaymentBreakdown
+      ? representativePaymentMethod(parsed.data.supplierPaymentBreakdown)
+      : parsed.data.supplierPaymentMethod
+    if (
+      (purchaseSettlement === 'PAID_NOW' || supplierInitialRaw > 0) &&
+      !effectivePurchasePaymentMethod
+    ) {
+      return badRequest("Pul to'langanda to'lov usuli kiritilishi shart")
+    }
+    const acquisitionPaidAt = new Date()
     const [shop, currency] = await Promise.all([
       prisma.shop.findUnique({ where: { id: resolvedShopId }, select: { name: true } }),
       getShopCurrencyContext(resolvedShopId),
     ])
-    if (purchaseSettlement === 'PAY_LATER' && idempotencyKey) {
-      const replay = await prisma.supplierPayable.findUnique({
-        where: { shopId_creationIdempotencyKey: { shopId: resolvedShopId, creationIdempotencyKey: idempotencyKey } },
-        select: { id: true, deviceId: true, status: true, createdBy: true, creationCommandHash: true, origin: true },
-      })
-      if (replay) {
-        if (replay.origin !== 'DEVICE_PURCHASE' || replay.createdBy !== session.user.id || replay.creationCommandHash !== commandHash) {
-          return conflict("Idempotency-Key boshqa yoki o'zgartirilgan qurilma xaridi uchun ishlatilgan")
-        }
-        const [item, changeCursor] = await Promise.all([
-          getShopDeviceListItemsByIds(resolvedShopId, [replay.deviceId], { includeOwnerFinancials }).then((items) => items[0]),
-          latestChangeCursorForShop(resolvedShopId),
-        ])
-        if (!item) return serverError('Qurilma topilmadi. Sahifani yangilang.')
-        return ok({
-          id: replay.deviceId,
-          item,
-          supplierPayableId: replay.id,
-          supplierPayableStatus: replay.status,
-          changeCursor,
-          affectedDomains: ['devices', 'debts', 'reports', 'logs'],
-          mutationId: `device.credit.replay:${replay.id}`,
-        }, "Qurilma xaridi allaqachon saqlangan")
-      }
-    }
 
     // Check active IMEI uniqueness within shop. Soft-deleted rows may be reused.
     const existing = await prisma.device.findFirst({
@@ -535,18 +626,15 @@ export async function POST(req: NextRequest) {
           throw { status: 403, message: "Ombor moduli do'kon paketida yoqilmagan" }
         }
       }
-      if (purchaseSettlement === 'PAY_LATER' && idempotencyKey) {
-        const replay = await tx.supplierPayable.findUnique({
-          where: { shopId_creationIdempotencyKey: { shopId: resolvedShopId, creationIdempotencyKey: idempotencyKey } },
-          select: { id: true, deviceId: true, status: true, createdBy: true, creationCommandHash: true, origin: true },
-        })
-        if (replay) {
-          if (replay.origin !== 'DEVICE_PURCHASE' || replay.createdBy !== session.user.id || replay.creationCommandHash !== commandHash) {
-            throw { status: 409, message: "Idempotency-Key boshqa yoki o'zgartirilgan qurilma xaridi uchun ishlatilgan" }
-          }
-          return { deviceId: replay.deviceId, payable: replay, duplicate: true as const }
-        }
-      }
+      // One shop-scoped lock spans both evidence tables, so the same key
+      // cannot concurrently create a PAID_NOW receipt and a PAY_LATER payable.
+      await tx.$executeRaw(Prisma.sql`
+        SELECT pg_advisory_xact_lock(
+          hashtextextended(${`device-acquisition:${resolvedShopId}:${idempotencyKey}`}, 0)
+        )
+      `)
+      const replay = await lookupAcquisitionReplay(tx)
+      if (replay) return replay
       let supplierId: string | undefined
       if (supplierName) {
         const supplier = await tx.supplier.create({
@@ -564,7 +652,12 @@ export async function POST(req: NextRequest) {
           purchaseCurrency: purchaseInput.inputCurrency,
           purchaseInputAmount: purchasePrice,
           purchaseExchangeRateAtCreation: purchaseInput.exchangeRateUsed,
+          purchaseExchangeRateSource: purchaseInput.exchangeRateSource,
+          purchaseExchangeRateEffectiveAt: purchaseInput.exchangeRateEffectiveAt,
+          purchaseExchangeRateFetchedAt: purchaseInput.exchangeRateFetchedAt,
           purchaseAmountUzsSnapshot: purchaseInput.amountUzs,
+          evidenceVersion: 2,
+          evidenceStatus: 'CAPTURED',
           imei,
           supplierId,
           supplierPhone,
@@ -580,6 +673,34 @@ export async function POST(req: NextRequest) {
         },
       })
 
+      const purchaseReceipt = purchaseSettlement === 'PAID_NOW'
+        ? await tx.devicePurchaseReceipt.create({
+            data: {
+              shopId: resolvedShopId,
+              deviceId: createdDevice.id,
+              inputAmount: purchasePrice,
+              inputCurrency: purchaseInput.inputCurrency,
+              nativeAmount: purchasePrice,
+              nativeCurrency: purchaseInput.inputCurrency,
+              amountUzsSnapshot: purchaseInput.amountUzs,
+              paymentMethod: effectivePurchasePaymentMethod!,
+              paymentBreakdown: parsed.data.supplierPaymentBreakdown,
+              exchangeRate: purchaseInput.exchangeRateUsed,
+              exchangeRateSource: purchaseInput.exchangeRateSource,
+              exchangeRateEffectiveAt: purchaseInput.exchangeRateEffectiveAt,
+              exchangeRateFetchedAt: purchaseInput.exchangeRateFetchedAt,
+              paidAt: acquisitionPaidAt,
+              actorId: session.user.id,
+              actorType: session.user.role as 'SUPER_ADMIN' | 'SHOP_ADMIN',
+              idempotencyKey,
+              commandHash,
+              evidenceVersion: 2,
+              evidenceStatus: 'CAPTURED',
+            },
+            select: { id: true },
+          })
+        : null
+
       const payable = purchaseSettlement === 'PAY_LATER'
         ? await createSupplierPayableCore({
             tx,
@@ -592,20 +713,20 @@ export async function POST(req: NextRequest) {
             purchaseInput,
             contractAmount: purchasePrice,
             dueDate: parsed.data.supplierDueDate!,
-            reminderEnabled: parsed.data.supplierReminderEnabled,
-            earlyReminderEnabled: parsed.data.earlyReminderEnabled,
+            reminderEnabled: parsed.data.supplierReminderEnabled ?? true,
+            earlyReminderEnabled: parsed.data.earlyReminderEnabled ?? false,
             earlyReminderDays: parsed.data.earlyReminderDays,
-            initialPayment: supplierInitialInput && parsed.data.supplierPaymentMethod ? {
+            initialPayment: supplierInitialInput && effectivePurchasePaymentMethod ? {
               rawAmount: supplierInitialRaw,
               converted: supplierInitialInput,
-              paymentMethod: parsed.data.supplierPaymentMethod,
+              paymentMethod: effectivePurchasePaymentMethod,
               paymentBreakdown: parsed.data.supplierPaymentBreakdown,
-              paidAt: new Date(),
+              paidAt: acquisitionPaidAt,
               note: "Boshlang'ich to'lov",
             } : undefined,
             actorId: session.user.id,
             commandHash,
-            idempotencyScope: idempotencyKey!,
+            idempotencyScope: idempotencyKey,
           })
         : null
 
@@ -621,6 +742,9 @@ export async function POST(req: NextRequest) {
             model,
             imei,
             purchasePrice: purchaseInput.amountUzs,
+            purchaseReceiptId: purchaseReceipt?.id ?? null,
+            purchasePaymentMethod: effectivePurchasePaymentMethod ?? null,
+            purchasePaymentBreakdown: parsed.data.supplierPaymentBreakdown ?? null,
             ...(payable ? {
               supplierPayableId: payable.id,
               supplierName: payable.supplierName,
@@ -695,34 +819,50 @@ export async function POST(req: NextRequest) {
         })
       }
 
-      return { deviceId: createdDevice.id, payable, duplicate: false as const }
+      return {
+        deviceId: createdDevice.id,
+        payable,
+        purchaseReceiptId: purchaseReceipt?.id ?? null,
+        duplicate: false as const,
+      }
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable })
 
     let result: Awaited<ReturnType<typeof run>> | undefined
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try { result = await run(); break } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') {
+          const duplicate = await lookupAcquisitionReplay(prisma)
+          if (duplicate) {
+            result = duplicate
+            break
+          }
+        }
         if (isRetryableTransactionError(error) && attempt < 2) continue
         throw error
       }
     }
     if (!result) return serverError()
 
-    invalidateShopDeviceMutation(resolvedShopId)
-    if (result.payable) invalidateShopSupplierPayableMutation(resolvedShopId)
+    if (!result.duplicate) {
+      invalidateShopDeviceMutation(resolvedShopId)
+      if (result.payable) invalidateShopSupplierPayableMutation(resolvedShopId)
+    }
 
     // Deliver notifications after the response is sent (non-blocking) so the
     // add-device request never waits on Telegram HTTP calls.
-    after(async () => {
-      try {
-        await flushQueuedTelegramWork()
-      } catch (e) {
-        logger.warn('device create notification failed', {
-          event: 'notification.flush_failed',
-          route: '/api/devices',
-          error: e,
-        })
-      }
-    })
+    if (!result.duplicate) {
+      after(async () => {
+        try {
+          await flushQueuedTelegramWork()
+        } catch (e) {
+          logger.warn('device create notification failed', {
+            event: 'notification.flush_failed',
+            route: '/api/devices',
+            error: e,
+          })
+        }
+      })
+    }
 
     const [item, changeCursor] = await Promise.all([
       getShopDeviceListItemsByIds(resolvedShopId, [result.deviceId], { includeOwnerFinancials }).then((items) => items[0]),
@@ -732,6 +872,7 @@ export async function POST(req: NextRequest) {
     const responseData = {
       id: result.deviceId,
       item,
+      purchaseReceiptId: result.purchaseReceiptId,
       supplierPayableId: result.payable?.id ?? null,
       supplierPayableStatus: result.payable?.status ?? null,
       changeCursor,

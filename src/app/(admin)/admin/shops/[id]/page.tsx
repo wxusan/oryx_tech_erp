@@ -322,6 +322,9 @@ export default function ShopDetailPage() {
         months: Number(payMonths),
         paymentMethod: methodToEnum(payMethod),
         note: payNote || undefined,
+        expectedPackageVersionId: activePackage!.id,
+        expectedCurrency: activePackage!.currency,
+        expectedMonthlyPrice: activePackage!.price.recurringPrice,
       }
       const res = await fetch(`/api/shops/${id}/payment`, {
         method: 'POST',

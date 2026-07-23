@@ -13,6 +13,7 @@ function baseInput(overrides: Partial<Record<string, unknown>> = {}) {
     amount: 500_000,
     paymentMethod: 'CASH',
     date: new Date('2026-07-08'),
+    inputCurrency: 'UZS',
     ...overrides,
   }
 }
@@ -57,6 +58,7 @@ describe('addNasiyaPaymentSchema — Izoh is optional for a regular payment', ()
       paymentMethod: 'CASH',
       note: '   ',
       reason: '',
+      inputCurrency: 'UZS',
     })
     expect(result.success).toBe(true)
     if (result.success) {
