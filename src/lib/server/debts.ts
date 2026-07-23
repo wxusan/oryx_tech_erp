@@ -33,10 +33,14 @@ function dueDateWhere(input: { start: Date | null; end: Date | null; overdue: bo
   return input.start && input.end ? { gte: input.start, lt: input.end } : undefined
 }
 
-function safeDeviceImage(shopId: string, imageUrls: string[]) {
-  const key = imageUrls.find((value) => isPrivateUploadStoredKey({ key: value, shopId, kind: 'device' }))
-  if (!key) return null
-  return privateUploadPreviewUrl('device', createPrivateUploadReference({ key, shopId, kind: 'device' }))
+function safeDeviceImages(shopId: string, imageUrls: string[]) {
+  return imageUrls
+    .filter((key) => isPrivateUploadStoredKey({ key, shopId, kind: 'device' }))
+    .slice(0, 10)
+    .map((key) => privateUploadPreviewUrl(
+      'device',
+      createPrivateUploadReference({ key, shopId, kind: 'device' }),
+    ))
 }
 
 function maskedImei(value: string) {
@@ -154,7 +158,7 @@ export async function queryOutgoingDebts(shopId: string, input: Omit<DebtQueryIn
         batteryHealth: row.device.batteryHealth,
         conditionCode: row.device.conditionCode,
         imei: maskedImei(row.device.imei),
-        imageUrl: safeDeviceImage(shopId, row.device.imageUrls),
+        imageUrls: safeDeviceImages(shopId, row.device.imageUrls),
       },
       payments: row.payments.map((payment) => ({
         id: payment.id,
@@ -245,7 +249,7 @@ export async function queryIncomingPayLaterDebts(shopId: string, input: Omit<Deb
         batteryHealth: row.device.batteryHealth,
         conditionCode: row.device.conditionCode,
         imei: maskedImei(row.device.imei),
-        imageUrl: safeDeviceImage(shopId, row.device.imageUrls),
+        imageUrls: safeDeviceImages(shopId, row.device.imageUrls),
       },
       payments: row.payments.map((payment) => ({
         id: payment.id,

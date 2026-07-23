@@ -4,6 +4,8 @@ import Image from 'next/image'
 import { useEffect, useRef, useState } from 'react'
 import { ArrowLeft, ArrowRight, ImagePlus, RefreshCw, Replace, Trash2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import { ImageViewer, useImageViewer } from '@/components/ui/image-viewer'
+import { ImageViewerTrigger } from '@/components/ui/image-viewer-trigger'
 
 const DEFAULT_MAX_FILE_SIZE = 5 * 1024 * 1024
 const DEFAULT_ACCEPTED_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const
@@ -345,129 +347,156 @@ export function ImageSelectionField({
   const helpId = `${inputId}-help`
   const errorId = `${inputId}-error`
   const hasError = Boolean(selection.selectionError || selection.items.some((item) => item.validationError))
+  const imageViewer = useImageViewer()
+  const previewableItems = selection.items.filter((item) => (
+    !item.file || DEFAULT_ACCEPTED_TYPES.includes(item.file.type as (typeof DEFAULT_ACCEPTED_TYPES)[number])
+  ))
+  const viewerImages = previewableItems.map((item) => ({
+    id: item.id,
+    src: item.previewUrl,
+    alt: `${label}: ${selection.items.findIndex((candidate) => candidate.id === item.id) + 1}-rasm, ${item.filename}`,
+  }))
 
   return (
-    <fieldset className={cn('min-w-0', className)} disabled={disabled} aria-describedby={`${helpId}${hasError ? ` ${errorId}` : ''}`}>
-      <legend className="text-xs font-medium text-zinc-700">
-        {label}
-        {required && <span aria-hidden="true" className="ml-1 text-red-500">*</span>}
-      </legend>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        <label
-          htmlFor={inputId}
-          className={cn(
-            'inline-flex min-h-9 cursor-pointer items-center gap-2 rounded border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50',
-            disabled && 'cursor-not-allowed opacity-50',
-          )}
-        >
-          <ImagePlus size={16} aria-hidden="true" />
-          {mode === 'single' && selection.items.length ? 'Rasmni almashtirish' : 'Rasm tanlash'}
-          <input
-            id={inputId}
-            data-image-selection-input
-            type="file"
-            accept={DEFAULT_ACCEPTED_TYPES.join(',')}
-            multiple={mode === 'multiple'}
-            required={required && selection.items.length === 0}
-            aria-required={required || undefined}
-            aria-invalid={hasError || undefined}
-            aria-describedby={`${helpId}${hasError ? ` ${errorId}` : ''}`}
-            disabled={disabled}
-            onChange={(event) => {
-              if (event.target.files) selection.addFiles(event.target.files)
-              event.target.value = ''
-            }}
-            className="sr-only"
-          />
-        </label>
-        <span className="text-xs text-zinc-500" aria-live="polite">
-          {selection.items.length ? `${selection.items.length} ta rasm tanlandi` : 'Rasm tanlanmagan'}
-        </span>
-      </div>
+    <>
+      <fieldset className={cn('min-w-0', className)} disabled={disabled} aria-describedby={`${helpId}${hasError ? ` ${errorId}` : ''}`}>
+        <legend className="text-xs font-medium text-zinc-700">
+          {label}
+          {required && <span aria-hidden="true" className="ml-1 text-red-500">*</span>}
+        </legend>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <label
+            htmlFor={inputId}
+            className={cn(
+              'inline-flex min-h-9 cursor-pointer items-center gap-2 rounded border border-zinc-200 bg-white px-3 text-sm font-medium text-zinc-700 hover:bg-zinc-50',
+              disabled && 'cursor-not-allowed opacity-50',
+            )}
+          >
+            <ImagePlus size={16} aria-hidden="true" />
+            {mode === 'single' && selection.items.length ? 'Rasmni almashtirish' : 'Rasm tanlash'}
+            <input
+              id={inputId}
+              data-image-selection-input
+              type="file"
+              accept={DEFAULT_ACCEPTED_TYPES.join(',')}
+              multiple={mode === 'multiple'}
+              required={required && selection.items.length === 0}
+              aria-required={required || undefined}
+              aria-invalid={hasError || undefined}
+              aria-describedby={`${helpId}${hasError ? ` ${errorId}` : ''}`}
+              disabled={disabled}
+              onChange={(event) => {
+                if (event.target.files) selection.addFiles(event.target.files)
+                event.target.value = ''
+              }}
+              className="sr-only"
+            />
+          </label>
+          <span className="text-xs text-zinc-500" aria-live="polite">
+            {selection.items.length ? `${selection.items.length} ta rasm tanlandi` : 'Rasm tanlanmagan'}
+          </span>
+        </div>
 
-      {selection.items.length > 0 && (
-        <ol
-          className={cn(
-            'mt-3 grid min-w-0 gap-3',
-            mode === 'single' ? 'grid-cols-1' : 'grid-cols-1 min-[380px]:grid-cols-2 sm:grid-cols-3',
-          )}
-          aria-label={`${label} tartibi`}
-        >
-          {selection.items.map((item, index) => {
-            const itemError = Boolean(item.validationError || item.uploadError)
-            return (
-              <li key={item.id} className={cn('min-w-0 overflow-hidden rounded-lg border bg-white', itemError ? 'border-red-300' : 'border-zinc-200')}>
-                <div className={cn('relative aspect-square bg-zinc-100', previewClassName)}>
-                  {item.validationError && item.file && !DEFAULT_ACCEPTED_TYPES.includes(item.file.type as (typeof DEFAULT_ACCEPTED_TYPES)[number]) ? (
-                    <div className="flex h-full items-center justify-center p-4 text-center text-xs text-zinc-500">Rasmni ko‘rib bo‘lmaydi</div>
-                  ) : (
-                    <Image
-                      src={item.previewUrl}
-                      alt={`${label}: ${index + 1}-rasm, ${item.filename}`}
-                      fill
-                      sizes="(max-width: 379px) 100vw, (max-width: 640px) 50vw, 220px"
-                      unoptimized
-                      className="object-cover"
-                    />
-                  )}
-                </div>
-                <div className="min-w-0 space-y-2 p-2.5">
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-medium text-zinc-800" title={item.filename}>{item.filename}</p>
-                    {item.size !== null && <p className="text-[11px] text-zinc-500">{formatBytes(item.size)}</p>}
-                    <p className={cn('mt-1 text-[11px] leading-4', itemError ? 'text-red-700' : 'text-zinc-500')} role={itemError ? 'alert' : undefined}>
-                      {statusCopy(item)}
-                    </p>
-                  </div>
-                  {item.uploadStatus === 'uploading' && (
-                    <progress className="h-1.5 w-full accent-zinc-900" max={100} value={item.uploadProgress} aria-label={`${item.filename} yuklash holati`} />
-                  )}
-                  <div className="flex flex-wrap gap-1.5">
-                    {mode === 'multiple' && (
+        {selection.items.length > 0 && (
+          <ol
+            className={cn(
+              'mt-3 grid min-w-0 gap-3',
+              mode === 'single' ? 'grid-cols-1' : 'grid-cols-1 min-[380px]:grid-cols-2 sm:grid-cols-3',
+            )}
+            aria-label={`${label} tartibi`}
+          >
+            {selection.items.map((item, index) => {
+              const itemError = Boolean(item.validationError || item.uploadError)
+              const viewerIndex = previewableItems.findIndex((candidate) => candidate.id === item.id)
+              return (
+                <li key={item.id} className={cn('min-w-0 overflow-hidden rounded-lg border bg-white', itemError ? 'border-red-300' : 'border-zinc-200')}>
+                  <div className={cn('relative aspect-square bg-zinc-100', previewClassName)}>
+                    {viewerIndex < 0 ? (
+                      <div className="flex h-full items-center justify-center p-4 text-center text-xs text-zinc-500">Rasmni ko‘rib bo‘lmaydi</div>
+                    ) : (
                       <>
-                        <button type="button" onClick={() => selection.move(item.id, -1)} disabled={index === 0 || disabled} aria-label={`${item.filename} rasmini oldinga surish`} className="inline-flex size-8 items-center justify-center rounded border border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-35">
-                          <ArrowLeft size={14} aria-hidden="true" />
-                        </button>
-                        <button type="button" onClick={() => selection.move(item.id, 1)} disabled={index === selection.items.length - 1 || disabled} aria-label={`${item.filename} rasmini keyinga surish`} className="inline-flex size-8 items-center justify-center rounded border border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-35">
-                          <ArrowRight size={14} aria-hidden="true" />
-                        </button>
+                        <Image
+                          src={item.previewUrl}
+                          alt={`${label}: ${index + 1}-rasm, ${item.filename}`}
+                          fill
+                          sizes="(max-width: 379px) 100vw, (max-width: 640px) 50vw, 220px"
+                          unoptimized
+                          className="object-cover"
+                        />
+                        <ImageViewerTrigger
+                          label={`${item.filename} rasmini kattalashtirish`}
+                          onClick={(trigger) => imageViewer.openAt(viewerIndex, trigger)}
+                        />
                       </>
                     )}
-                    <label htmlFor={`${inputId}-${item.id}-replace`} className="inline-flex size-8 cursor-pointer items-center justify-center rounded border border-zinc-200 text-zinc-600 hover:bg-zinc-50" aria-label={`${item.filename} rasmini almashtirish`} title="Almashtirish">
-                      <Replace size={14} aria-hidden="true" />
-                      <input
-                        data-image-selection-replace
-                        id={`${inputId}-${item.id}-replace`}
-                        type="file"
-                        accept={DEFAULT_ACCEPTED_TYPES.join(',')}
-                        aria-label={`${item.filename} rasmini almashtirish`}
-                        disabled={disabled}
-                        onChange={(event) => {
-                          const file = event.target.files?.[0]
-                          if (file) selection.replaceFile(item.id, file)
-                          event.target.value = ''
-                        }}
-                        className="sr-only"
-                      />
-                    </label>
-                    <button type="button" onClick={() => selection.remove(item.id)} disabled={disabled} aria-label={`${item.filename} rasmini olib tashlash`} className="inline-flex size-8 items-center justify-center rounded border border-zinc-200 text-zinc-600 hover:border-red-200 hover:bg-red-50 hover:text-red-600">
-                      <Trash2 size={14} aria-hidden="true" />
-                    </button>
-                    {item.uploadStatus === 'error' && (
-                      <button type="button" onClick={() => void selection.retryUpload(item.id).catch(() => {})} disabled={disabled} className="inline-flex min-h-8 items-center gap-1 rounded border border-red-200 px-2 text-xs text-red-700 hover:bg-red-50">
-                        <RefreshCw size={13} aria-hidden="true" /> Qayta urinish
-                      </button>
-                    )}
                   </div>
-                </div>
-              </li>
-            )
-          })}
-        </ol>
-      )}
+                  <div className="min-w-0 space-y-2 p-2.5">
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-medium text-zinc-800" title={item.filename}>{item.filename}</p>
+                      {item.size !== null && <p className="text-[11px] text-zinc-500">{formatBytes(item.size)}</p>}
+                      <p className={cn('mt-1 text-[11px] leading-4', itemError ? 'text-red-700' : 'text-zinc-500')} role={itemError ? 'alert' : undefined}>
+                        {statusCopy(item)}
+                      </p>
+                    </div>
+                    {item.uploadStatus === 'uploading' && (
+                      <progress className="h-1.5 w-full accent-zinc-900" max={100} value={item.uploadProgress} aria-label={`${item.filename} yuklash holati`} />
+                    )}
+                    <div className="flex flex-wrap gap-1.5">
+                      {mode === 'multiple' && (
+                        <>
+                          <button type="button" onClick={() => selection.move(item.id, -1)} disabled={index === 0 || disabled} aria-label={`${item.filename} rasmini oldinga surish`} className="inline-flex size-8 items-center justify-center rounded border border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-35">
+                            <ArrowLeft size={14} aria-hidden="true" />
+                          </button>
+                          <button type="button" onClick={() => selection.move(item.id, 1)} disabled={index === selection.items.length - 1 || disabled} aria-label={`${item.filename} rasmini keyinga surish`} className="inline-flex size-8 items-center justify-center rounded border border-zinc-200 text-zinc-600 hover:bg-zinc-50 disabled:opacity-35">
+                            <ArrowRight size={14} aria-hidden="true" />
+                          </button>
+                        </>
+                      )}
+                      <label htmlFor={`${inputId}-${item.id}-replace`} className="inline-flex size-8 cursor-pointer items-center justify-center rounded border border-zinc-200 text-zinc-600 hover:bg-zinc-50" aria-label={`${item.filename} rasmini almashtirish`} title="Almashtirish">
+                        <Replace size={14} aria-hidden="true" />
+                        <input
+                          data-image-selection-replace
+                          id={`${inputId}-${item.id}-replace`}
+                          type="file"
+                          accept={DEFAULT_ACCEPTED_TYPES.join(',')}
+                          aria-label={`${item.filename} rasmini almashtirish`}
+                          disabled={disabled}
+                          onChange={(event) => {
+                            const file = event.target.files?.[0]
+                            if (file) selection.replaceFile(item.id, file)
+                            event.target.value = ''
+                          }}
+                          className="sr-only"
+                        />
+                      </label>
+                      <button type="button" onClick={() => selection.remove(item.id)} disabled={disabled} aria-label={`${item.filename} rasmini olib tashlash`} className="inline-flex size-8 items-center justify-center rounded border border-zinc-200 text-zinc-600 hover:border-red-200 hover:bg-red-50 hover:text-red-600">
+                        <Trash2 size={14} aria-hidden="true" />
+                      </button>
+                      {item.uploadStatus === 'error' && (
+                        <button type="button" onClick={() => void selection.retryUpload(item.id).catch(() => {})} disabled={disabled} className="inline-flex min-h-8 items-center gap-1 rounded border border-red-200 px-2 text-xs text-red-700 hover:bg-red-50">
+                          <RefreshCw size={13} aria-hidden="true" /> Qayta urinish
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </li>
+              )
+            })}
+          </ol>
+        )}
 
-      <p id={helpId} className="mt-2 text-xs text-zinc-500">{help}</p>
-      {selection.selectionError && <p id={errorId} role="alert" className="mt-1 text-xs text-red-700">{selection.selectionError}</p>}
-    </fieldset>
+        <p id={helpId} className="mt-2 text-xs text-zinc-500">{help}</p>
+        {selection.selectionError && <p id={errorId} role="alert" className="mt-1 text-xs text-red-700">{selection.selectionError}</p>}
+      </fieldset>
+      <ImageViewer
+        images={viewerImages}
+        open={imageViewer.open}
+        activeIndex={imageViewer.activeIndex}
+        onOpenChange={imageViewer.onOpenChange}
+        onActiveIndexChange={imageViewer.onActiveIndexChange}
+        finalFocusRef={imageViewer.finalFocusRef}
+        title={label}
+      />
+    </>
   )
 }

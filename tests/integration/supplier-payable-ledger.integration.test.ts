@@ -3,9 +3,14 @@ import { PrismaPg } from '@prisma/adapter-pg'
 import { PrismaClient } from '@/generated/prisma/client'
 import { queryIncomingPayLaterDebts, queryOutgoingDebts } from '@/lib/server/debts'
 import { getShopDebtStatsAggregate } from '@/lib/server/shop-stats-queries'
+import { resolvePrivateUploadReference } from '@/lib/server/private-upload-reference'
 
 const databaseUrl = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('TEST_DATABASE_URL or DATABASE_URL is required')
+const privateUploadSecret = process.env.AUTH_SECRET
+  || process.env.NEXTAUTH_SECRET
+  || 'integration-private-upload-secret-at-least-32-characters'
+process.env.AUTH_SECRET = privateUploadSecret
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl, max: 2 }) })
 
@@ -234,6 +239,20 @@ describe('supplier payable append-only ledger invariants', () => {
       })
     }
     await createPayable({ shopId: first.shop.id, deviceId: first.device.id, key: 'aug-a', dueDate: new Date('2026-08-10T00:00:00.000Z') })
+    const outgoingImageKeys = Array.from(
+      { length: 12 },
+      (_, index) => `shops/${first.shop.id}/devices/outgoing-${String(index + 1).padStart(2, '0')}.jpg`,
+    )
+    await prisma.device.update({
+      where: { id: first.device.id },
+      data: {
+        imageUrls: [
+          ...outgoingImageKeys,
+          `shops/${second.shop.id}/devices/foreign.jpg`,
+          'https://example.com/legacy.jpg',
+        ],
+      },
+    })
     const secondDevice = await prisma.device.create({
       data: { shopId: first.shop.id, model: 'Second debt phone', purchasePrice: 1, imei: 'ledger-query-second', addedBy: first.root.id },
     })
@@ -247,6 +266,15 @@ describe('supplier payable append-only ledger invariants', () => {
     const outgoingFirst = await queryOutgoingDebts(first.shop.id, { month: '2026-08', status: 'ALL', take: 1 })
     expect(outgoingFirst.items).toHaveLength(1)
     expect(outgoingFirst.nextCursor).toBeTruthy()
+    expect(outgoingFirst.items[0].device.imageUrls).toHaveLength(10)
+    expect(outgoingFirst.items[0].device.imageUrls.every((url) => url.startsWith('/api/uploads/device?reference=v1.'))).toBe(true)
+    expect(JSON.stringify(outgoingFirst.items[0].device.imageUrls)).not.toContain('shops/')
+    expect(outgoingFirst.items[0].device.imageUrls.map((url) => resolvePrivateUploadReference({
+      value: url,
+      shopId: first.shop.id,
+      kind: 'device',
+      secret: privateUploadSecret,
+    }))).toEqual(outgoingImageKeys.slice(0, 10))
     const outgoingSecond = await queryOutgoingDebts(first.shop.id, { month: '2026-08', status: 'ALL', take: 1, cursor: outgoingFirst.nextCursor! })
     expect(outgoingSecond.items).toHaveLength(1)
     expect(new Set([...outgoingFirst.items, ...outgoingSecond.items].map((item) => item.supplier.name))).toEqual(new Set(['Supplier aug-a', 'Supplier aug-b']))
@@ -269,7 +297,19 @@ describe('supplier payable append-only ledger invariants', () => {
       data: { shopId: first.shop.id, name: 'Pay Later customer', phone: '+998905555555', normalizedPhone: '998905555555' },
     })
     const saleDevice = await prisma.device.create({
-      data: { shopId: first.shop.id, model: 'Sale debt phone', purchasePrice: 500_000, imei: 'ledger-query-sale', addedBy: first.root.id, status: 'SOLD_DEBT' },
+      data: {
+        shopId: first.shop.id,
+        model: 'Sale debt phone',
+        purchasePrice: 500_000,
+        imei: 'ledger-query-sale',
+        addedBy: first.root.id,
+        status: 'SOLD_DEBT',
+        imageUrls: [
+          `shops/${first.shop.id}/devices/incoming-01.webp`,
+          `shops/${first.shop.id}/devices/incoming-02.webp`,
+          `shops/${second.shop.id}/devices/foreign.webp`,
+        ],
+      },
     })
     await prisma.sale.create({
       data: {
@@ -328,5 +368,15 @@ describe('supplier payable append-only ledger invariants', () => {
     expect(incoming.items).toHaveLength(1)
     expect(incoming.items[0].customer.name).toBe('Pay Later customer')
     expect(incoming.items[0].origin).toBe('ORDINARY_SALE')
+    expect(incoming.items[0].device.imageUrls.map((url) => resolvePrivateUploadReference({
+      value: url,
+      shopId: first.shop.id,
+      kind: 'device',
+      secret: privateUploadSecret,
+    }))).toEqual([
+      `shops/${first.shop.id}/devices/incoming-01.webp`,
+      `shops/${first.shop.id}/devices/incoming-02.webp`,
+    ])
+    expect(JSON.stringify(incoming.items[0].device.imageUrls)).not.toContain('shops/')
   })
 })

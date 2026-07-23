@@ -16,6 +16,8 @@ import type { DebtQueryResult, DebtStatusFilter, DebtTab } from '@/lib/server/de
 import { queryKeys } from '@/lib/query-keys'
 import { useAuthenticatedQueryScope } from '@/components/query-scope-context'
 import { SupplierPayablePaymentDialog } from '@/components/shop/supplier-payable-payment-dialog'
+import { ImageViewer, useImageViewer } from '@/components/ui/image-viewer'
+import { ImageViewerTrigger } from '@/components/ui/image-viewer-trigger'
 
 type OutgoingResult = Extract<DebtQueryResult, { tab: 'outgoing' }>
 type IncomingResult = Extract<DebtQueryResult, { tab: 'incoming' }>
@@ -61,11 +63,21 @@ function AmountSummary({ original, paid, remaining }: { original: MoneyDto; paid
   )
 }
 
-function DevicePicture({ item }: { item: { model: string; imageUrl: string | null } }) {
+function DevicePicture({
+  item,
+  onExpand,
+}: {
+  item: { model: string; imageUrls: string[] }
+  onExpand: (trigger: HTMLButtonElement) => void
+}) {
+  const imageUrl = item.imageUrls[0]
   return (
     <div className="relative h-20 w-20 shrink-0 overflow-hidden rounded-xl bg-zinc-100">
-      {item.imageUrl
-        ? <Image src={item.imageUrl} alt={`${item.model} qurilmasi`} fill sizes="80px" className="object-cover" />
+      {imageUrl
+        ? <>
+            <Image src={imageUrl} alt={`${item.model} qurilmasi`} fill sizes="80px" unoptimized className="object-cover" />
+            <ImageViewerTrigger label={`${item.model} rasmlarini kattalashtirish`} onClick={onExpand} />
+          </>
         : <div className="flex h-full items-center justify-center px-2 text-center text-xs text-zinc-400">Rasm yo‘q</div>}
     </div>
   )
@@ -124,6 +136,16 @@ export default function QarzlarClient({
   const [cursorStack, setCursorStack] = useState<Array<string | null>>([null])
   const cursor = cursorStack.at(-1) ?? null
   const [payable, setPayable] = useState<OutgoingItem | null>(null)
+  const [viewerDevice, setViewerDevice] = useState<{ id: string; model: string; imageUrls: string[] } | null>(null)
+  const imageViewer = useImageViewer()
+
+  function openDeviceImages(
+    device: { id: string; model: string; imageUrls: string[] },
+    trigger: HTMLButtonElement,
+  ) {
+    setViewerDevice(device)
+    imageViewer.openAt(0, trigger)
+  }
 
   useEffect(() => {
     if (firstSearchEffect.current) {
@@ -217,7 +239,7 @@ export default function QarzlarClient({
           {tab === 'outgoing' && (items as OutgoingItem[]).map((item) => (
             <article key={item.id} className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
               <div className="flex gap-3">
-                <DevicePicture item={item.device} />
+                <DevicePicture item={item.device} onExpand={(trigger) => openDeviceImages(item.device, trigger)} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2"><h2 className="truncate font-semibold text-zinc-900">{item.device.model}</h2><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${item.status === 'OVERDUE' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-800'}`}>{statusLabels[item.status] ?? item.status}</span></div>
                   <p className="mt-0.5 text-xs text-zinc-500">{item.device.storage || '—'} · IMEI {item.device.imei}</p>
@@ -238,7 +260,7 @@ export default function QarzlarClient({
           {tab === 'incoming' && (items as IncomingItem[]).map((item) => (
             <article key={item.id} className="space-y-4 rounded-2xl border border-zinc-200 bg-white p-4 shadow-sm">
               <div className="flex gap-3">
-                <DevicePicture item={item.device} />
+                <DevicePicture item={item.device} onExpand={(trigger) => openDeviceImages(item.device, trigger)} />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-start justify-between gap-2"><h2 className="truncate font-semibold text-zinc-900">{item.device.model}</h2><span className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${item.status === 'OVERDUE' ? 'bg-red-100 text-red-700' : 'bg-blue-100 text-blue-800'}`}>{statusLabels[item.status]}</span></div>
                   <p className="mt-0.5 text-xs text-zinc-500">{item.device.storage || '—'} · IMEI {item.device.imei}</p>
@@ -271,6 +293,19 @@ export default function QarzlarClient({
         open={Boolean(payable)}
         onOpenChange={(open) => !open && setPayable(null)}
         onPaid={async () => { await query.refetch() }}
+      />
+      <ImageViewer
+        images={(viewerDevice?.imageUrls ?? []).map((imageUrl, index) => ({
+          id: `${viewerDevice?.id ?? 'device'}-${index}`,
+          src: imageUrl,
+          alt: `${viewerDevice?.model ?? 'Qurilma'} rasmi ${index + 1}`,
+        }))}
+        open={imageViewer.open}
+        activeIndex={imageViewer.activeIndex}
+        onOpenChange={imageViewer.onOpenChange}
+        onActiveIndexChange={imageViewer.onActiveIndexChange}
+        finalFocusRef={imageViewer.finalFocusRef}
+        title={`${viewerDevice?.model ?? 'Qurilma'} rasmlari`}
       />
     </div>
   )

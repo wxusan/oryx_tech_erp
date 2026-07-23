@@ -40,6 +40,8 @@ import { NasiyaSchedulePreview } from '@/components/shop/nasiya-schedule-preview
 import { ShopAccessDenied, useShopAccess } from '@/components/shop/shop-access-context'
 import { CustomerCombobox, type CustomerPickerOption } from '@/components/shop/customer-combobox'
 import { ImageSelectionField, useImageSelection } from '@/components/ui/image-selection-field'
+import { ImageViewer, useImageViewer } from '@/components/ui/image-viewer'
+import { ImageViewerTrigger } from '@/components/ui/image-viewer-trigger'
 import { formatPassportIdentifierInput, isValidPassportIdentifier } from '@/lib/passport-identifier-format'
 import type { TrustTier } from '@/components/shop/trust-badge'
 
@@ -149,6 +151,7 @@ function AuthorizedNewNasiyaPage() {
   const [savingCustomerEdit, setSavingCustomerEdit] = useState(false)
   const [loadingCustomerEdit, setLoadingCustomerEdit] = useState(false)
   const [selectedCustomerPassportPreview, setSelectedCustomerPassportPreview] = useState<CustomerPassportPreview | null>(null)
+  const selectedCustomerImageViewer = useImageViewer()
   const [selectedCustomerPassportRevision, setSelectedCustomerPassportRevision] = useState(0)
   const [selectedCustomerPassportMasked, setSelectedCustomerPassportMasked] = useState<string | null>(null)
   const [selectedCustomerPassportIdentifier, setSelectedCustomerPassportIdentifier] = useState<string | null>(null)
@@ -679,6 +682,7 @@ function AuthorizedNewNasiyaPage() {
                   inputId="nasiya-customer-picker"
                   selected={selectedCustomer}
                   onSelect={(customer) => {
+                    selectedCustomerImageViewer.close()
                     setSelectedCustomer(customer)
                     setCustomerMode('EXISTING')
                     setCustomerName(customer.name)
@@ -692,6 +696,7 @@ function AuthorizedNewNasiyaPage() {
                   }}
                   onEdit={canEditCustomer || canManageCustomerPassport || canOverrideCustomerTrust ? openCustomerEdit : undefined}
                   onClear={() => {
+                    selectedCustomerImageViewer.close()
                     setSelectedCustomer(null)
                     setCustomerMode('PICK')
                     setCustomerName('')
@@ -707,6 +712,7 @@ function AuthorizedNewNasiyaPage() {
                     passportSelection.clear()
                   }}
                   onCreateNew={(searchText) => {
+                    selectedCustomerImageViewer.close()
                     setSelectedCustomer(null)
                     setCustomerMode('NEW')
                     setCustomerName('')
@@ -794,6 +800,10 @@ function AuthorizedNewNasiyaPage() {
                               unoptimized
                               className="object-contain p-2"
                             />
+                            <ImageViewerTrigger
+                              label={`${selectedCustomer.name} pasport rasmini kattalashtirish`}
+                              onClick={(trigger) => selectedCustomerImageViewer.openAt(0, trigger)}
+                            />
                           </div>
                         ) : selectedCustomerPassportPreview?.key === selectedCustomerPassportKey && selectedCustomerPassportPreview.error ? (
                           <p role="alert" className="rounded border border-red-200 bg-red-50 px-2 py-2 text-xs text-red-700">{selectedCustomerPassportPreview.error}</p>
@@ -811,6 +821,21 @@ function AuthorizedNewNasiyaPage() {
                       )}
                     </div>
                   </div>
+                  <ImageViewer
+                    images={selectedCustomerPassportPreview?.key === selectedCustomerPassportKey && selectedCustomerPassportPreview.url
+                      ? [{
+                          id: selectedCustomerPassportKey,
+                          src: selectedCustomerPassportPreview.url,
+                          alt: `${selectedCustomer.name} pasport rasmi`,
+                        }]
+                      : []}
+                    open={selectedCustomerImageViewer.open}
+                    activeIndex={selectedCustomerImageViewer.activeIndex}
+                    onOpenChange={selectedCustomerImageViewer.onOpenChange}
+                    onActiveIndexChange={selectedCustomerImageViewer.onActiveIndexChange}
+                    finalFocusRef={selectedCustomerImageViewer.finalFocusRef}
+                    title={`${selectedCustomer.name} pasport rasmi`}
+                  />
                 </section>
               )}
               {customerMode === 'NEW' && <>

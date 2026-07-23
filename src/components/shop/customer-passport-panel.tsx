@@ -5,6 +5,8 @@ import Image from 'next/image'
 import { Eye, EyeOff, FileImage } from 'lucide-react'
 import { AsyncButton } from '@/components/ui/async-button'
 import { useShopAccess } from '@/components/shop/shop-access-context'
+import { ImageViewer, useImageViewer } from '@/components/ui/image-viewer'
+import { ImageViewerTrigger } from '@/components/ui/image-viewer-trigger'
 
 type PassportPhotoCheck = {
   customerId: string
@@ -28,6 +30,7 @@ export function CustomerPassportPanel({
   const [photoCheck, setPhotoCheck] = useState<PassportPhotoCheck | null>(null)
   const [loading, setLoading] = useState<'identifier' | 'image' | null>(null)
   const [error, setError] = useState('')
+  const imageViewer = useImageViewer()
   const photoStatus = !hasPassportPhoto
     ? 'unavailable'
     : photoCheck?.customerId === customerId
@@ -96,6 +99,7 @@ export function CustomerPassportPanel({
 
   async function showImage() {
     if (imageUrl) {
+      imageViewer.close()
       setImageUrl(null)
       return
     }
@@ -153,8 +157,21 @@ export function CustomerPassportPanel({
             unoptimized
             className="object-contain p-2"
           />
+          <ImageViewerTrigger
+            label="Mijozning pasport rasmini kattalashtirish"
+            onClick={(trigger) => imageViewer.openAt(0, trigger)}
+          />
         </div>
       )}
+      <ImageViewer
+        images={imageUrl ? [{ id: customerId, src: imageUrl, alt: 'Mijozning pasport rasmi' }] : []}
+        open={imageViewer.open}
+        activeIndex={imageViewer.activeIndex}
+        onOpenChange={imageViewer.onOpenChange}
+        onActiveIndexChange={imageViewer.onActiveIndexChange}
+        finalFocusRef={imageViewer.finalFocusRef}
+        title="Mijozning pasport rasmi"
+      />
     </section>
   )
 }
